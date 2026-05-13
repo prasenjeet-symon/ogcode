@@ -31,4 +31,5 @@ type Plan struct {
 	AllTasksCompleted  bool   `json:"allTasksCompleted,omitempty"`  // true when locked and all tasks done
 	CreatedAt          int64  `json:"createdAt"`
 	UpdatedAt          int64  `json:"updatedAt"`
+	ArchivedAt         int64  `json:"archivedAt,omitempty"`
 }
