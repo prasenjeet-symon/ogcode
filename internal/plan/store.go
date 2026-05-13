@@ -110,3 +110,26 @@ func (s *Store) Delete(id string) error {
 	_, err := s.db.Exec(`DELETE FROM plan WHERE id = ?`, id)
 	return err
 }
+
+// ListArchived returns all archived plans for a given directory (status = locked AND archived_at > 0).
+func (s *Store) ListArchived(directory string) ([]*Plan, error) {
+	rows, err := s.db.Query(
+		`SELECT id, session_id, project_id, directory, title, status, model, compaction_summary, breakdown_status, breakdown_warnings, archived_at, time_created, time_updated
+		 FROM plan WHERE directory = ? AND status = ? AND archived_at > 0 ORDER BY time_updated DESC`,
+		directory, StatusLocked,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list archived plans: %w", err)
+	}
+	defer rows.Close()
+
+	var plans []*Plan
+	for rows.Next() {
+		var p Plan
+		if err := rows.Scan(&p.ID, &p.SessionID, &p.ProjectID, &p.Directory, &p.Title, &p.Status, &p.Model, &p.CompactionSummary, &p.BreakdownStatus, &p.BreakdownWarnings, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		plans = append(plans, &p)
+	}
+	return plans, nil
+}
