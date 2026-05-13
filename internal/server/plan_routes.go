@@ -837,9 +837,15 @@ func (s *Server) handleGetPlanMessages(w http.ResponseWriter, r *http.Request) {
 
 // generatePlanMarkdown renders a plan archive: title, dates, the final plan
 // summary, and a rich task list with branch, PR, and description per task.
-func (s *Server) generatePlanMarkdown(p *plan.Plan) string {
-	messages, _ := s.store.GetMessages(session.SessionID(p.SessionID), "", 1000)
-	tasks, _ := s.taskStore.ListByPlan(p.ID)
+func (s *Server) generatePlanMarkdown(p *plan.Plan) (string, error) {
+	messages, err := s.store.GetMessages(session.SessionID(p.SessionID), "", 1000)
+	if err != nil {
+		return "", fmt.Errorf("get messages: %w", err)
+	}
+	tasks, err := s.taskStore.ListByPlan(p.ID)
+	if err != nil {
+		return "", fmt.Errorf("list tasks: %w", err)
+	}
 
 	var md strings.Builder
 
@@ -925,7 +931,7 @@ func (s *Server) generatePlanMarkdown(p *plan.Plan) string {
 		}
 	}
 
-	return md.String()
+	return md.String(), nil
 }
 
 func (s *Server) handleExportPlan(w http.ResponseWriter, r *http.Request) {
@@ -936,7 +942,11 @@ func (s *Server) handleExportPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content := s.generatePlanMarkdown(p)
+	content, err := s.generatePlanMarkdown(p)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	filename := strings.ToLower(strings.ReplaceAll(p.Title, " ", "-"))
 	filename = strings.Map(func(r rune) rune {
@@ -992,7 +1002,11 @@ func (s *Server) tryArchivePlan(planID string) {
 		return
 	}
 
-	content := s.generatePlanMarkdown(p)
+	content, err := s.generatePlanMarkdown(p)
+	if err != nil {
+		slog.Error("generate plan markdown for archive", "plan", planID, "err", err)
+		return
+	}
 	if err := os.WriteFile(archivePath, []byte(content), 0o644); err != nil {
 		slog.Error("write plan archive", "plan", planID, "path", archivePath, "err", err)
 		return
@@ -1136,8 +1150,8 @@ func collectStreamText(ctx context.Context, pr provider.Provider, modelID, syste
 	userParts, _ := json.Marshal([]provider.ContentPart{{Type: "text", Text: userMessage}})
 
 	req := provider.StreamRequest{
-		Model:    modelID,
-		System:   []string{systemPrompt},
+		Model:  modelID,
+		System: []string{systemPrompt},
 		Messages: []provider.ModelMessage{
 			{Role: "user", Content: userParts},
 		},
