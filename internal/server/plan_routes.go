@@ -1019,21 +1019,22 @@ func (s *Server) tryArchivePlan(planID string) {
 // planArchivePaths returns absolute paths to all completed plan archives in
 // <directory>/.ogcode/archives/, excluding the current plan's own file.
 func (s *Server) planArchivePaths(directory, excludePlanID string) []string {
-	archiveDir := filepath.Join(directory, ".ogcode", "archives")
-	entries, err := os.ReadDir(archiveDir)
-	if err != nil {
+	// Use the DB to filter only plans that are locked and have been archived.
+	plans, err := s.planStore.ListArchived(directory)
+	if err != nil || len(plans) == 0 {
 		return nil
 	}
+
+	archiveDir := filepath.Join(directory, ".ogcode", "archives")
 	var paths []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+	for _, p := range plans {
+		if p.ID == excludePlanID {
 			continue
 		}
-		// Filename is "<slug>-<planID>.md" — skip the current plan's archive.
-		if strings.Contains(e.Name(), excludePlanID) {
-			continue
-		}
-		paths = append(paths, filepath.Join(archiveDir, e.Name()))
+		// Filename matches the archive format: "<slug>-<planID>.md"
+		slug := git.Slugify(p.Title)
+		archivePath := filepath.Join(archiveDir, slug+"-"+p.ID+".md")
+		paths = append(paths, archivePath)
 	}
 	return paths
 }
