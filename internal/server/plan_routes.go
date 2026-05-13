@@ -36,7 +36,7 @@ func (s *Server) handleListPlans(w http.ResponseWriter, r *http.Request) {
 		plans = []*plan.Plan{}
 	}
 
-	// Compute AllTasksCompleted for each plan
+	// Compute AllTasksCompleted and Archived for each plan
 	for _, p := range plans {
 		if p.Status == plan.StatusLocked {
 			tasks, err := s.taskStore.ListByPlan(p.ID)
@@ -51,6 +51,7 @@ func (s *Server) handleListPlans(w http.ResponseWriter, r *http.Request) {
 				p.AllTasksCompleted = allDone
 			}
 		}
+		p.Archived = p.ArchivedAt > 0
 	}
 
 	writeJSON(w, http.StatusOK, plans)
