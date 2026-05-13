@@ -547,7 +547,10 @@ func (s *Server) autoCompleteTask(t *task.Task) {
 	}
 	s.bus.Publish("task.completed", t)
 
-	go s.tryArchivePlan(t.PlanID)
+	if err := s.tryArchivePlan(t.PlanID); err != nil {
+		slog.Error("archive plan failed", "plan", t.PlanID, "err", err)
+		s.bus.Publish("plan.archive.failed", map[string]any{"planId": t.PlanID, "error": err.Error()})
+	}
 }
 
 // completeTask routes post-completion work based on whether the task belongs to
@@ -787,7 +790,10 @@ func (s *Server) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 
 	go s.autoStartDependentTasks(t.PlanID)
-	go s.tryArchivePlan(t.PlanID)
+	if err := s.tryArchivePlan(t.PlanID); err != nil {
+		slog.Error("archive plan failed", "plan", t.PlanID, "err", err)
+		s.bus.Publish("plan.archive.failed", map[string]any{"planId": t.PlanID, "error": err.Error()})
+	}
 }
 
 func (s *Server) handleFailTask(w http.ResponseWriter, r *http.Request) {
