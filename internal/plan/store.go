@@ -20,9 +20,9 @@ func NewStore(database *db.DB) *Store {
 // Create inserts a new plan into the database.
 func (s *Store) Create(plan *Plan) error {
 	_, err := s.db.Exec(
-		`INSERT INTO plan (id, session_id, project_id, directory, title, status, model, compaction_summary, breakdown_status, breakdown_warnings, time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		plan.ID, plan.SessionID, plan.ProjectID, plan.Directory, plan.Title, plan.Status, plan.Model, plan.CompactionSummary, plan.BreakdownStatus, plan.BreakdownWarnings, plan.CreatedAt, plan.UpdatedAt,
+		`INSERT INTO plan (id, session_id, project_id, directory, title, status, model, compaction_summary, breakdown_status, breakdown_warnings, archived_at, time_created, time_updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		plan.ID, plan.SessionID, plan.ProjectID, plan.Directory, plan.Title, plan.Status, plan.Model, plan.CompactionSummary, plan.BreakdownStatus, plan.BreakdownWarnings, plan.ArchivedAt, plan.CreatedAt, plan.UpdatedAt,
 	)
 	return err
 }
@@ -30,11 +30,11 @@ func (s *Store) Create(plan *Plan) error {
 // Get retrieves a plan by ID. Returns nil if not found.
 func (s *Store) Get(id string) (*Plan, error) {
 	row := s.db.QueryRow(
-		`SELECT id, session_id, project_id, directory, title, status, model, compaction_summary, breakdown_status, breakdown_warnings, time_created, time_updated
+		`SELECT id, session_id, project_id, directory, title, status, model, compaction_summary, breakdown_status, breakdown_warnings, archived_at, time_created, time_updated
 		 FROM plan WHERE id = ?`, id,
 	)
 	var p Plan
-	err := row.Scan(&p.ID, &p.SessionID, &p.ProjectID, &p.Directory, &p.Title, &p.Status, &p.Model, &p.CompactionSummary, &p.BreakdownStatus, &p.BreakdownWarnings, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.SessionID, &p.ProjectID, &p.Directory, &p.Title, &p.Status, &p.Model, &p.CompactionSummary, &p.BreakdownStatus, &p.BreakdownWarnings, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -47,7 +47,7 @@ func (s *Store) Get(id string) (*Plan, error) {
 // List returns all plans for a given directory, ordered by most recently updated.
 func (s *Store) List(directory string) ([]*Plan, error) {
 	rows, err := s.db.Query(
-		`SELECT id, session_id, project_id, directory, title, status, model, compaction_summary, breakdown_status, breakdown_warnings, time_created, time_updated
+		`SELECT id, session_id, project_id, directory, title, status, model, compaction_summary, breakdown_status, breakdown_warnings, archived_at, time_created, time_updated
 		 FROM plan WHERE directory = ? ORDER BY time_updated DESC`, directory,
 	)
 	if err != nil {
@@ -58,7 +58,7 @@ func (s *Store) List(directory string) ([]*Plan, error) {
 	var plans []*Plan
 	for rows.Next() {
 		var p Plan
-		if err := rows.Scan(&p.ID, &p.SessionID, &p.ProjectID, &p.Directory, &p.Title, &p.Status, &p.Model, &p.CompactionSummary, &p.BreakdownStatus, &p.BreakdownWarnings, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.SessionID, &p.ProjectID, &p.Directory, &p.Title, &p.Status, &p.Model, &p.CompactionSummary, &p.BreakdownStatus, &p.BreakdownWarnings, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		plans = append(plans, &p)
@@ -66,11 +66,11 @@ func (s *Store) List(directory string) ([]*Plan, error) {
 	return plans, nil
 }
 
-// Update modifies a plan's mutable fields (title, model, status, compaction_summary, breakdown_status, breakdown_warnings).
+// Update modifies a plan's mutable fields (title, model, status, compaction_summary, breakdown_status, breakdown_warnings, archived_at).
 func (s *Store) Update(plan *Plan) error {
 	_, err := s.db.Exec(
-		`UPDATE plan SET title = ?, model = ?, status = ?, compaction_summary = ?, breakdown_status = ?, breakdown_warnings = ?, time_updated = ? WHERE id = ?`,
-		plan.Title, plan.Model, plan.Status, plan.CompactionSummary, plan.BreakdownStatus, plan.BreakdownWarnings, plan.UpdatedAt, plan.ID,
+		`UPDATE plan SET title = ?, model = ?, status = ?, compaction_summary = ?, breakdown_status = ?, breakdown_warnings = ?, archived_at = ?, time_updated = ? WHERE id = ?`,
+		plan.Title, plan.Model, plan.Status, plan.CompactionSummary, plan.BreakdownStatus, plan.BreakdownWarnings, plan.ArchivedAt, plan.UpdatedAt, plan.ID,
 	)
 	return err
 }
@@ -93,6 +93,16 @@ func (s *Store) Lock(id string) error {
 	plan.Status = StatusLocked
 	plan.UpdatedAt = now()
 	return s.Update(plan)
+}
+
+// Archive marks a plan as archived by setting archived_at and time_updated to the current timestamp.
+func (s *Store) Archive(id string) error {
+	now := Now()
+	_, err := s.db.Exec(
+		`UPDATE plan SET archived_at = ?, time_updated = ? WHERE id = ?`,
+		now, now, id,
+	)
+	return err
 }
 
 // Delete removes a plan by ID.
