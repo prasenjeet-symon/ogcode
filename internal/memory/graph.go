@@ -710,9 +710,14 @@ func parseRecallResponse(text string) recallResponse {
 
 func buildRecallPrompt(question string, skeletonTree map[string]TopicTree, semanticTree map[string]TopicTree, topFacts []Node, history []string) string {
 	var sb strings.Builder
-	sb.WriteString("You are a Memory Context Retriever. Your ONLY job is to surface relevant background\n")
-	sb.WriteString("from past conversations so that a downstream LLM can use it to answer the user's query.\n")
-	sb.WriteString("Do NOT answer the query yourself. Return context, not answers.\n\n")
+	sb.WriteString("You are a Context Enricher. Your sole job: given an incoming query, produce a tight\n")
+	sb.WriteString("background context block that frames the query for a downstream LLM.\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- NEVER answer the query. Surface context around it, not a response to it.\n")
+	sb.WriteString("- Be specific and to the point. No preamble, no prose filler, no repetition.\n")
+	sb.WriteString("- Use bullet points. Cover all relevant facts — do not artificially limit — but omit everything irrelevant.\n")
+	sb.WriteString("- Organize bullets in chronological order (oldest → newest) so the downstream LLM sees how things evolved.\n")
+	sb.WriteString("- Group related bullets under a short timeline label (e.g. [Earlier] / [Recently] / [Latest]) when it aids clarity.\n\n")
 
 	if len(history) > 0 {
 		sb.WriteString("Previous retrieval rounds:\n")
@@ -722,24 +727,22 @@ func buildRecallPrompt(question string, skeletonTree map[string]TopicTree, seman
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("=== BIRD'S-EYE VIEW (Topics & Concepts) ===\n")
-	sb.WriteString("Use this map to request FOLLOWUPs if the relevant facts below are insufficient.\n")
+	sb.WriteString("=== TOPIC MAP ===\n")
 	sb.WriteString(skeletonTreeText(skeletonTree))
 
-	sb.WriteString("\n=== MOST RELEVANT FACTS (Semantic matches marked with ★) ===\n")
+	sb.WriteString("\n=== RELEVANT FACTS (★ = semantic match) ===\n")
 	sb.WriteString(semanticTreeText(semanticTree, topFacts))
-	sb.WriteString("\nUser Query: " + question + "\n\n")
-	sb.WriteString(`Respond with a single JSON object and nothing else — no markdown fences, no explanation:
+	sb.WriteString("\nQuery: " + question + "\n\n")
+	sb.WriteString(`Respond with a single JSON object, no markdown fences:
 {
-  "thought_process": "<Does this query need past context? Which stored facts are relevant?>",
-  "context_found": <true or false. false if the query is generic or memory has nothing relevant>,
-  "draft_context": "<If true, a factual summary of ONLY the relevant past context — what was discussed, decided, or built. Do NOT answer the query. If false, empty string.>",
-  "critique": "<Did you accidentally answer the query? Include irrelevant facts? Hallucinate?>",
-  "refinement_needed": <true or false. true if the critique found issues or a followup search would help>,
-  "confidence": <0.0-1.0 confidence the retrieved context is sufficient for the downstream LLM>,
-  "followup": "<If refinement_needed is true, what specific topic or fact to search for next. Otherwise empty string.>",
-  "facts_used": <integer count of facts drawn upon>,
-  "final_context": "<Your polished background context brief for the downstream LLM. If context_found is false, use empty string.>"
+  "context_found": <true|false — false if memory has nothing relevant to this query>,
+  "draft_context": "<Working draft of the context block — bullet points, chronological. Used for self-correction in next round. Empty if context_found is false.>",
+  "critique": "<Did you accidentally answer the query? Include irrelevant facts? Miss important timeline ordering? Empty if no issues.>",
+  "refinement_needed": <true|false — true if critique found issues or a followup search would help>,
+  "confidence": <0.0-1.0>,
+  "followup": "<specific topic/fact to search next if refinement_needed, else empty>",
+  "facts_used": <integer>,
+  "final_context": "<Chronologically ordered bullet-point context block (• prefix, timeline labels where helpful) covering all relevant background for the downstream LLM. Specific, no fluff. Empty string if context_found is false.>"
 }`)
 	return sb.String()
 }

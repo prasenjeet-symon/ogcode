@@ -10,6 +10,11 @@ import TaskBoard from '../components/task-board';
 import Breadcrumb from '../components/breadcrumb';
 import NotificationBell from '../components/notification-bell';
 
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
 function getModelLabel(model: string | undefined): string {
   if (!model) return '';
   const parts = model.split('/');
@@ -80,6 +85,35 @@ function PlanDetailContent() {
             <Show when={plan.activePlan()?.model}>
               <span class="text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium">
                 {getModelLabel(plan.activePlan()?.model)}
+              </span>
+            </Show>
+
+            <Show when={server.memoryEnabled()}>
+              <span
+                title={(() => {
+                  const t = plan.memorySavedTokens();
+                  if (t > 0) return `Memory is saving ~${formatTokens(t)} tokens vs. sending full history`;
+                  if (t < 0) return `Memory is adding ~${formatTokens(-t)} tokens of overhead — savings kick in as history grows`;
+                  return 'Agentic memory active';
+                })()}
+                class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border font-medium
+                  ${plan.memorySavedTokens() < 0
+                    ? 'text-amber-400 bg-amber-400/10 border-amber-400/20'
+                    : 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
+                  }`}
+              >
+                <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 00-3.09 3.091z" />
+                </svg>
+                Memory
+                <Show when={plan.memorySavedTokens() > 0}>
+                  <span class="text-emerald-500/70">·</span>
+                  <span class="text-emerald-300">~{formatTokens(plan.memorySavedTokens())} saved</span>
+                </Show>
+                <Show when={plan.memorySavedTokens() < 0}>
+                  <span class="text-amber-500/70">·</span>
+                  <span class="text-amber-300">~{formatTokens(-plan.memorySavedTokens())} overhead</span>
+                </Show>
               </span>
             </Show>
 

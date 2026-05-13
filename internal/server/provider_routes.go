@@ -36,7 +36,7 @@ type providerConfigResponse struct {
 func (s *Server) handleGetProviderConfigs(w http.ResponseWriter, r *http.Request) {
 	var out []providerConfigResponse
 	for _, id := range knownProviders {
-		cfg, err := session.GetProviderConfig(s.db, id)
+		cfg, err := session.GetProviderConfig(s.globalDB, id)
 		if err != nil {
 			http.Error(w, "failed to read provider config", http.StatusInternalServerError)
 			return
@@ -69,7 +69,7 @@ func (s *Server) handleSetProviderConfig(w http.ResponseWriter, r *http.Request)
 	incoming.ProviderID = id
 
 	// Preserve existing API key when the sentinel is sent.
-	existing, err := session.GetProviderConfig(s.db, id)
+	existing, err := session.GetProviderConfig(s.globalDB, id)
 	if err != nil {
 		http.Error(w, "failed to read provider config", http.StatusInternalServerError)
 		return
@@ -78,7 +78,7 @@ func (s *Server) handleSetProviderConfig(w http.ResponseWriter, r *http.Request)
 		incoming.APIKey = existing.APIKey
 	}
 
-	if err := session.SetProviderConfig(s.db, &incoming); err != nil {
+	if err := session.SetProviderConfig(s.globalDB, &incoming); err != nil {
 		http.Error(w, "failed to save provider config", http.StatusInternalServerError)
 		return
 	}

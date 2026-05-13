@@ -42,6 +42,7 @@ type Server struct {
 	dir        string
 	mode       ServerMode
 	db         *db.DB
+	globalDB   *db.DB // shared config DB at ~/.ogcode/config.db
 	bus        *bus.Bus
 	store      *session.Store
 	planStore  *plan.Store
@@ -82,6 +83,22 @@ func (s *Server) Start() error {
 		return fmt.Errorf("open database: %w", err)
 	}
 	s.db = database
+
+	// Global config DB shared across all workspaces.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home dir: %w", err)
+	}
+	globalDBPath := filepath.Join(home, ".ogcode", "config.db")
+	if err := os.MkdirAll(filepath.Dir(globalDBPath), 0o755); err != nil {
+		return fmt.Errorf("create global config dir: %w", err)
+	}
+	globalDatabase, err := db.Open(globalDBPath)
+	if err != nil {
+		return fmt.Errorf("open global config database: %w", err)
+	}
+	s.globalDB = globalDatabase
+
 	s.bus = bus.New(256)
 	s.store = session.NewStore(database)
 	s.planStore = plan.NewStore(database)
@@ -106,7 +123,7 @@ func (s *Server) Start() error {
 	}
 
 	// Load DB-stored provider credentials (env vars take precedence).
-	dbProviderCfgs, err := session.GetAllProviderConfigs(database)
+	dbProviderCfgs, err := session.GetAllProviderConfigs(globalDatabase)
 	if err != nil {
 		slog.Warn("failed to load provider configs from DB", "err", err)
 	}
@@ -236,7 +253,7 @@ func (s *Server) Start() error {
 		toolRegistry.Register(tool.NewMemoryRecallTool(mem))
 	} else {
 		// DB-config path: user enabled memory from the settings UI.
-		dbMemCfg, err := session.GetMemoryConfig(database)
+		dbMemCfg, err := session.GetMemoryConfig(globalDatabase)
 		if err != nil {
 			slog.Warn("failed to read memory config from DB", "err", err)
 		} else if dbMemCfg.Enabled && dbMemCfg.EmbedProviderID != "" {
@@ -384,6 +401,11 @@ func (s *Server) Start() error {
 	if s.db != nil {
 		if err := s.db.Close(); err != nil {
 			slog.Warn("close database", "err", err)
+		}
+	}
+	if s.globalDB != nil {
+		if err := s.globalDB.Close(); err != nil {
+			slog.Warn("close global config database", "err", err)
 		}
 	}
 

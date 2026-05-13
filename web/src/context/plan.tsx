@@ -20,6 +20,7 @@ import {
   retryTask,
   getTask,
   getModels,
+  getSession,
   deletePlan as deletePlanAPI,
 } from '../api/client';
 import { useServer } from './server';
@@ -27,6 +28,7 @@ import { useServer } from './server';
 interface PlanContextValue {
   plans: () => Plan[];
   activePlan: () => Plan | null;
+  memorySavedTokens: () => number;
   tasks: () => Task[];
   messages: () => MessageWithParts[];
   loading: () => boolean;
@@ -77,6 +79,7 @@ export const PlanProvider: ParentComponent = (props) => {
 
   const [loadingPlanId, setLoadingPlanId] = createSignal<string>('');
   const loading = () => loadingPlanId() === activePlan()?.id && loadingPlanId() !== '';
+  const [memorySavedTokens, setMemorySavedTokens] = createSignal(0);
 
   // Archive notification: set by the plan.archived SSE event, cleared on plan switch or dismiss.
   const [archivePath, setArchivePath] = createSignal<string>('');
@@ -291,6 +294,15 @@ export const PlanProvider: ParentComponent = (props) => {
       const msgs = await getPlanMessages(id);
       setMessages(msgs);
 
+      // Restore persisted token savings for this plan's session.
+      if (p.sessionId) {
+        getSession(p.sessionId)
+          .then((sess) => setMemorySavedTokens(sess.memoryTokensSaved ?? 0))
+          .catch(() => setMemorySavedTokens(0));
+      } else {
+        setMemorySavedTokens(0);
+      }
+
       // Load tasks for the plan
       const t = await listTasks(id);
       setTasks(t || []);
@@ -480,6 +492,17 @@ export const PlanProvider: ParentComponent = (props) => {
   // Load plans on mount
   createEffect(on(server.directory, (dir) => {
     if (dir) refresh();
+  }));
+
+  // Track memory token savings for the active plan session
+  createEffect(on(server.eventTick, () => {
+    const last = server.lastEvent();
+    if (!last || last.type !== 'memory.savings') return;
+    const evtSessionId = (last.properties as any)?.sessionId;
+    const plan = activePlan();
+    if (!evtSessionId || !plan || evtSessionId !== plan.sessionId) return;
+    const saved = Number((last.properties as any)?.savedTokens ?? 0);
+    setMemorySavedTokens((prev) => prev + saved);
   }));
 
   // SSE-driven updates for plan conversations
@@ -724,6 +747,7 @@ export const PlanProvider: ParentComponent = (props) => {
   const value: PlanContextValue = {
     plans,
     activePlan,
+    memorySavedTokens,
     tasks,
     messages,
     loading,

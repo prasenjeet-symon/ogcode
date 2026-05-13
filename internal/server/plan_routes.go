@@ -972,19 +972,19 @@ func (s *Server) handleExportPlan(w http.ResponseWriter, r *http.Request) {
 // tryArchivePlan checks whether all tasks in the plan are completed and, if so,
 // writes the plan as a markdown file to <projectDir>/.ogcode/archives/<planID>.md.
 // The file is written only once — subsequent calls are no-ops when the file exists.
-func (s *Server) tryArchivePlan(planID string) {
+func (s *Server) tryArchivePlan(planID string) error {
 	p, err := s.planStore.Get(planID)
 	if err != nil || p == nil || p.Status != plan.StatusLocked {
-		return
+		return err
 	}
 
 	tasks, err := s.taskStore.ListByPlan(planID)
 	if err != nil || len(tasks) == 0 {
-		return
+		return err
 	}
 	for _, t := range tasks {
 		if t.Status != task.StatusCompleted {
-			return
+			return nil
 		}
 	}
 
@@ -995,25 +995,26 @@ func (s *Server) tryArchivePlan(planID string) {
 
 	// Skip if already archived.
 	if _, err := os.Stat(archivePath); err == nil {
-		return
+		return nil
 	}
 
 	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 		slog.Error("create archive dir", "plan", planID, "err", err)
-		return
+		return err
 	}
 
 	content, err := s.generatePlanMarkdown(p)
 	if err != nil {
 		slog.Error("generate plan markdown for archive", "plan", planID, "err", err)
-		return
+		return err
 	}
 	if err := os.WriteFile(archivePath, []byte(content), 0o644); err != nil {
 		slog.Error("write plan archive", "plan", planID, "path", archivePath, "err", err)
-		return
+		return err
 	}
 	slog.Info("plan archived", "plan", planID, "path", archivePath)
 	s.bus.Publish("plan.archived", map[string]string{"planId": planID, "path": archivePath})
+	return nil
 }
 
 // planArchivePaths returns absolute paths to all completed plan archives in
