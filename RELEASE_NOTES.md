@@ -1,28 +1,46 @@
-# Release Notes — v0.13.4
+# Release Notes — v0.13.5
 
-## Anthropic: fix 400 error on no-argument tool calls
+## UI/UX Redesign & HTML Widget Improvements
 
-When replaying a conversation that contains a tool call with no arguments (or
-arguments that round-trip through storage as `null`), the Anthropic Messages API
-rejected the request with a `400` error:
-
-```
-tool_use.input: Input should be an object
-```
-
-Anthropic requires the `input` field of every `tool_use` block to be a JSON
-object. A no-arg tool call serialises its arguments as `null`, which unmarshals
-to a `nil` Go interface (not a `map[string]any`). The provider now coerces any
-non-object `input` — `nil`, scalars, or arrays — to an empty object `{}` before
-sending it, preventing the 400.
+This patch release brings a comprehensive visual refresh inspired by Linear's
+design language, plus a fix that makes HTML widgets rendered in chat feel like
+a natural part of the conversation rather than separate cards.
 
 ---
 
+### ✨ Style: Linear-Inspired UI/UX Redesign
+
+The entire color system, typography, and animation framework has been overhauled
+for a more polished, modern feel:
+
+- **Color system:** Accent shifted from blue to Linear violet across all design
+  tokens and Go backend constants
+- **Typography:** Tighter body text (13px), tighter line-height, slight negative
+  tracking for a refined feel
+- **Surfaces:** Warm-tinted dark grays at each elevation level instead of flat
+  grays
+- **Shadows:** Softer, layered depth replacing heavy single shadows; accent-glow
+  shadows on focus and active states
+- **Animations:** Spring-based timing curves replace linear ease-out; new
+  animation classes — `scale-in`, `pop-in`, `slide-down`, `stagger`
+- **Micro-interactions:** Hover and active scale on buttons and chips; soft glow
+  ring focus states replacing hard outlines
+- **Scrollbars:** Ultra-thin 6px, barely visible until hover
+- **Command menu:** Backdrop blur, pop-in animation, accent glow shadow
+- **Prompt input:** Glow-on-focus with accent-tinted shadow
+- **Session sidebar:** Spring transitions, active dot with pulse-ring, tighter
+  header
+- **Messages:** Directional slide-in with spring curves
+- **Links:** Shifted from blue to violet to match the new accent
+- **Settings:** Linear Violet as the first color preset option
+
 ### 🐛 Bug Fixes
 
-- **Anthropic provider:** Coerce `tool_use.input` to `{}` when it is not a JSON
-  object, fixing `400 "Input should be an object"` errors on no-argument tool
-  calls.
+- **HTML widget:** Removed forced dark background and rounded border from the
+  chat iframe. HTML/CSS/JS code blocks now render with a transparent background
+  and zero border, blending seamlessly into the conversation flow instead of
+  appearing as separate cards. Updated agent prompt to instruct against adding
+  background colors or card-like containers.
 
 ---
 
@@ -50,4 +68,4 @@ docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-sy
 
 ---
 
-*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.13.3...v0.13.4*
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.13.4...v0.13.5*
