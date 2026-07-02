@@ -206,15 +206,17 @@ export default function MarkdownContent(props: { text: string; class?: string })
 
       // Create a sandboxed iframe
       const iframe = document.createElement('iframe');
-      iframe.style.cssText = 'width:100%;border:none;border-radius:8px;overflow:hidden;background:#1a1a2e;';
+      iframe.style.cssText = 'width:100%;border:none;overflow:hidden;background:transparent;';
       iframe.sandbox.add('allow-scripts', 'allow-same-origin');
       // Note: allow-same-origin is needed for scripts within the iframe to
       // execute properly (e.g., to access their own DOM). The iframe is still
       // sandboxed — it cannot access the parent page's DOM.
 
-      // Wrap the content in a dark-themed base template to match the chat UI
+      // Wrap the content in a transparent template that blends seamlessly
+      // into the chat. No background or card styling — the HTML content
+      // should appear as part of the conversation, not as a separate widget.
       const darkWrap = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-body { margin: 0; padding: 12px; background: #1a1a2e; color: #e4e4e7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+body { margin: 0; padding: 0; background: transparent; color: #e4e4e7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 a { color: #60a5fa; }
 table { border-collapse: collapse; }
 th, td { border: 1px solid #3f3f46; padding: 6px 12px; }

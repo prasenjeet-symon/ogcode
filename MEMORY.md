@@ -111,7 +111,7 @@ Steps:
 ## ogcode — Rich Output Architecture
 
 - **Supported formats**: Mermaid diagrams, LaTeX math, LaTeX documents, Plotly charts, Rough diagrams, HTML/CSS/JS (sandboxed iframe)
-- **HTML rendering**: `language-html` code blocks are extracted before DOMPurify runs, encoded as base64 data attributes, then rendered in sandboxed iframes with `allow-scripts` and `allow-same-origin`
+- **HTML rendering**: `language-html` code blocks are extracted before DOMPurify runs, encoded as base64 data attributes, then rendered in sandboxed iframes with `allow-scripts` and `allow-same-origin`. The iframe has a **transparent background with no border** — HTML content blends seamlessly into the chat. The system prompt instructs agents NOT to add background colors or card-like containers to their HTML output.
 - **LaTeX document rendering**: `language-latex` code blocks are rendered as styled previews with document class/title extraction, source code preview, and a "Download PDF" button that calls `POST /api/latex` to compile via pdflatex
 - **LaTeX-to-PDF tool**: `latex_to_pdf` agent tool compiles LaTeX source to PDF using system pdflatex, saves to session directory, and renders first page as JPEG for vision-capable models
 - **LaTeX API routes**: `POST /api/latex` (compile to PDF), `POST /api/latex/pages` (compile + render page images), `GET /api/latex/status` (check pdflatex availability + version info)
