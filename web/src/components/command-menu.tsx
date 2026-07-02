@@ -90,20 +90,21 @@ export default function CommandMenu(props: {
 
   return (
     <Show when={props.open}>
-      {/* Backdrop */}
+      {/* Backdrop — Linear-style blurred overlay */}
       <div
-        class="fixed inset-0 z-[200] bg-black/50 backdrop-blur-[2px]"
+        class="fixed inset-0 z-[200] bg-black/60 backdrop-blur-[3px] animate-fade-in"
         onClick={props.onClose}
+        style={{ 'animation-duration': '0.15s' }}
       />
 
-      {/* Palette */}
+      {/* Palette — slides down from top with spring bounce */}
       <div
         class="fixed left-1/2 top-[18vh] z-[201] w-[min(560px,92vw)] -translate-x-1/2
-               rounded-[14px] border overflow-hidden"
+               rounded-[14px] border overflow-hidden animate-pop-in"
         style={{
           background: 'var(--bg-overlay)',
           'border-color': 'var(--border-default)',
-          'box-shadow': 'var(--shadow-lg)',
+          'box-shadow': 'var(--shadow-lg), var(--shadow-glow)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -135,7 +136,7 @@ export default function CommandMenu(props: {
                 disabled={it.disabled}
                 onMouseEnter={() => setActive(i())}
                 onClick={() => run(it)}
-                class="w-full flex items-center gap-2.5 px-3 mx-1 h-9 rounded-lg text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                class="w-full flex items-center gap-2.5 px-3 mx-1 h-9 rounded-lg text-left transition-all var(--spring-sm) disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
                   width: 'calc(100% - 8px)',
                   background: active() === i() && !it.disabled ? 'var(--bg-hover)' : 'transparent',

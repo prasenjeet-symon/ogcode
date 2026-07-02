@@ -112,7 +112,7 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
         class="flex items-center gap-2 w-full text-left text-[12px] px-2.5 py-1.5 rounded-md
                bg-[color:var(--bg-elevated)] hover:bg-[color:var(--bg-hover)]
                border border-[color:var(--border-subtle)]
-               transition-colors duration-150 group"
+               transition-all var(--spring-sm) group"
       >
         <div class={`flex-shrink-0 ${statusColor()}`}>
           <Show when={status() === 'running'}>
@@ -161,7 +161,7 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
           </span>
         </Show>
         <svg
-          class={`w-3 h-3 text-zinc-600 transition-transform duration-200 shrink-0 ${expanded() ? 'rotate-90' : ''}`}
+          class={`w-3 h-3 text-zinc-600 transition-transform var(--spring-sm) shrink-0 ${expanded() ? 'rotate-90' : ''}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"
         >
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -433,7 +433,7 @@ function UserMessage(props: { msg: MessageWithParts }) {
               onClick={handleSendToNotes}
               disabled={sendingToNote()}
               title="Save to Notes"
-              class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md font-medium transition
+              class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md font-medium transition-all var(--spring-sm)
                 opacity-0 group-hover:opacity-100
                 ${noteSaved()
                   ? 'text-emerald-400 bg-emerald-500/10 opacity-100'
@@ -482,7 +482,7 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
   return (
     <div class="flex gap-3 animate-fade-in-left group">
       {/* Avatar */}
-      <div class="w-7 h-7 shrink-0 rounded-lg bg-[color:var(--accent)] flex items-center justify-center shadow-sm mt-0.5">
+      <div class="w-7 h-7 shrink-0 rounded-lg bg-[color:var(--accent)] flex items-center justify-center shadow-sm shadow-[color:var(--accent)]/15 mt-0.5">
         <svg class="w-3.5 h-3.5 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
@@ -523,10 +523,10 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
 
         {/* Action bar (hover) */}
         <Show when={props.msg.info.finish}>
-          <div class="mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+          <div class="mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity var(--spring-md)">
             <button
               onClick={handleCopy}
-              class={`text-[11px] px-2 py-1 rounded-md flex items-center gap-1.5 transition ${
+              class={`text-[11px] px-2 py-1 rounded-md flex items-center gap-1.5 transition-all var(--spring-sm) ${
                 copied()
                   ? 'text-emerald-400 bg-emerald-500/10'
                   : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]'

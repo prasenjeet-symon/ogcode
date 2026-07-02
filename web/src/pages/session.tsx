@@ -89,7 +89,7 @@ function ChatContent() {
       <SessionSidebar />
       <div class="flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
         {/* Header */}
-        <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-4 backdrop-blur-sm overflow-visible" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(17,17,20,0.8)', 'z-index': 100 }}>
+        <header class="h-11 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-4 backdrop-blur-sm overflow-visible" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(15,15,18,0.8)', 'z-index': 100 }}>
           <div class="flex items-center gap-2 min-w-0 flex-1">
             <svg class="w-4 h-4 text-zinc-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
               <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
@@ -161,7 +161,7 @@ function ChatContent() {
             <button
               type="button"
               onClick={() => navigate('/settings', { state: { from: location.pathname } })}
-              class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition"
+              class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition-all var(--spring-sm) active:scale-[0.92]"
               title="Settings"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">

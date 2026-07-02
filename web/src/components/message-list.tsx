@@ -184,7 +184,7 @@ export default function MessageList() {
         <Show when={isScrolledUp()}>
           <button
             onClick={scrollToBottom}
-            class="fixed bottom-24 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-lg bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] text-sm font-medium shadow-lg transition-all animate-fade-in"
+            class="fixed bottom-24 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-lg bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] text-sm font-medium shadow-lg shadow-[color:var(--accent)]/20 transition-all var(--spring-md) hover:scale-[1.02] active:scale-[0.98] animate-pop-in"
             title="Jump to latest message"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

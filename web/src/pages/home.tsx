@@ -90,8 +90,8 @@ function HomeContent() {
         <div class="relative flex-1 overflow-y-auto flex flex-col">
           <div class="flex-1 flex flex-col items-center justify-center w-full max-w-2xl mx-auto px-6 pb-24">
             {/* Brand */}
-            <div class="mb-8 flex flex-col items-center">
-              <div class="w-11 h-11 rounded-2xl bg-[color:var(--accent)] flex items-center justify-center shadow-lg ring-1 ring-white/10 mb-4">
+            <div class="mb-8 flex flex-col items-center animate-scale-in">
+              <div class="w-11 h-11 rounded-2xl bg-[color:var(--accent)] flex items-center justify-center shadow-lg shadow-[color:var(--accent)]/20 ring-1 ring-white/10 mb-4">
                 <svg class="w-5 h-5 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
@@ -102,9 +102,10 @@ function HomeContent() {
             </div>
 
             {/* Prompt input */}
-            <form onSubmit={handleSubmit} class="w-full">
+            <form onSubmit={handleSubmit} class="w-full animate-fade-in-up" style={{ 'animation-delay': '60ms' }}>
               <div class="rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]
-                          shadow-lg shadow-black/30 transition focus-within:border-[color:var(--border-strong)]">
+                          shadow-lg shadow-black/30 transition-all var(--spring-md) focus-within:border-[color:var(--accent)]/50
+                          focus-within:shadow-[color:var(--accent)]/5 focus-within:shadow-2xl">
                 <textarea
                   ref={textareaRef}
                   value={text()}
@@ -113,7 +114,7 @@ function HomeContent() {
                   placeholder="Message ogcode…"
                   disabled={submitting()}
                   rows={2}
-                  class="block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[15px] text-zinc-100
+                  class="block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14px] text-zinc-100
                          placeholder-zinc-500 focus:outline-none disabled:opacity-60
                          min-h-[56px] max-h-[280px] leading-relaxed"
                 />
@@ -126,7 +127,7 @@ function HomeContent() {
                     title={canSend() ? 'Send (Enter)' : 'Type a message'}
                     class={`h-9 w-9 rounded-xl flex items-center justify-center transition-all shrink-0
                       ${canSend()
-                        ? 'bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] shadow-sm'
+                        ? 'bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] shadow-sm hover:shadow-md hover:scale-[1.04] active:scale-[0.97]'
                         : 'bg-[color:var(--bg-elevated)] text-zinc-600 cursor-not-allowed'
                       }`}
                   >
@@ -148,7 +149,7 @@ function HomeContent() {
             </form>
 
             {/* Suggestion chips */}
-            <div class="mt-5 flex flex-wrap items-center justify-center gap-2">
+            <div class="mt-5 flex flex-wrap items-center justify-center gap-2 animate-fade-in-up" style={{ 'animation-delay': '120ms' }}>
               <For each={SUGGESTIONS}>
                 {(s) => (
                   <button
@@ -158,9 +159,9 @@ function HomeContent() {
                       textareaRef?.focus();
                     }}
                     class="h-8 px-3 rounded-full border border-[color:var(--border-subtle)]
-                           bg-[color:var(--bg-surface)]/60 hover:border-[color:var(--accent)]
+                           bg-[color:var(--bg-surface)]/60 hover:border-[color:var(--accent)]/40
                            hover:bg-[color:var(--accent-soft)] text-[12px] text-zinc-400 hover:text-[color:var(--accent)]
-                           transition"
+                           transition-all var(--spring-sm) hover:scale-[1.02] active:scale-[0.98]"
                   >
                     {s}
                   </button>

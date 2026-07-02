@@ -368,6 +368,7 @@ function ThemePicker() {
   };
 
   const presets = [
+    { label: 'Linear Violet', hex: '#5e6ad2' },
     { label: 'Blue', hex: '#3b82f6' },
     { label: 'Indigo', hex: '#6366f1' },
     { label: 'Violet', hex: '#8b5cf6' },
@@ -400,7 +401,7 @@ function ThemePicker() {
               value={themeCtx.primaryColor()}
               onChange={(e) => handleInput(e.currentTarget.value)}
               disabled={saving()}
-              placeholder="#3b82f6"
+              placeholder="#5e6ad2"
               class="w-28 h-8 px-2.5 rounded-md border border-[color:var(--border-default)]
                      bg-[color:var(--bg-elevated)] text-[12px] font-mono text-zinc-200
                      focus:outline-none focus:border-[color:var(--accent)] transition"

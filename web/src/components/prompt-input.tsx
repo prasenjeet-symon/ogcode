@@ -64,9 +64,9 @@ export default function PromptInput() {
     <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-4">
       <form onSubmit={handleSubmit} class="max-w-3xl mx-auto px-4 md:px-6 pb-4">
         <div
-          class={`rounded-2xl border bg-[color:var(--bg-surface)] transition-all duration-150
+          class={`rounded-2xl border bg-[color:var(--bg-surface)] transition-all var(--spring-md)
             ${focused()
-              ? 'border-[color:var(--border-strong)] shadow-lg shadow-black/30'
+              ? 'border-[color:var(--accent)]/40 shadow-lg shadow-black/30 shadow-[color:var(--accent)]/5'
               : 'border-[color:var(--border-default)] shadow-md shadow-black/20'
             }`}
         >
@@ -98,7 +98,7 @@ export default function PromptInput() {
                 onClick={() => session.abort()}
                 class="h-8 px-3 rounded-lg flex items-center gap-1.5 text-[12px] font-medium
                        text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/30
-                       transition-colors duration-150"
+                       transition-all var(--spring-sm) active:scale-[0.97]"
                 title="Cancel agent (Esc)"
               >
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
@@ -113,9 +113,9 @@ export default function PromptInput() {
                 type="submit"
                 disabled={!canSend()}
                 title={canSend() ? 'Send (Enter)' : 'Type a message'}
-                class={`h-8 w-8 rounded-lg flex items-center justify-center transition-all
+                class={`h-8 w-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm)
                   ${canSend()
-                    ? 'bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] shadow-sm scale-100'
+                    ? 'bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] shadow-sm hover:shadow-md hover:scale-[1.06] active:scale-[0.95]'
                     : 'bg-[color:var(--bg-elevated)] text-zinc-600 cursor-not-allowed scale-95'
                   }`}
               >

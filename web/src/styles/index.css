@@ -2,39 +2,42 @@
 @import "highlight.js/styles/github-dark-dimmed.css";
 
 /* ============================================================
-   Design tokens
+   Design tokens — Linear-inspired dark-first color system
    ============================================================ */
 :root {
-  --bg-base:        #0a0a0b;
-  --bg-surface:     #111114;
-  --bg-elevated:    #17171a;
-  --bg-overlay:     #1c1c20;
-  --bg-hover:       #232328;
+  /* Surfaces: warm-tinted dark grays, subtly shifting warmer as they rise */
+  --bg-base:        #09090b;
+  --bg-surface:     #0f0f12;
+  --bg-elevated:    #161619;
+  --bg-overlay:     #1b1b1f;
+  --bg-hover:       #222226;
 
-  --border-subtle:  #1f1f24;
-  --border-default: #27272c;
-  --border-strong:  #34343a;
+  /* Borders: intentionally subtle — barely visible until interaction */
+  --border-subtle:  #1e1e23;
+  --border-default: #2a2a30;
+  --border-strong:  #3a3a42;
 
-  --text-primary:   #f4f4f5;
-  --text-secondary: #a1a1aa;
-  --text-tertiary:  #71717a;
-  --text-muted:     #52525b;
+  /* Text: warm-cool zinc progression */
+  --text-primary:   #ededef;
+  --text-secondary: #9d9da6;
+  --text-tertiary:  #6b6b76;
+  --text-muted:     #4a4a55;
 
-  --accent:         #3b82f6;
-  --accent-hover:   #2563eb;
-  --accent-soft:    rgba(59, 130, 246, 0.12);
-  --accent-ring:    rgba(59, 130, 246, 0.35);
+  /* Accent: Linear violet (#5E6AD2) — the single saturated color */
+  --accent:         #5e6ad2;
+  --accent-hover:   #4f5bc4;
+  --accent-soft:    rgba(94, 106, 210, 0.12);
+  --accent-ring:    rgba(94, 106, 210, 0.35);
   --on-primary:     #ffffff;
-  --glow:           rgba(59, 130, 246, 0.12);
-  --tint:           rgba(59, 130, 246, 0.05);
+  --glow:           rgba(94, 106, 210, 0.08);
+  --tint:           rgba(94, 106, 210, 0.04);
 
-  --success:        #10b981;
-  --warning:        #f59e0b;
-  --danger:         #ef4444;
+  --success:        #17c284;
+  --warning:        #f5a623;
+  --danger:         #e5484d;
   --reasoning:      #a78bfa;
 
-  /* Linear-aligned task status palette (todo gray, in-progress yellow,
-     done indigo, failed red) — used by the status-circle iconography. */
+  /* Status palette — Linear-aligned, desaturated for scanability */
   --status-pending:    #8a8f98;
   --status-progress:   #f2c94c;
   --status-completed:  #5e6ad2;
@@ -49,12 +52,20 @@
   --radius-lg: 14px;
   --radius-xl: 18px;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  /* Shadows: softer, layered — Linear uses depth without heavy shadow */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
+  --shadow-glow: 0 0 16px -4px rgba(94, 106, 210, 0.25);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* Spring-based transition presets (CSS approximations of Linear's spring physics) */
+  --spring-sm:  150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-md:  250ms cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-lg:  350ms cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bounce: 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
 
   color-scheme: dark;
 }
@@ -71,6 +82,21 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  /* Linear: 13px body text, tight line-height, slight negative tracking */
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+
+/* Default transition for interactive elements — Linear's spring timing */
+button, a, input, textarea, select,
+[role="button"], [role="tab"] {
+  transition: background-color var(--spring-sm),
+              color var(--spring-sm),
+              border-color var(--spring-sm),
+              box-shadow var(--spring-sm),
+              opacity var(--spring-sm),
+              transform var(--spring-sm);
 }
 
 ::selection {
@@ -79,19 +105,17 @@ body {
 }
 
 /* ============================================================
-   Scrollbars
+   Scrollbars — Linear-inspired: ultra-thin, barely visible
    ============================================================ */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: transparent;
-  border: 2px solid transparent;
-  background-clip: padding-box;
   border-radius: 999px;
 }
 *:hover::-webkit-scrollbar-thumb {
@@ -113,17 +137,17 @@ body {
 }
 
 /* ============================================================
-   Focus rings
+   Focus rings — Linear-style: soft glow, not hard outlines
    ============================================================ */
 :focus-visible {
-  outline: 2px solid var(--accent-ring);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
   border-radius: 4px;
 }
 button:focus-visible,
 [role="button"]:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent-ring);
+  box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent-ring), var(--shadow-glow);
 }
 
 textarea:focus,
@@ -135,18 +159,37 @@ input:focus-visible {
 }
 
 /* ============================================================
-   Animations
+   Animations — Linear-inspired spring physics
+   All transitions use cubic-bezier(0.16, 1, 0.3, 1) which
+   approximates a spring with slight overshoot, giving that
+   characteristic Linear "snap into place" feel.
    ============================================================ */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes fadeInSlideRight {
-  from { opacity: 0; transform: translateX(6px); }
+  from { opacity: 0; transform: translateX(8px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes fadeInSlideLeft {
-  from { opacity: 0; transform: translateX(-6px); }
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes fadeInSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes slideInFromRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideInFromLeft {
+  from { opacity: 0; transform: translateX(-16px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes bounceDot {
@@ -166,20 +209,50 @@ input:focus-visible {
   100% { background-position: 400px 0; }
 }
 @keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
-  70%  { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(94, 106, 210, 0.4); }
+  70%  { box-shadow: 0 0 0 6px rgba(94, 106, 210, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(94, 106, 210, 0); }
+}
+@keyframes popIn {
+  0%   { opacity: 0; transform: scale(0.9); }
+  70%  { transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.animate-fade-in       { animation: fadeIn 0.25s ease-out forwards; }
-.animate-fade-in-right { animation: fadeInSlideRight 0.25s ease-out forwards; }
-.animate-fade-in-left  { animation: fadeInSlideLeft 0.25s ease-out forwards; }
-.animate-fade-in-up    { animation: fadeInUp 0.25s ease-out forwards; }
+/* Spring-based animation classes using Linear's timing curves */
+.animate-fade-in       { animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-fade-in-right { animation: slideInFromRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-fade-in-left  { animation: slideInFromLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-fade-in-up    { animation: fadeInSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-scale-in      { animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-pop-in        { animation: popIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.animate-slide-down    { animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 .animate-spin          { animation: spin 0.9s linear infinite; }
 .animate-pulse-ring    { animation: pulse-ring 2s ease-out infinite; }
 
-/* Linear-style subtle message/list entrance: short, soft, ease-out. */
-.anim-enter { animation: fadeIn 0.18s ease-out both; }
+/* Linear-style subtle message/list entrance */
+.anim-enter { animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Staggered list entrance — children animate in sequence with 30-50ms delay.
+   Apply to parent, nth-child delays go on the children. */
+.anim-stagger > * {
+  animation: fadeInSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.anim-stagger > *:nth-child(1)  { animation-delay: 0ms; }
+.anim-stagger > *:nth-child(2)  { animation-delay: 30ms; }
+.anim-stagger > *:nth-child(3)  { animation-delay: 60ms; }
+.anim-stagger > *:nth-child(4)  { animation-delay: 90ms; }
+.anim-stagger > *:nth-child(5)  { animation-delay: 120ms; }
+.anim-stagger > *:nth-child(6)  { animation-delay: 150ms; }
+.anim-stagger > *:nth-child(7)  { animation-delay: 180ms; }
+.anim-stagger > *:nth-child(8)  { animation-delay: 200ms; }
+.anim-stagger > *:nth-child(9)  { animation-delay: 220ms; }
+.anim-stagger > *:nth-child(10) { animation-delay: 240ms; }
+.anim-stagger > *:nth-child(n+11) { animation-delay: 260ms; }
 
 /* Respect users who prefer reduced motion — neutralize entrance/transition motion. */
 @media (prefers-reduced-motion: reduce) {
@@ -192,7 +265,7 @@ input:focus-visible {
 }
 
 .shimmer {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
   background-size: 800px 100%;
   animation: shimmer 2s linear infinite;
 }
@@ -227,11 +300,11 @@ textarea.auto-resize {
 }
 
 /* ============================================================
-   Prose / markdown styling
+   Prose / markdown styling — Linear's tight, scannable type
    ============================================================ */
 .prose-chat {
-  line-height: 1.65;
-  font-size: 0.9375rem;
+  line-height: 1.6;
+  font-size: 0.875rem;   /* 14px — Linear's body text size */
   color: var(--text-primary);
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -328,14 +401,14 @@ textarea.auto-resize {
 }
 
 .prose-chat a {
-  color: #7aa7f7;
+  color: #8b9cf7;
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
-  transition: color 150ms;
+  transition: color var(--spring-sm);
 }
 .prose-chat a:hover {
-  color: #a7c4fa;
+  color: #aab4f8;
 }
 
 .prose-chat table {
@@ -464,7 +537,7 @@ textarea.auto-resize {
   color: var(--text-tertiary);
   border: 1px solid var(--border-default);
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: all var(--spring-sm);
 }
 .latex-src-toggle:hover {
   background: var(--bg-hover);
@@ -473,7 +546,7 @@ textarea.auto-resize {
 .latex-src-toggle.active {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: rgba(59, 130, 246, 0.3);
+  border-color: rgba(94, 106, 210, 0.3);
 }
 .latex-download-btn {
   display: inline-flex;
@@ -483,16 +556,16 @@ textarea.auto-resize {
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  border: 1px solid rgba(94, 106, 210, 0.25);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: all var(--spring-sm);
   white-space: nowrap;
 }
 .latex-download-btn:hover:not(:disabled) {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(94, 106, 210, 0.2);
+  border-color: rgba(94, 106, 210, 0.4);
 }
 .latex-download-btn:disabled {
   opacity: 0.6;
@@ -588,9 +661,9 @@ textarea.auto-resize {
 .hide-scrollbar::-webkit-scrollbar { display: none; }
 .hide-scrollbar { scrollbar-width: none; }
 
-/* Grid background pattern (subtle) */
+/* Grid background pattern (subtle) — Linear-inspired dot grid */
 .bg-grid {
   background-image:
-    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.035) 1px, transparent 0);
-  background-size: 22px 22px;
+    radial-gradient(circle at 1px 1px, rgba(94, 106, 210, 0.04) 1px, transparent 0);
+  background-size: 24px 24px;
 }
