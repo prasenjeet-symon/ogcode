@@ -34,11 +34,11 @@ This applies to all of the following scenarios:
 
 ### Why?
 
-The project index provides **topic labels** and a **structured overview** of every indexed file. Using it first ensures:
+The project index provides **topic labels** and a **structured overview** of every indexed file — including PDF documents (each PDF leaf shows per-page labels so you can pick the right page before calling read_pdf_page). Using it first ensures:
 
 1. **Faster navigation** — You immediately know which files are relevant without blind glob/grep searches.
 2. **Better context** — Topic labels tell you what each file contains before you read it.
-3. **Fewer mistakes** — You won't miss important files or read irrelevant ones.
+3. **Fewer mistakes** — You won't miss important files (including PDFs) or read irrelevant ones.
 
 ### Workflow
 

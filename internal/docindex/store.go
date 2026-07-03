@@ -147,6 +147,33 @@ func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 	return entries, rows.Err()
 }
 
+// ListPDFFiles returns all indexed PDF entries (page-level) whose doc_path
+// starts with dirPrefix, ordered by path then page number. Each PDF document
+// will have one entry per page; callers group them by DocPath.
+func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
+		 FROM doc_page_index
+		 WHERE doc_path LIKE ? AND LOWER(doc_path) LIKE '%.pdf'
+		 ORDER BY doc_path ASC, page_num ASC`,
+		dirPrefix+"%",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list pdf files: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*PageEntry
+	for rows.Next() {
+		e, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
 // IsDocIndexed reports whether any pages for the given document path exist in the index.
 func (s *Store) IsDocIndexed(docPath string) (bool, error) {
 	var count int
