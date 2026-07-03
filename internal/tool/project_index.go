@@ -14,9 +14,11 @@ import (
 // session directory — text/code files and PDF documents alike — so the agent
 // can navigate the project by topic without knowing file paths upfront.
 //
-// Text/code files appear as leaves holding their topic-label array. PDF files
-// appear as leaves holding a per-page map of page-number → labels, giving the
-// agent enough structure to decide which pages to read with read_pdf_page.
+// Every file — text, code, or PDF — appears as a leaf holding a flat topic-label
+// array. For PDFs the labels are aggregated and de-duplicated across all pages,
+// giving the agent a concise overview of what the document covers without the
+// per-page breakdown. The dedicated pdf_index tool provides the full per-page
+// detail when the agent needs to decide which specific page to read.
 type ProjectIndexTool struct {
 	Store *docindex.Store
 }
@@ -28,7 +30,7 @@ func NewProjectIndexTool(store *docindex.Store) ProjectIndexTool {
 func (ProjectIndexTool) ID() string { return "codebase_map" }
 
 func (ProjectIndexTool) Description() string {
-	return "Return a labeled JSON tree of all indexed files — text, code, and PDF documents. Each text/code file appears as a leaf with its topic labels; each PDF appears as a leaf with per-page topic labels. Use this to discover which files (including PDFs) are relevant to a topic before reading them. Pass subdir to scope the results to a specific folder (e.g. \"internal/auth\") — recommended for large projects."
+	return "Return a labeled JSON tree of all indexed files — text, code, and PDF documents. Every file appears as a leaf with its topic labels. For PDFs the labels are aggregated across pages (no per-page breakdown). Use this to discover which files (including PDFs) are relevant to a topic before reading them. Use the pdf_index tool when you need per-page labels for a specific PDF. Pass subdir to scope the results to a specific folder (e.g. \"internal/auth\") — recommended for large projects."
 }
 
 func (ProjectIndexTool) Parameters() json.RawMessage {
@@ -99,8 +101,9 @@ func countDistinctDocs(entries []*docindex.PageEntry) int {
 }
 
 // buildProjectTree converts flat lists of indexed entries into a nested
-// folder/file tree. Text/code files are leaves holding their label array.
-// PDF files are leaves holding a per-page map: {"pages": {1: [...], 2: [...]}}.
+// folder/file tree. Every file — text/code or PDF — is a leaf holding a flat,
+// de-duplicated label array. For PDFs, labels from all pages are merged so the
+// agent sees what the document covers without per-page noise.
 func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntries []*docindex.PageEntry) map[string]any {
 	root := make(map[string]any)
 
@@ -130,7 +133,8 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 	}
 
 	// PDF files: multiple entries (one per page) for the same file. Group
-	// them by DocPath and place a {"pages": {pageNum: labels}} leaf.
+	// them by DocPath, merge all page labels (de-duplicated, order-preserving),
+	// and place a flat label-array leaf — same shape as a text/code file.
 	pagesByDoc := make(map[string][]*docindex.PageEntry)
 	for _, e := range pdfEntries {
 		pagesByDoc[e.DocPath] = append(pagesByDoc[e.DocPath], e)
@@ -166,15 +170,23 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 			node = child.(map[string]any)
 		}
 
-		pages := make(map[int][]string, len(entries))
+		// Merge labels from every page, preserving first-seen order and
+		// dropping duplicates.
+		seen := make(map[string]struct{})
+		var merged []string
 		for _, e := range entries {
-			labels := e.Labels
-			if labels == nil {
-				labels = []string{}
+			for _, l := range e.Labels {
+				if _, ok := seen[l]; ok {
+					continue
+				}
+				seen[l] = struct{}{}
+				merged = append(merged, l)
 			}
-			pages[e.PageNum] = labels
 		}
-		node[parts[len(parts)-1]] = map[string]any{"pages": pages}
+		if merged == nil {
+			merged = []string{}
+		}
+		node[parts[len(parts)-1]] = merged
 	}
 
 	return root
