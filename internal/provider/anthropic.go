@@ -187,13 +187,33 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		})
 	}
 
+	// Prompt caching: Anthropic caches the prefix of the request (tools →
+	// system → messages) when cache_control breakpoints are present. The
+	// system prompt and tool definitions are largely static across turns
+	// within a session, so we mark them as cacheable to get ~90% cost
+	// reduction on repeated prefixes. We use content-block format for the
+	// system prompt (required to attach cache_control) and place a
+	// cache_control marker on the last tool and the last system block.
+	//
+	// Prefix order is tools → system → messages, so a breakpoint on the
+	// last system block caches everything through the system prompt (which
+	// includes the tool definitions that precede it). A breakpoint on the
+	// last tool caches just the tool block — useful when the system prompt
+	// is small or below the minimum cacheable threshold.
+	systemBlocks := []anthropicSystemBlock{
+		{Type: "text", Text: systemPrompt, CacheControl: &anthropicCacheControl{Type: "ephemeral"}},
+	}
+	if len(tools) > 0 {
+		tools[len(tools)-1].CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+	}
+
 	body := anthropicRequest{
-		Model:      model,
-		MaxTokens:  max(req.MaxTokens, 4096),
-		System:     systemPrompt,
-		Messages:   messages,
-		Tools:      tools,
-		Stream:     true,
+		Model:       model,
+		MaxTokens:   max(req.MaxTokens, 4096),
+		System:      systemBlocks,
+		Messages:    messages,
+		Tools:       tools,
+		Stream:      true,
 		Temperature: req.Temperature,
 	}
 
@@ -335,13 +355,29 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 // Anthropic API types
 
 type anthropicRequest struct {
-	Model      string            `json:"model"`
-	MaxTokens int               `json:"max_tokens"`
-	System     string            `json:"system,omitempty"`
-	Messages   []anthropicMessage `json:"messages"`
-	Tools      []anthropicTool   `json:"tools,omitempty"`
-	Stream     bool              `json:"stream"`
-	Temperature float64         `json:"temperature,omitempty"`
+	Model       string                 `json:"model"`
+	MaxTokens   int                    `json:"max_tokens"`
+	System      []anthropicSystemBlock `json:"system,omitempty"`
+	Messages    []anthropicMessage     `json:"messages"`
+	Tools       []anthropicTool        `json:"tools,omitempty"`
+	Stream      bool                   `json:"stream"`
+	Temperature float64                `json:"temperature,omitempty"`
+}
+
+// anthropicSystemBlock is a content block within the system field. Anthropic
+// requires the system field to be an array of blocks (not a plain string) to
+// attach cache_control markers for prompt caching.
+type anthropicSystemBlock struct {
+	Type         string                  `json:"type"`
+	Text         string                  `json:"text"`
+	CacheControl *anthropicCacheControl  `json:"cache_control,omitempty"`
+}
+
+// anthropicCacheControl marks a content block or tool as cacheable. When set
+// to {"type": "ephemeral"}, Anthropic stores the KV cache for the prefix up to
+// and including that block, enabling ~90% cost reduction on repeated prefixes.
+type anthropicCacheControl struct {
+	Type string `json:"type"`
 }
 
 type anthropicMessage struct {
@@ -350,9 +386,10 @@ type anthropicMessage struct {
 }
 
 type anthropicTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	InputSchema  json.RawMessage        `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicEvent struct {
