@@ -1,46 +1,48 @@
-# Release Notes — v0.13.5
+# Release Notes — v0.13.6
 
-## UI/UX Redesign & HTML Widget Improvements
+## DOCX Indexing & Unified Project Index
 
-This patch release brings a comprehensive visual refresh inspired by Linear's
-design language, plus a fix that makes HTML widgets rendered in chat feel like
-a natural part of the conversation rather than separate cards.
+This release adds full DOCX (Word document) support to the document indexing
+pipeline and unifies PDFs into the project index tree, so agents can discover
+and read both PDFs and DOCX files from a single `codebase_map` call.
 
 ---
 
-### ✨ Style: Linear-Inspired UI/UX Redesign
+### 📄 DOCX Indexing Support
 
-The entire color system, typography, and animation framework has been overhauled
-for a more polished, modern feel:
+Word documents (`.docx`) are now first-class citizens in the indexing system,
+with the same level of support as PDFs:
 
-- **Color system:** Accent shifted from blue to Linear violet across all design
-  tokens and Go backend constants
-- **Typography:** Tighter body text (13px), tighter line-height, slight negative
-  tracking for a refined feel
-- **Surfaces:** Warm-tinted dark grays at each elevation level instead of flat
-  grays
-- **Shadows:** Softer, layered depth replacing heavy single shadows; accent-glow
-  shadows on focus and active states
-- **Animations:** Spring-based timing curves replace linear ease-out; new
-  animation classes — `scale-in`, `pop-in`, `slide-down`, `stagger`
-- **Micro-interactions:** Hover and active scale on buttons and chips; soft glow
-  ring focus states replacing hard outlines
-- **Scrollbars:** Ultra-thin 6px, barely visible until hover
-- **Command menu:** Backdrop blur, pop-in animation, accent glow shadow
-- **Prompt input:** Glow-on-focus with accent-tinted shadow
-- **Session sidebar:** Spring transitions, active dot with pulse-ring, tighter
-  header
-- **Messages:** Directional slide-in with spring curves
-- **Links:** Shifted from blue to violet to match the new accent
-- **Settings:** Linear Violet as the first color preset option
+- **Extraction pipeline** — A new `internal/docx` package parses DOCX files,
+  handling paragraph properties, tables, hyperlinks, structured document tags,
+  and explicit page breaks. Documents without explicit breaks are split into
+  pseudo-pages (~500 words each) for consistent indexing.
 
-### 🐛 Bug Fixes
+- **Agent tools** — Two new tools are available to agents:
+  - `docx_index` — Returns the semantic page labels for a DOCX file, just like
+    `pdf_index` does for PDFs.
+  - `read_docx_page` — Extracts the plain text of a single pseudo-page from a
+    DOCX file, similar to `read_pdf_page`.
 
-- **HTML widget:** Removed forced dark background and rounded border from the
-  chat iframe. HTML/CSS/JS code blocks now render with a transparent background
-  and zero border, blending seamlessly into the conversation flow instead of
-  appearing as separate cards. Updated agent prompt to instruct against adding
-  background colors or card-like containers.
+- **Automatic indexing** — DOCX files are detected during directory walks and
+  processed in their own batch alongside PDFs. The docindex UI shows DOCX files
+  with a distinct blue badge and document icon.
+
+- **Project index** — `codebase_map` now includes DOCX files in the unified
+  project tree, showing their semantic labels alongside text and code files.
+
+- **10 test cases** covering real-world DOCX structures including tables,
+  hyperlinks, nested content, and mixed page-break scenarios.
+
+### 🗂️ Unified Project Index with PDFs
+
+PDFs are now part of the `codebase_map` project tree instead of being separate:
+
+- PDF entries appear as leaves with up to 15 de-duplicated topic labels — enough
+  to understand what a document covers without overwhelming the agent.
+- Per-page detail remains available via the dedicated `pdf_index` tool.
+- The `pdf_index` tool now returns only semantic labels (keyword corpora are no
+  longer exposed to agents — they were raw indexing artifacts).
 
 ---
 
@@ -68,4 +70,4 @@ docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-sy
 
 ---
 
-*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.13.4...v0.13.5*
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.13.5...v0.13.6*
