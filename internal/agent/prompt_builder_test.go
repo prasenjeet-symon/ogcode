@@ -79,6 +79,36 @@ func TestMarkdownCapabilitiesPrompt(t *testing.T) {
 	}
 }
 
+func TestSystemReminderPrompt(t *testing.T) {
+	prompt := systemReminderPrompt()
+	if !strings.Contains(prompt, "<system-reminder>") {
+		t.Error("expected <system-reminder> tag in systemReminderPrompt")
+	}
+	if !strings.Contains(prompt, "</system-reminder>") {
+		t.Error("expected closing </system-reminder> tag in systemReminderPrompt")
+	}
+	if !strings.Contains(prompt, "Current date:") {
+		t.Error("expected 'Current date:' in systemReminderPrompt")
+	}
+}
+
+func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
+	// The base system prompt must NOT contain the current date — it's injected
+	// separately as a system-reminder so the Anthropic prompt cache prefix stays
+	// byte-for-byte identical across turns.
+	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", nil, 1920, 1080)
+	if strings.Contains(prompt, "Current date:") {
+		t.Error("did not expect 'Current date:' in the base system prompt (it should be in a separate system-reminder entry)")
+	}
+	// Working directory and platform should still be present (they're static).
+	if !strings.Contains(prompt, "Working directory:") {
+		t.Error("expected 'Working directory:' in the base system prompt")
+	}
+	if !strings.Contains(prompt, "Platform:") {
+		t.Error("expected 'Platform:' in the base system prompt")
+	}
+}
+
 func TestViewportPrompt(t *testing.T) {
 	// With valid dimensions
 	prompt := viewportPrompt(1920, 1080)

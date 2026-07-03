@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // projectIndexPrompt returns the mandatory project index instructions section,
@@ -257,6 +258,17 @@ func parallelToolCallsPrompt() string {
 	return `## Parallel tool calls
 
 When you need to make multiple tool calls and they are independent of each other (i.e., the result of one does not affect the inputs of another), make all the calls in the same response block rather than making them sequentially. This significantly improves efficiency and reduces latency. For example, if you need to read three unrelated files, invoke all three read calls together rather than one after another.`
+}
+
+// systemReminderPrompt returns the per-turn dynamic content (current date) as
+// a <system-reminder> block. This is kept OUT of the main system prompt so the
+// main prompt stays byte-for-byte identical across turns, enabling Anthropic's
+// prompt cache to hit. The date changes every turn and would invalidate the
+// cache if it were in the cached prefix. The working directory and platform are
+// static within a session, so they remain in the main (cacheable) system prompt.
+func systemReminderPrompt() string {
+	now := time.Now().Format("Mon Jan 2 15:04:05 MST 2006")
+	return fmt.Sprintf("<system-reminder>\nCurrent date: %s\n</system-reminder>", now)
 }
 
 // projectNotesPrompt returns the project notes section, adapted for the agent's

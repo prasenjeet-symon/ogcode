@@ -304,7 +304,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		}
 		system := buildSystemPrompt(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, mcpTools, viewportWidth, viewportHeight)
 
-		systemPrompts := []string{system}
+		// The base system prompt is static within a session (no date, no
+		// per-turn content) so it stays byte-for-byte identical across turns.
+		// The current date is injected as a separate trailing system prompt
+		// entry via systemReminderPrompt(). This separation is critical for
+		// Anthropic prompt caching: the Anthropic provider puts the cache_control
+		// breakpoint on the first (static) system block only, so the date —
+		// which changes every turn — does not invalidate the cache.
+		systemPrompts := []string{system, systemReminderPrompt()}
 		var modelMessages []provider.ModelMessage
 
 		if memoryEnabled {
@@ -1511,12 +1518,10 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 }
 
 func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, mcpTools map[string]mcp.ToolDef, viewportWidth int, viewportHeight int) string {
-	now := time.Now().Format("Mon Jan 2 15:04:05 MST 2006")
 	prompt := fmt.Sprintf(`%s
 
 Working directory: %s
-Platform: %s/%s
-Current date: %s`, a.System, dir, runtime.GOOS, runtime.GOARCH, now)
+Platform: %s/%s`, a.System, dir, runtime.GOOS, runtime.GOARCH)
 
 	if agentMDContent != "" {
 		prompt += agentMDContent

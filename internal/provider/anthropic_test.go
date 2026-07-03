@@ -160,3 +160,91 @@ func TestAnthropicNoToolsNoCacheControlOnTools(t *testing.T) {
 		t.Errorf("expected system cache_control type 'ephemeral', got %v", cc["type"])
 	}
 }
+
+// TestAnthropicMultiSystemBlocksCaching verifies that when multiple system
+// prompt entries are provided (e.g. static base prompt + dynamic date
+// reminder), only the first (static) block gets cache_control and the
+// trailing dynamic blocks do not. This ensures the date — which changes every
+// turn — does not invalidate the prompt cache prefix.
+func TestAnthropicMultiSystemBlocksCaching(t *testing.T) {
+	// Simulate the loop.go pattern: [static system prompt, dynamic date reminder]
+	systemEntries := []string{
+		"You are a coding agent.\n\nWorking directory: /tmp",
+		"<system-reminder>\nCurrent date: Mon Jan 2 15:04:05 MST 2026\n</system-reminder>",
+	}
+
+	// Replicate the Anthropic provider's system-block construction logic.
+	var systemBlocks []anthropicSystemBlock
+	if len(systemEntries) > 1 {
+		systemBlocks = append(systemBlocks, anthropicSystemBlock{
+			Type:         "text",
+			Text:         systemEntries[0],
+			CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+		})
+		for _, s := range systemEntries[1:] {
+			systemBlocks = append(systemBlocks, anthropicSystemBlock{
+				Type: "text",
+				Text: s,
+			})
+		}
+	} else {
+		systemBlocks = []anthropicSystemBlock{
+			{Type: "text", Text: strings.Join(systemEntries, "\n\n"), CacheControl: &anthropicCacheControl{Type: "ephemeral"}},
+		}
+	}
+
+	body := anthropicRequest{
+		Model:     "claude-sonnet-4-6",
+		MaxTokens: 4096,
+		System:    systemBlocks,
+		Stream:    true,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(jsonBody, &raw); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	sysRaw, ok := raw["system"].([]any)
+	if !ok {
+		t.Fatalf("expected system to be an array, got %T", raw["system"])
+	}
+	if len(sysRaw) != 2 {
+		t.Fatalf("expected 2 system blocks (static + dynamic), got %d", len(sysRaw))
+	}
+
+	// First block (static) must have cache_control.
+	firstBlock := sysRaw[0].(map[string]any)
+	if firstBlock["type"] != "text" {
+		t.Errorf("expected first block type 'text', got %v", firstBlock["type"])
+	}
+	firstCC, ok := firstBlock["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatal("expected cache_control on first (static) system block")
+	}
+	if firstCC["type"] != "ephemeral" {
+		t.Errorf("expected first block cache_control type 'ephemeral', got %v", firstCC["type"])
+	}
+	// First block must contain the static system prompt text.
+	if !strings.Contains(firstBlock["text"].(string), "Working directory") {
+		t.Error("expected first block to contain the static system prompt")
+	}
+
+	// Second block (dynamic date) must NOT have cache_control.
+	secondBlock := sysRaw[1].(map[string]any)
+	if secondBlock["type"] != "text" {
+		t.Errorf("expected second block type 'text', got %v", secondBlock["type"])
+	}
+	if _, hasCC := secondBlock["cache_control"]; hasCC {
+		t.Error("did not expect cache_control on second (dynamic) system block — it would invalidate the cache every turn")
+	}
+	// Second block must contain the date reminder.
+	if !strings.Contains(secondBlock["text"].(string), "Current date") {
+		t.Error("expected second block to contain the dynamic date reminder")
+	}
+}

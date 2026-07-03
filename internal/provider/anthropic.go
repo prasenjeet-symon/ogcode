@@ -189,19 +189,47 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 
 	// Prompt caching: Anthropic caches the prefix of the request (tools →
 	// system → messages) when cache_control breakpoints are present. The
-	// system prompt and tool definitions are largely static across turns
-	// within a session, so we mark them as cacheable to get ~90% cost
-	// reduction on repeated prefixes. We use content-block format for the
-	// system prompt (required to attach cache_control) and place a
-	// cache_control marker on the last tool and the last system block.
+	// tool definitions and the base system prompt are largely static across
+	// turns within a session, so we mark them as cacheable to get ~90% cost
+	// reduction on repeated prefixes.
+	//
+	// The system field is sent as an array of content blocks (required to
+	// attach cache_control). We split the system prompt entries into:
+	//   - A cacheable block containing all entries joined together, with a
+	//     cache_control breakpoint. This is the prefix that stays byte-for-byte
+	//     identical across turns (tools definitions + base system prompt).
+	//   - Optionally, a trailing non-cached block for per-turn dynamic content
+	//     (e.g. the current date in a <system-reminder> tag). This content
+	//     changes every turn, so it must NOT be in the cached prefix.
+	//
+	// The last tool definition also gets a cache_control breakpoint, caching
+	// the tool block independently — useful when the system prompt is small
+	// or below the minimum cacheable threshold.
 	//
 	// Prefix order is tools → system → messages, so a breakpoint on the
-	// last system block caches everything through the system prompt (which
-	// includes the tool definitions that precede it). A breakpoint on the
-	// last tool caches just the tool block — useful when the system prompt
-	// is small or below the minimum cacheable threshold.
-	systemBlocks := []anthropicSystemBlock{
-		{Type: "text", Text: systemPrompt, CacheControl: &anthropicCacheControl{Type: "ephemeral"}},
+	// cacheable system block caches everything through the system prompt (which
+	// includes the tool definitions that precede it).
+	var systemBlocks []anthropicSystemBlock
+	if len(req.System) > 1 {
+		// Multiple entries: the first entry is the static base system prompt
+		// (cacheable); remaining entries are dynamic (date, compaction summary).
+		// Cache only the static first block.
+		systemBlocks = append(systemBlocks, anthropicSystemBlock{
+			Type:         "text",
+			Text:         req.System[0],
+			CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+		})
+		for _, s := range req.System[1:] {
+			systemBlocks = append(systemBlocks, anthropicSystemBlock{
+				Type: "text",
+				Text: s,
+			})
+		}
+	} else {
+		// Single entry or empty: join and cache as one block.
+		systemBlocks = []anthropicSystemBlock{
+			{Type: "text", Text: systemPrompt, CacheControl: &anthropicCacheControl{Type: "ephemeral"}},
+		}
 	}
 	if len(tools) > 0 {
 		tools[len(tools)-1].CacheControl = &anthropicCacheControl{Type: "ephemeral"}
