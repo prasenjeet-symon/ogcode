@@ -9,9 +9,8 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 )
 
-// PdfIndexTool returns the stored semantic map for a PDF — page labels and
-// keyword corpus — so the agent can decide which pages to read before calling
-// read_pdf_page.
+// PdfIndexTool returns the stored semantic map for a PDF — page labels — so
+// the agent can decide which pages to read before calling read_pdf_page.
 type PdfIndexTool struct {
 	Store *docindex.Store
 }
@@ -23,7 +22,7 @@ func NewPdfIndexTool(store *docindex.Store) PdfIndexTool {
 func (PdfIndexTool) ID() string { return "pdf_index" }
 
 func (PdfIndexTool) Description() string {
-	return "Return the semantic index for a PDF file: for each page, the topic labels and keyword corpus produced by ogcode index. Use this to understand document structure and locate relevant pages before reading them with read_pdf_page."
+	return "Return the semantic index for a PDF file: for each page, the topic labels produced by ogcode index. Use this to understand document structure and locate relevant pages before reading them with read_pdf_page."
 }
 
 func (PdfIndexTool) Parameters() json.RawMessage {
@@ -67,9 +66,8 @@ func (t PdfIndexTool) Execute(_ context.Context, args json.RawMessage, tctx Cont
 	}
 
 	type pageMap struct {
-		Page     int      `json:"page"`
-		Labels   []string `json:"labels"`
-		Keywords []string `json:"keywords"`
+		Page   int      `json:"page"`
+		Labels []string `json:"labels"`
 	}
 	pages := make([]pageMap, len(entries))
 	for i, e := range entries {
@@ -77,11 +75,7 @@ func (t PdfIndexTool) Execute(_ context.Context, args json.RawMessage, tctx Cont
 		if labels == nil {
 			labels = []string{}
 		}
-		keywords := e.Keywords
-		if keywords == nil {
-			keywords = []string{}
-		}
-		pages[i] = pageMap{Page: e.PageNum, Labels: labels, Keywords: keywords}
+		pages[i] = pageMap{Page: e.PageNum, Labels: labels}
 	}
 
 	out, err := json.MarshalIndent(pages, "", "  ")
