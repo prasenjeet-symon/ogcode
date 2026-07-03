@@ -11,14 +11,16 @@ import (
 )
 
 // ProjectIndexTool returns a labeled JSON tree of all indexed files in the
-// session directory — text/code files and PDF documents alike — so the agent
-// can navigate the project by topic without knowing file paths upfront.
+// session directory — text/code files, PDF documents, and DOCX documents alike
+// — so the agent can navigate the project by topic without knowing file paths
+// upfront.
 //
-// Every file — text, code, or PDF — appears as a leaf holding a flat topic-label
-// array. For PDFs a concise subset of labels (capped at 15) is aggregated and
-// de-duplicated across all pages, giving the agent a quick overview of what the
-// document covers without the per-page breakdown. The dedicated pdf_index tool
-// provides the full per-page detail when the agent needs to decide which page to read.
+// Every file — text, code, PDF, or DOCX — appears as a leaf holding a flat
+// topic-label array. For PDFs and DOCX files a concise subset of labels (capped
+// at 15) is aggregated and de-duplicated across all pages, giving the agent a
+// quick overview of what the document covers without the per-page breakdown.
+// The dedicated pdf_index and docx_index tools provide the full per-page detail
+// when the agent needs to decide which page to read.
 type ProjectIndexTool struct {
 	Store *docindex.Store
 }
@@ -30,7 +32,7 @@ func NewProjectIndexTool(store *docindex.Store) ProjectIndexTool {
 func (ProjectIndexTool) ID() string { return "codebase_map" }
 
 func (ProjectIndexTool) Description() string {
-	return "Return a labeled JSON tree of all indexed files — text, code, and PDF documents. Every file appears as a leaf with its topic labels. For PDFs a concise subset of labels (up to 15) is aggregated across pages (no per-page breakdown). Use this to discover which files (including PDFs) are relevant to a topic before reading them. Use the pdf_index tool when you need per-page labels for a specific PDF. Pass subdir to scope the results to a specific folder (e.g. \"internal/auth\") — recommended for large projects."
+	return "Return a labeled JSON tree of all indexed files — text, code, PDF, and DOCX documents. Every file appears as a leaf with its topic labels. For PDFs and DOCX files a concise subset of labels (up to 15) is aggregated across pages (no per-page breakdown). Use this to discover which files are relevant to a topic before reading them. Use the pdf_index tool when you need per-page labels for a specific PDF, or docx_index for a DOCX. Pass subdir to scope the results to a specific folder (e.g. \"internal/auth\") — recommended for large projects."
 }
 
 func (ProjectIndexTool) Parameters() json.RawMessage {
@@ -68,8 +70,12 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 	if err != nil {
 		return Result{}, fmt.Errorf("list pdf files: %w", err)
 	}
+	docxEntries, err := t.Store.ListDocxFiles(prefix)
+	if err != nil {
+		return Result{}, fmt.Errorf("list docx files: %w", err)
+	}
 
-	totalFiles := len(textEntries) + countDistinctDocs(pdfEntries)
+	totalFiles := len(textEntries) + countDistinctDocs(pdfEntries) + countDistinctDocs(docxEntries)
 	if totalFiles == 0 {
 		msg := "no indexed files found — run Index Docs first to build the project index"
 		if params.Subdir != "" {
@@ -78,7 +84,7 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 		return Result{Title: title, Output: msg}, nil
 	}
 
-	tree := buildProjectTree(tctx.SessionDir, textEntries, pdfEntries)
+	tree := buildProjectTree(tctx.SessionDir, textEntries, pdfEntries, docxEntries)
 	out, err := json.MarshalIndent(tree, "", "  ")
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal project tree: %w", err)
@@ -100,17 +106,19 @@ func countDistinctDocs(entries []*docindex.PageEntry) int {
 	return len(seen)
 }
 
-// pdfLabelCap is the maximum number of topic labels returned for a PDF in the
-// project tree. Labels are collected across pages (de-duplicated, first-seen
-// order) and truncated at this limit so the map stays concise. The full
-// per-page breakdown is available through the dedicated pdf_index tool.
-const pdfLabelCap = 15
+// docLabelCap is the maximum number of topic labels returned for a multi-page
+// document (PDF or DOCX) in the project tree. Labels are collected across pages
+// (de-duplicated, first-seen order) and truncated at this limit so the map
+// stays concise. The full per-page breakdown is available through the
+// dedicated pdf_index / docx_index tools.
+const docLabelCap = 15
 
 // buildProjectTree converts flat lists of indexed entries into a nested
-// folder/file tree. Every file — text/code or PDF — is a leaf holding a flat,
-// de-duplicated label array. For PDFs, labels from all pages are merged so the
-// agent sees what the document covers without per-page noise.
-func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntries []*docindex.PageEntry) map[string]any {
+// folder/file tree. Every file — text/code, PDF, or DOCX — is a leaf holding a
+// flat, de-duplicated label array. For PDFs and DOCX files, labels from all
+// pages are merged so the agent sees what the document covers without per-page
+// noise.
+func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntries []*docindex.PageEntry, docxEntries []*docindex.PageEntry) map[string]any {
 	root := make(map[string]any)
 
 	// Text/code files: one entry per file, leaf = labels array.
@@ -138,11 +146,15 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 		node[parts[len(parts)-1]] = labels
 	}
 
-	// PDF files: multiple entries (one per page) for the same file. Group
-	// them by DocPath, merge all page labels (de-duplicated, order-preserving),
-	// and place a flat label-array leaf — same shape as a text/code file.
+	// Multi-page documents (PDF and DOCX): multiple entries (one per page) for
+	// the same file. Group them by DocPath, merge all page labels (de-duplicated,
+	// order-preserving), and place a flat label-array leaf — same shape as a
+	// text/code file.
 	pagesByDoc := make(map[string][]*docindex.PageEntry)
 	for _, e := range pdfEntries {
+		pagesByDoc[e.DocPath] = append(pagesByDoc[e.DocPath], e)
+	}
+	for _, e := range docxEntries {
 		pagesByDoc[e.DocPath] = append(pagesByDoc[e.DocPath], e)
 	}
 
@@ -177,13 +189,14 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 		}
 
 		// Merge labels from every page, preserving first-seen order and
-		// dropping duplicates. Cap at pdfLabelCap so the map stays concise —
-		// the full per-page detail is available via the pdf_index tool.
+		// dropping duplicates. Cap at docLabelCap so the map stays concise —
+		// the full per-page detail is available via the pdf_index / docx_index
+		// tools.
 		seen := make(map[string]struct{})
 		var merged []string
 		for _, e := range entries {
 			for _, l := range e.Labels {
-				if len(merged) >= pdfLabelCap {
+				if len(merged) >= docLabelCap {
 					break
 				}
 				if _, ok := seen[l]; ok {
@@ -192,7 +205,7 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 				seen[l] = struct{}{}
 				merged = append(merged, l)
 			}
-			if len(merged) >= pdfLabelCap {
+			if len(merged) >= docLabelCap {
 				break
 			}
 		}

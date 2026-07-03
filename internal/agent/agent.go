@@ -14,7 +14,7 @@ var BuildAgent = Agent{
 	ID:          "build",
 	Name:        "Build",
 	Description: "Full-access coding agent",
-	Tools:       []string{"bash", "read", "write", "edit", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "codebase_map", "deep_search", "latex_to_pdf"},
+	Tools:       []string{"bash", "read", "write", "edit", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf"},
 	System: `You are a coding agent executing a single implementation task in a dedicated git worktree. You have full read/write access to the codebase.
 
 ` + projectIndexPrompt("build") + `
@@ -79,7 +79,7 @@ var PlanAgent = Agent{
 	ID:          "plan",
 	Name:        "Plan",
 	Description: "Planning agent — reads and understands code, plans changes but never writes",
-	Tools:       []string{"bash", "read", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "codebase_map", "deep_search"},
+	Tools:       []string{"bash", "read", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search"},
 	System: `You are a planning agent. Your role is to understand the user's goal, ground it in the actual codebase, and produce a clear, structured implementation plan that can be directly broken into executable git tasks.
 
 ` + projectIndexPrompt("plan") + `

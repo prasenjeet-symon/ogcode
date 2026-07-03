@@ -105,9 +105,10 @@ func (idx *Indexer) isExcluded(name string) bool {
 
 // docItem holds a file path and its extracted page corpora, ready for batching.
 type docItem struct {
-	path     string
-	corpora  []PageCorpus
-	isPDF    bool
+	path         string
+	corpora      []PageCorpus
+	isPDF        bool
+	isDocx       bool
 	keywordCount int // total keywords across all pages
 }
 
@@ -136,7 +137,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
-		if ext == ".pdf" || IsTextFile(ext) {
+		if ext == ".pdf" || ext == ".docx" || IsTextFile(ext) {
 			allFiles = append(allFiles, path)
 		}
 		return nil
@@ -151,6 +152,21 @@ func (idx *Indexer) Run(ctx context.Context) error {
 	}
 
 	slog.Info("found indexable files", "count", len(allFiles))
+
+	// Log file type breakdown for debugging.
+	var pdfCount, docxCount, textCount int
+	for _, f := range allFiles {
+		ext := strings.ToLower(filepath.Ext(f))
+		switch ext {
+		case ".pdf":
+			pdfCount++
+		case ".docx":
+			docxCount++
+		default:
+			textCount++
+		}
+	}
+	slog.Info("file type breakdown", "pdf", pdfCount, "docx", docxCount, "text", textCount)
 
 	// Filter out already-indexed documents.
 	var toIndex []string
@@ -182,21 +198,31 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		isPDF := strings.ToLower(filepath.Ext(filePath)) == ".pdf"
+		isDocx := strings.ToLower(filepath.Ext(filePath)) == ".docx"
+		fileType := "text"
+		if isPDF {
+			fileType = "pdf"
+		} else if isDocx {
+			fileType = "docx"
+		}
 		var pages []PageText
 		var err error
 		if isPDF {
 			pages, err = ExtractPages(filePath)
+		} else if isDocx {
+			pages, err = ExtractDocxPages(filePath)
 		} else {
 			pages, err = ExtractTextFile(filePath)
 		}
 		if err != nil {
-			slog.Warn("failed to extract text, skipping", "path", filePath, "err", err)
+			slog.Warn("failed to extract text, skipping", "path", filePath, "type", fileType, "err", err)
 			continue
 		}
 		if len(pages) == 0 {
-			slog.Info("no pages found, skipping", "path", filePath)
+			slog.Info("no pages found, skipping", "path", filePath, "type", fileType)
 			continue
 		}
+		slog.Info("extracted pages", "path", filePath, "type", fileType, "pages", len(pages))
 		corpora := BuildCorpora(pages)
 		kwCount := 0
 		for _, c := range corpora {
@@ -206,6 +232,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			path:         filePath,
 			corpora:      corpora,
 			isPDF:        isPDF,
+			isDocx:       isDocx,
 			keywordCount: kwCount,
 		})
 	}
@@ -241,47 +268,51 @@ func (idx *Indexer) Run(ctx context.Context) error {
 }
 
 // batch represents a group of documents to be sent to a single LLM session,
-// or a single PDF document that needs its own session due to size.
+// or a single document (PDF or DOCX) that needs its own session due to size.
 type batch struct {
 	// For multi-file batches (text/code files): multiple docItems
 	items []docItem
-	// For single-PDF batches: one PDF doc
-	isPDF bool
+	// For single-document batches (PDF or DOCX): one document
+	isPDF  bool
+	isDocx bool
 }
 
-// assembleBatches groups documents into batches. PDFs always get their own batch
-// (they can be very large). Small text/code files are packed together based on
-// total keyword count to minimize LLM sessions while staying within context limits.
+// assembleBatches groups documents into batches. PDFs and DOCX files always get
+// their own batch (they can be very large). Small text/code files are packed
+// together based on total keyword count to minimize LLM sessions while staying
+// within context limits.
 func (idx *Indexer) assembleBatches(items []docItem) []*batch {
 	var batches []*batch
 
-	// Separate PDFs from text files.
-	var pdfs []docItem
+	// Separate multi-page documents (PDF, DOCX) from text files.
+	var multiPageDocs []docItem
 	var textFiles []docItem
 	for _, item := range items {
-		if item.isPDF {
-			pdfs = append(pdfs, item)
+		if item.isPDF || item.isDocx {
+			multiPageDocs = append(multiPageDocs, item)
 		} else {
 			textFiles = append(textFiles, item)
 		}
 	}
 
-	// Each PDF gets its own batch (it may have hundreds of pages).
-	for _, pdf := range pdfs {
-		// Split large PDFs into page-range batches using the existing batchSize constant.
-		for start := 0; start < len(pdf.corpora); start += batchSize {
+	// Each multi-page document gets its own batch (it may have hundreds of pages).
+	for _, doc := range multiPageDocs {
+		// Split large documents into page-range batches using the existing batchSize constant.
+		for start := 0; start < len(doc.corpora); start += batchSize {
 			end := start + batchSize
-			if end > len(pdf.corpora) {
-				end = len(pdf.corpora)
+			if end > len(doc.corpora) {
+				end = len(doc.corpora)
 			}
 			batches = append(batches, &batch{
 				items: []docItem{{
-					path:         pdf.path,
-					corpora:      pdf.corpora[start:end],
-					isPDF:        true,
-					keywordCount: pdf.keywordCount,
+					path:         doc.path,
+					corpora:      doc.corpora[start:end],
+					isPDF:        doc.isPDF,
+					isDocx:       doc.isDocx,
+					keywordCount: doc.keywordCount,
 				}},
-				isPDF: true,
+				isPDF:  doc.isPDF,
+				isDocx: doc.isDocx,
 			})
 		}
 	}
@@ -314,8 +345,8 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 	var userText string
 	var title string
 
-	if b.isPDF {
-		// Single PDF: use the original per-file format.
+	if b.isPDF || b.isDocx {
+		// Single multi-page document (PDF or DOCX): use the original per-file format.
 		item := b.items[0]
 		var sb strings.Builder
 		for _, c := range item.corpora {
@@ -364,7 +395,7 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 		title = fmt.Sprintf("Index batch: %d files", len(b.items))
 	}
 
-	slog.Info("processing batch", "title", title, "files", len(b.items), "isPDF", b.isPDF)
+	slog.Info("processing batch", "title", title, "files", len(b.items), "isPDF", b.isPDF, "isDocx", b.isDocx)
 
 	sess := &session.Session{
 		ID:          session.NewSessionID(),
@@ -438,8 +469,8 @@ func (idx *Indexer) publishProgress(ctx context.Context, phase string) {
 // Compact keyword format keeps each batch well under 50KB.
 const batchSize = 100
 
-// IndexDocument extracts text from a PDF or text/code file, builds keyword corpora,
-// then runs the IndexAgent in batches to produce labels.
+// IndexDocument extracts text from a PDF, DOCX, or text/code file, builds keyword
+// corpora, then runs the IndexAgent in batches to produce labels.
 // This is the single-file entry point — it delegates to the batch infrastructure.
 func (idx *Indexer) IndexDocument(ctx context.Context, filePath string) error {
 	slog.Info("indexing document", "path", filePath)
@@ -447,8 +478,11 @@ func (idx *Indexer) IndexDocument(ctx context.Context, filePath string) error {
 	var pages []PageText
 	var err error
 	isPDF := strings.ToLower(filepath.Ext(filePath)) == ".pdf"
+	isDocx := strings.ToLower(filepath.Ext(filePath)) == ".docx"
 	if isPDF {
 		pages, err = ExtractPages(filePath)
+	} else if isDocx {
+		pages, err = ExtractDocxPages(filePath)
 	} else {
 		pages, err = ExtractTextFile(filePath)
 	}
@@ -470,6 +504,7 @@ func (idx *Indexer) IndexDocument(ctx context.Context, filePath string) error {
 		path:         filePath,
 		corpora:      corpora,
 		isPDF:        isPDF,
+		isDocx:       isDocx,
 		keywordCount: kwCount,
 	}
 

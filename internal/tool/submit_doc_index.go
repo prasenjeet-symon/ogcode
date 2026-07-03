@@ -22,13 +22,13 @@ func NewSubmitDocIndexTool(store *docindex.Store) SubmitDocIndexTool {
 func (SubmitDocIndexTool) ID() string { return "submit_doc_index" }
 
 func (SubmitDocIndexTool) Description() string {
-	return `Submit semantic page labels for an indexed PDF document.
+	return `Submit semantic page labels for an indexed document (PDF, DOCX, or text/code file).
 
 Call this tool once you have analyzed all page keyword corpora and determined
 2-5 concise semantic labels per page. Include ALL pages — do not skip any.
 
 Parameters:
-- doc_path: absolute path to the PDF file being indexed
+- doc_path: absolute path to the document being indexed
 - pages: array of {page_num, labels} objects covering every page`
 }
 
@@ -39,7 +39,7 @@ func (SubmitDocIndexTool) Parameters() json.RawMessage {
 		"properties": {
 			"doc_path": {
 				"type": "string",
-				"description": "Absolute path to the PDF document being indexed"
+				"description": "Absolute path to the document being indexed"
 			},
 			"pages": {
 				"type": "array",

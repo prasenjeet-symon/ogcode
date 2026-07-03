@@ -121,13 +121,14 @@ func (s *Store) ListDocsSummary(dirPrefix string) ([]*DocSummary, error) {
 	return summaries, rows.Err()
 }
 
-// ListTextFiles returns all indexed non-PDF entries whose doc_path starts with dirPrefix,
-// ordered by path. Each text/code file has exactly one entry (page 1).
+// ListTextFiles returns all indexed non-PDF, non-DOCX entries whose doc_path
+// starts with dirPrefix, ordered by path. Each text/code file has exactly one
+// entry (page 1).
 func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
 		 FROM doc_page_index
-		 WHERE doc_path LIKE ? AND LOWER(doc_path) NOT LIKE '%.pdf'
+		 WHERE doc_path LIKE ? AND LOWER(doc_path) NOT LIKE '%.pdf' AND LOWER(doc_path) NOT LIKE '%.docx'
 		 ORDER BY doc_path ASC`,
 		dirPrefix+"%",
 	)
@@ -160,6 +161,33 @@ func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list pdf files: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*PageEntry
+	for rows.Next() {
+		e, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// ListDocxFiles returns all indexed DOCX entries (page-level) whose doc_path
+// starts with dirPrefix, ordered by path then page number. Each DOCX document
+// will have one entry per pseudo-page; callers group them by DocPath.
+func (s *Store) ListDocxFiles(dirPrefix string) ([]*PageEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
+		 FROM doc_page_index
+		 WHERE doc_path LIKE ? AND LOWER(doc_path) LIKE '%.docx'
+		 ORDER BY doc_path ASC, page_num ASC`,
+		dirPrefix+"%",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list docx files: %w", err)
 	}
 	defer rows.Close()
 

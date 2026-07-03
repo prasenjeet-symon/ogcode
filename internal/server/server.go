@@ -165,6 +165,8 @@ func (s *Server) Start() error {
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.ReadPdfPageTool{})
 	toolRegistry.Register(tool.NewPdfIndexTool(s.docindexStore))
+	toolRegistry.Register(tool.ReadDocxPageTool{})
+	toolRegistry.Register(tool.NewDocxIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.NewProjectIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.LatexToPdfTool{})
 

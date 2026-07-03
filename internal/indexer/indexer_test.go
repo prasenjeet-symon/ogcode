@@ -139,6 +139,71 @@ func TestAssembleBatches_EmptyItems(t *testing.T) {
 	}
 }
 
+func TestAssembleBatches_DocxSeparation(t *testing.T) {
+	idx := New("/tmp", nil, nil)
+	items := []docItem{
+		{path: "/report.docx", corpora: []PageCorpus{{PageNum: 1, Keywords: []string{"database", "optimization"}}, {PageNum: 2, Keywords: []string{"concurrency", "patterns"}}}, isDocx: true, keywordCount: 4},
+		{path: "/main.go", corpora: []PageCorpus{{PageNum: 1, Keywords: []string{"kw1"}}}, isPDF: false, keywordCount: 1},
+	}
+
+	batches := idx.assembleBatches(items)
+
+	// DOCX should be in its own batch (like PDFs)
+	foundDocx := false
+	foundText := false
+	for _, b := range batches {
+		if b.isDocx {
+			foundDocx = true
+			if len(b.items) != 1 {
+				t.Errorf("DOCX batch should have exactly 1 item, got %d", len(b.items))
+			}
+			if b.items[0].path != "/report.docx" {
+				t.Errorf("DOCX batch should contain /report.docx, got %s", b.items[0].path)
+			}
+			if !b.items[0].isDocx {
+				t.Error("DOCX docItem should have isDocx=true")
+			}
+		} else {
+			foundText = true
+		}
+	}
+	if !foundDocx {
+		t.Error("expected a DOCX batch")
+	}
+	if !foundText {
+		t.Error("expected at least one text batch")
+	}
+}
+
+func TestAssembleBatches_DocxAndPdfSeparate(t *testing.T) {
+	idx := New("/tmp", nil, nil)
+	items := []docItem{
+		{path: "/doc.pdf", corpora: []PageCorpus{{PageNum: 1, Keywords: []string{"kw1"}}}, isPDF: true, keywordCount: 1},
+		{path: "/doc.docx", corpora: []PageCorpus{{PageNum: 1, Keywords: []string{"kw2"}}}, isDocx: true, keywordCount: 1},
+		{path: "/main.go", corpora: []PageCorpus{{PageNum: 1, Keywords: []string{"kw3"}}}, isPDF: false, keywordCount: 1},
+	}
+
+	batches := idx.assembleBatches(items)
+
+	// Both PDF and DOCX should be in separate batches
+	foundPDF := false
+	foundDocx := false
+	for _, b := range batches {
+		if b.isPDF && !b.isDocx {
+			foundPDF = true
+		}
+		if b.isDocx && !b.isPDF {
+			foundDocx = true
+		}
+	}
+	if !foundPDF {
+		t.Error("expected a PDF batch")
+	}
+	if !foundDocx {
+		t.Error("expected a DOCX batch")
+	}
+}
+
 func TestProgressTracker(t *testing.T) {
 	idx := New("/tmp", nil, nil)
 	p := idx.Progress()
