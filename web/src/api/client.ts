@@ -148,6 +148,7 @@ export interface ConfigInfo {
   port: number;
   memoryEnabled: boolean;
   memoryProvider: string;
+  posthogEnabled: boolean;
 }
 
 export function getConfig(): Promise<ConfigInfo> {
@@ -612,6 +613,25 @@ export function getSearchConfig(): Promise<SearchConfig> {
 
 export function setSearchConfig(cfg: Omit<SearchConfig, 'updatedAt'>): Promise<SearchConfig> {
   return fetchAPI('/search/config', {
+    method: 'POST',
+    body: JSON.stringify(cfg),
+  });
+}
+
+// PostHog Config API
+export interface PostHogConfig {
+  enabled: boolean;
+  apiKey: string;       // masked when reading (e.g. "phc_xxxx…"); full key only on write
+  apiHost: string;
+  updatedAt?: number;
+}
+
+export function getPostHogConfig(): Promise<PostHogConfig> {
+  return fetchAPI('/posthog/config');
+}
+
+export function setPostHogConfig(cfg: Omit<PostHogConfig, 'updatedAt'>): Promise<PostHogConfig> {
+  return fetchAPI('/posthog/config', {
     method: 'POST',
     body: JSON.stringify(cfg),
   });

@@ -66,6 +66,9 @@ type Server struct {
 	// Search bridge (optional — enabled via OGCODE_SEARCH_ENABLED=true)
 	searchBridge *search.BridgeProcess
 
+	// PostHog analytics client (optional — enabled via the settings UI)
+	posthogClient *PostHogClient
+
 	// Track running agent loops so they can be cancelled on abort
 	mu           sync.Mutex
 	running      map[session.SessionID]context.CancelFunc
@@ -304,6 +307,20 @@ func (s *Server) Start() error {
 	// Initialize version manager
 	s.versionManager = version.New()
 
+	// Initialize PostHog analytics client from the shared global config DB.
+	// Events are sent server-side via the PostHog /capture REST endpoint.
+	if phCfg, err := session.GetPostHogConfig(s.globalDB); err != nil {
+		slog.Warn("failed to read posthog config", "err", err)
+	} else if phCfg.Enabled && phCfg.APIKey != "" {
+		s.posthogClient = NewPostHogClient(phCfg.APIKey, phCfg.APIHost)
+		if s.posthogClient != nil {
+			s.posthogClient.Capture("ogcode_server_started", posthogDistinctID(), map[string]any{
+				"mode": string(s.mode),
+			})
+			slog.Info("posthog analytics enabled", "host", phCfg.APIHost)
+		}
+	}
+
 	r := s.routes()
 
 	// Try ports starting from the configured port, up to 50 attempts.
@@ -377,6 +394,12 @@ func (s *Server) Start() error {
 	// Stop search bridge
 	if s.searchBridge != nil {
 		s.searchBridge.Stop()
+	}
+
+	// Stop PostHog analytics client (flushes queued events)
+	if s.posthogClient != nil {
+		s.posthogClient.Capture("ogcode_server_stopped", posthogDistinctID(), nil)
+		s.posthogClient.Stop()
 	}
 
 	// Close memory store
@@ -473,6 +496,32 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 func (s *Server) reloadProviders() {
 	s.registry.ReplaceProviders(s.loadProviderMap())
 	slog.Info("reloaded provider registry", "providers", s.registry.List())
+}
+
+// reloadPostHog rebuilds the PostHog analytics client from the current DB config
+// so enable/disable and key changes from the settings UI take effect without a
+// restart. The old client (if any) is stopped to flush its queue.
+func (s *Server) reloadPostHog() {
+	old := s.posthogClient
+	phCfg, err := session.GetPostHogConfig(s.globalDB)
+	if err != nil {
+		slog.Warn("reloadPostHog: failed to read config", "err", err)
+		return
+	}
+	var newClient *PostHogClient
+	if phCfg.Enabled && phCfg.APIKey != "" {
+		newClient = NewPostHogClient(phCfg.APIKey, phCfg.APIHost)
+		if newClient != nil {
+			newClient.Capture("ogcode_posthog_enabled", posthogDistinctID(), nil)
+			slog.Info("posthog analytics enabled", "host", phCfg.APIHost)
+		}
+	} else {
+		slog.Info("posthog analytics disabled")
+	}
+	s.posthogClient = newClient
+	if old != nil {
+		old.Stop()
+	}
 }
 
 func openBrowser(url string) {

@@ -1,3 +1,42 @@
+# Release Notes — v0.13.8
+
+## PostHog Product Analytics Integration
+
+This release adds PostHog cloud analytics to ogcode — enabling product teams to
+capture page views, session recordings, and custom events from the web UI, plus
+server-side lifecycle events from the Go backend.
+
+---
+
+### 📊 PostHog Analytics
+
+- **Cloud integration** — Connect your PostHog cloud project (app.posthog.com)
+  by entering your project API key in Settings → General → PostHog Analytics.
+  Self-hosted PostHog instances are also supported via a custom API Host field.
+
+- **Frontend SDK** — The `posthog-js` library is lazily initialised on app load
+  only when analytics is enabled and a key is configured. Page view capture and
+  session recording are enabled; autocapture is disabled to avoid noise.
+
+- **Server-side events** — A lightweight PostHog client
+  (`internal/server/posthog.go`) sends server lifecycle events
+  (`ogcode_server_started`, `ogcode_server_stopped`) to the PostHog `/capture`
+  REST endpoint via a bounded background worker — no blocking of request
+  handlers.
+
+- **Config persistence** — PostHog configuration (enabled, API key, API host) is
+  stored in the shared global config DB (`~/.ogcode/config.db`) via a new
+  migration (`031_posthog_config.sql`). The API key is masked in API responses.
+
+- **Hot reload** — Enabling/disabling or changing the API key from the settings
+  UI rebuilds the server-side PostHog client without a restart. The frontend
+  SDK requires a page refresh to load.
+
+- **Settings UI** — A new PostHog Analytics card in the General settings page
+  with an enable toggle, API key input (masked display), and API host field.
+
+---
+
 # Release Notes — v0.13.7
 
 ## Anthropic Prompt Caching
