@@ -2,7 +2,7 @@
   "name": "ogcode-web",
   "description": "The browser-native coding agent that runs entirely on your machine",
   "private": true,
-  "version": "0.14.0",
+  "version": "0.15.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

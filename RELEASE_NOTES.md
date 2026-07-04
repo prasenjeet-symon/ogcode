@@ -1,3 +1,57 @@
+# Release Notes — v0.15.0
+
+## `view_image` Agent Tool
+
+This minor release adds a new agent tool that lets vision-capable models **see
+image files on disk** — logos, screenshots, diagrams, photos — directly within a
+task, without the user having to manually upload them.
+
+---
+
+### 🖼️ `view_image` Agent Tool
+
+Agents can now read image files (PNG, JPEG, GIF, BMP, WebP) from the filesystem
+and return them to the model for visual inspection. This complements the existing
+image upload feature (v0.14.0) by enabling agents to proactively look at images
+they discover during exploration.
+
+- **New tool** — `view_image` accepts a file path (absolute or relative to the
+  session directory) and returns the image so vision-capable models can see it.
+  Large images are automatically downscaled to fit within vision-model limits.
+- **Use cases** — Inspecting logos, screenshots, UI mockups, diagrams, or any
+  image referenced in a task without requiring the user to attach it manually.
+- **Format support** — PNG, JPEG, GIF, BMP, and WebP.
+
+---
+
+### 📥 Installation
+
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+**Homebrew:**
+```bash
+brew install prasenjeet-symon/tap/ogcode
+```
+
+**Docker:**
+```bash
+docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.14.0...v0.15.0*
+
+---
+
 # Release Notes — v0.14.0
 
 ## Image Uploads, Anthropic Base URL Config, and Product Analytics
