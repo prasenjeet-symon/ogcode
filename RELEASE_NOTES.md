@@ -1,3 +1,58 @@
+# Release Notes — v0.13.7
+
+## Anthropic Prompt Caching
+
+This release introduces explicit prompt caching for Anthropic models (Claude
+Sonnet, Haiku, Opus) to reduce latency and token costs on multi-turn
+conversations. The system prompt prefix is now cached across turns so that
+repeated tool definitions and base instructions are read from cache instead of
+re-processed every call.
+
+---
+
+### ⚡ Anthropic Prompt Caching
+
+- **Explicit `cache_control` breakpoints** — The Anthropic provider now sends
+  the `system` field as an array of content blocks (required to attach
+  `cache_control` markers) instead of a plain string. Two cache breakpoints are
+  placed: one on the last tool definition (caches the entire tool block) and
+  one on the first static system block (caches tools + base system prompt).
+
+- **Static/dynamic system prompt separation** — The current date was extracted
+  from the base system prompt and injected as a separate dynamic
+  `<system-reminder>` entry. Only the static prefix receives `cache_control`;
+  dynamic trailing blocks (date, compaction summaries) do not. This keeps the
+  cacheable prefix byte-for-byte identical across turns.
+
+- **Token usage tracking** — The provider reads `cache_creation_input_tokens`
+  and `cache_read_input_tokens` from the Anthropic response and surfaces them
+  in `TokenUsage`, so callers can observe cache hits and misses.
+
+- **Other providers unaffected** — OpenAI (automatic prefix caching), Ollama,
+  and OpenRouter remain functionally identical. The static/dynamic split is
+  recombined into a single string for OpenAI-compatible providers.
+
+- **Tests** — New test cases in `anthropic_test.go` verify cache breakpoint
+  placement, system block splitting, and token usage parsing. New tests in
+  `prompt_builder_test.go` verify the separation of static and dynamic system
+  prompt content.
+
+---
+
+### 📥 Installation
+
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+---
+
 # Release Notes — v0.13.6
 
 ## DOCX Indexing & Unified Project Index
