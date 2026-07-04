@@ -162,6 +162,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	toolRegistry.Register(tool.EditTool{})
 	toolRegistry.Register(tool.GlobTool{})
 	toolRegistry.Register(tool.GrepTool{})
+	toolRegistry.Register(tool.ViewImageTool{})
 
 	b := bus.New(1024)
 	store := session.NewStore(database)
