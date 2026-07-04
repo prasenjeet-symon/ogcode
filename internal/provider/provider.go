@@ -234,6 +234,9 @@ func NewProviderWithConfig(providerID, apiKey, baseURL string) (Provider, error)
 		if apiKey != "" {
 			p.apiKey = apiKey
 		}
+		if baseURL != "" {
+			p.baseURL = baseURL
+		}
 		return p, nil
 	case "openai":
 		p := NewOpenAIProvider()

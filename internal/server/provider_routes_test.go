@@ -20,7 +20,8 @@ func newTestServer(t *testing.T) *Server {
 	// Neutralize any provider env vars so the test is deterministic regardless
 	// of the developer's shell.
 	for _, k := range []string{
-		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+		"OPENAI_API_KEY", "OPENAI_BASE_URL",
 		"OPENROUTER_API_KEY", "OLLAMA_API_KEY", "OLLAMA_BASE_URL",
 	} {
 		t.Setenv(k, "")

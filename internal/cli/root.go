@@ -86,7 +86,8 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	// Register providers using the same priority logic as the server.
 	registry := provider.NewRegistry()
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		p, _ := provider.NewProviderWithConfig("anthropic", key, "")
+		baseURL := os.Getenv("ANTHROPIC_BASE_URL")
+		p, _ := provider.NewProviderWithConfig("anthropic", key, baseURL)
 		registry.Register(p)
 	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {

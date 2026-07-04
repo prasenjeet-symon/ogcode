@@ -119,7 +119,8 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 
 	registry := provider.NewRegistry()
 	if key := resolveKey(os.Getenv("ANTHROPIC_API_KEY"), "anthropic"); key != "" {
-		if p, e := provider.NewProviderWithConfig("anthropic", key, ""); e == nil {
+		baseURL := resolveBaseURL(os.Getenv("ANTHROPIC_BASE_URL"), "anthropic")
+		if p, e := provider.NewProviderWithConfig("anthropic", key, baseURL); e == nil {
 			registry.Register(p)
 		}
 	}

@@ -627,7 +627,11 @@ function ProviderCredRow(props: {
                 type="text"
                 value={baseURL()}
                 onInput={e => setBaseURL(e.currentTarget.value)}
-                placeholder={props.def.id === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1'}
+                placeholder={
+                  props.def.id === 'ollama'    ? 'http://localhost:11434/v1' :
+                  props.def.id === 'anthropic' ? 'https://api.anthropic.com/v1' :
+                                                 'https://api.openai.com/v1'
+                }
                 class={inputCls}
               />
             </div>

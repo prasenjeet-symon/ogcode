@@ -18,7 +18,7 @@ var knownProviders = []string{"anthropic", "openai", "openrouter", "ollama"}
 // configure its key and base URL. These are checked at runtime so the UI
 // can show the correct "configured via env" state even when the DB is empty.
 var providerEnvVars = map[string]struct{ key, baseURL string }{
-	"anthropic":  {key: "ANTHROPIC_API_KEY"},
+	"anthropic":  {key: "ANTHROPIC_API_KEY", baseURL: "ANTHROPIC_BASE_URL"},
 	"openai":     {key: "OPENAI_API_KEY", baseURL: "OPENAI_BASE_URL"},
 	"openrouter": {key: "OPENROUTER_API_KEY"},
 	"ollama":     {key: "OLLAMA_API_KEY", baseURL: "OLLAMA_BASE_URL"},

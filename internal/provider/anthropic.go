@@ -16,8 +16,9 @@ import (
 
 // AnthropicProvider implements Provider for the Anthropic Messages API.
 type AnthropicProvider struct {
-	apiKey string
-	model  string
+	apiKey  string
+	model   string
+	baseURL string
 }
 
 func NewAnthropicProvider() *AnthropicProvider {
@@ -26,7 +27,11 @@ func NewAnthropicProvider() *AnthropicProvider {
 	if model == "" {
 		model = "claude-sonnet-4-6"
 	}
-	return &AnthropicProvider{apiKey: apiKey, model: model}
+	baseURL := os.Getenv("ANTHROPIC_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com/v1"
+	}
+	return &AnthropicProvider{apiKey: apiKey, model: model, baseURL: baseURL}
 }
 
 func (p *AnthropicProvider) ID() string { return "anthropic" }
@@ -250,7 +255,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(p.baseURL, "/")+"/messages", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

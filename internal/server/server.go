@@ -459,7 +459,8 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 	}
 
 	if key := resolveKey(os.Getenv("ANTHROPIC_API_KEY"), "anthropic"); key != "" {
-		p, _ := provider.NewProviderWithConfig("anthropic", key, "")
+		baseURL := resolveBaseURL(os.Getenv("ANTHROPIC_BASE_URL"), "anthropic")
+		p, _ := provider.NewProviderWithConfig("anthropic", key, baseURL)
 		providers["anthropic"] = p
 		slog.Info("registered anthropic provider")
 	}
