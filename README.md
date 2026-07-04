@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/ogcode-logo.png" alt="Ogcode Logo" width="200" height="200">
+
 # Ogcode
 
 **The token-efficient agentic coding workbench.**
