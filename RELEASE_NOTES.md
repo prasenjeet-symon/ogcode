@@ -1,39 +1,92 @@
-# Release Notes — v0.13.8
+# Release Notes — v0.14.0
 
-## PostHog Product Analytics Integration
+## Image Uploads, Anthropic Base URL Config, and Product Analytics
 
-This release adds PostHog cloud analytics to ogcode — enabling product teams to
-capture page views, session recordings, and custom events from the web UI, plus
-server-side lifecycle events from the Go backend.
+This minor release introduces three significant features: **image uploads** for
+vision-capable models, a **configurable Anthropic base URL** for proxy/gateway
+setups, and **PostHog product analytics** for usage insights.
 
 ---
 
-### 📊 PostHog Analytics
+### 🖼️ Image Uploads in Chat
 
-- **Cloud integration** — Connect your PostHog cloud project (app.posthog.com)
-  by entering your project API key in Settings → General → PostHog Analytics.
-  Self-hosted PostHog instances are also supported via a custom API Host field.
+Users can now attach images to chat prompts — either via the file picker button
+or by pasting from the clipboard. Images are sent to vision-capable models
+(Claude, GPT-4o, etc.) and rendered inline in the message list.
 
-- **Frontend SDK** — The `posthog-js` library is lazily initialised on app load
-  only when analytics is enabled and a key is configured. Page view capture and
-  session recording are enabled; autocapture is disabled to avoid noise.
+- **Multi-modal messages** — A new `PartImage` type and `ImagePartData` struct
+  persist images as first-class message parts. The agent loop attaches user
+  image parts to `ModelMessage.Images` so both Anthropic and OpenAI-compatible
+  providers (OpenRouter, Ollama) receive them as image content blocks — no
+  provider changes were needed.
+
+- **UI integration** — The prompt input bar has a new file picker button,
+  paste-from-clipboard support, image preview thumbnails with per-image remove
+  buttons, a 10 MB size limit, and file-type validation. Image parts render
+  inline in user messages with click-to-expand.
+
+---
+
+### 🔗 Configurable Anthropic Base URL
+
+The Anthropic provider now supports a custom base URL, mirroring the existing
+OpenAI/Ollama configuration. This enables use of Anthropic-compatible proxies,
+gateways, or self-hosted endpoints.
+
+- **Resolution priority** — UI/DB setting → `ANTHROPIC_BASE_URL` environment
+  variable → `https://api.anthropic.com/v1` default.
+- **Settings UI** — The field appears in Settings → Models → API Keys and in the
+  onboarding wizard, with an Anthropic-specific placeholder and a "set via env"
+  indicator.
+- **Provider wiring** — `AnthropicProvider` gains a `baseURL` field;
+  `StreamChat` uses it. `NewProviderWithConfig` applies it for the `anthropic`
+  case. Tests neutralise the env var for deterministic runs.
+
+---
+
+### 📊 PostHog Product Analytics
+
+PostHog cloud analytics is now integrated for internal product insights —
+capturing page views, session recordings, and custom events from the web UI,
+plus server-side lifecycle events from the Go backend.
 
 - **Server-side events** — A lightweight PostHog client
   (`internal/server/posthog.go`) sends server lifecycle events
   (`ogcode_server_started`, `ogcode_server_stopped`) to the PostHog `/capture`
-  REST endpoint via a bounded background worker — no blocking of request
-  handlers.
+  REST endpoint via a bounded background worker — non-blocking, always-on.
+- **Frontend SDK** — The `posthog-js` library is lazily initialised on app load
+  with page view capture and session recording enabled (autocapture disabled to
+  avoid noise).
+- **Hardcoded credentials** — Analytics uses hardcoded project credentials
+  (not user-configurable); it is an internal feature, not a user-facing setting.
 
-- **Config persistence** — PostHog configuration (enabled, API key, API host) is
-  stored in the shared global config DB (`~/.ogcode/config.db`) via a new
-  migration (`031_posthog_config.sql`). The API key is masked in API responses.
+---
 
-- **Hot reload** — Enabling/disabling or changing the API key from the settings
-  UI rebuilds the server-side PostHog client without a restart. The frontend
-  SDK requires a page refresh to load.
+### 📥 Installation
 
-- **Settings UI** — A new PostHog Analytics card in the General settings page
-  with an enable toggle, API key input (masked display), and API host field.
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+**Homebrew:**
+```bash
+brew install prasenjeet-symon/tap/ogcode
+```
+
+**Docker:**
+```bash
+docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.13.7...v0.14.0*
 
 ---
 

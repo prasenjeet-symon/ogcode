@@ -106,7 +106,7 @@ Steps:
 4. **Docker pipeline auto-triggers** — `.github/workflows/docker.yml` builds and pushes the Docker image.
 5. **Post-release** — update the "Current release" line below to the new version so future sessions know it without git inspection.
 
-**Current release**: `v0.13.7`
+**Current release**: `v0.14.0`
 
 ## ogcode — Rich Output Architecture
 
