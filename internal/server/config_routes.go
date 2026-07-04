@@ -140,7 +140,6 @@ func (s *Server) configPayload() map[string]any {
 		"mcpProvider":     mcpProvider,
 		"searchEnabled":   s.searchBridge != nil,
 		"searchRunning":   s.searchBridge != nil,
-		"posthogEnabled":  s.posthogClient != nil,
 	}
 }
 
@@ -191,62 +190,6 @@ func (s *Server) handleSetSearchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, &incoming)
-}
-
-func (s *Server) handleGetPostHogConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := session.GetPostHogConfig(s.globalDB)
-	if err != nil {
-		http.Error(w, "failed to read posthog config", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, session.MaskedPostHogConfig(cfg))
-}
-
-// handleSetPostHogConfig saves the PostHog config. When the API key is sent as a
-// masked value (ends with the Unicode ellipsis "…" or is the bullet mask), the
-// existing stored key is preserved instead of overwriting it with the mask.
-func (s *Server) handleSetPostHogConfig(w http.ResponseWriter, r *http.Request) {
-	var incoming session.PostHogConfig
-	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	// If the API key looks masked, preserve the existing key.
-	if isMaskedKey(incoming.APIKey) {
-		if existing, err := session.GetPostHogConfig(s.globalDB); err == nil {
-			incoming.APIKey = existing.APIKey
-		}
-	}
-	if err := session.SetPostHogConfig(s.globalDB, &incoming); err != nil {
-		http.Error(w, "failed to save posthog config", http.StatusInternalServerError)
-		return
-	}
-	// Rebuild the PostHog client so changes take effect without a restart.
-	s.reloadPostHog()
-	// Fetch the saved row for a masked response.
-	saved, _ := session.GetPostHogConfig(s.globalDB)
-	if saved != nil {
-		writeJSON(w, http.StatusOK, session.MaskedPostHogConfig(saved))
-		return
-	}
-	writeJSON(w, http.StatusOK, session.MaskedPostHogConfig(&incoming))
-}
-
-// isMaskedKey reports whether s is a masked representation (not the real key).
-func isMaskedKey(s string) bool {
-	if s == "" {
-		return false
-	}
-	// Masked by the server: prefix + "…" or the bullet placeholder.
-	if s == "••••" {
-		return true
-	}
-	for _, r := range s {
-		if r == '…' || r == '•' {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Server) handleModelsRefresh(w http.ResponseWriter, r *http.Request) {

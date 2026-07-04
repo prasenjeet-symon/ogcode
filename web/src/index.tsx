@@ -9,6 +9,6 @@ if (root) {
   render(() => <App />, root);
 }
 
-// Fire-and-forget: initialise PostHog analytics if the server has it configured.
+// Fire-and-forget: initialise PostHog analytics (always-on, hardcoded credentials).
 // This is intentionally non-blocking — analytics should never delay app render.
 initPostHog();

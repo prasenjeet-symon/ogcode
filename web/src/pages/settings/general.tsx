@@ -3,7 +3,7 @@ import { useNavigate } from '@solidjs/router';
 import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { useTheme } from '../../context/theme';
-import { getSearchConfig, setSearchConfig, getPostHogConfig, setPostHogConfig } from '../../api/client';
+import { getSearchConfig, setSearchConfig } from '../../api/client';
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -77,14 +77,6 @@ export default function GeneralSettings() {
           description="Enables parallel web research via headless Chrome. Build and note agents can call deep_search to fetch and synthesise live information. Requires a server restart to take effect."
         >
           <SearchConfigForm />
-        </Card>
-
-        {/* Analytics card */}
-        <Card
-          title="PostHog Analytics"
-          description="Connect a PostHog cloud project to capture product analytics — page views, session recordings, and custom events. Your project API key is stored locally and sent to the PostHog cloud."
-        >
-          <PostHogConfigForm />
         </Card>
 
         {/* Theme card */}
@@ -463,185 +455,5 @@ function ThemePicker() {
         </p>
       </div>
     </div>
-  );
-}
-
-function PostHogConfigForm() {
-  const server = useServer();
-  const [enabled, setEnabled] = createSignal(false);
-  const [apiKey, setApiKey] = createSignal('');
-  const [apiHost, setApiHost] = createSignal('https://app.posthog.com');
-  const [loading, setLoading] = createSignal(true);
-  const [saving, setSaving] = createSignal(false);
-  const [hasKey, setHasKey] = createSignal(false);
-  const [savedMaskedKey, setSavedMaskedKey] = createSignal('');
-  const [error, setError] = createSignal('');
-  const [reloadNeeded, setReloadNeeded] = createSignal(false);
-
-  onMount(async () => {
-    try {
-      const cfg = await getPostHogConfig();
-      setEnabled(cfg.enabled);
-      setApiKey(cfg.apiKey || '');
-      setApiHost(cfg.apiHost || 'https://app.posthog.com');
-      setHasKey(cfg.apiKey !== '');
-      setSavedMaskedKey(cfg.apiKey || '');
-    } catch {
-      // defaults stay
-    } finally {
-      setLoading(false);
-    }
-  });
-
-  const persist = async (next: { enabled: boolean; apiKey: string; apiHost: string }) => {
-    setSaving(true);
-    setError('');
-    try {
-      const cfg = await setPostHogConfig(next);
-      setApiKey(cfg.apiKey || '');
-      setHasKey(cfg.apiKey !== '');
-      setSavedMaskedKey(cfg.apiKey || '');
-      setReloadNeeded(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleToggle = async () => {
-    const next = !enabled();
-    setEnabled(next);
-    try {
-      // If turning on with no key set yet, don't persist until key is entered.
-      if (next && !hasKey()) {
-        return;
-      }
-      await persist({ enabled: next, apiKey: apiKey(), apiHost: apiHost() });
-    } catch {
-      setEnabled(!next);
-    }
-  };
-
-  const handleSaveKey = async () => {
-    if (!apiKey() || apiKey().startsWith('•')) return;
-    try {
-      await persist({ enabled: enabled() || true, apiKey: apiKey(), apiHost: apiHost() });
-      if (!enabled()) setEnabled(true);
-    } catch {
-      // error set in persist
-    }
-  };
-
-  const handleHostChange = (v: string) => {
-    setApiHost(v);
-  };
-
-  const handleHostSave = async () => {
-    if (enabled() && hasKey()) {
-      await persist({ enabled: enabled(), apiKey: apiKey(), apiHost: apiHost() });
-    }
-  };
-
-  return (
-    <Show when={!loading()} fallback={
-      <div class="py-4 flex items-center gap-2 text-[12px] text-zinc-500">
-        <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4m0 8v4m8-8h-4M8 12H4" />
-        </svg>
-        Loading…
-      </div>
-    }>
-      <div class="space-y-3">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <div class="text-[13px] text-zinc-100 font-medium">Enable analytics</div>
-            <div class="text-[11.5px] text-zinc-500 mt-0.5 leading-snug">
-              Captures page views, session recordings, and custom events to your PostHog cloud project.
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled()}
-            disabled={saving() || !hasKey()}
-            onClick={handleToggle}
-            title={!hasKey() ? 'Enter a project API key first' : ''}
-            class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent
-              transition-colors duration-200 focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed
-              ${enabled() ? 'bg-[color:var(--accent)]' : 'bg-[color:var(--bg-hover)]'}`}
-          >
-            <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow
-              transition duration-200 ${enabled() ? 'translate-x-4' : 'translate-x-0'}`} />
-          </button>
-        </div>
-
-        <Show when={!hasKey()}>
-          <div class="flex items-start gap-2 text-[11.5px] text-zinc-400 bg-[color:var(--bg-elevated)] rounded-md px-3 py-2">
-            <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-            </svg>
-            <span>Enter your PostHog project API key below and save to enable analytics. Find it in PostHog → Project Settings → API Key (starts with <code class="font-mono text-zinc-300">phc_…</code>).</span>
-          </div>
-        </Show>
-
-        {/* API Key input */}
-        <div class="space-y-1.5">
-          <label class="text-[11px] text-zinc-500 uppercase tracking-wider">Project API Key</label>
-          <div class="flex items-center gap-2">
-            <input
-              type="text"
-              value={apiKey()}
-              onInput={(e) => setApiKey(e.currentTarget.value)}
-              onBlur={handleSaveKey}
-              placeholder="phc_xxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              class="flex-1 h-8 px-2.5 rounded-md border border-[color:var(--border-default)]
-                     bg-[color:var(--bg-elevated)] text-[12px] font-mono text-zinc-200 placeholder:text-zinc-600
-                     focus:outline-none focus:border-[color:var(--accent)] transition"
-            />
-            <Show when={apiKey() && !apiKey().startsWith('•') && apiKey() !== savedMaskedKey()}>
-              <button
-                type="button"
-                onClick={handleSaveKey}
-                disabled={saving()}
-                class="h-8 px-3 text-[12px] font-medium text-zinc-100 border border-[color:var(--border-default)]
-                       hover:bg-[color:var(--bg-hover)] rounded-md transition"
-              >
-                Save
-              </button>
-            </Show>
-          </div>
-        </div>
-
-        {/* API Host input */}
-        <div class="space-y-1.5">
-          <label class="text-[11px] text-zinc-500 uppercase tracking-wider">API Host</label>
-          <input
-            type="text"
-            value={apiHost()}
-            onInput={(e) => handleHostChange(e.currentTarget.value)}
-            onBlur={handleHostSave}
-            placeholder="https://app.posthog.com"
-            class="w-full h-8 px-2.5 rounded-md border border-[color:var(--border-default)]
-                   bg-[color:var(--bg-elevated)] text-[12px] font-mono text-zinc-200 placeholder:text-zinc-600
-                   focus:outline-none focus:border-[color:var(--accent)] transition"
-          />
-          <div class="text-[11px] text-zinc-500">
-            Use <code class="font-mono text-zinc-400">https://app.posthog.com</code> for the cloud version, or your self-hosted URL.
-          </div>
-        </div>
-
-        <Show when={error()}>
-          <div class="text-[11.5px] text-red-400 bg-red-400/10 rounded-md px-3 py-2">{error()}</div>
-        </Show>
-
-        <Show when={reloadNeeded() && enabled()}>
-          <div class="flex items-center gap-2 text-[11.5px] text-emerald-400">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-            Analytics active — page views and events are being captured. Refresh the page to load the PostHog JS SDK.
-          </div>
-        </Show>
-      </div>
-    </Show>
   );
 }

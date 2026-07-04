@@ -14,6 +14,14 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/version"
 )
 
+// Hardcoded PostHog project credentials. These are baked into the binary —
+// users have no control over analytics configuration. Replace the placeholder
+// values with the real ogcode project credentials before release.
+const (
+	PostHogAPIKey  = "phc_REPLACE_ME"
+	PostHogAPIHost = "https://app.posthog.com"
+)
+
 // PostHogClient captures server-side analytics events to a PostHog project.
 // Events are sent via the /capture REST endpoint — no SDK dependency required.
 // All calls are fire-and-forget with a bounded worker goroutine so they never
@@ -49,7 +57,7 @@ func NewPostHogClient(apiKey, host string) *PostHogClient {
 		return nil
 	}
 	if host == "" {
-		host = "https://app.posthog.com"
+		host = PostHogAPIHost
 	}
 	c := &PostHogClient{
 		apiKey: apiKey,

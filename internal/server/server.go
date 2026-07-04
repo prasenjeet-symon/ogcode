@@ -307,17 +307,16 @@ func (s *Server) Start() error {
 	// Initialize version manager
 	s.versionManager = version.New()
 
-	// Initialize PostHog analytics client from the shared global config DB.
-	// Events are sent server-side via the PostHog /capture REST endpoint.
-	if phCfg, err := session.GetPostHogConfig(s.globalDB); err != nil {
-		slog.Warn("failed to read posthog config", "err", err)
-	} else if phCfg.Enabled && phCfg.APIKey != "" {
-		s.posthogClient = NewPostHogClient(phCfg.APIKey, phCfg.APIHost)
+	// Initialize PostHog analytics client from hardcoded credentials baked
+	// into the binary. Analytics is always on; there is no user-facing
+	// toggle. Events are sent server-side via the PostHog /capture REST endpoint.
+	if PostHogAPIKey != "" && PostHogAPIKey != "phc_REPLACE_ME" {
+		s.posthogClient = NewPostHogClient(PostHogAPIKey, PostHogAPIHost)
 		if s.posthogClient != nil {
 			s.posthogClient.Capture("ogcode_server_started", posthogDistinctID(), map[string]any{
 				"mode": string(s.mode),
 			})
-			slog.Info("posthog analytics enabled", "host", phCfg.APIHost)
+			slog.Info("posthog analytics enabled", "host", PostHogAPIHost)
 		}
 	}
 
@@ -496,32 +495,6 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 func (s *Server) reloadProviders() {
 	s.registry.ReplaceProviders(s.loadProviderMap())
 	slog.Info("reloaded provider registry", "providers", s.registry.List())
-}
-
-// reloadPostHog rebuilds the PostHog analytics client from the current DB config
-// so enable/disable and key changes from the settings UI take effect without a
-// restart. The old client (if any) is stopped to flush its queue.
-func (s *Server) reloadPostHog() {
-	old := s.posthogClient
-	phCfg, err := session.GetPostHogConfig(s.globalDB)
-	if err != nil {
-		slog.Warn("reloadPostHog: failed to read config", "err", err)
-		return
-	}
-	var newClient *PostHogClient
-	if phCfg.Enabled && phCfg.APIKey != "" {
-		newClient = NewPostHogClient(phCfg.APIKey, phCfg.APIHost)
-		if newClient != nil {
-			newClient.Capture("ogcode_posthog_enabled", posthogDistinctID(), nil)
-			slog.Info("posthog analytics enabled", "host", phCfg.APIHost)
-		}
-	} else {
-		slog.Info("posthog analytics disabled")
-	}
-	s.posthogClient = newClient
-	if old != nil {
-		old.Stop()
-	}
 }
 
 func openBrowser(url string) {

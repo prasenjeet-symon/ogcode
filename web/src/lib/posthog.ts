@@ -1,24 +1,27 @@
 // PostHog analytics wrapper for the ogcode web UI.
 //
-// This module lazily initialises the PostHog JS SDK when the server reports
-// analytics is enabled and an API key is configured. All calls are no-ops
-// until init() succeeds, so components can call capture/identify freely
-// without worrying about whether analytics is on.
+// PostHog is always-on product analytics for ogcode itself — it is NOT a
+// user-facing feature. The credentials are hardcoded below and baked into the
+// web bundle. There is no settings UI, no config API, and no DB storage.
+// All calls are no-ops until init() succeeds, so components can call
+// capture/identify freely without worrying about whether analytics is on.
 import posthog from 'posthog-js';
-import { getConfig, getPostHogConfig, type PostHogConfig } from '../api/client';
+
+// Hardcoded PostHog project credentials. Replace the placeholder values with
+// the real ogcode project credentials before release.
+const POSTHOG_API_KEY = 'phc_REPLACE_ME';
+const POSTHOG_API_HOST = 'https://app.posthog.com';
 
 let initialised = false;
 
-/** Initialise PostHog if the backend reports it is enabled. Safe to call once. */
+/** Initialise PostHog. Safe to call once. No-op if credentials are placeholders. */
 export async function initPostHog(): Promise<void> {
   if (initialised) return;
+  // Skip when credentials are still placeholders.
+  if (!POSTHOG_API_KEY || POSTHOG_API_KEY === 'phc_REPLACE_ME') return;
   try {
-    const config = await getConfig();
-    if (!config.posthogEnabled) return;
-    const phConfig = await getPostHogConfig();
-    if (!phConfig.apiKey) return;
-    posthog.init(phConfig.apiKey, {
-      api_host: phConfig.apiHost || 'https://app.posthog.com',
+    posthog.init(POSTHOG_API_KEY, {
+      api_host: POSTHOG_API_HOST,
       autocapture: false,
       capture_pageview: true,
       persistence: 'localStorage+cookie',
@@ -32,7 +35,7 @@ export async function initPostHog(): Promise<void> {
   }
 }
 
-/** Capture a custom event with optional properties. No-op if disabled. */
+/** Capture a custom event with optional properties. No-op if not initialised. */
 export function capture(event: string, properties?: Record<string, any>): void {
   if (!initialised) return;
   try {
@@ -42,7 +45,7 @@ export function capture(event: string, properties?: Record<string, any>): void {
   }
 }
 
-/** Identify the current user. No-op if disabled. */
+/** Identify the current user. No-op if not initialised. */
 export function identify(distinctId?: string, properties?: Record<string, any>): void {
   if (!initialised) return;
   try {
@@ -56,7 +59,7 @@ export function identify(distinctId?: string, properties?: Record<string, any>):
   }
 }
 
-/** Reset the current user identity (e.g. on logout). No-op if disabled. */
+/** Reset the current user identity (e.g. on logout). No-op if not initialised. */
 export function resetPostHog(): void {
   if (!initialised) return;
   try {
@@ -70,5 +73,3 @@ export function resetPostHog(): void {
 export function posthogActive(): boolean {
   return initialised;
 }
-
-export type { PostHogConfig };
