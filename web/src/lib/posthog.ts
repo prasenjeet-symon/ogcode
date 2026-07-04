@@ -7,18 +7,16 @@
 // capture/identify freely without worrying about whether analytics is on.
 import posthog from 'posthog-js';
 
-// Hardcoded PostHog project credentials. Replace the placeholder values with
-// the real ogcode project credentials before release.
-const POSTHOG_API_KEY = 'phc_REPLACE_ME';
+// Hardcoded PostHog project credentials.
+const POSTHOG_API_KEY = 'phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z';
 const POSTHOG_API_HOST = 'https://app.posthog.com';
 
 let initialised = false;
 
-/** Initialise PostHog. Safe to call once. No-op if credentials are placeholders. */
+/** Initialise PostHog. Safe to call once. */
 export async function initPostHog(): Promise<void> {
   if (initialised) return;
-  // Skip when credentials are still placeholders.
-  if (!POSTHOG_API_KEY || POSTHOG_API_KEY === 'phc_REPLACE_ME') return;
+  if (!POSTHOG_API_KEY) return;
   try {
     posthog.init(POSTHOG_API_KEY, {
       api_host: POSTHOG_API_HOST,

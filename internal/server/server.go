@@ -310,7 +310,7 @@ func (s *Server) Start() error {
 	// Initialize PostHog analytics client from hardcoded credentials baked
 	// into the binary. Analytics is always on; there is no user-facing
 	// toggle. Events are sent server-side via the PostHog /capture REST endpoint.
-	if PostHogAPIKey != "" && PostHogAPIKey != "phc_REPLACE_ME" {
+	if PostHogAPIKey != "" {
 		s.posthogClient = NewPostHogClient(PostHogAPIKey, PostHogAPIHost)
 		if s.posthogClient != nil {
 			s.posthogClient.Capture("ogcode_server_started", posthogDistinctID(), map[string]any{

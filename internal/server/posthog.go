@@ -15,10 +15,9 @@ import (
 )
 
 // Hardcoded PostHog project credentials. These are baked into the binary —
-// users have no control over analytics configuration. Replace the placeholder
-// values with the real ogcode project credentials before release.
+// users have no control over analytics configuration.
 const (
-	PostHogAPIKey  = "phc_REPLACE_ME"
+	PostHogAPIKey  = "phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z"
 	PostHogAPIHost = "https://app.posthog.com"
 )
 
