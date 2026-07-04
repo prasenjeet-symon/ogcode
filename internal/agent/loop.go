@@ -1423,6 +1423,7 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 		var textParts []string
 		var toolCallParts []session.ToolPartData
 		var toolResultParts []session.ToolPartData
+		var imageParts []session.ImagePartData
 
 		for _, p := range m.Parts {
 			switch p.Type {
@@ -1431,6 +1432,12 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 				json.Unmarshal(p.Data, &data)
 				if data.Text != "" {
 					textParts = append(textParts, data.Text)
+				}
+			case session.PartImage:
+				var data session.ImagePartData
+				json.Unmarshal(p.Data, &data)
+				if data.Data != "" && data.MediaType != "" {
+					imageParts = append(imageParts, data)
 				}
 			case session.PartTool:
 				var data session.ToolPartData
@@ -1505,12 +1512,22 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 			}
 		} else {
 			// Plain text message
-			if len(textParts) > 0 {
+			if len(textParts) > 0 || len(imageParts) > 0 {
 				content, _ := json.Marshal(strings.Join(textParts, ""))
-				result = append(result, provider.ModelMessage{
+				msg := provider.ModelMessage{
 					Role:    string(m.Info.Role),
 					Content: content,
-				})
+				}
+				if len(imageParts) > 0 {
+					msg.Images = make([]provider.MessageImage, 0, len(imageParts))
+					for _, ip := range imageParts {
+						msg.Images = append(msg.Images, provider.MessageImage{
+							MediaType: ip.MediaType,
+							Data:      ip.Data,
+						})
+					}
+				}
+				result = append(result, msg)
 			}
 		}
 	}

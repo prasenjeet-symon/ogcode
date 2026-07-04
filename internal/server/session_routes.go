@@ -260,11 +260,12 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	sessionID := session.SessionID(chi.URLParam(r, "sessionID"))
 
 	var input struct {
-		Content        string `json:"content"`
-		Agent          string `json:"agent,omitempty"`
-		Model          string `json:"model,omitempty"`
-		ViewportWidth  int    `json:"viewportWidth,omitempty"`
-		ViewportHeight int    `json:"viewportHeight,omitempty"`
+		Content        string           `json:"content"`
+		Images         []session.ImagePartData `json:"images,omitempty"`
+		Agent          string           `json:"agent,omitempty"`
+		Model          string           `json:"model,omitempty"`
+		ViewportWidth  int              `json:"viewportWidth,omitempty"`
+		ViewportHeight int              `json:"viewportHeight,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -319,6 +320,26 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.CreatePart(userPart); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Create image parts for any user-uploaded images.
+	for _, img := range input.Images {
+		if img.Data == "" || img.MediaType == "" {
+			continue
+		}
+		imgData, _ := json.Marshal(img)
+		imgPart := &session.Part{
+			ID:        session.NewPartID(),
+			MessageID: userMsg.ID,
+			SessionID: sessionID,
+			Type:      session.PartImage,
+			Data:      imgData,
+			CreatedAt: session.Now(),
+			UpdatedAt: session.Now(),
+		}
+		if err := s.store.CreatePart(imgPart); err != nil {
+			slog.Error("create user image part", "err", err)
+		}
 	}
 
 	s.bus.Publish("message.updated", userMsg)

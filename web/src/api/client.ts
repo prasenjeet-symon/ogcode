@@ -82,8 +82,8 @@ export interface Part {
   id: string;
   messageId: string;
   sessionId: string;
-  type: 'text' | 'tool' | 'reasoning';
-  data: TextPartData | ToolPartData | ReasoningPartData;
+  type: 'text' | 'tool' | 'reasoning' | 'image';
+  data: TextPartData | ToolPartData | ReasoningPartData | ImagePartData;
   createdAt: number;
   updatedAt: number;
 }
@@ -105,10 +105,18 @@ export interface ToolState {
   error?: string;
   title?: string;
   metadata?: any;
+  image?: { mediaType: string; data: string };
 }
 
 export interface ReasoningPartData {
   text: string;
+}
+
+// User-uploaded image attachment. Data is base64-encoded image bytes.
+export interface ImagePartData {
+  mediaType: string;
+  data: string;
+  name?: string;
 }
 
 export interface MessageWithParts {
@@ -120,8 +128,9 @@ export function getMessages(sessionId: string): Promise<MessageWithParts[]> {
   return fetchAPI(`/session/${sessionId}/message`);
 }
 
-export function sendPrompt(sessionId: string, content: string, model?: string, viewportWidth?: number, viewportHeight?: number): Promise<void> {
+export function sendPrompt(sessionId: string, content: string, images?: ImagePartData[], model?: string, viewportWidth?: number, viewportHeight?: number): Promise<void> {
   const body: Record<string, unknown> = { content };
+  if (images && images.length > 0) body.images = images;
   if (model) body.model = model;
   if (viewportWidth) body.viewportWidth = viewportWidth;
   if (viewportHeight) body.viewportHeight = viewportHeight;

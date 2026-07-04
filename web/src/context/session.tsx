@@ -4,6 +4,7 @@ import {
   type Session,
   type MessageWithParts,
   type ModelInfo,
+  type ImagePartData,
   listSessions,
   createSession,
   getMessages,
@@ -52,7 +53,7 @@ interface SessionContextValue {
   selectModel: (modelId: string) => void;
   selectSession: (id: string) => Promise<void>;
   newSession: (model?: string) => Promise<Session>;
-  prompt: (content: string) => Promise<void>;
+  prompt: (content: string, images?: ImagePartData[]) => Promise<void>;
   abort: () => Promise<void>;
   refreshModels: () => Promise<void>;
   toggleModel: (model: ModelInfo, enabled: boolean) => Promise<void>;
@@ -522,10 +523,20 @@ export const SessionProvider: ParentComponent = (props) => {
     }, 3000);
   }
 
-  async function prompt(content: string) {
+  async function prompt(content: string, images?: ImagePartData[]) {
     const session = activeSession();
     if (!session) return;
     setLoadingSessionId(session.id);
+
+    const imageParts = (images || []).map((img, i) => ({
+      id: 'temp-img-' + Date.now() + '-' + i,
+      messageId: 'temp-' + Date.now(),
+      sessionId: session.id,
+      type: 'image' as const,
+      data: img,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }));
 
     // Optimistic: add user message immediately
     const tempUserMsg: MessageWithParts = {
@@ -535,20 +546,23 @@ export const SessionProvider: ParentComponent = (props) => {
         role: 'user',
         createdAt: Date.now(),
       },
-      parts: [{
-        id: 'temp-part-' + Date.now(),
-        messageId: 'temp-' + Date.now(),
-        sessionId: session.id,
-        type: 'text',
-        data: { text: content },
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      }],
+      parts: [
+        ...imageParts,
+        {
+          id: 'temp-part-' + Date.now(),
+          messageId: 'temp-' + Date.now(),
+          sessionId: session.id,
+          type: 'text',
+          data: { text: content },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
     };
     setMessages((prev) => [...prev, tempUserMsg]);
 
     try {
-      await sendPrompt(session.id, content, selectedModel(), window.innerWidth, window.innerHeight);
+      await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight);
       // Immediately fetch to get the real user message + start seeing assistant
       const msgs = await getMessages(session.id);
       setMessages(msgs);

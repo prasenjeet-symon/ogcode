@@ -56,10 +56,11 @@ type MessageWithParts struct {
 type PartType string
 
 const (
-	PartText     PartType = "text"
-	PartTool     PartType = "tool"
+	PartText      PartType = "text"
+	PartTool      PartType = "tool"
 	PartReasoning PartType = "reasoning"
-	PartFile     PartType = "file"
+	PartFile      PartType = "file"
+	PartImage     PartType = "image"
 )
 
 type Part struct {
@@ -74,6 +75,15 @@ type Part struct {
 
 type TextPartData struct {
 	Text string `json:"text"`
+}
+
+// ImagePartData stores a user-uploaded image attachment. Data is base64-encoded
+// image bytes; MediaType is e.g. "image/jpeg" or "image/png". The Name field
+// carries the original filename (optional, for display only).
+type ImagePartData struct {
+	MediaType string `json:"mediaType"`
+	Data      string `json:"data"`
+	Name      string `json:"name,omitempty"`
 }
 
 type ToolStatus string

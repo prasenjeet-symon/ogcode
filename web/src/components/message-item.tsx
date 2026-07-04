@@ -1,5 +1,5 @@
 import { Index, Show, createEffect, createMemo, createSignal, onMount } from 'solid-js';
-import type { MessageWithParts, Part, TextPartData, ToolPartData, ReasoningPartData } from '../api/client';
+import type { MessageWithParts, Part, TextPartData, ToolPartData, ReasoningPartData, ImagePartData } from '../api/client';
 import MarkdownContent from './markdown-content';
 import FileDiff, { diffStat } from './file-diff';
 import { useNote } from '../context/note';
@@ -264,6 +264,28 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
   );
 }
 
+function ImagePartDisplay(props: { data: ImagePartData }) {
+  const [expanded, setExpanded] = createSignal(false);
+  const src = () => `data:${props.data.mediaType};base64,${props.data.data}`;
+  const name = () => props.data.name || 'image';
+
+  return (
+    <div class="my-2">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded())}
+        class="block rounded-lg overflow-hidden border border-[color:var(--border-subtle)] transition-all var(--spring-sm)"
+      >
+        <img
+          src={src()}
+          alt={name()}
+          class={`object-contain bg-black/20 ${expanded() ? 'max-h-[500px] w-auto' : 'h-24 w-auto max-w-full'}`}
+        />
+      </button>
+    </div>
+  );
+}
+
 function ReasoningPartDisplay(props: { data: ReasoningPartData }) {
   const [expanded, setExpanded] = createSignal(false);
   const charCount = () => props.data.text.length;
@@ -327,6 +349,9 @@ function PartDisplay(props: { part: Part }) {
     <>
       <Show when={props.part.type === 'text'}>
         <TextPartDisplay data={parsePartData<TextPartData>(props.part.data)} />
+      </Show>
+      <Show when={props.part.type === 'image'}>
+        <ImagePartDisplay data={parsePartData<ImagePartData>(props.part.data)} />
       </Show>
       <Show when={props.part.type === 'tool'}>
         <ToolPartDisplay data={parsePartData<ToolPartData>(props.part.data)} />
