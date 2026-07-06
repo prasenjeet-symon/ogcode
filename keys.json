@@ -6,6 +6,12 @@
       "baseURL": "https://api.groq.com/openai/v1",
       "keys": ["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"],
       "defaultModel": "llama-3.3-70b-versatile"
+    },
+    "openrouter": {
+      "collection": "OpenRouter",
+      "baseURL": "https://openrouter.ai/api/v1",
+      "keys": ["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"],
+      "defaultModel": "qwen/qwen3-coder:free"
     }
   }
 }
