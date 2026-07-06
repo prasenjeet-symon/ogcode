@@ -45,6 +45,7 @@ export default function ModelsSettings() {
   const [addId, setAddId] = createSignal('');
   const [addProvider, setAddProvider] = createSignal('');
   const [addName, setAddName] = createSignal('');
+  const [addCollection, setAddCollection] = createSignal('');
   const [addError, setAddError] = createSignal('');
   const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>({});
 
@@ -101,8 +102,8 @@ export default function ModelsSettings() {
     if (!id) { setAddError('Model ID is required'); return; }
     if (!provider) { setAddError('Provider is required'); return; }
     try {
-      await session.addCustomModel(id, provider, name);
-      setAddId(''); setAddProvider(''); setAddName('');
+      await session.addCustomModel(id, provider, name, addCollection().trim() || undefined);
+      setAddId(''); setAddProvider(''); setAddName(''); setAddCollection('');
       setAddError(''); setAddOpen(false);
     } catch (e: any) {
       setAddError(e.message || 'Failed to add model');
@@ -218,6 +219,23 @@ export default function ModelsSettings() {
                        text-[12.5px] text-zinc-100 placeholder-zinc-600
                        focus:outline-none focus:border-[color:var(--border-strong)] transition"
               />
+            </FormField>
+            <FormField label="Collection" hint="Optional. Groups this model in the picker (e.g. DeepSeek, Gemini).">
+              <input
+                type="text"
+                list="collection-presets"
+                value={addCollection()}
+                onInput={(e) => setAddCollection(e.currentTarget.value)}
+                placeholder="e.g. DeepSeek"
+                class="w-full h-9 px-3 rounded-lg bg-[color:var(--bg-elevated)] border border-[color:var(--border-default)]
+                       text-[12.5px] text-zinc-100 placeholder-zinc-600
+                       focus:outline-none focus:border-[color:var(--border-strong)] transition"
+              />
+              <datalist id="collection-presets">
+                <For each={COMPATIBLE_PRESETS}>
+                  {(preset) => <option value={preset.collection}>{preset.label}</option>}
+                </For>
+              </datalist>
             </FormField>
             <Show when={addError()}>
               <div class="flex items-start gap-2 text-[12px] text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
