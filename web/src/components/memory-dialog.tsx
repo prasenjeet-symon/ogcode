@@ -230,40 +230,6 @@ export default function MemoryDialog(props: MemoryDialogProps) {
                 </div>
               </Show>
 
-              {/* How it works section */}
-              <div class="border-t border-[color:var(--border-subtle)] pt-4">
-                <h4 class="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold mb-3">How Memory Works</h4>
-                <div class="space-y-3">
-                  <div class="flex items-start gap-3">
-                    <div class="w-6 h-6 rounded-md bg-[color:var(--accent-soft)] flex items-center justify-center shrink-0 mt-0.5">
-                      <span class="text-[10px] font-bold text-[color:var(--accent)]">1</span>
-                    </div>
-                    <div>
-                      <p class="text-[12px] text-zinc-300 font-medium">Builds knowledge graph</p>
-                      <p class="text-[11px] text-zinc-500 leading-relaxed">Extracts key facts, decisions, and context into a structured memory graph.</p>
-                    </div>
-                  </div>
-                  <div class="flex items-start gap-3">
-                    <div class="w-6 h-6 rounded-md bg-[color:var(--accent-soft)] flex items-center justify-center shrink-0 mt-0.5">
-                      <span class="text-[10px] font-bold text-[color:var(--accent)]">2</span>
-                    </div>
-                    <div>
-                      <p class="text-[12px] text-zinc-300 font-medium">Replaces full history</p>
-                      <p class="text-[11px] text-zinc-500 leading-relaxed">Instead of sending the entire conversation, only relevant memories are injected.</p>
-                    </div>
-                  </div>
-                  <div class="flex items-start gap-3">
-                    <div class="w-6 h-6 rounded-md bg-[color:var(--accent-soft)] flex items-center justify-center shrink-0 mt-0.5">
-                      <span class="text-[10px] font-bold text-[color:var(--accent)]">3</span>
-                    </div>
-                    <div>
-                      <p class="text-[12px] text-zinc-300 font-medium">Saves tokens & cost</p>
-                      <p class="text-[11px] text-zinc-500 leading-relaxed">The shorter context window reduces both token usage and API costs per request.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               {/* Model info */}
               <Show when={props.model}>
                 <div class="mt-4 pt-3 border-t border-[color:var(--border-subtle)] flex items-center justify-between">
