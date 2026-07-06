@@ -50,6 +50,7 @@ func (GrepTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 			searchDir = filepath.Join(tctx.SessionDir, input.Path)
 		}
 	}
+	searchDir = filepath.Clean(searchDir)
 
 	includePattern := input.Include
 	if includePattern == "" {
@@ -62,10 +63,14 @@ func (GrepTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 			return nil
 		}
 		if info.IsDir() {
-			// Skip hidden dirs and common non-source dirs
-			name := info.Name()
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
-				return filepath.SkipDir
+			// Skip hidden dirs and common non-source dirs, but never the search
+			// root itself — if the user explicitly points the tool at a hidden
+			// or vendor dir we should still search it.
+			if path != searchDir {
+				name := info.Name()
+				if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
@@ -82,6 +87,8 @@ func (GrepTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		defer f.Close()
 
 		rel, _ := filepath.Rel(searchDir, path)
+		// Normalize to forward slashes so output is identical on every platform.
+		rel = filepath.ToSlash(rel)
 		scanner := bufio.NewScanner(f)
 		lineNum := 0
 		for scanner.Scan() {
