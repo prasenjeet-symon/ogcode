@@ -1,8 +1,8 @@
 import { useParams, useNavigate, useLocation } from '@solidjs/router';
 import { usePlan } from '../context/plan';
 import { useServer } from '../context/server';
-import { downloadPlanExport } from '../api/client';
-import { createEffect, on, Show, createSignal } from 'solid-js';
+import { downloadPlanExport, getProviderPricing, getModels } from '../api/client';
+import { createEffect, createMemo, on, Show, createSignal } from 'solid-js';
 import PlanSidebar from '../components/plan-sidebar';
 import PlanMessageList from '../components/plan-message-list';
 import PlanPromptInput from '../components/plan-prompt-input';
@@ -10,11 +10,7 @@ import TaskBoard from '../components/task-board';
 import Breadcrumb from '../components/breadcrumb';
 import NotificationBell from '../components/notification-bell';
 import TokenPill from '../components/token-pill';
-
-function formatTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
+import MemoryDialog from '../components/memory-dialog';
 
 function getModelLabel(model: string | undefined): string {
   if (!model) return '';
@@ -34,6 +30,32 @@ function PlanDetailContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = createSignal<'conversation' | 'tasks'>('conversation');
+
+  // Real-time pricing for OpenRouter and Ollama providers.
+  const [dynamicPrices, setDynamicPrices] = createSignal<Record<string, number>>({});
+  const [models, setModels] = createSignal<any[]>([]);
+
+  createEffect(on(() => plan.activePlan()?.model, (model) => {
+    if (!model) return;
+    const provider = model.split('/')[0];
+    if (provider === 'openrouter' || provider === 'ollama') {
+      getProviderPricing(provider).then(setDynamicPrices).catch(() => {});
+    }
+  }));
+
+  // Load models for pricing
+  getModels().then((list) => setModels(list || [])).catch(() => {});
+
+  // Compute total tokens consumed (for MemoryDialog)
+  const planTotalTokens = createMemo(() => {
+    let total = 0;
+    for (const m of plan.messages()) {
+      const t = m.info.tokens;
+      if (!t) continue;
+      total += (t.input ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.output ?? 0);
+    }
+    return total;
+  });
 
   createEffect(on(() => params.id, (id) => {
     if (id) {
@@ -92,32 +114,13 @@ function PlanDetailContent() {
             <TokenPill messages={plan.messages} />
 
             <Show when={server.memoryEnabled()}>
-              <span
-                title={(() => {
-                  const t = plan.memorySavedTokens();
-                  if (t > 0) return `Memory is saving ~${formatTokens(t)} tokens vs. sending full history`;
-                  if (t < 0) return `Memory is adding ~${formatTokens(-t)} tokens of overhead — savings kick in as history grows`;
-                  return 'Agentic memory active';
-                })()}
-                class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border font-medium
-                  ${plan.memorySavedTokens() < 0
-                    ? 'text-amber-400 bg-amber-400/10 border-amber-400/20'
-                    : 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
-                  }`}
-              >
-                <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 00-3.09 3.091z" />
-                </svg>
-                Memory
-                <Show when={plan.memorySavedTokens() > 0}>
-                  <span class="text-emerald-500/70">·</span>
-                  <span class="text-emerald-300">~{formatTokens(plan.memorySavedTokens())} saved</span>
-                </Show>
-                <Show when={plan.memorySavedTokens() < 0}>
-                  <span class="text-amber-500/70">·</span>
-                  <span class="text-amber-300">~{formatTokens(-plan.memorySavedTokens())} overhead</span>
-                </Show>
-              </span>
+              <MemoryDialog
+                savedTokens={plan.memorySavedTokens()}
+                totalTokens={planTotalTokens()}
+                model={plan.activePlan()?.model ?? ''}
+                dynamicPrices={dynamicPrices()}
+                models={models()}
+              />
             </Show>
 
             {/* Tab toggle for narrow screens */}

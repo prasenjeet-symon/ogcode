@@ -1,11 +1,12 @@
 import { useParams, useNavigate, useLocation } from '@solidjs/router';
 import { useSession } from '../context/session';
 import { useServer } from '../context/server';
-import { createEffect, createSignal, on, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, on, Show } from 'solid-js';
 import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
 import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
+import MemoryDialog from '../components/memory-dialog';
 import { getProviderPricing } from '../api/client';
 
 function getModelLabel(model: string | undefined): string {
@@ -13,31 +14,6 @@ function getModelLabel(model: string | undefined): string {
   const parts = model.split('/');
   const name = parts[parts.length - 1];
   return name.replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-preview$/, '');
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function estimateCost(tokens: number, model: string, dynamicPrices: Record<string, number>, models: { id: string; inputPricePerM: number }[]): string | null {
-  // Dynamic prices (from real-time API) take precedence for OpenRouter/Ollama.
-  const base = model.split('/').pop() ?? model;
-  const dynPrice = dynamicPrices[model] ?? dynamicPrices[base];
-  if (dynPrice) {
-    const cost = (tokens / 1_000_000) * dynPrice;
-    if (cost < 0.0001) return null;
-    return cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(3)}`;
-  }
-  // Fallback to catalog prices from the model list.
-  const info = models.find((m) => m.id === model) ?? models.find((m) => m.id === base);
-  if (info && info.inputPricePerM > 0) {
-    const cost = (tokens / 1_000_000) * info.inputPricePerM;
-    if (cost < 0.0001) return null;
-    return cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(3)}`;
-  }
-  return null;
 }
 
 function shortenPath(path: string): string {
@@ -62,6 +38,17 @@ function ChatContent() {
 
   // Real-time pricing for OpenRouter and Ollama providers.
   const [dynamicPrices, setDynamicPrices] = createSignal<Record<string, number>>({});
+
+  // Compute total tokens consumed this session (for MemoryDialog)
+  const sessionTotalTokens = createMemo(() => {
+    let total = 0;
+    for (const m of session.messages()) {
+      const t = m.info.tokens;
+      if (!t) continue;
+      total += (t.input ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.output ?? 0);
+    }
+    return total;
+  });
 
   createEffect(on(
     () => {
@@ -124,39 +111,13 @@ function ChatContent() {
               </span>
             </Show>
             <Show when={server.memoryEnabled()}>
-              <span
-                title={(() => {
-                  const t = session.memorySavedTokens();
-                  if (t > 0) return `Memory is saving ~${formatTokens(t)} tokens vs. sending full history`;
-                  if (t < 0) return `Memory is adding ~${formatTokens(-t)} tokens of overhead — savings kick in as history grows`;
-                  return 'Agentic memory active';
-                })()}
-                class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border font-medium
-                  ${session.memorySavedTokens() > 0
-                    ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
-                    : session.memorySavedTokens() < 0
-                    ? 'text-amber-400 bg-amber-400/10 border-amber-400/20'
-                    : 'text-zinc-400 bg-zinc-400/10 border-zinc-400/20'
-                  }`}
-              >
-                <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 00-3.09 3.091z" />
-                </svg>
-                Memory
-                <Show when={session.memorySavedTokens() > 0}>
-                  <span class="text-emerald-500/70">·</span>
-                  <span class="text-emerald-300">~{formatTokens(session.memorySavedTokens())} saved</span>
-                  <Show when={estimateCost(session.memorySavedTokens(), session.activeSession()?.model ?? '', dynamicPrices(), session.models())}>
-                    <span class="text-emerald-500/70 font-normal">
-                      ({estimateCost(session.memorySavedTokens(), session.activeSession()?.model ?? '', dynamicPrices(), session.models())})
-                    </span>
-                  </Show>
-                </Show>
-                <Show when={session.memorySavedTokens() < 0}>
-                  <span class="text-amber-500/70">·</span>
-                  <span class="text-amber-300">~{formatTokens(-session.memorySavedTokens())} overhead</span>
-                </Show>
-              </span>
+              <MemoryDialog
+                savedTokens={session.memorySavedTokens()}
+                totalTokens={sessionTotalTokens()}
+                model={session.activeSession()?.model ?? ''}
+                dynamicPrices={dynamicPrices()}
+                models={session.models()}
+              />
             </Show>
             <button
               type="button"
