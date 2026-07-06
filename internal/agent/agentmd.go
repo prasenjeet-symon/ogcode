@@ -58,6 +58,11 @@ func LoadAgentMD(dir string) string {
 		if err != nil {
 			relPath = p
 		}
+		// Normalize to forward slashes so the path is identical on every OS.
+		// filepath.Rel returns OS-native separators (backslashes on Windows),
+		// which would leak Windows-style paths into the system prompt and break
+		// the Anthropic prompt-cache prefix byte-for-byte across platforms.
+		relPath = filepath.ToSlash(relPath)
 
 		fmt.Fprintf(&b, "\n\n<agent-md path=\"%s\">\n%s\n</agent-md>", relPath, trimmed)
 		totalSize += len(trimmed)

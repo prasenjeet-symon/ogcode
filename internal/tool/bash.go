@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"time"
 )
 
 type BashTool struct{}
 
-func (BashTool) ID() string          { return "bash" }
+func (BashTool) ID() string { return "bash" }
 func (BashTool) Description() string {
+	if runtime.GOOS == "windows" {
+		return "Execute a shell command and return the output. Commands are executed via \"cmd /c\" (Windows cmd.exe) — write Windows cmd.exe-compatible syntax, not POSIX sh."
+	}
 	return "Execute a shell command and return the output. Commands are executed via \"sh -c\" (POSIX sh) — write POSIX-compatible shell, not bash-only syntax."
 }
 func (BashTool) Parameters() json.RawMessage {
@@ -43,7 +47,15 @@ func (BashTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "sh", "-c", input.Command)
+	// Use the OS-native shell so the tool works on every platform. On Windows
+	// there is no "sh" by default (only installed via WSL/Git Bash/MSYS2), so a
+	// hardcoded "sh -c" fails on every Windows call. cmd /c is always present.
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(cmdCtx, "cmd", "/c", input.Command)
+	} else {
+		cmd = exec.CommandContext(cmdCtx, "sh", "-c", input.Command)
+	}
 	cmd.Dir = tctx.SessionDir
 
 	var stdout, stderr bytes.Buffer

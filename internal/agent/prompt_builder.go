@@ -298,12 +298,17 @@ func detectOSVersion() string {
 // osEnvPrompt returns the OS version and shell environment lines appended to
 // the static system prompt header. Both pieces are static within a session so
 // they stay in the Anthropic cacheable prefix alongside the working directory
-// and platform.
+// and platform. The shell line matches what the bash tool actually invokes
+// on the current OS so the agent writes compatible syntax on every platform.
 func osEnvPrompt() string {
 	info := getOSEnv()
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("\nOS: %s", info.OSVersion))
-	b.WriteString("\nShell: sh (commands are executed via \"sh -c\" — write POSIX-compatible shell, not bash-only syntax)")
+	if runtime.GOOS == "windows" {
+		b.WriteString("\nShell: cmd (commands are executed via \"cmd /c\" — write Windows cmd.exe-compatible syntax, not POSIX sh)")
+	} else {
+		b.WriteString("\nShell: sh (commands are executed via \"sh -c\" — write POSIX-compatible shell, not bash-only syntax)")
+	}
 	return b.String()
 }
 
