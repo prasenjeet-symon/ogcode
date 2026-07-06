@@ -1,4 +1,5 @@
 import { createSignal, Show, createMemo, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 
 interface MemoryDialogProps {
   savedTokens: number;
@@ -112,8 +113,11 @@ export default function MemoryDialog(props: MemoryDialogProps) {
         </Show>
       </button>
 
-      {/* Dialog overlay */}
+      {/* Dialog overlay — portaled to <body> so `position: fixed` anchors to the
+          viewport. Without this it is contained by the header's `backdrop-blur`
+          ancestor and renders off-center with its top (and close button) cut off. */}
       <Show when={open()}>
+        <Portal>
         <div
           class="fixed inset-0 z-[200] flex items-center justify-center"
           onClick={() => setOpen(false)}
@@ -250,6 +254,7 @@ export default function MemoryDialog(props: MemoryDialogProps) {
             </div>
           </div>
         </div>
+        </Portal>
       </Show>
     </>
   );
