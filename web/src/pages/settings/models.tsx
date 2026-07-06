@@ -2,7 +2,7 @@ import { For, Show, createSignal, createMemo, onMount } from 'solid-js';
 import { useSession } from '../../context/session';
 import type { ModelInfo, ProviderConfig } from '../../api/client';
 import { getProviderConfigs, setProviderConfig } from '../../api/client';
-import { PROVIDER_DEFS, COMPATIBLE_PRESETS, modelGroup, type CompatiblePreset } from '../../lib/providers';
+import { PROVIDER_DEFS, COMPATIBLE_PRESETS, modelGroup, subProviderLabel, type CompatiblePreset } from '../../lib/providers';
 
 interface ProviderMeta {
   label: string;
@@ -146,20 +146,9 @@ export default function ModelsSettings() {
         </button>
       </header>
 
-      {/* Info card: using OpenAI-compatible providers */}
-      <CompatibleProvidersCard />
-
-      {/* Provider credentials */}
-      <ProviderCredsPanel />
-
-      {/* Stats strip */}
-      <div class="grid grid-cols-3 gap-px rounded-xl overflow-hidden bg-[color:var(--border-subtle)] mb-6">
-        <StatCell label="Enabled" value={totals().enabled} hint={`of ${totals().total}`} />
-        <StatCell label="Available" value={totals().total} hint={`across ${allProviders().length} providers`} />
-        <StatCell label="Custom" value={totals().custom} hint="user added" />
-      </div>
-
-      {/* Add custom model panel */}
+      {/* Add custom model panel — rendered at the very top of the section so it
+          is immediately visible the moment the "Add custom model" CTA is clicked,
+          instead of opening below the fold under the info/credentials panels. */}
       <Show when={addOpen()}>
         <div class="mb-6 rounded-xl border border-[color:var(--border-default)] bg-[color:var(--bg-surface)] overflow-hidden animate-fade-in">
           <div class="px-5 py-3.5 border-b border-[color:var(--border-subtle)] flex items-center justify-between">
@@ -190,6 +179,7 @@ export default function ModelsSettings() {
               <FormField label="Model ID" required>
                 <input
                   type="text"
+                  ref={(el) => requestAnimationFrame(() => el.focus())}
                   value={addId()}
                   onInput={(e) => setAddId(e.currentTarget.value)}
                   placeholder="e.g. gpt-4o-mini"
@@ -267,6 +257,19 @@ export default function ModelsSettings() {
           </div>
         </div>
       </Show>
+
+      {/* Info card: using OpenAI-compatible providers */}
+      <CompatibleProvidersCard />
+
+      {/* Provider credentials */}
+      <ProviderCredsPanel />
+
+      {/* Stats strip */}
+      <div class="grid grid-cols-3 gap-px rounded-xl overflow-hidden bg-[color:var(--border-subtle)] mb-6">
+        <StatCell label="Enabled" value={totals().enabled} hint={`of ${totals().total}`} />
+        <StatCell label="Available" value={totals().total} hint={`across ${allProviders().length} providers`} />
+        <StatCell label="Custom" value={totals().custom} hint="user added" />
+      </div>
 
       {/* Toolbar: search + filter */}
       <div class="flex items-center gap-3 mb-5">
@@ -364,6 +367,9 @@ function ModelRow(props: { model: ModelInfo; onToggle: () => void; onRemove: () 
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-[13px] text-zinc-100 font-medium">{props.model.name}</span>
+          <Show when={subProviderLabel(props.model)}>
+            {(label) => <Badge tone="zinc">{label()}</Badge>}
+          </Show>
           <Show when={props.model.default}>
             <Badge tone="blue">Default</Badge>
           </Show>

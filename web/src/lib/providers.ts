@@ -67,6 +67,30 @@ export const CHAT_PROVIDERS = [
 // the providerId when no collection is set, so legacy custom models still group
 // correctly).
 export function modelGroup(m: { providerId: string; isCustom?: boolean; collection?: string }): string {
-  if (m.isCustom && m.collection) return m.collection;
+  // Prefer an explicit collection label (e.g. the free-tier "ogcode" pool, or an
+  // OpenAI-compatible provider's collection) so those models group under their
+  // collection instead of a raw provider id. Built-in providers carry no
+  // collection and fall back to the provider id.
+  if (m.collection) return m.collection;
   return m.providerId;
+}
+
+// Free-pool providers use ids like "ogcode-groq" / "ogcode-openrouter". Their
+// models all group under the shared "ogcode" collection, so this returns the
+// underlying provider's display label (e.g. "Groq", "OpenRouter") to tag each
+// model with where it actually comes from. Returns null for non-free-pool
+// models (whose provider is already the group header).
+const SUBPROVIDER_LABELS: Record<string, string> = {
+  groq: 'Groq',
+  openrouter: 'OpenRouter',
+  cerebras: 'Cerebras',
+  sambanova: 'SambaNova',
+  github_models: 'GitHub Models',
+  nvidia: 'NVIDIA',
+};
+
+export function subProviderLabel(m: { providerId: string }): string | null {
+  if (!m.providerId.startsWith('ogcode-')) return null;
+  const key = m.providerId.slice('ogcode-'.length);
+  return SUBPROVIDER_LABELS[key] ?? (key.charAt(0).toUpperCase() + key.slice(1));
 }

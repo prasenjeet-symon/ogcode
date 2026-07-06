@@ -117,6 +117,21 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Enforce a single global default so a new user's model selection is
+	// deterministic. Every provider's Models() flags its own default model, which
+	// would otherwise surface several "default" models and a nondeterministic
+	// pick in the UI. Keep the flag only on the highest-priority registered
+	// provider's default (see provider.ProviderPriority / Registry.Default).
+	defaultProviderID := ""
+	if d := s.registry.Default(); d != nil {
+		defaultProviderID = d.ID()
+	}
+	for i := range result {
+		if result[i].Default && result[i].ProviderID != defaultProviderID {
+			result[i].Default = false
+		}
+	}
+
 	if result == nil {
 		result = []ModelEntry{}
 	}

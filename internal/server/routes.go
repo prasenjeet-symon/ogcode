@@ -44,6 +44,7 @@ func (s *Server) routes() http.Handler {
 		r.Post("/providers/config/{id}", s.handleSetProviderConfig)
 		r.Post("/providers/config/{id}/validate", s.handleValidateProviderConfig)
 		r.Get("/providers/ollama/status", s.handleOllamaStatus)
+		r.Get("/providers/free", s.handleFreeProviders)
 
 		r.Get("/pricing", s.handleGetPricing)
 

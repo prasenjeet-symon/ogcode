@@ -298,7 +298,15 @@ func (r *Registry) RefreshModels() {
 
 // ProviderPriority is the stable order used to choose a default provider when a
 // session does not specify a model.
-var ProviderPriority = []string{"anthropic", "openai", "openrouter", "ollama"}
+//
+// User-configured first-party providers always win. Free-tier providers
+// (keyed "ogcode-<collection>") are appended so the app works out-of-the-box
+// with the community key pool, but never override a user's own credentials.
+var ProviderPriority = []string{
+	"anthropic", "openai", "openrouter", "ollama",
+	"ogcode-openrouter", "ogcode-groq", "ogcode-cerebras", "ogcode-sambanova",
+	"ogcode-github_models", "ogcode-nvidia",
+}
 
 // Default returns the highest-priority registered provider, or nil if the
 // registry has no providers.

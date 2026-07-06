@@ -515,10 +515,53 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 			}
 		}
 	}
+	// Auto-provision free-tier providers from the shared community key pool
+	// (a public GitHub-hosted JSON of OpenAI-compatible provider keys). These
+	// give ogcode a zero-friction out-of-the-box experience: the user can start
+	// chatting immediately using a free model without configuring anything.
+	//
+	// Free providers are keyed "ogcode-<collection>" so they coexist as
+	// separately selectable instances. They never override a user's own
+	// first-party credentials — those are registered above under their
+	// canonical IDs ("openai", "anthropic", …). The fetch is best-effort and
+	// cached locally so offline launches still work.
+	freeCtx, freeCancel := context.WithTimeout(context.Background(), provider.FreePoolTimeout)
+	freeDefs, freeErr := provider.FetchFreePool(freeCtx)
+	freeCancel()
+	if freeErr != nil {
+		slog.Warn("free pool: unavailable (onboarding will require user-configured keys)", "err", freeErr)
+	} else {
+		for id, def := range freeDefs {
+			regID := "ogcode-" + id
+			if _, exists := providers[regID]; exists {
+				continue // already registered (e.g. env var override)
+			}
+			// Don't shadow a user-configured OpenAI provider pointing at the
+			// same collection's base URL.
+			if op, ok := providers["openai"].(*provider.OpenAIProvider); ok && op != nil {
+				if collectionFromBaseURLEq(op, def.BaseURL) {
+					continue
+				}
+			}
+			p, err := provider.NewFreePoolProvider(def)
+			if err != nil {
+				slog.Warn("free pool: skipping provider (no keys)", "id", id, "err", err)
+				continue
+			}
+			providers[regID] = p
+			slog.Info("registered free-tier provider", "id", regID, "collection", def.Collection, "baseURL", def.BaseURL)
+		}
+	}
+
 	return providers
 }
 
-// reloadProviders rebuilds the provider registry from the current DB + env
+// collectionFromBaseURLEq reports whether an existing OpenAI provider's base URL
+// resolves to the same collection as the given base URL. Used to avoid
+// registering a free-pool provider that duplicates a user-configured endpoint.
+func collectionFromBaseURLEq(p *provider.OpenAIProvider, baseURL string) bool {
+	return p != nil && provider.CollectionFromBaseURL(p.BaseURL()) == provider.CollectionFromBaseURL(baseURL)
+}
 // credentials and swaps it into the running server in place, so credential
 // changes from the settings/onboarding UI take effect without a restart. The
 // shared *provider.Registry pointer (held by the loop runner and handlers) is

@@ -146,3 +146,30 @@ func (s *Server) handleOllamaStatus(w http.ResponseWriter, r *http.Request) {
 		BaseURL:   st.BaseURL,
 	})
 }
+
+// freeProviderResponse describes one active free-tier provider from the
+// community key pool. Keys are never sent to the frontend.
+type freeProviderResponse struct {
+	Collection   string `json:"collection"`
+	BaseURL      string `json:"baseUrl"`
+	DefaultModel string `json:"defaultModel"`
+}
+
+// handleFreeProviders lists the active free-tier providers sourced from the
+// shared community key pool (a public GitHub-hosted JSON). The frontend uses
+// this to satisfy the onboarding gate — when any free provider is available,
+// the user can start chatting immediately without configuring their own keys.
+// Keys are never exposed; only the collection name, base URL, and default
+// model are returned.
+func (s *Server) handleFreeProviders(w http.ResponseWriter, r *http.Request) {
+	defs := provider.FreeProviderList()
+	out := make([]freeProviderResponse, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, freeProviderResponse{
+			Collection:   d.Collection,
+			BaseURL:      d.BaseURL,
+			DefaultModel: d.DefaultModel,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}

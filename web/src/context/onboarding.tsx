@@ -1,5 +1,5 @@
 import { createContext, useContext, createSignal, type ParentComponent } from 'solid-js';
-import { getProviderConfigs, getOllamaStatus, type ProviderConfig, type OllamaStatus } from '../api/client';
+import { getOllamaStatus, type OllamaStatus } from '../api/client';
 
 interface OnboardingContextValue {
   // True once the initial provider-config check has completed.
@@ -21,27 +21,11 @@ interface OnboardingContextValue {
 
 const OnboardingContext = createContext<OnboardingContextValue>();
 
-// A provider counts as "configured" when its key is stored in the DB (apiKey
-// sentinel "__SET__") or supplied via environment variable. Keyless local
-// providers (Ollama) instead count as configured once a base URL is set —
-// otherwise completing the wizard with Ollama would leave the app looking
-// unconfigured and bounce the user back into onboarding.
-//
-// Additionally, a *running* local Ollama instance (detected via the backend
-// health probe) counts as configured so the user skips the API-key wizard
-// entirely (zero-config flow).
-function isConfigured(configs: ProviderConfig[], ollama: OllamaStatus | null): boolean {
-  if (configs.some(
-    (c) =>
-      c.apiKey === '__SET__' ||
-      c.envKeySet ||
-      (c.providerId === 'ollama' && (c.baseUrl !== '' || c.envBaseURLSet)),
-  )) {
-    return true;
-  }
-  // A running Ollama server satisfies the gate even with no saved config.
-  return !!ollama?.running;
-}
+// Onboarding is disabled for new users: the community free-tier key pool makes
+// the app usable out of the box, so nobody is forced through the setup wizard.
+// `needsOnboarding` is therefore always false. The /onboarding page itself
+// stays reachable manually (e.g. from Settings) for users who want to add their
+// own provider keys.
 
 export const OnboardingProvider: ParentComponent = (props) => {
   const [loaded, setLoaded] = createSignal(false);
@@ -51,14 +35,11 @@ export const OnboardingProvider: ParentComponent = (props) => {
 
   const refresh = async () => {
     try {
-      const [configs, ollama] = await Promise.all([
-        getProviderConfigs(),
-        getOllamaStatus().catch(() => null),
-      ]);
+      // Onboarding is disabled — new users get working free models out of the
+      // box, so they are never forced into the setup wizard. We still probe
+      // Ollama so the (manually reachable) onboarding page can show its status.
+      const ollama = await getOllamaStatus().catch(() => null);
       setOllamaStatus(ollama);
-      setNeedsOnboarding(!isConfigured(configs, ollama));
-    } catch {
-      // Fail open: if the check errors, never trap the user in onboarding.
       setNeedsOnboarding(false);
     } finally {
       setLoaded(true);

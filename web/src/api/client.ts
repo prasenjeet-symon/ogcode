@@ -227,6 +227,21 @@ export function getOllamaStatus(): Promise<OllamaStatus> {
   return fetchAPI('/providers/ollama/status');
 }
 
+// Free-tier providers sourced from the shared community key pool (a public
+// GitHub-hosted JSON of OpenAI-compatible providers). Their presence lets the
+// onboarding gate skip the credential wizard — the user can start chatting
+// immediately without configuring any keys. Keys are never exposed by the
+// backend; only the collection, base URL, and default model are returned.
+export interface FreeProvider {
+  collection: string;
+  baseUrl: string;
+  defaultModel: string;
+}
+
+export function getFreeProviders(): Promise<FreeProvider[]> {
+  return fetchAPI('/providers/free');
+}
+
 // Pricing API — returns model ID → USD per 1 million input tokens
 export function getProviderPricing(provider: string): Promise<Record<string, number>> {
   return fetchAPI(`/pricing?provider=${encodeURIComponent(provider)}`);

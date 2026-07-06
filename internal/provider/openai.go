@@ -26,6 +26,7 @@ type OpenAIProvider struct {
 	model      string
 	baseURL    string
 	collection string // grouping label for dynamically-fetched models ("" = none)
+	freePool   bool   // provisioned from the community free-tier key pool
 
 	// cachedModels caches models fetched from /v1/models for Ollama cloud.
 	// Nil means not yet fetched; empty slice means fetched but none found.
@@ -214,6 +215,11 @@ func NewOllamaProvider() *OpenAIProvider {
 }
 
 func (p *OpenAIProvider) ID() string { return p.id }
+
+// BaseURL returns the API base URL the provider is configured to use. Exposed
+// so callers (e.g. the free-pool registration) can compare endpoints without
+// reaching into the unexported field directly.
+func (p *OpenAIProvider) BaseURL() string { return p.baseURL }
 
 // RefreshModels clears the cached model list so the next call to Models()
 // will re-fetch from the endpoint (for cloud providers).
@@ -470,12 +476,47 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 		}
 	}
 
+	// Community free-pool providers: restrict/curate the fetched list so a shared
+	// public key is safe (free models only for OpenRouter) and every model is
+	// enabled by default — a new user lands ready to chat, not on an empty picker.
+	if p.freePool {
+		list = curateFreePoolModels(list, p.baseURL)
+	}
 	for i := range list {
 		if list[i].ID == p.model {
 			list[i].Default = true
 		}
 	}
 	return list
+}
+
+// curateFreePoolModels tailors a free-tier community-pool provider's
+// dynamically-fetched model list. For OpenRouter the shared pool key is public
+// and can reach paid models, so the list is restricted to the free (":free")
+// variants — this honours the "use OpenRouter's free models" intent and keeps a
+// public key from being used to drain credits on paid models through the app.
+// Every surviving model is marked ActiveByDefault so a brand-new user lands with
+// usable free models already enabled instead of an empty, all-disabled picker.
+func curateFreePoolModels(fetched []ModelInfo, baseURL string) []ModelInfo {
+	openRouter := strings.Contains(strings.ToLower(baseURL), "openrouter.ai")
+	out := make([]ModelInfo, 0, len(fetched))
+	for _, m := range fetched {
+		if openRouter && !strings.HasSuffix(m.ID, ":free") {
+			continue
+		}
+		m.ActiveByDefault = true
+		out = append(out, m)
+	}
+	// If the free-only filter removed everything (e.g. OpenRouter renamed its
+	// free tier), don't leave the provider empty — enable the raw list instead.
+	if len(out) == 0 {
+		out = make([]ModelInfo, 0, len(fetched))
+		for _, m := range fetched {
+			m.ActiveByDefault = true
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // collectionFromBaseURL infers a grouping label from an OpenAI-compatible base
@@ -490,12 +531,28 @@ func collectionFromBaseURL(baseURL string) string {
 		return "DeepSeek"
 	case strings.Contains(u, "groq.com"):
 		return "Groq"
+	case strings.Contains(u, "openrouter.ai"):
+		return "OpenRouter"
+	case strings.Contains(u, "cerebras.ai"):
+		return "Cerebras"
+	case strings.Contains(u, "sambanova"):
+		return "SambaNova"
+	case strings.Contains(u, "models.inference.ai.azure.com"):
+		return "GitHub Models"
+	case strings.Contains(u, "integrate.api.nvidia.com"):
+		return "NVIDIA"
 	case strings.Contains(u, "together.xyz"):
 		return "Together"
 	case strings.Contains(u, "mistral.ai"):
 		return "Mistral"
 	}
 	return ""
+}
+
+// CollectionFromBaseURL is the exported form of collectionFromBaseURL for use
+// outside the provider package (e.g. server-side provider registration).
+func CollectionFromBaseURL(baseURL string) string {
+	return collectionFromBaseURL(baseURL)
 }
 
 func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error) {
