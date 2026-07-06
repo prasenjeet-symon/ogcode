@@ -3,7 +3,7 @@ import { For, Show, createSignal, createMemo, onMount } from 'solid-js';
 import { useOnboarding } from '../context/onboarding';
 import { useSession } from '../context/session';
 import { setProviderConfig, validateProviderConfig, type ModelInfo } from '../api/client';
-import { PROVIDER_DEFS, type ProviderDef } from '../lib/providers';
+import { PROVIDER_DEFS, COMPATIBLE_PRESETS, type ProviderDef, type CompatiblePreset } from '../lib/providers';
 
 // Providers that work without an API key (local).
 const KEYLESS = new Set(['ollama']);
@@ -50,6 +50,10 @@ export default function Onboarding() {
   const [providerId, setProviderId] = createSignal('');
   const [apiKey, setApiKey] = createSignal('');
   const [baseUrl, setBaseUrl] = createSignal('');
+  // When the user picks an OpenAI-compatible provider (DeepSeek, Gemini, …) we
+  // record the preset so step 2 can show the right base URL + key hint and step
+  // 3 can group models under the collection name.
+  const [compatPreset, setCompatPreset] = createSignal<CompatiblePreset | null>(null);
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal('');
   const [selectedModelId, setSelectedModelId] = createSignal('');
@@ -99,9 +103,24 @@ export default function Onboarding() {
 
   const pickProvider = (id: string) => {
     setProviderId(id);
+    setCompatPreset(null);
     setError('');
     setApiKey('');
     setBaseUrl(id === 'ollama' ? OLLAMA_DEFAULT_BASE_URL : '');
+    setModelQuery('');
+    resetTest();
+    setStep(2);
+  };
+
+  // Pick an OpenAI-compatible provider (DeepSeek, Gemini, Groq, …). These are
+  // routed through the OpenAI provider with a custom base URL, and their models
+  // are grouped in the picker under the collection name.
+  const pickCompatible = (preset: CompatiblePreset) => {
+    setProviderId('openai');
+    setCompatPreset(preset);
+    setError('');
+    setApiKey('');
+    setBaseUrl(preset.baseURL);
     setModelQuery('');
     resetTest();
     setStep(2);
@@ -223,7 +242,14 @@ export default function Onboarding() {
 
   const back = () => {
     setError('');
-    setStep((s) => (s === 'ready' || s === 3 ? 2 : s === 2 ? 1 : s) as 1 | 2 | 3);
+    setStep((s) => {
+      if (s === 3 || s === 'ready') return 2;
+      if (s === 2) {
+        setCompatPreset(null);
+        return 1;
+      }
+      return s;
+    });
   };
 
   return (
@@ -292,19 +318,74 @@ export default function Onboarding() {
 
         {/* Step 1 — pick provider */}
         <Show when={step() === 1}>
-          <div class="grid grid-cols-2 gap-3">
-            <For each={PROVIDER_DEFS}>
-              {(p) => (
-                <button
-                  type="button"
-                  onClick={() => pickProvider(p.id)}
-                  class={`flex items-center gap-3 rounded-xl border border-zinc-800 ${p.bg} p-4 text-left ring-1 ${p.ring} transition hover:border-zinc-600`}
-                >
-                  <span class={`h-2.5 w-2.5 rounded-full ${p.dot}`} />
-                  <span class="text-sm font-medium text-zinc-100">{p.label}</span>
-                </button>
-              )}
-            </For>
+          <div class="space-y-5">
+            {/* First-party providers — these have native API support and a
+                dedicated onboarding flow. */}
+            <div>
+              <div class="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                Recommended
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <For each={PROVIDER_DEFS.filter((p) => p.firstParty)}>
+                  {(p) => (
+                    <button
+                      type="button"
+                      onClick={() => pickProvider(p.id)}
+                      class={`flex items-center gap-3 rounded-xl border border-zinc-800 ${p.bg} p-4 text-left ring-1 ${p.ring} transition hover:border-zinc-600`}
+                    >
+                      <span class={`h-2.5 w-2.5 rounded-full ${p.dot}`} />
+                      <span class="text-sm font-medium text-zinc-100">{p.label}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            {/* OpenAI-compatible providers — routed through the OpenAI provider
+                with a custom base URL. Models are grouped by collection name. */}
+            <div>
+              <div class="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                OpenAI-compatible
+              </div>
+              <div class="grid grid-cols-1 gap-2">
+                <For each={COMPATIBLE_PRESETS}>
+                  {(preset) => (
+                    <button
+                      type="button"
+                      onClick={() => pickCompatible(preset)}
+                      class="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3.5 text-left transition hover:border-zinc-600"
+                    >
+                      <span class={`h-2.5 w-2.5 rounded-full ${preset.dot}`} />
+                      <div class="min-w-0">
+                        <div class="text-sm font-medium text-zinc-100">{preset.collection}</div>
+                        <div class="truncate text-[11px] text-zinc-500">{preset.baseURL}</div>
+                      </div>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            {/* Other / local providers */}
+            <div>
+              <div class="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                Local &amp; aggregator
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <For each={PROVIDER_DEFS.filter((p) => !p.firstParty)}>
+                  {(p) => (
+                    <button
+                      type="button"
+                      onClick={() => pickProvider(p.id)}
+                      class={`flex items-center gap-3 rounded-xl border border-zinc-800 ${p.bg} p-4 text-left ring-1 ${p.ring} transition hover:border-zinc-600`}
+                    >
+                      <span class={`h-2.5 w-2.5 rounded-full ${p.dot}`} />
+                      <span class="text-sm font-medium text-zinc-100">{p.label}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
           </div>
         </Show>
 
@@ -312,9 +393,18 @@ export default function Onboarding() {
         <Show when={step() === 2}>
           <div class="space-y-4">
             <div class="flex items-center gap-2 text-sm text-zinc-300">
-              <span class={`h-2.5 w-2.5 rounded-full ${def()?.dot}`} />
-              <span class="font-medium">{def()?.label}</span>
+              <span class={`h-2.5 w-2.5 rounded-full ${compatPreset()?.dot || def()?.dot}`} />
+              <span class="font-medium">
+                {compatPreset() ? compatPreset()!.label : def()?.label}
+              </span>
             </div>
+
+            <Show when={compatPreset()}>
+              <p class="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-xs text-zinc-400">
+                {compatPreset()!.collection} uses an OpenAI-compatible API. Your
+                models will be grouped under <span class="font-medium text-zinc-300">{compatPreset()!.collection}</span> in the model picker and routed through the OpenAI provider.
+              </p>
+            </Show>
 
             <Show when={showKey()}>
               <label class="block">
@@ -329,7 +419,7 @@ export default function Onboarding() {
                     setApiKey(e.currentTarget.value);
                     resetTest();
                   }}
-                  placeholder={KEY_HINTS[providerId()] || ''}
+                  placeholder={compatPreset()?.keyHint || KEY_HINTS[providerId()] || ''}
                   class="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
                 />
               </label>
@@ -338,7 +428,7 @@ export default function Onboarding() {
             <Show when={def()?.hasBaseURL}>
               <label class="block">
                 <span class="mb-1.5 block text-xs font-medium text-zinc-400">
-                  Base URL{providerId() === 'ollama' ? '' : ' (optional)'}
+                  Base URL{providerId() === 'ollama' || compatPreset() ? '' : ' (optional)'}
                 </span>
                 <input
                   type="text"
