@@ -146,6 +146,9 @@ export default function ModelsSettings() {
         </button>
       </header>
 
+      {/* Info card: using OpenAI-compatible providers */}
+      <CompatibleProvidersCard />
+
       {/* Provider credentials */}
       <ProviderCredsPanel />
 
@@ -476,6 +479,96 @@ function FilterPill(props: { active: boolean; onClick: () => void; children: any
     >
       {props.children}
     </button>
+  );
+}
+
+// ---------- OpenAI-compatible providers info card ----------
+
+function CompatibleProvidersCard() {
+  const [dismissed, setDismissed] = createSignal(false);
+
+  return (
+    <Show when={!dismissed()}>
+      <div class="mb-6 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] overflow-hidden">
+        <div class="px-5 py-4">
+          {/* Header */}
+          <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 ring-1 ring-emerald-400/20 flex items-center justify-center shrink-0 mt-0.5">
+              <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13.5px] font-semibold text-zinc-100">Use OpenAI-compatible providers</div>
+              <p class="text-[12px] text-zinc-400 mt-1 leading-relaxed">
+                Providers like DeepSeek, Google Gemini, Groq, Together AI, and Mistral AI all speak the OpenAI API.
+                You can connect to any of them through the <span class="text-zinc-200 font-medium">OpenAI</span> provider by
+                setting a custom <span class="text-zinc-200 font-medium">Base URL</span> and your provider's API key — no separate integration needed.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              class="w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition shrink-0"
+              title="Dismiss"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Steps */}
+          <ol class="mt-4 space-y-2.5">
+            <StepRow n={1}>
+              Open the <span class="text-zinc-200 font-medium">API Keys</span> section below and expand the
+              <span class="inline-flex items-center gap-1.5 mx-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-400" />
+                <span class="text-zinc-200 font-medium">OpenAI</span>
+              </span>
+              row.
+            </StepRow>
+            <StepRow n={2}>
+              Paste your provider's API key (e.g. a DeepSeek <code class="font-mono text-zinc-300 bg-[color:var(--bg-elevated)] px-1.5 py-0.5 rounded text-[11px]">sk-…</code> key or a Google
+              <code class="font-mono text-zinc-300 bg-[color:var(--bg-elevated)] px-1.5 py-0.5 rounded text-[11px] mx-1">AIza…</code> key).
+            </StepRow>
+            <StepRow n={3}>
+              Set the <span class="text-zinc-200 font-medium">Base URL</span> to your provider's OpenAI-compatible endpoint (see the list below).
+            </StepRow>
+            <StepRow n={4}>
+              Save and restart ogcode, then click <span class="text-zinc-200 font-medium">Add custom model</span> to add a model from that provider.
+              Use the <span class="text-zinc-200 font-medium">Collection</span> field to group it under the provider name in the model picker.
+            </StepRow>
+          </ol>
+
+          {/* Preset list */}
+          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            <For each={COMPATIBLE_PRESETS}>
+              {(preset) => (
+                <div class="flex items-center gap-2.5 rounded-lg bg-[color:var(--bg-elevated)]/60 border border-[color:var(--border-subtle)] px-3 py-2">
+                  <span class={`w-2 h-2 rounded-full ${preset.dot} shrink-0`} />
+                  <div class="min-w-0 flex-1">
+                    <div class="text-[12px] font-medium text-zinc-200 truncate">{preset.label}</div>
+                    <div class="text-[10.5px] text-zinc-500 font-mono truncate">{preset.baseURL}</div>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
+      </div>
+    </Show>
+  );
+}
+
+function StepRow(props: { n: number; children: any }) {
+  return (
+    <li class="flex items-start gap-2.5">
+      <span class="shrink-0 w-5 h-5 rounded-full bg-[color:var(--accent-soft)] text-[color:var(--accent)] flex items-center justify-center text-[11px] font-semibold tabular-nums mt-px">
+        {props.n}
+      </span>
+      <span class="text-[12px] text-zinc-400 leading-relaxed">{props.children}</span>
+    </li>
   );
 }
 
