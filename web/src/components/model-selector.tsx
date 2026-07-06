@@ -2,11 +2,13 @@ import { createSignal, For, Show, createMemo } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { useSession } from '../context/session';
 import type { ModelInfo } from '../api/client';
+import { modelGroup } from '../lib/providers';
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   openrouter: 'OpenRouter',
+  ollama: 'Ollama',
   google: 'Google',
   mistral: 'Mistral',
 };
@@ -15,6 +17,7 @@ const PROVIDER_DOT: Record<string, string> = {
   anthropic: 'bg-orange-400',
   openai: 'bg-emerald-400',
   openrouter: 'bg-violet-400',
+  ollama: 'bg-sky-400',
   google: 'bg-blue-400',
   mistral: 'bg-rose-400',
 };
@@ -23,9 +26,39 @@ const PROVIDER_TEXT: Record<string, string> = {
   anthropic: 'text-orange-400',
   openai: 'text-emerald-400',
   openrouter: 'text-violet-400',
+  ollama: 'text-sky-400',
   google: 'text-blue-400',
   mistral: 'text-rose-400',
 };
+
+// Collection/group color and label overrides so OpenAI-compatible providers
+// (Gemini, DeepSeek, Groq, …) get their own visual identity in the picker
+// instead of all appearing as "OpenAI".
+const COLLECTION_DOT: Record<string, string> = {
+  Gemini: 'bg-blue-400',
+  DeepSeek: 'bg-indigo-400',
+  Groq: 'bg-amber-400',
+  Together: 'bg-teal-400',
+  Mistral: 'bg-rose-400',
+};
+
+const COLLECTION_TEXT: Record<string, string> = {
+  Gemini: 'text-blue-400',
+  DeepSeek: 'text-indigo-400',
+  Groq: 'text-amber-400',
+  Together: 'text-teal-400',
+  Mistral: 'text-rose-400',
+};
+
+function groupLabel(group: string): string {
+  return PROVIDER_LABELS[group] || group;
+}
+function groupDot(group: string): string {
+  return COLLECTION_DOT[group] || PROVIDER_DOT[group] || 'bg-zinc-500';
+}
+function groupText(group: string): string {
+  return COLLECTION_TEXT[group] || PROVIDER_TEXT[group] || 'text-zinc-500';
+}
 
 interface ModelSelectorProps {
   selectedModel?: () => string;
@@ -66,9 +99,10 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
   const grouped = createMemo((): Map<string, ModelInfo[]> => {
     const map = new Map<string, ModelInfo[]>();
     for (const m of enabledModels()) {
-      const list = map.get(m.providerId) || [];
+      const group = modelGroup(m);
+      const list = map.get(group) || [];
       list.push(m);
-      map.set(m.providerId, list);
+      map.set(group, list);
     }
     return map;
   });
@@ -100,7 +134,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
                transition-colors whitespace-nowrap max-w-[200px]"
       >
         <span class={`w-1.5 h-1.5 rounded-full ${
-          PROVIDER_DOT[selectedModelInfo()?.providerId || ''] || 'bg-zinc-500'
+          selectedModelInfo() ? groupDot(modelGroup(selectedModelInfo()!)) : 'bg-zinc-500'
         }`} />
         <span class="truncate">{selectedModelInfo()?.name || 'Select model'}</span>
         <svg class="w-3 h-3 text-zinc-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -119,15 +153,13 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
             }}
           >
           <For each={[...grouped().entries()]}>
-            {([providerId, models]) => (
+            {([group, models]) => (
               <div>
                 <div class={`px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
-                  PROVIDER_TEXT[providerId] || 'text-zinc-500'
+                  groupText(group)
                 }`}>
-                  <span class={`w-1.5 h-1.5 rounded-full ${
-                    PROVIDER_DOT[providerId] || 'bg-zinc-500'
-                  }`} />
-                  {PROVIDER_LABELS[providerId] || providerId}
+                  <span class={`w-1.5 h-1.5 rounded-full ${groupDot(group)}`} />
+                  {groupLabel(group)}
                 </div>
                 <For each={models}>
                   {(model) => {

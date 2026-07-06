@@ -2,7 +2,7 @@ import { For, Show, createSignal, createMemo, onMount } from 'solid-js';
 import { useSession } from '../../context/session';
 import type { ModelInfo, ProviderConfig } from '../../api/client';
 import { getProviderConfigs, setProviderConfig } from '../../api/client';
-import { PROVIDER_DEFS } from '../../lib/providers';
+import { PROVIDER_DEFS, COMPATIBLE_PRESETS, modelGroup, type CompatiblePreset } from '../../lib/providers';
 
 interface ProviderMeta {
   label: string;
@@ -21,8 +21,18 @@ const PROVIDER_META: Record<string, ProviderMeta> = {
   mistral:    { label: 'Mistral',    dot: 'bg-rose-400',    text: 'text-rose-300',    bg: 'bg-rose-500/10',    ring: 'ring-rose-400/20' },
 };
 
+// Collection/group visual metadata for OpenAI-compatible providers so they get
+// their own section styling instead of collapsing under "OpenAI".
+const COLLECTION_META: Record<string, ProviderMeta> = {
+  Gemini:   { label: 'Gemini',   dot: 'bg-blue-400',   text: 'text-blue-300',   bg: 'bg-blue-500/10',   ring: 'ring-blue-400/20' },
+  DeepSeek: { label: 'DeepSeek', dot: 'bg-indigo-400', text: 'text-indigo-300', bg: 'bg-indigo-500/10', ring: 'ring-indigo-400/20' },
+  Groq:     { label: 'Groq',     dot: 'bg-amber-400',  text: 'text-amber-300',  bg: 'bg-amber-500/10',  ring: 'ring-amber-400/20' },
+  Together: { label: 'Together AI', dot: 'bg-teal-400', text: 'text-teal-300', bg: 'bg-teal-500/10',   ring: 'ring-teal-400/20' },
+  Mistral:  { label: 'Mistral AI',  dot: 'bg-rose-400', text: 'text-rose-300', bg: 'bg-rose-500/10',  ring: 'ring-rose-400/20' },
+};
+
 function providerMeta(id: string): ProviderMeta {
-  return PROVIDER_META[id] || { label: id, dot: 'bg-zinc-400', text: 'text-zinc-300', bg: 'bg-zinc-500/10', ring: 'ring-zinc-400/20' };
+  return PROVIDER_META[id] || COLLECTION_META[id] || { label: id, dot: 'bg-zinc-400', text: 'text-zinc-300', bg: 'bg-zinc-500/10', ring: 'ring-zinc-400/20' };
 }
 
 type Filter = 'all' | 'enabled' | 'custom';
@@ -40,7 +50,7 @@ export default function ModelsSettings() {
 
   const allProviders = createMemo(() => {
     const ids = new Set<string>();
-    for (const m of session.models()) ids.add(m.providerId);
+    for (const m of session.models()) ids.add(modelGroup(m));
     return [...ids].sort();
   });
 
@@ -51,10 +61,13 @@ export default function ModelsSettings() {
       if (f === 'enabled' && !m.enabled) return false;
       if (f === 'custom' && !m.isCustom) return false;
       if (!q) return true;
+      const group = modelGroup(m);
       return (
         m.name.toLowerCase().includes(q) ||
         m.id.toLowerCase().includes(q) ||
-        (PROVIDER_META[m.providerId]?.label.toLowerCase().includes(q) ?? false)
+        (PROVIDER_META[m.providerId]?.label.toLowerCase().includes(q) ?? false) ||
+        (COLLECTION_META[group]?.label.toLowerCase().includes(q) ?? false) ||
+        group.toLowerCase().includes(q)
       );
     });
   });
@@ -62,9 +75,10 @@ export default function ModelsSettings() {
   const grouped = createMemo(() => {
     const map = new Map<string, ModelInfo[]>();
     for (const m of filteredModels()) {
-      const list = map.get(m.providerId) || [];
+      const group = modelGroup(m);
+      const list = map.get(group) || [];
       list.push(m);
-      map.set(m.providerId, list);
+      map.set(group, list);
     }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   });

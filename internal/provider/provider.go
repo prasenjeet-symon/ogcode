@@ -90,6 +90,10 @@ type ModelInfo struct {
 	InputPricePerM  float64 `json:"inputPricePerM"`
 	OutputPricePerM float64 `json:"outputPricePerM"`
 	SupportsImages  bool    `json:"supportsImages"`
+	// Collection is an optional grouping label for dynamically-fetched models
+	// from OpenAI-compatible providers (e.g. "DeepSeek", "Gemini") so the UI can
+	// group them instead of collapsing everything under the OpenAI provider id.
+	Collection string `json:"collection,omitempty"`
 }
 
 type Provider interface {
@@ -245,6 +249,7 @@ func NewProviderWithConfig(providerID, apiKey, baseURL string) (Provider, error)
 		}
 		if baseURL != "" {
 			p.baseURL = baseURL
+			p.collection = collectionFromBaseURL(baseURL)
 		}
 		return p, nil
 	case "openrouter":

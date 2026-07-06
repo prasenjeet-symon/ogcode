@@ -57,7 +57,7 @@ interface SessionContextValue {
   abort: () => Promise<void>;
   refreshModels: () => Promise<void>;
   toggleModel: (model: ModelInfo, enabled: boolean) => Promise<void>;
-  addCustomModel: (id: string, providerId: string, displayName: string) => Promise<void>;
+  addCustomModel: (id: string, providerId: string, displayName: string, collection?: string) => Promise<void>;
   removeCustomModel: (id: string) => Promise<void>;
   refresh: () => void;
   memorySavedTokens: () => number;
@@ -277,6 +277,7 @@ export const SessionProvider: ParentComponent = (props) => {
         displayName: model.name,
         enabled,
         isCustom: model.isCustom,
+        collection: model.collection,
       });
       setModels(updated || []);
     } catch (e) {
@@ -284,7 +285,7 @@ export const SessionProvider: ParentComponent = (props) => {
     }
   }
 
-  async function addCustomModel(id: string, providerId: string, displayName: string) {
+  async function addCustomModel(id: string, providerId: string, displayName: string, collection?: string) {
     try {
       const updated = await setModelPreference({
         id,
@@ -292,6 +293,7 @@ export const SessionProvider: ParentComponent = (props) => {
         displayName: displayName || id,
         enabled: true,
         isCustom: true,
+        collection: collection || '',
       });
       setModels(updated || []);
     } catch (e) {

@@ -15,7 +15,7 @@ type ModelPreferenceStore struct{}
 // GetModelPreferences returns all model preference overrides from the database.
 func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 	rows, err := database.Query(
-		`SELECT id, enabled, provider_id, display_name, is_custom, time_created, time_updated
+		`SELECT id, enabled, provider_id, display_name, is_custom, collection, time_created, time_updated
 		 FROM model_preference ORDER BY time_created ASC`,
 	)
 	if err != nil {
@@ -28,11 +28,13 @@ func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 		var p ModelPreference
 		var enabled int
 		var isCustom int
-		if err := rows.Scan(&p.ID, &enabled, &p.ProviderID, &p.DisplayName, &isCustom, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var collection sql.NullString
+		if err := rows.Scan(&p.ID, &enabled, &p.ProviderID, &p.DisplayName, &isCustom, &collection, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.Enabled = enabled == 1
 		p.IsCustom = isCustom == 1
+		p.Collection = collection.String
 		prefs = append(prefs, &p)
 	}
 	return prefs, nil
@@ -49,9 +51,9 @@ func SetModelPreference(database *db.DB, p *ModelPreference) error {
 		isCustom = 1
 	}
 	_, err := database.Exec(
-		`INSERT OR REPLACE INTO model_preference (id, enabled, provider_id, display_name, is_custom, time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, enabled, p.ProviderID, p.DisplayName, isCustom, p.CreatedAt, p.UpdatedAt,
+		`INSERT OR REPLACE INTO model_preference (id, enabled, provider_id, display_name, is_custom, collection, time_created, time_updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, enabled, p.ProviderID, p.DisplayName, isCustom, p.Collection, p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }

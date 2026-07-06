@@ -16,6 +16,7 @@ func (s *Server) handleSetModelPreference(w http.ResponseWriter, r *http.Request
 		DisplayName string `json:"displayName"`
 		Enabled     bool   `json:"enabled"`
 		IsCustom    bool   `json:"isCustom"`
+		Collection  string `json:"collection"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -37,7 +38,7 @@ func (s *Server) handleSetModelPreference(w http.ResponseWriter, r *http.Request
 			return
 		}
 		s.registry.RegisterCustomModel(input.ID, input.ProviderID)
-		slog.Info("registered custom model", "id", input.ID, "provider", input.ProviderID)
+		slog.Info("registered custom model", "id", input.ID, "provider", input.ProviderID, "collection", input.Collection)
 	}
 
 	now := session.Now()
@@ -47,6 +48,7 @@ func (s *Server) handleSetModelPreference(w http.ResponseWriter, r *http.Request
 		ProviderID:  input.ProviderID,
 		DisplayName: input.DisplayName,
 		IsCustom:    input.IsCustom,
+		Collection:  input.Collection,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

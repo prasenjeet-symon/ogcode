@@ -20,8 +20,13 @@ type ModelPreference struct {
 	ProviderID  string `json:"providerId"`
 	DisplayName string `json:"displayName"`
 	IsCustom    bool   `json:"isCustom"`
-	CreatedAt   int64  `json:"createdAt"`
-	UpdatedAt   int64  `json:"updatedAt"`
+	// Collection is an optional group name for custom models so OpenAI-compatible
+	// providers added through the OpenAI provider (Gemini, DeepSeek, Groq, …) can
+	// be grouped together in the UI instead of all collapsing under "OpenAI".
+	// Empty for built-in models and legacy custom models (falls back to providerId).
+	Collection string `json:"collection"`
+	CreatedAt  int64  `json:"createdAt"`
+	UpdatedAt  int64  `json:"updatedAt"`
 }
 
 // ModelCapability is a probed/known capability record for a model, persisted so

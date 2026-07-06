@@ -66,6 +66,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		Default         bool    `json:"default"`
 		Enabled         bool    `json:"enabled"`
 		IsCustom        bool    `json:"isCustom"`
+		Collection      string  `json:"collection"`
 		InputPricePerM  float64 `json:"inputPricePerM"`
 		OutputPricePerM float64 `json:"outputPricePerM"`
 		SupportsImages  bool    `json:"supportsImages"`
@@ -90,6 +91,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			Default:         m.Default,
 			Enabled:         defaultEnabled,
 			IsCustom:        false,
+			Collection:      m.Collection,
 			InputPricePerM:  m.InputPricePerM,
 			OutputPricePerM: m.OutputPricePerM,
 			SupportsImages:  supportsImages,
@@ -111,6 +113,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			Default:    false,
 			Enabled:    p.Enabled,
 			IsCustom:   true,
+			Collection: p.Collection,
 		})
 	}
 

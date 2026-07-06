@@ -263,6 +263,10 @@ export interface ModelInfo {
   default: boolean;
   enabled: boolean;
   isCustom: boolean;
+  // Collection is an optional group name for custom models added via an
+  // OpenAI-compatible provider (Gemini, DeepSeek, Groq, …) so they can be
+  // grouped together in the UI. Empty for built-in models.
+  collection: string;
   inputPricePerM: number;
   outputPricePerM: number;
 }
@@ -277,6 +281,7 @@ export interface ModelPreference {
   displayName: string;
   enabled: boolean;
   isCustom: boolean;
+  collection: string;
 }
 
 export function setModelPreference(pref: ModelPreference): Promise<ModelInfo[]> {

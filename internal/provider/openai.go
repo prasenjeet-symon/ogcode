@@ -17,11 +17,15 @@ import (
 
 // OpenAIProvider implements Provider for the OpenAI Chat Completions API.
 // Also used for OpenRouter and Ollama (same API format, different base URL).
+// When configured for an OpenAI-compatible third party (DeepSeek, Gemini, Groq,
+// …) via a custom base URL, the `collection` field tags dynamically-fetched
+// models so the UI can group them instead of collapsing them under "openai".
 type OpenAIProvider struct {
-	id      string
-	apiKey  string
-	model   string
-	baseURL string
+	id         string
+	apiKey     string
+	model      string
+	baseURL    string
+	collection string // grouping label for dynamically-fetched models ("" = none)
 
 	// cachedModels caches models fetched from /v1/models for Ollama cloud.
 	// Nil means not yet fetched; empty slice means fetched but none found.
@@ -165,7 +169,7 @@ func NewOpenAIProvider() *OpenAIProvider {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
-	return &OpenAIProvider{id: "openai", apiKey: apiKey, model: model, baseURL: baseURL}
+	return &OpenAIProvider{id: "openai", apiKey: apiKey, model: model, baseURL: baseURL, collection: collectionFromBaseURL(baseURL)}
 }
 
 // NewOpenRouterProvider creates an OpenAI-compatible provider for OpenRouter.
@@ -297,6 +301,7 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 			Name:           name,
 			ProviderID:     p.id,
 			SupportsImages: modelNameSuggestsVision(m.ID),
+			Collection:     p.collection,
 		})
 	}
 	slog.Info("dynamically fetched models from endpoint", "provider", p.id, "count", len(models))
@@ -427,6 +432,30 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 		p.modelsMu.Unlock()
 
 	default: // openai
+		// When the base URL points to a non-OpenAI endpoint (e.g. DeepSeek,
+		// Gemini, Groq — OpenAI-compatible providers configured via a custom
+		// OPENAI_BASE_URL), fetch the model list dynamically so the user sees
+		// the actual models that endpoint serves. Fall back to the static
+		// OpenAI catalog for the canonical api.openai.com endpoint.
+		if isCloudURL(p.baseURL) && p.baseURL != "https://api.openai.com/v1" {
+			p.modelsOnce.Do(func() {
+				fetched := p.fetchDynamicModels(context.Background())
+				p.modelsMu.Lock()
+				if len(fetched) > 0 {
+					p.cachedModels = fetched
+				} else {
+					p.cachedModels = nil // fallback to static catalog below
+				}
+				p.modelsMu.Unlock()
+			})
+			p.modelsMu.Lock()
+			cached := p.cachedModels
+			p.modelsMu.Unlock()
+			if len(cached) > 0 {
+				list = cached
+				break
+			}
+		}
 		list = make([]ModelInfo, 0, len(OpenAIModels))
 		for _, m := range OpenAIModels {
 			list = append(list, ModelInfo{
@@ -447,6 +476,26 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 		}
 	}
 	return list
+}
+
+// collectionFromBaseURL infers a grouping label from an OpenAI-compatible base
+// URL so dynamically-fetched models can be grouped in the UI. Returns "" when
+// the URL is the canonical OpenAI endpoint (no grouping needed).
+func collectionFromBaseURL(baseURL string) string {
+	u := strings.ToLower(baseURL)
+	switch {
+	case strings.Contains(u, "generativelanguage.googleapis.com"):
+		return "Gemini"
+	case strings.Contains(u, "deepseek.com"):
+		return "DeepSeek"
+	case strings.Contains(u, "groq.com"):
+		return "Groq"
+	case strings.Contains(u, "together.xyz"):
+		return "Together"
+	case strings.Contains(u, "mistral.ai"):
+		return "Mistral"
+	}
+	return ""
 }
 
 func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error) {
