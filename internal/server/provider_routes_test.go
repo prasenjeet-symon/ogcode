@@ -133,3 +133,29 @@ func TestValidateProviderConfigStructure(t *testing.T) {
 		t.Fatal("expected a non-empty error message on failure")
 	}
 }
+
+// TestOllamaStatusEndpoint verifies the /api/providers/ollama/status endpoint
+// returns a well-formed {installed,running,baseUrl} payload and that, with no
+// OLLAMA_BASE_URL set, baseUrl defaults to the localhost endpoint.
+func TestOllamaStatusEndpoint(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.routes()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/providers/ollama/status", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/providers/ollama/status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var st struct {
+		Installed bool   `json:"installed"`
+		Running   bool   `json:"running"`
+		BaseURL   string `json:"baseUrl"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+		t.Fatalf("decode ollama status: %v (body: %s)", err, rec.Body.String())
+	}
+	// With no OLLAMA_BASE_URL set, the base URL must default to localhost.
+	if st.BaseURL != "http://localhost:11434/v1" {
+		t.Fatalf("expected default baseUrl http://localhost:11434/v1, got %q", st.BaseURL)
+	}
+}

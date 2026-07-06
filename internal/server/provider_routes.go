@@ -34,6 +34,15 @@ type providerConfigResponse struct {
 	EnvBaseURLSet bool   `json:"envBaseURLSet"` // PROVIDER_BASE_URL env var is present
 }
 
+// ollamaStatusResponse is the lightweight Ollama runtime status surfaced to the
+// frontend so the onboarding gate can treat a running instance as already
+// configured (zero-config flow) and show an appropriate detection state.
+type ollamaStatusResponse struct {
+	Installed bool   `json:"installed"`
+	Running   bool   `json:"running"`
+	BaseURL   string `json:"baseUrl"`
+}
+
 // handleGetProviderConfigs returns masked credentials for all known providers,
 // including whether each is configured via environment variable.
 func (s *Server) handleGetProviderConfigs(w http.ResponseWriter, r *http.Request) {
@@ -123,4 +132,17 @@ func (s *Server) handleValidateProviderConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleOllamaStatus reports whether a local Ollama install is detected
+// (binary on $PATH) and whether the server is currently running (liveness
+// probe). The frontend uses this to satisfy the onboarding gate without
+// forcing the user through the API-key wizard when Ollama is already running.
+func (s *Server) handleOllamaStatus(w http.ResponseWriter, r *http.Request) {
+	st := provider.DetectOllama()
+	writeJSON(w, http.StatusOK, ollamaStatusResponse{
+		Installed: st.Installed,
+		Running:   st.Running,
+		BaseURL:   st.BaseURL,
+	})
 }

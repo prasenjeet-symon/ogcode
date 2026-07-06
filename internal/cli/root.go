@@ -101,7 +101,11 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 	ollamaKey := os.Getenv("OLLAMA_API_KEY")
 	ollamaBaseURL := os.Getenv("OLLAMA_BASE_URL")
-	if ollamaKey != "" || ollamaBaseURL != "" || fileExists("/usr/local/bin/ollama") || fileExists("/opt/homebrew/bin/ollama") {
+	ollamaStatus := provider.DetectOllama()
+	if ollamaKey != "" || ollamaBaseURL != "" || ollamaStatus.Installed || ollamaStatus.Running {
+		if ollamaBaseURL == "" {
+			ollamaBaseURL = ollamaStatus.BaseURL
+		}
 		p, _ := provider.NewProviderWithConfig("ollama", ollamaKey, ollamaBaseURL)
 		registry.Register(p)
 	}
@@ -145,11 +149,6 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Indexing complete")
 	return nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func setupLogging() {

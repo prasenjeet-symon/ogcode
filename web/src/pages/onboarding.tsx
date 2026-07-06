@@ -1,5 +1,5 @@
 import { useNavigate } from '@solidjs/router';
-import { For, Show, createSignal, createMemo } from 'solid-js';
+import { For, Show, createSignal, createMemo, onMount } from 'solid-js';
 import { useOnboarding } from '../context/onboarding';
 import { useSession } from '../context/session';
 import { setProviderConfig, validateProviderConfig, type ModelInfo } from '../api/client';
@@ -35,12 +35,18 @@ function isCloudURL(baseURL: string): boolean {
 
 // Onboarding wizard shown on first run when no LLM provider is configured.
 // Step 1 pick provider → step 2 enter credentials → step 3 choose default model.
+//
+// When a local Ollama server is detected as running, a dedicated "ready to go"
+// screen is shown instead of the credential steps — the user can pick a model
+// and start chatting immediately (zero-config flow).
 export default function Onboarding() {
   const onboarding = useOnboarding();
   const session = useSession();
   const navigate = useNavigate();
 
-  const [step, setStep] = createSignal(1);
+  // 'ready' is a special step shown when Ollama is detected as running. It
+  // skips credentials and goes straight to model selection.
+  const [step, setStep] = createSignal<1 | 2 | 3 | 'ready'>(1);
   const [providerId, setProviderId] = createSignal('');
   const [apiKey, setApiKey] = createSignal('');
   const [baseUrl, setBaseUrl] = createSignal('');
@@ -51,6 +57,19 @@ export default function Onboarding() {
   const [testing, setTesting] = createSignal(false);
   const [testResult, setTestResult] = createSignal<'idle' | 'ok' | 'fail'>('idle');
   const [testMessage, setTestMessage] = createSignal('');
+
+  const ollamaStatus = () => onboarding.ollamaStatus();
+
+  // On mount, if Ollama is detected as running, jump straight to the "ready"
+  // screen so the user sees the zero-config welcome instead of the provider
+  // picker. We only do this once (before the user has chosen anything).
+  onMount(() => {
+    if (ollamaStatus()?.running) {
+      setProviderId('ollama');
+      setBaseUrl(OLLAMA_DEFAULT_BASE_URL);
+      setStep('ready');
+    }
+  });
 
   const def = createMemo<ProviderDef | undefined>(() =>
     PROVIDER_DEFS.find((p) => p.id === providerId()),
@@ -150,6 +169,33 @@ export default function Onboarding() {
     }
   };
 
+  // Ollama is already running and registered server-side — no credentials to
+  // save. Refresh the model list (which fetches pulled models from Ollama) and
+  // go straight to model selection.
+  const goReadyToModels = async () => {
+    setError('');
+    setSaving(true);
+    try {
+      await session.refreshModels();
+      const models = providerModels();
+      if (models.length === 0) {
+        setError('Ollama is running, but no models are pulled. Run `ollama pull <model>` first, then refresh.');
+        setSaving(false);
+        return;
+      }
+      const preferred =
+        models.find((m) => m.default && m.enabled) ||
+        models.find((m) => m.enabled) ||
+        models[0];
+      setSelectedModelId(preferred.id);
+      setStep(3);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load Ollama models.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const finish = async () => {
     const modelId = selectedModelId();
     if (!modelId) {
@@ -177,7 +223,7 @@ export default function Onboarding() {
 
   const back = () => {
     setError('');
-    setStep((s) => Math.max(1, s - 1));
+    setStep((s) => (s === 'ready' || s === 3 ? 2 : s === 2 ? 1 : s) as 1 | 2 | 3);
   };
 
   return (
@@ -189,18 +235,60 @@ export default function Onboarding() {
           <p class="mt-2 text-sm text-zinc-400">
             Connect an AI provider to start coding. Takes about a minute.
           </p>
-          <div class="mt-5 flex items-center justify-center gap-2">
-            <For each={[1, 2, 3]}>
-              {(n) => (
-                <div
-                  class={`h-1.5 rounded-full transition-all ${
-                    step() === n ? 'w-8 bg-zinc-200' : 'w-4 bg-zinc-700'
-                  }`}
-                />
-              )}
-            </For>
-          </div>
+          <Show when={step() !== 'ready'}>
+            <div class="mt-5 flex items-center justify-center gap-2">
+              <For each={[1, 2, 3]}>
+                {(n) => (
+                  <div
+                    class={`h-1.5 rounded-full transition-all ${
+                      (step() === n || (step() === 'ready' && n === 1)) ? 'w-8 bg-zinc-200' : 'w-4 bg-zinc-700'
+                    }`}
+                  />
+                )}
+              </For>
+            </div>
+          </Show>
         </div>
+
+        {/* Ollama detected — ready to go (zero-config) */}
+        <Show when={step() === 'ready'}>
+          <div class="space-y-5">
+            <div class="flex flex-col items-center gap-3 text-center">
+              <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-500/10 ring-1 ring-sky-400/30">
+                <svg class="h-7 w-7 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <div>
+                <h2 class="text-lg font-semibold text-zinc-100">Ollama detected — you're all set</h2>
+                <p class="mt-1.5 text-sm text-zinc-400">
+                  A running Ollama instance was found on your machine. No API key or
+                  configuration needed — pick a model and start coding.
+                </p>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-zinc-500">Status</span>
+                <span class="flex items-center gap-1.5 font-medium text-emerald-400">
+                  <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Running
+                </span>
+              </div>
+              <div class="mt-2 flex items-center justify-between text-xs">
+                <span class="text-zinc-500">Endpoint</span>
+                <span class="font-mono text-zinc-300">{ollamaStatus()?.baseUrl || OLLAMA_DEFAULT_BASE_URL}</span>
+              </div>
+            </div>
+
+            <Show when={error()}>
+              <p class="rounded-lg border border-red-900/50 bg-red-950/40 px-3 py-2 text-xs text-red-300">
+                {error()}
+              </p>
+            </Show>
+          </div>
+        </Show>
 
         {/* Step 1 — pick provider */}
         <Show when={step() === 1}>
@@ -339,7 +427,7 @@ export default function Onboarding() {
         </Show>
 
         {/* Error */}
-        <Show when={error()}>
+        <Show when={error() && step() !== 'ready'}>
           <p class="mt-4 rounded-lg border border-red-900/50 bg-red-950/40 px-3 py-2 text-xs text-red-300">
             {error()}
           </p>
@@ -348,7 +436,7 @@ export default function Onboarding() {
         {/* Footer actions */}
         <div class="mt-7 flex items-center justify-between">
           <Show
-            when={step() > 1}
+            when={step() !== 1}
             fallback={
               <button
                 type="button"
@@ -376,6 +464,17 @@ export default function Onboarding() {
               class="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-white disabled:opacity-50"
             >
               {saving() ? 'Saving…' : 'Continue'}
+            </button>
+          </Show>
+
+          <Show when={step() === 'ready'}>
+            <button
+              type="button"
+              onClick={goReadyToModels}
+              disabled={saving()}
+              class="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-white disabled:opacity-50"
+            >
+              {saving() ? 'Loading models…' : 'Choose a model'}
             </button>
           </Show>
 

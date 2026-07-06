@@ -215,6 +215,18 @@ export function validateProviderConfig(id: string, cfg: { apiKey: string; baseUr
   });
 }
 
+// Ollama runtime status — used by the onboarding gate to treat a running
+// local Ollama instance as already configured (zero-config flow).
+export interface OllamaStatus {
+  installed: boolean; // ollama binary found on $PATH
+  running: boolean;   // Ollama server responded to a health probe
+  baseUrl: string;    // detected/expected base URL
+}
+
+export function getOllamaStatus(): Promise<OllamaStatus> {
+  return fetchAPI('/providers/ollama/status');
+}
+
 // Pricing API — returns model ID → USD per 1 million input tokens
 export function getProviderPricing(provider: string): Promise<Record<string, number>> {
   return fetchAPI(`/pricing?provider=${encodeURIComponent(provider)}`);

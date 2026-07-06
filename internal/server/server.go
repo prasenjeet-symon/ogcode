@@ -478,13 +478,24 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 	}
 	ollamaKey := resolveKey(os.Getenv("OLLAMA_API_KEY"), "ollama")
 	ollamaBaseURL := resolveBaseURL(os.Getenv("OLLAMA_BASE_URL"), "ollama")
-	if ollamaKey != "" || ollamaBaseURL != "" || fileExists("/usr/local/bin/ollama") || fileExists("/opt/homebrew/bin/ollama") {
+	// Detect a running/installed local Ollama instance. Registration is
+	// driven by the live health probe + $PATH binary lookup (cross-platform),
+	// replacing the old hardcoded /usr/local/bin + /opt/homebrew path checks.
+	// The provider is registered when any of: an explicit key/base URL is set,
+	// the binary is on $PATH, or the Ollama server responds to a health probe.
+	ollamaStatus := provider.DetectOllama()
+	ollamaDetected := ollamaKey != "" || ollamaBaseURL != "" || ollamaStatus.Installed || ollamaStatus.Running
+	if ollamaDetected {
+		if ollamaBaseURL == "" {
+			ollamaBaseURL = ollamaStatus.BaseURL
+		}
 		if ollamaKey != "" && ollamaBaseURL == "" {
 			slog.Warn("Ollama API key is set but no base URL configured; using http://localhost:11434/v1")
 		}
 		p, _ := provider.NewProviderWithConfig("ollama", ollamaKey, ollamaBaseURL)
 		providers["ollama"] = p
-		slog.Info("registered ollama provider")
+		slog.Info("registered ollama provider",
+			"installed", ollamaStatus.Installed, "running", ollamaStatus.Running, "baseUrl", ollamaBaseURL)
 	}
 	return providers
 }
