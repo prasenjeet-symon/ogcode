@@ -107,6 +107,86 @@ func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
 	if !strings.Contains(prompt, "Platform:") {
 		t.Error("expected 'Platform:' in the base system prompt")
 	}
+	// OS version and shell info are static per session — they belong in the
+	// cacheable prefix, not in the per-turn system-reminder.
+	if !strings.Contains(prompt, "OS:") {
+		t.Error("expected 'OS:' line in the base system prompt")
+	}
+	if !strings.Contains(prompt, "Shell:") {
+		t.Error("expected 'Shell:' line in the base system prompt")
+	}
+	if !strings.Contains(prompt, "POSIX-compatible shell") {
+		t.Error("expected POSIX-compatible shell guidance in the base system prompt")
+	}
+}
+
+func TestBuildSystemPrompt_OSEnvStaticAcrossAgents(t *testing.T) {
+	// OS/shell lines are derived from the host, not the agent — every agent
+	// gets the same cacheable prefix lines, so the prompt stays cache-stable
+	// regardless of which agent runs.
+	detectedOSEnv = nil // force re-detection
+	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", nil, 0, 0)
+	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", nil, 0, 0)
+	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", nil, 0, 0)
+
+	for name, p := range map[string]string{"build": buildPrompt, "plan": planPrompt, "note": notePrompt} {
+		if !strings.Contains(p, "OS:") {
+			t.Errorf("%s prompt: expected 'OS:' line", name)
+		}
+		if !strings.Contains(p, "Shell:") {
+			t.Errorf("%s prompt: expected 'Shell:' line", name)
+		}
+		if !strings.Contains(p, "sh -c") {
+			t.Errorf("%s prompt: expected 'sh -c' mention", name)
+		}
+	}
+	// All three should share the identical OS/Shell block since it's host-derived.
+	buildOS := substringAfter(buildPrompt, "\nOS:")
+	planOS := substringAfter(planPrompt, "\nOS:")
+	noteOS := substringAfter(notePrompt, "\nOS:")
+	if buildOS != planOS || planOS != noteOS {
+		t.Error("expected identical OS/Shell block across all agents (host-derived, not agent-derived)")
+	}
+}
+
+func TestOSEnvPrompt_CachedAndNonEmpty(t *testing.T) {
+	// Reset cache so the first call performs detection.
+	detectedOSEnv = nil
+	info := getOSEnv()
+	if info.OSVersion == "" {
+		t.Error("expected non-empty OSVersion from getOSEnv")
+	}
+	// The prompt must mention POSIX sh so the agent avoids bashisms.
+	p := osEnvPrompt()
+	if !strings.Contains(p, "POSIX-compatible shell") {
+		t.Error("expected POSIX-compatible shell guidance in osEnvPrompt")
+	}
+	if !strings.Contains(p, "sh -c") {
+		t.Error("expected 'sh -c' mention in osEnvPrompt")
+	}
+	if !strings.Contains(p, "OS:") {
+		t.Error("expected 'OS:' line in osEnvPrompt")
+	}
+	if !strings.Contains(p, "Shell:") {
+		t.Error("expected 'Shell:' line in osEnvPrompt")
+	}
+}
+
+// substringAfter returns the portion of s after the first occurrence of sep,
+// including everything up to the next newline-boundary block. Used to compare
+// the OS/Shell block across agent prompts.
+func substringAfter(s, sep string) string {
+	idx := strings.Index(s, sep)
+	if idx == -1 {
+		return ""
+	}
+	rest := s[idx+len(sep):]
+	// Trim to the first two lines (OS + Shell) so the comparison is stable.
+	lines := strings.SplitN(rest, "\n", 3)
+	if len(lines) > 2 {
+		return strings.Join(lines[:2], "\n")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func TestViewportPrompt(t *testing.T) {

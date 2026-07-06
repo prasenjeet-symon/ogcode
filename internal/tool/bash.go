@@ -12,7 +12,9 @@ import (
 type BashTool struct{}
 
 func (BashTool) ID() string          { return "bash" }
-func (BashTool) Description() string { return "Execute a shell command and return the output" }
+func (BashTool) Description() string {
+	return "Execute a shell command and return the output. Commands are executed via \"sh -c\" (POSIX sh) — write POSIX-compatible shell, not bash-only syntax."
+}
 func (BashTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",

@@ -1538,7 +1538,7 @@ func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent s
 	prompt := fmt.Sprintf(`%s
 
 Working directory: %s
-Platform: %s/%s`, a.System, dir, runtime.GOOS, runtime.GOARCH)
+Platform: %s/%s%s`, a.System, dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt())
 
 	if agentMDContent != "" {
 		prompt += agentMDContent

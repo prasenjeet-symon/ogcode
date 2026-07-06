@@ -2,7 +2,9 @@ package agent
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -204,6 +206,105 @@ func kpsewhich(file string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) != ""
+}
+
+// osEnvInfo describes the host operating system and shell environment for the
+// system prompt. OS version disambiguates a year-old OS from a current one
+// (darwin/amd64 alone is ambiguous); the shell line tells the agent that the
+// bash tool runs commands via "sh -c" so it writes POSIX-compatible shell
+// instead of bashisms that silently break.
+type osEnvInfo struct {
+	OSVersion string // e.g. "macOS 15.5", "Ubuntu 24.04", "unknown"
+}
+
+// detectedOSEnv caches the result of OS environment detection so it is only
+// probed once per process.
+var detectedOSEnv *osEnvInfo
+
+// getOSEnv detects the host OS version. The result is cached after the first
+// call.
+func getOSEnv() *osEnvInfo {
+	if detectedOSEnv != nil {
+		return detectedOSEnv
+	}
+	info := &osEnvInfo{OSVersion: detectOSVersion()}
+	detectedOSEnv = info
+	return info
+}
+
+// detectOSVersion returns a human-readable OS version string for the system
+// prompt. It probes platform-specific sources (sw_vers on macOS, /etc/os-release
+// on Linux, ver on Windows) and falls back to "unknown" when detection fails.
+func detectOSVersion() string {
+	switch runtime.GOOS {
+	case "darwin":
+		// sw_vers -productVersion → e.g. "15.5"
+		out, err := exec.Command("sw_vers", "-productVersion").Output()
+		if err != nil {
+			return "macOS (version unknown)"
+		}
+		v := strings.TrimSpace(string(out))
+		if v == "" {
+			return "macOS (version unknown)"
+		}
+		return "macOS " + v
+	case "linux":
+		// /etc/os-release is the standard on modern distros.
+		data, err := os.ReadFile("/etc/os-release")
+		if err != nil {
+			return "Linux (version unknown)"
+		}
+		name := ""
+		version := ""
+		for _, line := range strings.Split(string(data), "\n") {
+			if after, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+				name = strings.Trim(after, `"`)
+				break
+			}
+			if after, ok := strings.CutPrefix(line, "NAME="); ok {
+				name = strings.Trim(after, `"`)
+			}
+			if after, ok := strings.CutPrefix(line, "VERSION="); ok {
+				version = strings.Trim(after, `"`)
+			}
+		}
+		if name == "" {
+			return "Linux (version unknown)"
+		}
+		if version != "" {
+			return name + " " + version
+		}
+		return name
+	case "windows":
+		// `ver` returns a line like "Microsoft Windows [Version 10.0.22631.4602]"
+		out, err := exec.Command("cmd", "/c", "ver").Output()
+		if err != nil {
+			return "Windows (version unknown)"
+		}
+		// Strip the leading "Microsoft Windows [Version " and trailing "]"
+		s := strings.TrimSpace(string(out))
+		if idx := strings.Index(s, "[Version "); idx != -1 {
+			rest := s[idx+len("[Version "):]
+			if end := strings.Index(rest, "]"); end != -1 {
+				return "Windows " + rest[:end]
+			}
+		}
+		return "Windows (version unknown)"
+	default:
+		return runtime.GOOS + " (version unknown)"
+	}
+}
+
+// osEnvPrompt returns the OS version and shell environment lines appended to
+// the static system prompt header. Both pieces are static within a session so
+// they stay in the Anthropic cacheable prefix alongside the working directory
+// and platform.
+func osEnvPrompt() string {
+	info := getOSEnv()
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("\nOS: %s", info.OSVersion))
+	b.WriteString("\nShell: sh (commands are executed via \"sh -c\" — write POSIX-compatible shell, not bash-only syntax)")
+	return b.String()
 }
 
 // latexInfoPrompt returns a section describing the available LaTeX environment
