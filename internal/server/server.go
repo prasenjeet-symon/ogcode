@@ -496,6 +496,24 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 		providers["ollama"] = p
 		slog.Info("registered ollama provider",
 			"installed", ollamaStatus.Installed, "running", ollamaStatus.Running, "baseUrl", ollamaBaseURL)
+
+		// Auto-persist a lightweight Ollama config (base URL only, no API key) on
+		// first detection so that subsequent launches treat Ollama as already
+		// "configured" even when the server is not currently running. This prevents
+		// the onboarding gate from bouncing the user back to the wizard when Ollama
+		// is merely stopped (not uninstalled). We only insert when no row exists yet
+		// so we never clobber a user-saved key or custom base URL.
+		if _, exists := dbProviderMap["ollama"]; !exists && ollamaBaseURL != "" {
+			if err := session.SetProviderConfig(s.globalDB, &session.ProviderConfig{
+				ProviderID: "ollama",
+				APIKey:     "",
+				BaseURL:    ollamaBaseURL,
+			}); err != nil {
+				slog.Warn("failed to auto-persist ollama config", "err", err)
+			} else {
+				slog.Info("auto-persisted ollama provider config (base URL only)")
+			}
+		}
 	}
 	return providers
 }
