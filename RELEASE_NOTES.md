@@ -1,3 +1,83 @@
+# Release Notes — v0.16.0
+
+## Zero-Config Free Models
+
+This minor release lets **new users start coding immediately — no API key, no
+setup**. On first launch, ogcode fetches a community pool of free,
+OpenAI-compatible models and makes them available out of the box, grouped under a
+dedicated **"ogcode"** collection with a sensible default already selected.
+
+---
+
+### ⚡ Free Model Pool (zero setup)
+
+ogcode now ships usable the moment it opens — no credentials required.
+
+- **Auto-provisioned providers** — On startup, ogcode fetches a JSON pool of
+  OpenAI-compatible free providers (Groq, OpenRouter) from a public URL and
+  registers them automatically. They never override your own configured providers.
+- **Free models only** — For OpenRouter the list is restricted to its `:free`
+  variants, and every free model is enabled by default, so you land ready to chat
+  instead of on an empty picker.
+- **Default model** — New users start on **North Mini Code**
+  (`cohere/north-mini-code:free`), a coding-focused free model, selected by default.
+- **Resilient** — The pool is cached locally (24h TTL, atomic writes,
+  stale-on-error fallback), so startup never blocks on the network.
+- **Keys never exposed** — The `/api/providers/free` endpoint reports available
+  free providers with their keys masked.
+
+### 🗂️ "ogcode" Collection
+
+All free-pool models are grouped under a single **ogcode** collection so they stay
+separate from your own OpenAI / Anthropic / OpenRouter / Ollama / Groq models. Each
+free model is tagged with its underlying provider (e.g. **OpenRouter**, **Groq**)
+so you always know where a model comes from.
+
+### 🚪 No Onboarding Required
+
+Because free models work out of the box, new users are no longer forced through the
+setup wizard. The onboarding screen stays reachable from Settings for anyone who
+wants to add their own provider keys.
+
+### ✨ Model Picker & Settings Polish
+
+- The model-picker dropdown is wider so long model names render cleanly, with a
+  per-model provider tag.
+- The **Add custom model** form now opens at the top of Settings → Models, visible
+  immediately when you click the button.
+- **Fix** — The memory-savings popover is now correctly centered on screen (it was
+  being clipped by the blurred header) with a visible close button.
+
+---
+
+### 📥 Installation
+
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+**Homebrew:**
+```bash
+brew install prasenjeet-symon/tap/ogcode
+```
+
+**Docker:**
+```bash
+docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.15.0...v0.16.0*
+
+---
+
 # Release Notes — v0.15.0
 
 ## `view_image` Agent Tool
