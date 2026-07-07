@@ -125,12 +125,21 @@ export default function GeneralSettings() {
           </Show>
         </Card>
 
+        {/* Model hotkeys */}
+        <Card
+          title="Model Hotkeys"
+          description="Pin up to 4 models to numbered slots and switch between them instantly with Alt+1–4. Each slot holds one model — a model can only occupy a single slot at a time."
+        >
+          <ModelHotkeyConfig />
+        </Card>
+
         {/* Keyboard shortcuts */}
         <Card title="Keyboard" description="Shortcuts available throughout the app.">
           <div class="space-y-2">
             <Shortcut keys={['Enter']} description="Send message" />
             <Shortcut keys={['Shift', 'Enter']} description="Insert newline" />
             <Shortcut keys={['⌘', 'N']} description="Start new session" />
+            <Shortcut keys={['Alt', '1–4']} description="Switch to pinned model slot" />
           </div>
         </Card>
       </div>
@@ -341,6 +350,57 @@ function SearchConfigForm() {
         </Show>
       </div>
     </Show>
+  );
+}
+
+function ModelHotkeyConfig() {
+  const session = useSession();
+  const slots = () => session.modelSlots();
+  const enabledModels = createMemo(() => session.models().filter((m) => m.enabled));
+
+  const modelName = (id: string | null): string => {
+    if (!id) return 'Empty';
+    const m = session.models().find((mod) => mod.id === id);
+    return m ? m.name : 'Unknown model';
+  };
+
+  const handleChange = (slot: number, value: string) => {
+    // value === "" means clear the slot
+    session.setModelSlot(slot, value || null);
+  };
+
+  return (
+    <div class="space-y-2">
+      <For each={slots()}>
+        {(modelId, index) => (
+          <div class="flex items-center gap-3">
+            <kbd class="px-2 py-1 rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)]
+                         font-mono text-[12px] text-zinc-300 w-12 text-center shrink-0">
+              Alt+{index() + 1}
+            </kbd>
+            <div class="flex-1 min-w-0">
+              <select
+                value={modelId || ''}
+                onChange={(e) => handleChange(index(), e.currentTarget.value)}
+                class="w-full h-8 px-2.5 rounded-md border border-[color:var(--border-default)]
+                       bg-[color:var(--bg-elevated)] text-[12.5px] text-zinc-200
+                       focus:outline-none focus:border-[color:var(--accent)] transition cursor-pointer"
+              >
+                <option value="">— Empty —</option>
+                <For each={enabledModels()}>
+                  {(m) => <option value={m.id}>{m.name}</option>}
+                </For>
+              </select>
+            </div>
+          </div>
+        )}
+      </For>
+      <Show when={slots().every((s) => !s)}>
+        <p class="text-[11.5px] text-zinc-500 pt-1 leading-relaxed">
+          Assign a model to each slot, then press <kbd class="px-1 py-0.5 rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[10.5px] text-zinc-300">Alt</kbd> + the slot number anywhere in the app to switch instantly.
+        </p>
+      </Show>
+    </div>
   );
 }
 

@@ -88,6 +88,16 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
   const [pos, setPos] = createSignal<{ left: number; top?: number; bottom?: number; maxH: number } | null>(null);
   let triggerRef: HTMLButtonElement | undefined;
 
+  // Map model IDs to their pinned hotkey slot (1–4) for badge display.
+  const slotMap = createMemo((): Map<string, number> => {
+    const map = new Map<string, number>();
+    const slots = session.modelSlots();
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i]) map.set(slots[i]!, i + 1);
+    }
+    return map;
+  });
+
   // Open the dropdown as a viewport-fixed, clamped popover anchored to the trigger
   // so it stays fully visible — even inside a right-edge drawer or near a screen edge.
   const toggleOpen = () => {
@@ -216,6 +226,13 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
                           </Show>
                           <Show when={model.default}>
                             <span class="text-[9.5px] text-zinc-500 uppercase tracking-wider">default</span>
+                          </Show>
+                          <Show when={slotMap().get(model.id)}>
+                            {(n) => (
+                              <span class="text-[9px] text-[color:var(--accent)] bg-[color:var(--accent-soft)] px-1 py-0.5 rounded font-mono font-semibold">
+                                Alt+{n()}
+                              </span>
+                            )}
                           </Show>
                         </div>
                       </button>

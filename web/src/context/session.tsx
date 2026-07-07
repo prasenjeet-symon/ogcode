@@ -1,5 +1,5 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
-import { createSignal, createEffect, on } from 'solid-js';
+import { createSignal, createEffect, on, onMount, onCleanup } from 'solid-js';
 import {
   type Session,
   type MessageWithParts,
@@ -61,6 +61,8 @@ interface SessionContextValue {
   removeCustomModel: (id: string) => Promise<void>;
   refresh: () => void;
   memorySavedTokens: () => number;
+  modelSlots: () => (string | null)[];
+  setModelSlot: (slot: number, modelId: string | null) => void;
 }
 
 const SessionContext = createContext<SessionContextValue>();
@@ -178,6 +180,48 @@ export const SessionProvider: ParentComponent = (props) => {
   const [pendingModel, setPendingModel] = createSignal<string>(
     typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) || '' : ''
   );
+
+  // Model hotkey slots — up to 4 models that can be switched to with Alt+1–4.
+  // Persisted in localStorage so assignments survive app restarts.
+  const SLOTS_KEY = 'ogcode-model-slots';
+  const NUM_SLOTS = 4;
+  function loadModelSlots(): (string | null)[] {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SLOTS_KEY) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const slots: (string | null)[] = [];
+          for (let i = 0; i < NUM_SLOTS; i++) {
+            slots.push(typeof parsed[i] === 'string' ? (parsed[i] as string) : null);
+          }
+          return slots;
+        }
+      }
+    } catch (_e) { /* ignore parse errors */ }
+    return new Array(NUM_SLOTS).fill(null);
+  }
+  function saveModelSlots(slots: (string | null)[]) {
+    try { localStorage.setItem(SLOTS_KEY, JSON.stringify(slots)); } catch (_e) { /* ignore quota errors */ }
+  }
+  const [modelSlots, setModelSlots] = createSignal<(string | null)[]>(loadModelSlots());
+
+  function setModelSlot(slot: number, modelId: string | null) {
+    if (slot < 0 || slot >= NUM_SLOTS) return;
+    setModelSlots((prev) => {
+      const next = [...prev];
+      // Don't assign the same model to multiple slots — clear any existing slot
+      // that already holds this model.
+      if (modelId) {
+        for (let i = 0; i < next.length; i++) {
+          if (i !== slot && next[i] === modelId) next[i] = null;
+        }
+      }
+      next[slot] = modelId;
+      saveModelSlots(next);
+      return next;
+    });
+  }
   // Two-tier polling:
   //   fastPollInterval — 3 s, runs only while the agent loop is active
   //   bgPollInterval   — 15 s, always runs for the active session so the UI
@@ -685,6 +729,35 @@ export const SessionProvider: ParentComponent = (props) => {
     setMemorySavedTokens((prev) => prev + saved);
   }));
 
+  // Global hotkey listener: Alt+1–4 switches the active model to the one
+  // registered in that slot. Uses e.code (Digit1–Digit4) for layout independence.
+  // On macOS Option+1 sets e.key to "¡" but e.code stays "Digit1".
+  const handleHotkey = (e: KeyboardEvent) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const code = e.code;
+    let slot = -1;
+    if (code === 'Digit1') slot = 0;
+    else if (code === 'Digit2') slot = 1;
+    else if (code === 'Digit3') slot = 2;
+    else if (code === 'Digit4') slot = 3;
+    if (slot < 0) return;
+    const modelId = modelSlots()[slot];
+    if (!modelId) return; // no model registered for this slot — do nothing
+    e.preventDefault();
+    e.stopPropagation();
+    // Only switch if the model is currently enabled
+    const enabled = models().some((m) => m.id === modelId && m.enabled);
+    if (!enabled) return;
+    selectModel(modelId);
+  };
+
+  onMount(() => {
+    document.addEventListener('keydown', handleHotkey);
+  });
+  onCleanup(() => {
+    document.removeEventListener('keydown', handleHotkey);
+  });
+
   const value: SessionContextValue = {
     sessions,
     activeSession,
@@ -705,6 +778,8 @@ export const SessionProvider: ParentComponent = (props) => {
     removeCustomModel,
     refresh,
     memorySavedTokens,
+    modelSlots,
+    setModelSlot,
   };
 
   return (
