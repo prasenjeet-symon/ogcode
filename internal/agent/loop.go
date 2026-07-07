@@ -649,6 +649,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				// back to the API on subsequent turns. Without the signature,
 				// multi-turn thinking breaks with an API error.
 				currentReasoningSignature = evt.Signature
+				// If a reasoning part was already created (e.g. by an empty
+				// EventReasoning from a redacted_thinking block, or a prior
+				// thinking_delta), update it now with the signature. This
+				// ensures redacted_thinking blocks — which carry only a
+				// signature and no text deltas — persist their signature.
+				if streamReasoningPart != nil {
+					reasonData, _ := json.Marshal(session.ReasoningPartData{
+						Text:      currentReasoning.String(),
+						Signature: currentReasoningSignature,
+					})
+					streamReasoningPart.Data = reasonData
+					streamReasoningPart.UpdatedAt = session.Now()
+					lr.Store.UpdatePart(streamReasoningPart)
+				}
 
 			case provider.EventFinish:
 				if evt.FinishReason != nil {
@@ -1991,6 +2005,14 @@ func estimateRequestSize(req provider.StreamRequest) int {
 		}
 		for _, img := range m.Images {
 			size += len(img.Data)
+		}
+		// ReasoningParts (thinking blocks) are serialized into the request body
+		// for Anthropic. Account for their text + signature so the estimate
+		// triggers proactive compaction before a thinking-heavy history pushes
+		// the request over the model's context limit.
+		for _, rp := range m.ReasoningParts {
+			size += len(rp.Text)
+			size += len(rp.Signature)
 		}
 	}
 	// Tools JSON is also serialized but relatively small; skip for now.

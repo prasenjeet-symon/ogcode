@@ -190,6 +190,98 @@ func TestAnthropicThinkingBlocksWithToolCalls(t *testing.T) {
 
 
 
+// TestAnthropicRedactedThinkingEvent verifies that a redacted_thinking
+// content_block_start event — which carries only a signature and no text deltas
+// — is correctly parsed and the signature is extracted. This is the streaming
+// side of the thinking-content round-trip: without the signature, multi-turn
+// thinking with redacted blocks fails with an Anthropic API error.
+func TestAnthropicRedactedThinkingEvent(t *testing.T) {
+	// Simulate the JSON payload of a content_block_start event for a
+	// redacted_thinking block. Anthropic delivers the signature here, not
+	// via a signature_delta (which only accompanies non-redacted thinking).
+	raw := `{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","signature":"EuYBCg=="}}`
+
+	var evt anthropicEvent
+	if err := json.Unmarshal([]byte(raw), &evt); err != nil {
+		t.Fatalf("failed to parse redacted_thinking event: %v", err)
+	}
+	if evt.Type != "content_block_start" {
+		t.Fatalf("expected type 'content_block_start', got %q", evt.Type)
+	}
+	if evt.ContentBlock == nil {
+		t.Fatal("expected non-nil ContentBlock")
+	}
+	if evt.ContentBlock.Type != "redacted_thinking" {
+		t.Errorf("expected content block type 'redacted_thinking', got %q", evt.ContentBlock.Type)
+	}
+	if evt.ContentBlock.Signature != "EuYBCg==" {
+		t.Errorf("expected signature 'EuYBCg==', got %q", evt.ContentBlock.Signature)
+	}
+}
+
+// TestAnthropicRedactedThinkingForwardedAsThinkingBlock verifies that a
+// reasoning part with empty text but a non-empty signature (as produced by a
+// redacted_thinking block) is still forwarded to the API as a thinking content
+// block. Anthropic accepts redacted_thinking-originated blocks as "thinking"
+// blocks as long as the signature is present.
+func TestAnthropicRedactedThinkingForwardedAsThinkingBlock(t *testing.T) {
+	messages := []ModelMessage{
+		{Role: "user", Content: json.RawMessage(`"Continue"`)},
+		{
+			Role:    "assistant",
+			Content: json.RawMessage(`"Here is the answer."`),
+			ReasoningParts: []ReasoningPart{
+				{Text: "", Signature: "EuYBCg=="},
+			},
+		},
+		{Role: "user", Content: json.RawMessage(`"Thanks"`)},
+	}
+
+	// Replicate the plain-assistant-with-reasoning branch from StreamChat
+	var assistantMsg anthropicMessage
+	for _, m := range messages {
+		if m.Role == "assistant" && len(m.ReasoningParts) > 0 && m.ToolCalls == nil {
+			var blocks []map[string]any
+			for _, rp := range m.ReasoningParts {
+				blocks = append(blocks, map[string]any{
+					"type":      "thinking",
+					"thinking":  rp.Text,
+					"signature": rp.Signature,
+				})
+			}
+			var text string
+			if m.Content != nil {
+				json.Unmarshal(m.Content, &text)
+			}
+			if text != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": text})
+			}
+			assistantMsg = anthropicMessage{Role: "assistant", Content: blocks}
+			break
+		}
+	}
+
+	blocks, ok := assistantMsg.Content.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected []map[string]any, got %T", assistantMsg.Content)
+	}
+	if len(blocks) < 2 {
+		t.Fatalf("expected at least 2 blocks, got %d", len(blocks))
+	}
+	if blocks[0]["type"] != "thinking" {
+		t.Errorf("expected first block 'thinking', got %v", blocks[0]["type"])
+	}
+	if blocks[0]["signature"] != "EuYBCg==" {
+		t.Errorf("expected signature preserved, got %v", blocks[0]["signature"])
+	}
+	if blocks[0]["thinking"] != "" {
+		t.Errorf("expected empty thinking text for redacted block, got %v", blocks[0]["thinking"])
+	}
+	if blocks[1]["type"] != "text" {
+		t.Errorf("expected second block 'text', got %v", blocks[1]["type"])
+	}
+}
+
 // TestAnthropicPromptCaching verifies that the Anthropic provider emits
 // cache_control markers on the system prompt block and the last tool
 // definition, enabling prompt caching for repeated prefixes.

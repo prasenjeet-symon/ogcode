@@ -549,3 +549,46 @@ func TestConvertMessagesReasoningPartsWithToolCalls(t *testing.T) {
 		t.Errorf("expected reasoning signature, got %q", result[0].ReasoningParts[0].Signature)
 	}
 }
+
+// TestEstimateRequestSizeReasoningParts verifies that estimateRequestSize
+// accounts for ReasoningParts (thinking blocks) text and signatures. Thinking
+// content can be large; if it isn't counted, proactive compaction may trigger
+// too late, causing a context-overflow error from the model.
+func TestEstimateRequestSizeReasoningParts(t *testing.T) {
+	reasoningText := "Let me think about this problem step by step."
+	signature := "EuYBCg=="
+
+	withReasoning := provider.StreamRequest{
+		System: []string{"You are helpful."},
+		Messages: []provider.ModelMessage{
+			{
+				Role:    "assistant",
+				Content: json.RawMessage(`"Answer."`),
+				ReasoningParts: []provider.ReasoningPart{
+					{Text: reasoningText, Signature: signature},
+				},
+			},
+		},
+	}
+	withoutReasoning := provider.StreamRequest{
+		System: []string{"You are helpful."},
+		Messages: []provider.ModelMessage{
+			{
+				Role:    "assistant",
+				Content: json.RawMessage(`"Answer."`),
+			},
+		},
+	}
+
+	sizeWith := estimateRequestSize(withReasoning)
+	sizeWithout := estimateRequestSize(withoutReasoning)
+
+	if sizeWith <= sizeWithout {
+		t.Fatalf("expected size with reasoning (%d) to exceed without (%d)", sizeWith, sizeWithout)
+	}
+	// The difference should be at least the text + signature length.
+	expectedDelta := len(reasoningText) + len(signature)
+	if sizeWith-sizeWithout < expectedDelta {
+		t.Errorf("expected size delta >= %d (text+signature), got %d", expectedDelta, sizeWith-sizeWithout)
+	}
+}

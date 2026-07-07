@@ -366,6 +366,15 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 						ToolCallID: currentToolID,
 						ToolName:   currentToolName,
 					}
+				case "redacted_thinking":
+					// A redacted thinking block has no text deltas — only a signature
+					// delivered on the content_block_start event. Emit an empty reasoning
+					// event (so the loop creates a reasoning part) followed by the
+					// signature, so the block is round-tripped to the API on later turns.
+					ch <- StreamEvent{Type: EventReasoning, Text: ""}
+					if evt.ContentBlock.Signature != "" {
+						ch <- StreamEvent{Type: EventReasoningSignature, Signature: evt.ContentBlock.Signature}
+					}
 				}
 			}
 		case "content_block_delta":
