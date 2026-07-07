@@ -1,3 +1,54 @@
+# Release Notes — v0.16.1
+
+## Frontend Stability Fix
+
+This patch release fixes a **UI crash to a blank screen** that could occur when
+using Ollama-compatible proxies that emit malformed or incomplete tool-call data.
+
+---
+
+### 🐛 `ToolPartDisplay` Defensive Guards
+
+- **Fix** — The `ToolPartDisplay` SolidJS component no longer throws a `TypeError`
+  when the backend creates a tool part without a valid `state` or `tool` property.
+  This happened when Ollama proxies sent truncated tool-call payloads, which
+  previously aborted the entire render and blanked the screen.
+- **Defaults** — A `DEFAULT_TOOL_STATE` fallback and safe accessor functions were
+  added; all direct references to `props.data.state` / `props.data.tool` now route
+  through these accessors, so missing fields degrade gracefully instead of crashing.
+- **No behavior change** for well-formed data — the guards only engage when fields
+  are absent or malformed.
+
+---
+
+### 📥 Installation
+
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+**Homebrew:**
+```bash
+brew install prasenjeet-symon/tap/ogcode
+```
+
+**Docker:**
+```bash
+docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.16.0...v0.16.1*
+
+---
+
 # Release Notes — v0.16.0
 
 ## Zero-Config Free Models
