@@ -4,6 +4,7 @@ import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { useTheme } from '../../context/theme';
 import { getSearchConfig, setSearchConfig } from '../../api/client';
+import ModelSelector from '../../components/model-selector';
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -356,17 +357,13 @@ function SearchConfigForm() {
 function ModelHotkeyConfig() {
   const session = useSession();
   const slots = () => session.modelSlots();
-  const enabledModels = createMemo(() => session.models().filter((m) => m.enabled));
 
-  const modelName = (id: string | null): string => {
-    if (!id) return 'Empty';
-    const m = session.models().find((mod) => mod.id === id);
-    return m ? m.name : 'Unknown model';
+  const handleSelect = (slot: number, modelId: string) => {
+    session.setModelSlot(slot, modelId);
   };
 
-  const handleChange = (slot: number, value: string) => {
-    // value === "" means clear the slot
-    session.setModelSlot(slot, value || null);
+  const handleClear = (slot: number) => {
+    session.setModelSlot(slot, null);
   };
 
   return (
@@ -378,19 +375,26 @@ function ModelHotkeyConfig() {
                          font-mono text-[12px] text-zinc-300 w-12 text-center shrink-0">
               Alt+{index() + 1}
             </kbd>
-            <div class="flex-1 min-w-0">
-              <select
-                value={modelId || ''}
-                onChange={(e) => handleChange(index(), e.currentTarget.value)}
-                class="w-full h-8 px-2.5 rounded-md border border-[color:var(--border-default)]
-                       bg-[color:var(--bg-elevated)] text-[12.5px] text-zinc-200
-                       focus:outline-none focus:border-[color:var(--accent)] transition cursor-pointer"
-              >
-                <option value="">— Empty —</option>
-                <For each={enabledModels()}>
-                  {(m) => <option value={m.id}>{m.name}</option>}
-                </For>
-              </select>
+            <div class="flex-1 min-w-0 flex items-center gap-2">
+              <ModelSelector
+                selectedModel={() => modelId || ''}
+                onSelect={(id) => handleSelect(index(), id)}
+                placement="bottom"
+              />
+              <Show when={modelId}>
+                <button
+                  type="button"
+                  onClick={() => handleClear(index())}
+                  title="Clear slot"
+                  class="h-8 w-8 rounded-md flex items-center justify-center transition-all var(--spring-sm)
+                         text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]
+                         active:scale-[0.95] shrink-0"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </Show>
             </div>
           </div>
         )}
