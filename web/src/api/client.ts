@@ -110,6 +110,7 @@ export interface ToolState {
 
 export interface ReasoningPartData {
   text: string;
+  signature?: string;
 }
 
 // User-uploaded image attachment. Data is base64-encoded image bytes.

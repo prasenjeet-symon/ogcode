@@ -10,14 +10,15 @@ import (
 type StreamEventType string
 
 const (
-	EventTextDelta      StreamEventType = "text-delta"
-	EventToolCallStart  StreamEventType = "tool-call-start"
-	EventToolCallDelta  StreamEventType = "tool-call-delta"
-	EventToolCallEnd    StreamEventType = "tool-call-end"
-	EventReasoning      StreamEventType = "reasoning"
-	EventFinish         StreamEventType = "finish"
-	EventUsage          StreamEventType = "usage"
-	EventError          StreamEventType = "error"
+	EventTextDelta            StreamEventType = "text-delta"
+	EventToolCallStart        StreamEventType = "tool-call-start"
+	EventToolCallDelta        StreamEventType = "tool-call-delta"
+	EventToolCallEnd          StreamEventType = "tool-call-end"
+	EventReasoning            StreamEventType = "reasoning"
+	EventReasoningSignature   StreamEventType = "reasoning-signature"
+	EventFinish               StreamEventType = "finish"
+	EventUsage                StreamEventType = "usage"
+	EventError                StreamEventType = "error"
 )
 
 // TokenUsage carries per-message token accounting from a provider.
@@ -33,6 +34,7 @@ type TokenUsage struct {
 type StreamEvent struct {
 	Type         StreamEventType  `json:"type"`
 	Text         string           `json:"text,omitempty"`
+	Signature    string           `json:"signature,omitempty"`
 	ToolCallID   string           `json:"toolCallId,omitempty"`
 	ToolName     string           `json:"toolName,omitempty"`
 	ToolInput    json.RawMessage  `json:"toolInput,omitempty"`
@@ -63,6 +65,19 @@ type ModelMessage struct {
 	// render these per their API: Anthropic embeds them in the tool_result
 	// content block; OpenAI-family inject a follow-up user message.
 	Images []MessageImage `json:"images,omitempty"`
+	// ReasoningParts carries thinking/reasoning blocks from a previous assistant
+	// turn. Anthropic requires these to be forwarded back as "thinking" content
+	// blocks with their signatures intact; OpenAI-family providers handle
+	// reasoning tokens server-side and should ignore this field.
+	ReasoningParts []ReasoningPart `json:"reasoningParts,omitempty"`
+}
+
+// ReasoningPart represents a thinking/reasoning block from a model's response.
+// Anthropic models return these with a cryptographic signature that must be
+// forwarded back unchanged on subsequent turns.
+type ReasoningPart struct {
+	Text      string `json:"text"`
+	Signature string `json:"signature,omitempty"`
 }
 
 type ToolDefinition struct {

@@ -466,3 +466,86 @@ func TestEstimateRequestSize(t *testing.T) {
 		t.Errorf("estimateRequestSize(empty) = %d, expected 0", emptySize)
 	}
 }
+// TestConvertMessagesReasoningParts verifies that convertMessages correctly
+// extracts reasoning parts from stored messages and includes them in the
+// ModelMessage so they can be forwarded back to Anthropic as thinking blocks.
+func TestConvertMessagesReasoningParts(t *testing.T) {
+	reasoningData, _ := json.Marshal(session.ReasoningPartData{
+		Text:      "Let me think about this step by step.",
+		Signature: "ErkBCgIYAhIM...",
+	})
+
+	messages := []*session.MessageWithParts{
+		{
+			Info: session.MessageInfo{Role: session.RoleAssistant},
+			Parts: []session.Part{
+				{
+					Type: session.PartReasoning,
+					Data: reasoningData,
+				},
+				{
+					Type: session.PartText,
+					Data: json.RawMessage(`{"text":"The answer is 42."}`),
+				},
+			},
+		},
+	}
+
+	result := convertMessages(messages)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	if len(result[0].ReasoningParts) != 1 {
+		t.Fatalf("expected 1 reasoning part, got %d", len(result[0].ReasoningParts))
+	}
+
+	rp := result[0].ReasoningParts[0]
+	if rp.Text != "Let me think about this step by step." {
+		t.Errorf("expected reasoning text, got %q", rp.Text)
+	}
+	if rp.Signature != "ErkBCgIYAhIM..." {
+		t.Errorf("expected reasoning signature, got %q", rp.Signature)
+	}
+}
+
+// TestConvertMessagesReasoningPartsWithToolCalls verifies that assistant messages
+// with both reasoning parts and tool calls include reasoning parts.
+func TestConvertMessagesReasoningPartsWithToolCalls(t *testing.T) {
+	reasoningData, _ := json.Marshal(session.ReasoningPartData{
+		Text:      "I need to use a tool.",
+		Signature: "ToolSig==",
+	})
+
+	messages := []*session.MessageWithParts{
+		{
+			Info: session.MessageInfo{Role: session.RoleAssistant},
+			Parts: []session.Part{
+				{
+					Type: session.PartReasoning,
+					Data: reasoningData,
+				},
+				{
+					Type: session.PartTool,
+					Data: json.RawMessage(`{"tool":"bash","callId":"call_1","state":{"status":"completed","input":{"command":"ls"}}}`),
+				},
+			},
+		},
+	}
+
+	result := convertMessages(messages)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	if len(result[0].ReasoningParts) != 1 {
+		t.Fatalf("expected 1 reasoning part, got %d", len(result[0].ReasoningParts))
+	}
+
+	if result[0].ReasoningParts[0].Text != "I need to use a tool." {
+		t.Errorf("expected reasoning text, got %q", result[0].ReasoningParts[0].Text)
+	}
+	if result[0].ReasoningParts[0].Signature != "ToolSig==" {
+		t.Errorf("expected reasoning signature, got %q", result[0].ReasoningParts[0].Signature)
+	}
+}

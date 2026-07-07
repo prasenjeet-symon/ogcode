@@ -125,7 +125,8 @@ type ToolTime struct {
 }
 
 type ReasoningPartData struct {
-	Text string `json:"text"`
+	Text      string `json:"text"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func Now() int64 {

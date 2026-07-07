@@ -108,7 +108,10 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 			i-- // outer loop will increment
 			messages = append(messages, anthropicMessage{Role: "user", Content: blocks})
 		} else if m.ToolCalls != nil {
-			// Assistant message with tool calls: convert from OpenAI format to Anthropic tool_use blocks
+			// Assistant message with tool calls: convert from OpenAI format to Anthropic tool_use blocks.
+			// When the assistant produced thinking/reasoning content, Anthropic requires the
+			// thinking blocks to precede all other content blocks (text, tool_use) — otherwise
+			// the API returns a 400 error.
 			type oaiFn struct {
 				Name      string `json:"name"`
 				Arguments string `json:"arguments"`
@@ -119,6 +122,15 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 			}
 			var calls []oaiCall
 			var blocks []map[string]any
+			// Prepend thinking blocks first (required by Anthropic API)
+			for _, rp := range m.ReasoningParts {
+				thinkingBlock := map[string]any{
+					"type":      "thinking",
+					"thinking":  rp.Text,
+					"signature": rp.Signature,
+				}
+				blocks = append(blocks, thinkingBlock)
+			}
 			if err := json.Unmarshal(m.ToolCalls, &calls); err == nil {
 				if m.Content != nil {
 					var text string
@@ -170,14 +182,35 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 			}
 			messages = append(messages, anthropicMessage{Role: m.Role, Content: blocks})
 		} else {
-			var content any
-			if err := json.Unmarshal(m.Content, &content); err != nil {
-				content = string(m.Content)
-			}
-			messages = append(messages, anthropicMessage{
-				Role:    m.Role,
+			// For assistant messages with thinking/reasoning blocks, Anthropic requires
+			// thinking blocks to precede text blocks. Build a content array.
+			if m.Role == "assistant" && len(m.ReasoningParts) > 0 {
+				var blocks []map[string]any
+				for _, rp := range m.ReasoningParts {
+					blocks = append(blocks, map[string]any{
+						"type":      "thinking",
+						"thinking":  rp.Text,
+						"signature": rp.Signature,
+					})
+				}
+				var text string
+				if m.Content != nil {
+					json.Unmarshal(m.Content, &text)
+				}
+				if text != "" {
+					blocks = append(blocks, map[string]any{"type": "text", "text": text})
+				}
+				messages = append(messages, anthropicMessage{Role: "assistant", Content: blocks})
+			} else {
+				var content any
+				if err := json.Unmarshal(m.Content, &content); err != nil {
+					content = string(m.Content)
+				}
+				messages = append(messages, anthropicMessage{
+					Role:    m.Role,
 				Content: content,
-			})
+				})
+			}
 		}
 	}
 
@@ -319,17 +352,20 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 				usageDirty = true
 			}
 		case "content_block_start":
-			if evt.ContentBlock != nil && evt.ContentBlock.Type == "tool_use" {
-				currentToolID = evt.ContentBlock.ID
-				currentToolName = evt.ContentBlock.Name
-				// Don't send the placeholder `{}` from content_block_start as ToolInput.
-				// Anthropic always sends `"input":{}` here; the real input arrives
-				// exclusively via input_json_delta events. Sending `{}` would prepend
-				// it to the accumulated delta bytes, producing invalid JSON.
-				ch <- StreamEvent{
-					Type:       EventToolCallStart,
-					ToolCallID: currentToolID,
-					ToolName:   currentToolName,
+			if evt.ContentBlock != nil {
+				switch evt.ContentBlock.Type {
+				case "tool_use":
+					currentToolID = evt.ContentBlock.ID
+					currentToolName = evt.ContentBlock.Name
+					// Don't send the placeholder `{}` from content_block_start as ToolInput.
+					// Anthropic always sends `"input":{}` here; the real input arrives
+					// exclusively via input_json_delta events. Sending `{}` would prepend
+					// it to the accumulated delta bytes, producing invalid JSON.
+					ch <- StreamEvent{
+						Type:       EventToolCallStart,
+						ToolCallID: currentToolID,
+						ToolName:   currentToolName,
+					}
 				}
 			}
 		case "content_block_delta":
@@ -348,6 +384,8 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 					}
 				case "thinking_delta":
 					ch <- StreamEvent{Type: EventReasoning, Text: evt.Delta.Thinking}
+				case "signature_delta":
+					ch <- StreamEvent{Type: EventReasoningSignature, Signature: evt.Delta.Signature}
 				}
 			}
 		case "content_block_stop":
@@ -447,11 +485,13 @@ type anthropicUsage struct {
 }
 
 type anthropicContentBlock struct {
-	Type  string          `json:"type"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
-	Text  string          `json:"text,omitempty"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
 }
 
 type anthropicDelta struct {
@@ -459,6 +499,7 @@ type anthropicDelta struct {
 	Text         string `json:"text,omitempty"`
 	PartialJson  string `json:"partial_json,omitempty"`
 	Thinking     string `json:"thinking,omitempty"`
+	Signature    string `json:"signature,omitempty"`
 	StopReason   string `json:"stop_reason,omitempty"`
 }
 

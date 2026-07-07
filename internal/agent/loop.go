@@ -444,6 +444,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// Process stream events
 		var currentText strings.Builder
 		var currentReasoning strings.Builder
+		var currentReasoningSignature string
 		var pendingToolCalls []pendingToolCall
 		var finishReason string
 		var streamUsage *provider.TokenUsage
@@ -473,7 +474,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if len(text) > maxReasoningLen {
 				text = text[:maxReasoningLen] + "\n... (truncated)"
 			}
-			reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text})
+			reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text, Signature: currentReasoningSignature})
 			streamReasoningPart.Data = reasonData
 			streamReasoningPart.UpdatedAt = session.Now()
 			lr.Store.UpdatePart(streamReasoningPart)
@@ -619,7 +620,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					if len(text) > maxReasoningLen {
 						text = text[:maxReasoningLen] + "\n... (truncated)"
 					}
-					reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text})
+					reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text, Signature: currentReasoningSignature})
 					newReasoningPart := &session.Part{
 						ID:        session.PartID(id.NewPartID()),
 						MessageID: assistantID,
@@ -642,6 +643,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				} else {
 					flushReasoningPart(false)
 				}
+
+			case provider.EventReasoningSignature:
+				// Capture the Anthropic thinking signature for round-tripping
+				// back to the API on subsequent turns. Without the signature,
+				// multi-turn thinking breaks with an API error.
+				currentReasoningSignature = evt.Signature
 
 			case provider.EventFinish:
 				if evt.FinishReason != nil {
@@ -692,7 +699,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				if len(text) > maxReasoningLen {
 					text = text[:maxReasoningLen] + "\n... (truncated)"
 				}
-				reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text})
+				reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text, Signature: currentReasoningSignature})
 				reasonPart := &session.Part{
 					ID:        session.PartID(id.NewPartID()),
 					MessageID: assistantID,
@@ -1419,11 +1426,12 @@ func toProviderMessages(messages []*session.MessageWithParts, memoryText string)
 func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessage {
 	var result []provider.ModelMessage
 	for _, m := range messages {
-		// Collect text and tool parts
+		// Collect text, tool, and reasoning parts
 		var textParts []string
 		var toolCallParts []session.ToolPartData
 		var toolResultParts []session.ToolPartData
 		var imageParts []session.ImagePartData
+		var reasoningParts []provider.ReasoningPart
 
 		for _, p := range m.Parts {
 			switch p.Type {
@@ -1447,6 +1455,13 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 				} else {
 					toolResultParts = append(toolResultParts, data)
 				}
+			case session.PartReasoning:
+				var data session.ReasoningPartData
+				json.Unmarshal(p.Data, &data)
+				reasoningParts = append(reasoningParts, provider.ReasoningPart{
+					Text:      data.Text,
+					Signature: data.Signature,
+				})
 			}
 		}
 
@@ -1479,8 +1494,9 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 			toolCallsJSON, _ := json.Marshal(calls)
 
 			msg := provider.ModelMessage{
-				Role:      "assistant",
-				ToolCalls: toolCallsJSON,
+				Role:           "assistant",
+				ToolCalls:      toolCallsJSON,
+				ReasoningParts: reasoningParts,
 			}
 			if len(textParts) > 0 {
 				msg.Content, _ = json.Marshal(strings.Join(textParts, ""))
@@ -1526,6 +1542,12 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 							Data:      ip.Data,
 						})
 					}
+				}
+				// Forward reasoning/thinking blocks for assistant messages.
+				// Anthropic requires these to be passed back with their signatures
+				// on subsequent turns; other providers ignore this field.
+				if m.Info.Role == session.RoleAssistant && len(reasoningParts) > 0 {
+					msg.ReasoningParts = reasoningParts
 				}
 				result = append(result, msg)
 			}

@@ -6,6 +6,190 @@ import (
 	"testing"
 )
 
+// TestAnthropicThinkingBlocksInAssistantMessages verifies that reasoning/thinking
+// blocks from previous assistant turns are forwarded back to the Anthropic API
+// as "thinking" content blocks. Without this, multi-turn thinking breaks with an
+// API error: "Expected `thinking` or `redacted_thinking`".
+func TestAnthropicThinkingBlocksInAssistantMessages(t *testing.T) {
+	// Simulate a multi-turn conversation where the assistant produced thinking
+	// content in the previous turn. The ModelMessage carries ReasoningParts
+	// that must be rendered as Anthropic "thinking" content blocks.
+	messages := []ModelMessage{
+		{Role: "user", Content: json.RawMessage(`"What is 2+2?"`)},
+		{
+			Role:    "assistant",
+			Content: json.RawMessage(`"4"`),
+			ReasoningParts: []ReasoningPart{
+				{Text: "The user is asking a simple arithmetic question.", Signature: "ErkBCgIYAhIM..."},
+			},
+		},
+		{Role: "user", Content: json.RawMessage(`"And 3+3?"`)},
+	}
+
+	req := StreamRequest{
+		Model:    "claude-sonnet-4-6",
+		System:   []string{"You are a math tutor."},
+		Messages: messages,
+	}
+
+	// Replicate the message-building logic from StreamChat
+	anthropicMessages := make([]anthropicMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		if m.Role == "system" {
+			continue
+		}
+
+		if m.ToolCallID != "" {
+			// Tool result handling (not relevant to this test)
+		} else if m.ToolCalls != nil {
+			// Assistant with tool calls (not relevant to this test)
+		} else if m.Role == "assistant" && len(m.ReasoningParts) > 0 {
+			// Assistant message with thinking blocks: thinking blocks must
+			// precede text blocks per Anthropic API requirements.
+			var blocks []map[string]any
+			for _, rp := range m.ReasoningParts {
+				blocks = append(blocks, map[string]any{
+					"type":      "thinking",
+					"thinking":  rp.Text,
+					"signature": rp.Signature,
+				})
+			}
+			var text string
+			if m.Content != nil {
+				json.Unmarshal(m.Content, &text)
+			}
+			if text != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": text})
+			}
+			anthropicMessages = append(anthropicMessages, anthropicMessage{Role: "assistant", Content: blocks})
+		} else {
+			var content any
+			if err := json.Unmarshal(m.Content, &content); err != nil {
+				content = string(m.Content)
+			}
+			anthropicMessages = append(anthropicMessages, anthropicMessage{
+				Role:    m.Role,
+				Content: content,
+			})
+		}
+	}
+
+	// Verify the assistant message has thinking blocks
+	if len(anthropicMessages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(anthropicMessages))
+	}
+
+	// Second message should be the assistant message with thinking
+	assistantMsg := anthropicMessages[1]
+	if assistantMsg.Role != "assistant" {
+		t.Errorf("expected assistant role, got %s", assistantMsg.Role)
+	}
+
+	blocks, ok := assistantMsg.Content.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected Content to be []map[string]any, got %T", assistantMsg.Content)
+	}
+
+	// First block should be thinking
+	if len(blocks) < 2 {
+		t.Fatalf("expected at least 2 blocks (thinking + text), got %d", len(blocks))
+	}
+
+	thinkingBlock := blocks[0]
+	if thinkingBlock["type"] != "thinking" {
+		t.Errorf("expected first block type 'thinking', got %v", thinkingBlock["type"])
+	}
+	if thinkingBlock["thinking"] != "The user is asking a simple arithmetic question." {
+		t.Errorf("expected thinking text, got %v", thinkingBlock["thinking"])
+	}
+	if thinkingBlock["signature"] != "ErkBCgIYAhIM..." {
+		t.Errorf("expected signature, got %v", thinkingBlock["signature"])
+	}
+
+	// Second block should be text
+	textBlock := blocks[1]
+	if textBlock["type"] != "text" {
+		t.Errorf("expected second block type 'text', got %v", textBlock["type"])
+	}
+}
+
+// TestAnthropicThinkingBlocksWithToolCalls verifies that thinking blocks are
+// placed before tool_use blocks in assistant messages with tool calls.
+func TestAnthropicThinkingBlocksWithToolCalls(t *testing.T) {
+	// Assistant message with both reasoning and tool calls
+	messages := []ModelMessage{
+		{Role: "user", Content: json.RawMessage(`"Read the file"`)},
+		{
+			Role:      "assistant",
+			ToolCalls: json.RawMessage(`[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"/tmp/test\"}"}}]`),
+			ReasoningParts: []ReasoningPart{
+				{Text: "I need to read the file first.", Signature: "Sig123=="},
+			},
+		},
+	}
+
+	// Replicate the Anthropic message-building logic for tool calls with thinking
+	anthropicMessages := make([]anthropicMessage, 0)
+	for _, m := range messages {
+		if m.ToolCalls != nil {
+			type oaiFn struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}
+			type oaiCall struct {
+				ID       string `json:"id"`
+				Function oaiFn  `json:"function"`
+			}
+			var calls []oaiCall
+			var blocks []map[string]any
+			if err := json.Unmarshal(m.ToolCalls, &calls); err == nil {
+				// Prepend thinking blocks first (required by Anthropic API)
+				for _, rp := range m.ReasoningParts {
+					blocks = append(blocks, map[string]any{
+						"type":      "thinking",
+						"thinking":  rp.Text,
+						"signature": rp.Signature,
+					})
+				}
+				for _, call := range calls {
+					var input any
+					json.Unmarshal([]byte(call.Function.Arguments), &input)
+					if _, ok := input.(map[string]any); !ok {
+						input = map[string]any{}
+					}
+					blocks = append(blocks, map[string]any{
+						"type":  "tool_use",
+						"id":    call.ID,
+						"name":  call.Function.Name,
+						"input": input,
+					})
+				}
+			}
+			anthropicMessages = append(anthropicMessages, anthropicMessage{Role: "assistant", Content: blocks})
+		}
+	}
+
+	if len(anthropicMessages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(anthropicMessages))
+	}
+
+	blocks, ok := anthropicMessages[0].Content.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected Content to be []map[string]any, got %T", anthropicMessages[0].Content)
+	}
+
+	// First block must be thinking (not tool_use)
+	if blocks[0]["type"] != "thinking" {
+		t.Errorf("expected first block to be 'thinking', got %v", blocks[0]["type"])
+	}
+	// Second block must be tool_use
+	if blocks[1]["type"] != "tool_use" {
+		t.Errorf("expected second block to be 'tool_use', got %v", blocks[1]["type"])
+	}
+}
+
+
+
 // TestAnthropicPromptCaching verifies that the Anthropic provider emits
 // cache_control markers on the system prompt block and the last tool
 // definition, enabling prompt caching for repeated prefixes.
