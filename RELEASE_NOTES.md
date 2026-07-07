@@ -1,3 +1,57 @@
+# Release Notes — v0.17.0
+
+## Model Hotkeys & Dark HTML Output
+
+This minor release adds **Alt+1–4 keyboard shortcuts** for instant model switching and makes HTML code-block output render with a dark background by default.
+
+---
+
+### ⌨️ Model Hotkey Slots (Alt+1–4)
+
+You can now switch models with a single keystroke — no more hunting through the picker mid-conversation.
+
+- **Four hotkey slots** — Alt+1 through Alt+4 each map to a configurable model. The default model fills slot 1 on first launch.
+- **Settings UI** — A new "Model Hotkeys" section in Settings → General lets you assign models to each slot using the same ModelSelector popover used elsewhere, keeping the UI consistent.
+- **Keyboard shortcuts** — Press Alt+1 / Alt+2 / Alt+3 / Alt+4 (Option on macOS) to switch models instantly. The active model badge updates immediately.
+- **Persistent** — Hotkey assignments are saved to the session store and survive page reloads.
+
+### 🌑 Dark-by-Default HTML Output
+
+HTML code blocks (rendered in sandboxed iframes) now default to a dark color scheme, matching the existing dark UI theme.
+
+- **`color-scheme: dark`** — The iframe root element sets `color-scheme: dark`, which activates dark-native form controls, scrollbars, and default text colors without any custom CSS.
+- **Backward-compatible** — Existing HTML content that specifies its own colors continues to work exactly as before. The `color-scheme` declaration only affects elements using system defaults.
+
+---
+
+### 📥 Installation
+
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+**Homebrew:**
+```bash
+brew install prasenjeet-symon/tap/ogcode
+```
+
+**Docker:**
+```bash
+docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.16.1...v0.17.0*
+
+---
+
 # Release Notes — v0.16.1
 
 ## Frontend Stability Fix
