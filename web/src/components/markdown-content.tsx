@@ -215,11 +215,12 @@ export default function MarkdownContent(props: { text: string; class?: string })
       // Wrap the content in a transparent template that blends seamlessly
       // into the chat. No background or card styling — the HTML content
       // should appear as part of the conversation, not as a separate widget.
-      const darkWrap = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-body { margin: 0; padding: 0; background: transparent; color: #e4e4e7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-a { color: #60a5fa; }
-table { border-collapse: collapse; }
-th, td { border: 1px solid #3f3f46; padding: 6px 12px; }
+      const darkWrap = `<!DOCTYPE html><html style="color-scheme:dark;"><head><meta charset="utf-8"><style>
+body { margin: 0; padding: 0; background: transparent; color: #ededef; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color-scheme: dark; }
+a { color: #8b9cf7; }
+table { border-collapse: collapse; margin: 0.75em 0; }
+th, td { border: 1px solid #2a2a30; padding: 6px 12px; text-align: left; }
+th { background: rgba(255, 255, 255, 0.05); }
 img { max-width: 100%; height: auto; }
 </style></head><body>${rawHtml}</body></html>`;
 
