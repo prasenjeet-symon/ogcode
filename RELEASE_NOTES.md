@@ -1,3 +1,82 @@
+# Release Notes — v0.17.1
+
+## Anthropic Multi-Turn Thinking Fix
+
+This patch release fixes **multi-turn extended thinking** with Anthropic
+(Claude) models. When a model produced `thinking` blocks on one turn, those
+blocks — and their cryptographic signatures — were silently dropped before the
+next API call, which broke multi-turn thinking with an API error. Thinking and
+redacted-thinking blocks are now correctly preserved and forwarded.
+
+---
+
+### 🧠 Forward Thinking Blocks on Subsequent Turns
+
+Anthropic requires that `thinking` blocks (with their cryptographic signatures)
+be passed back unchanged on subsequent turns — dropping them breaks extended
+thinking. Previously, reasoning content was captured and stored but never sent
+back to the API.
+
+- **Signature storage** — A `Signature` field was added to `ReasoningPartData` and
+  `StreamEvent`, and a new `EventReasoningSignature` stream event type captures
+  `signature_delta` events from Anthropic streaming responses so signatures are
+  persisted alongside the reasoning text.
+- **Cross-provider carry** — A `ReasoningPart` type was added to `ModelMessage`
+  for carrying thinking blocks across the provider abstraction. The Anthropic
+  provider now emits thinking blocks as content blocks in assistant messages,
+  ordered before text/tool_use blocks per the API contract.
+- **Unaffected providers** — OpenAI-family providers handle reasoning tokens
+  server-side; the `ReasoningParts` field is simply ignored.
+
+### 🔒 Redacted-Thinking Handling
+
+- **`redacted_thinking` blocks** — Anthropic returns `redacted_thinking`
+  content-block-start events carrying only a signature with no text deltas.
+  Dropping them broke multi-turn thinking. The stream parser now handles these
+  events, emitting an empty reasoning event plus a signature event; the
+  signature handler persists it to an existing reasoning part so a
+  redacted-only block still stores its signature and is forwarded correctly.
+
+### 📏 Reasoning Counted in Request-Size Estimate
+
+- **Proactive compaction** — `estimateRequestSize` now sums
+  `ReasoningParts` text and signature lengths. Without this, a thinking-heavy
+  history could silently exceed the model context limit before the proactive
+  compaction heuristic triggered.
+- **Tests** — Added coverage for `redacted_thinking` event parsing,
+  redacted-thinking forwarded as a thinking block, and reasoning parts counted
+  in the request-size estimate.
+
+---
+
+### 📥 Installation
+
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+**Homebrew:**
+```bash
+brew install prasenjeet-symon/tap/ogcode
+```
+
+**Docker:**
+```bash
+docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.17.0...v0.17.1*
+
+---
+
 # Release Notes — v0.17.0
 
 ## Model Hotkeys & Dark HTML Output
