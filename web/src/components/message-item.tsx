@@ -1,5 +1,5 @@
 import { Index, Show, createEffect, createMemo, createSignal, onMount } from 'solid-js';
-import type { MessageWithParts, Part, TextPartData, ToolPartData, ReasoningPartData, ImagePartData } from '../api/client';
+import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData } from '../api/client';
 import MarkdownContent from './markdown-content';
 import FileDiff, { diffStat } from './file-diff';
 import { useNote } from '../context/note';
@@ -36,29 +36,44 @@ function TextPartDisplay(props: { data: TextPartData }) {
   return <MarkdownContent text={props.data.text} />;
 }
 
+// Fallback used when a tool part arrives with missing/malformed state — e.g.
+// from an Ollama-compatible proxy that streams incomplete tool-call deltas.
+// Without this, `props.data.state` is undefined and the component throws a
+// TypeError that aborts the entire SolidJS render (blank screen).
+const DEFAULT_TOOL_STATE: ToolState = {
+  status: 'error',
+  input: {},
+  error: 'Malformed tool part: missing state',
+};
+
 function ToolPartDisplay(props: { data: ToolPartData }) {
-  const [expanded, setExpanded] = createSignal(props.data.state.status === 'running');
-  const status = () => props.data.state.status;
-  const title = () => props.data.state.title || props.data.tool;
+  // Defensively normalize the incoming data so downstream code never touches
+  // an undefined `state`. Malformed proxies can send parts whose `data` field
+  // parses to an object with no `state` property.
+  const state = (): ToolState => props.data.state ?? DEFAULT_TOOL_STATE;
+  const tool = (): string => props.data.tool || 'unknown';
+  const [expanded, setExpanded] = createSignal(state().status === 'running');
+  const status = () => state().status;
+  const title = () => state().title || tool();
   const summary = () => {
-    if (isDeepSearch() && props.data.state.status === 'completed') return 'Search results';
-    return summarizeInput(props.data.tool, props.data.state.input);
+    if (isDeepSearch() && state().status === 'completed') return 'Search results';
+    return summarizeInput(tool(), state().input);
   };
-  const hasOutput = () => !!props.data.state.output;
-  const outputLineCount = () => (props.data.state.output || '').split('\n').length;
+  const hasOutput = () => !!state().output;
+  const outputLineCount = () => (state().output || '').split('\n').length;
 
   // Deep search results contain the full synthesised answer (markdown with
   // Sources section). Render them as markdown instead of a code block, and
   // auto-expand on completion so the user sees the answer immediately.
-  const isDeepSearch = () => props.data.tool === 'deep_search';
+  const isDeepSearch = () => tool() === 'deep_search';
 
   // File-editing tools render a GitHub-style before/after diff instead of raw input.
-  const isFileEdit = () => props.data.tool === 'edit' || props.data.tool === 'write';
+  const isFileEdit = () => tool() === 'edit' || tool() === 'write';
   const fileDiff = createMemo((): { oldText: string; newText: string; mode: 'create' | 'edit' | 'overwrite'; omitted: boolean } | null => {
     if (!isFileEdit()) return null;
-    const input = props.data.state.input || {};
-    const meta = props.data.state.metadata || {};
-    if (props.data.tool === 'edit') {
+    const input = state().input || {};
+    const meta = state().metadata || {};
+    if (tool() === 'edit') {
       return { oldText: String(input.old_string ?? ''), newText: String(input.new_string ?? ''), mode: 'edit', omitted: false };
     }
     const created = !!meta.created;
@@ -99,9 +114,10 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
 
   // Detect if this tool was cancelled (error message contains cancellation text)
   const isCancelled = () => {
-    return props.data.state.status === 'error' &&
-      props.data.state.error &&
-      props.data.state.error.toLowerCase().includes('cancel');
+    const s = state();
+    return s.status === 'error' &&
+      s.error &&
+      s.error.toLowerCase().includes('cancel');
   };
 
   return (
@@ -173,18 +189,18 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
           <Show when={isFileEdit() && fileDiff()}>
             <FileDiff oldText={fileDiff()!.oldText} newText={fileDiff()!.newText} mode={fileDiff()!.mode} omitted={fileDiff()!.omitted} />
           </Show>
-          <Show when={!isFileEdit() && props.data.state.input && Object.keys(props.data.state.input).length > 0 && !(isDeepSearch() && status() === 'completed')}>
-            <CodeBlock label="input" maxHeight={160} text={safeStringify(props.data.state.input)} />
+          <Show when={!isFileEdit() && state().input && Object.keys(state().input).length > 0 && !(isDeepSearch() && status() === 'completed')}>
+            <CodeBlock label="input" maxHeight={160} text={safeStringify(state().input)} />
           </Show>
-          <Show when={props.data.state.output && !isFileEdit()}>
-            <Show when={isDeepSearch()} fallback={<CodeBlock label="output" maxHeight={280} text={props.data.state.output || ''} />}>
+          <Show when={state().output && !isFileEdit()}>
+            <Show when={isDeepSearch()} fallback={<CodeBlock label="output" maxHeight={280} text={state().output || ''} />}>
               <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-3 max-h-[600px] overflow-y-auto">
-                <MarkdownContent text={props.data.state.output || ''} />
+                <MarkdownContent text={state().output || ''} />
               </div>
             </Show>
           </Show>
-          <Show when={props.data.state.error}>
-            <CodeBlock label="error" maxHeight={160} text={props.data.state.error || ''} />
+          <Show when={state().error}>
+            <CodeBlock label="error" maxHeight={160} text={state().error || ''} />
           </Show>
         </div>
       </Show>
