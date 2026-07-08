@@ -114,7 +114,7 @@ export default function PlanSidebar() {
           </button>
           <button
             onClick={() => navigate('/docindex')}
-            title="Doc Index"
+            title="Project Index"
             class={`w-8 h-8 rounded-lg flex items-center justify-center transition
               ${location.pathname.startsWith('/docindex')
                 ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
