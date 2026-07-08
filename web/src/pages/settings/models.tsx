@@ -539,7 +539,7 @@ function CompatibleProvidersCard() {
               <code class="font-mono text-zinc-300 bg-[color:var(--bg-elevated)] px-1.5 py-0.5 rounded text-[11px] mx-1">AIza…</code> key).
             </StepRow>
             <StepRow n={3}>
-              Set the <span class="text-zinc-200 font-medium">Base URL</span> to your provider's OpenAI-compatible endpoint (see the list below).
+              Set the <span class="text-zinc-200 font-medium">Base URL</span> to your provider's OpenAI-compatible endpoint.
             </StepRow>
             <StepRow n={4}>
               Save and restart ogcode, then click <span class="text-zinc-200 font-medium">Add custom model</span> to add a model from that provider.
@@ -547,20 +547,6 @@ function CompatibleProvidersCard() {
             </StepRow>
           </ol>
 
-          {/* Preset list */}
-          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            <For each={COMPATIBLE_PRESETS}>
-              {(preset) => (
-                <div class="flex items-center gap-2.5 rounded-lg bg-[color:var(--bg-elevated)]/60 border border-[color:var(--border-subtle)] px-3 py-2">
-                  <span class={`w-2 h-2 rounded-full ${preset.dot} shrink-0`} />
-                  <div class="min-w-0 flex-1">
-                    <div class="text-[12px] font-medium text-zinc-200 truncate">{preset.label}</div>
-                    <div class="text-[10.5px] text-zinc-500 font-mono truncate">{preset.baseURL}</div>
-                  </div>
-                </div>
-              )}
-            </For>
-          </div>
         </div>
       </div>
     </Show>
