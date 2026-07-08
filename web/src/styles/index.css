@@ -222,6 +222,14 @@ input:focus-visible {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* Model-switch confirmation popover: pops in, holds, then gently fades out. */
+@keyframes switchPopup {
+  0%   { opacity: 0; transform: scale(0.92) translateY(-6px); }
+  12%  { opacity: 1; transform: scale(1.02) translateY(0); }
+  20%  { transform: scale(1) translateY(0); }
+  78%  { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(0.98) translateY(-4px); }
+}
 
 /* Spring-based animation classes using Linear's timing curves */
 .animate-fade-in       { animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
@@ -233,6 +241,7 @@ input:focus-visible {
 .animate-slide-down    { animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 .animate-spin          { animation: spin 0.9s linear infinite; }
 .animate-pulse-ring    { animation: pulse-ring 2s ease-out infinite; }
+.animate-switch-popup { animation: switchPopup 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
 /* Linear-style subtle message/list entrance */
 .anim-enter { animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }

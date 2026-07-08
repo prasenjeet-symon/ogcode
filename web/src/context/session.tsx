@@ -63,6 +63,8 @@ interface SessionContextValue {
   memorySavedTokens: () => number;
   modelSlots: () => (string | null)[];
   setModelSlot: (slot: number, modelId: string | null) => void;
+  modelSwitchPopup: () => { modelId: string; slot: number } | null;
+  showModelSwitchPopup: (modelId: string, slot: number) => void;
 }
 
 const SessionContext = createContext<SessionContextValue>();
@@ -205,6 +207,18 @@ export const SessionProvider: ParentComponent = (props) => {
     try { localStorage.setItem(SLOTS_KEY, JSON.stringify(slots)); } catch (_e) { /* ignore quota errors */ }
   }
   const [modelSlots, setModelSlots] = createSignal<(string | null)[]>(loadModelSlots());
+
+  // Transient model-switch popup state — set when the user switches models via
+  // the Alt+1–4 hotkey. Auto-clears after a short delay so the popover only
+  // flashes briefly to confirm which model is now active.
+  interface SwitchPopup { modelId: string; slot: number }
+  const [modelSwitchPopup, setModelSwitchPopup] = createSignal<SwitchPopup | null>(null);
+  let switchPopupTimer: ReturnType<typeof setTimeout> | null = null;
+  function showModelSwitchPopup(modelId: string, slot: number) {
+    if (switchPopupTimer) clearTimeout(switchPopupTimer);
+    setModelSwitchPopup({ modelId, slot });
+    switchPopupTimer = setTimeout(() => setModelSwitchPopup(null), 1800);
+  }
 
   function setModelSlot(slot: number, modelId: string | null) {
     if (slot < 0 || slot >= NUM_SLOTS) return;
@@ -749,6 +763,7 @@ export const SessionProvider: ParentComponent = (props) => {
     const enabled = models().some((m) => m.id === modelId && m.enabled);
     if (!enabled) return;
     selectModel(modelId);
+    showModelSwitchPopup(modelId, slot + 1);
   };
 
   onMount(() => {
@@ -780,6 +795,8 @@ export const SessionProvider: ParentComponent = (props) => {
     memorySavedTokens,
     modelSlots,
     setModelSlot,
+    modelSwitchPopup,
+    showModelSwitchPopup,
   };
 
   return (

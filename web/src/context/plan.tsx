@@ -1,5 +1,5 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
-import { createSignal, createEffect, on } from 'solid-js';
+import { createSignal, createEffect, on, onMount, onCleanup } from 'solid-js';
 import {
   type Plan,
   type Task,
@@ -25,6 +25,7 @@ import {
   deletePlan as deletePlanAPI,
 } from '../api/client';
 import { useServer } from './server';
+import { useSession } from './session';
 
 interface PlanContextValue {
   plans: () => Plan[];
@@ -761,6 +762,32 @@ export const PlanProvider: ParentComponent = (props) => {
       lastSSEUpdate = Date.now();
     }).catch(() => {});
   }));
+
+  // ── Model switch hotkey (Alt+1–4) ──
+  // The session context owns the slot assignments, so we reuse its modelSlots
+  // and popup signal. On plan screens the hotkey switches the *plan's* model
+  // (not the session's) and still shows the glass confirmation popover.
+  const session = useSession();
+  const handlePlanHotkey = (e: KeyboardEvent) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    let slot = -1;
+    if (e.code === 'Digit1') slot = 0;
+    else if (e.code === 'Digit2') slot = 1;
+    else if (e.code === 'Digit3') slot = 2;
+    else if (e.code === 'Digit4') slot = 3;
+    if (slot < 0) return;
+    const modelId = session.modelSlots()[slot];
+    if (!modelId) return;
+    // Only switch if the model is currently enabled in this context.
+    const enabled = models().some((m: any) => m.id === modelId && m.enabled);
+    if (!enabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    selectModel(modelId);
+    session.showModelSwitchPopup(modelId, slot + 1);
+  };
+  onMount(() => document.addEventListener('keydown', handlePlanHotkey));
+  onCleanup(() => document.removeEventListener('keydown', handlePlanHotkey));
 
   const value: PlanContextValue = {
     plans,
