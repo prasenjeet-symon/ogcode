@@ -265,17 +265,26 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 		// Check if we should continue: last assistant finished means done
 		if shouldBreak(messages) {
-			last := messages[len(messages)-1]
-			finish := "stop"
-			if last.Info.Finish != nil {
-				finish = *last.Info.Finish
+			// Don't break if there is pending guidance — the user injected a
+			// new instruction while the loop was running and we just drained
+			// it at the top of this iteration. If we broke here the guidance
+			// would be silently discarded because it is never persisted to the
+			// message DB (it's an ephemeral system-prompt entry). Continue so
+			// the guidance reaches the LLM on this iteration's call.
+			if pendingGuidance == "" {
+				last := messages[len(messages)-1]
+				finish := "stop"
+				if last.Info.Finish != nil {
+					finish = *last.Info.Finish
+				}
+				slog.Info("agent loop breaking", "session", sessionID, "reason", "last assistant finished", "finish", finish, "totalMessages", len(messages))
+				exitReason = finish
+				if memoryEnabled {
+					lr.writeMemory(ctx, sessionID, p, modelID)
+				}
+				return nil
 			}
-			slog.Info("agent loop breaking", "session", sessionID, "reason", "last assistant finished", "finish", finish, "totalMessages", len(messages))
-			exitReason = finish
-			if memoryEnabled {
-				lr.writeMemory(ctx, sessionID, p, modelID)
-			}
-			return nil
+			slog.Info("agent loop continuing for pending guidance", "session", sessionID, "step", step, "len", len(pendingGuidance))
 		}
 
 		// Create new assistant message
@@ -991,6 +1000,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// finish_reason — some providers send "stop" even alongside tool calls.
 		// Only break when there are no tool calls to feed back.
 		if !toolCallsExecuted {
+			// Before breaking, re-check for guidance that arrived during this
+			// iteration's streaming/tool execution. Such guidance was queued
+			// after we drained at the top of this iteration, so it would be
+			// silently lost if we exited now (guidance is never persisted).
+			// Continue the loop so the next iteration drains and injects it.
+			if lc := LoopControlFromContext(ctx); lc != nil && lc.HasPendingGuidance() {
+				slog.Info("agent loop continuing for guidance received during iteration", "session", sessionID, "step", step)
+				continue
+			}
 			slog.Info("agent loop complete", "session", sessionID, "steps", step, "reason", finishReason)
 			exitReason = finishReason
 			if memoryEnabled {
