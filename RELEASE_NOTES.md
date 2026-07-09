@@ -1,3 +1,90 @@
+# Release Notes — v0.18.0
+
+## Mid-Loop Guidance & Model-Switch Popover
+
+This minor release lets you **steer an agent mid-task** — inject a new
+instruction into an already-running loop without starting a new turn, and
+optionally cancel the in-flight tool call so the agent acts on your guidance
+immediately. It also adds a confirmation **popover** when you switch models
+with the Alt+1–4 hotkeys and renames the sidebar index to "Project Index".
+
+---
+
+### 🧭 Mid-Loop User Guidance
+
+You can now send additional instructions to an agent **while it is still
+working**, within the same user turn. The guidance is delivered at the top of
+the next loop iteration as a trailing `<system-reminder>` system-prompt entry.
+It is ephemeral — never persisted to the message DB — so it does not interfere
+with compaction turn boundaries or agentic-memory prior_context slicing.
+
+- **Side-channel design** — A new `LoopControl` type carries a per-session
+  guidance queue and tool-cancel function via context. It is nil-safe and a
+  no-op for CLI / search / indexer loops that do not wrap the context.
+- **In-flight tool cancellation** — Optionally cancels the currently-running
+  tool call so the loop can act on the new guidance immediately instead of
+  waiting for the tool to finish. Cancelled tools get a clear
+  "cancelled by user mid-loop guidance" result so the call/result pairing stays
+  valid.
+- **API** — `POST /api/session/{id}/guidance` accepts `content` and `cancelTool`.
+  Returns 409 when no loop is running, so the frontend falls back to a normal
+  prompt.
+- **Frontend** — While a loop is running the prompt textarea stays enabled and
+  submitting sends mid-loop guidance (always cancels the current tool). A
+  visible send button while running, "Guidance sent" confirmation badge, and
+  "Guidance queued" inline indicator are wired to `loop.guidance` SSE events.
+
+### ✨ Model-Switch Popover (Alt+1–4)
+
+Activating a model with the Alt+1–4 hotkey now shows a brief **glass popover**
+that pops in, holds, and fades out over ~1.8s, centered near the top of the
+screen. It shows the slot number badge, provider color dot, model name, and an
+"active" label so you get immediate visual confirmation of the switch.
+
+- Rendered at the app root so it appears on every screen (chat, plan, home,
+  settings, etc.).
+- The plan screen now also handles Alt+1–4 to switch the plan's own model
+  (previously the hotkey only affected the hidden session model on plan
+  screens) and reuses the session popup signal.
+
+### 🗂️ UI Polish
+
+- **Project Index rename** — The sidebar entry and page header previously
+  labelled "Doc Index" are now renamed to **Project Index**, matching the
+  unified index terminology.
+- **OpenAI-compatible providers info card** — Removed the base-URL preset
+  cards that were no longer accurate, leaving a cleaner info layout.
+
+---
+
+### 📥 Installation
+
+**macOS/Linux:**
+```bash
+curl -fsSL http://ogcode.xyz/install.sh | sh
+```
+
+**Windows:**
+```powershell
+irm http://ogcode.xyz/install.ps1 | iex
+```
+
+**Homebrew:**
+```bash
+brew install prasenjeet-symon/tap/ogcode
+```
+
+**Docker:**
+```bash
+docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.17.1...v0.18.0*
+
+---
+
 # Release Notes — v0.17.1
 
 ## Anthropic Multi-Turn Thinking Fix
