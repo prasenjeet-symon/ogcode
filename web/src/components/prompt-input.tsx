@@ -39,6 +39,10 @@ export default function PromptInput() {
   const [pendingImages, setPendingImages] = createSignal<PendingImage[]>([]);
   const [imageError, setImageError] = createSignal('');
   const [guidanceSent, setGuidanceSent] = createSignal(false); // brief confirmation after sending guidance
+  // Whether to cancel the in-flight tool when sending mid-loop guidance. The
+  // user can toggle this with a checkbox that appears while the agent is running.
+  // Defaults to true (cancel) so guidance is acted on immediately.
+  const [cancelTool, setCancelTool] = createSignal(true);
   let textareaRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let guidanceSentTimer: ReturnType<typeof setTimeout> | null = null;
@@ -151,9 +155,9 @@ export default function PromptInput() {
 
     if (isRunning()) {
       // Mid-loop guidance: inject into the running loop. If no loop is running
-      // (409), fall back to a normal prompt. Always cancel the current tool so
-      // the loop can act on the guidance immediately.
-      const accepted = await session.guidance(content, true);
+      // (409), fall back to a normal prompt. The user controls whether the
+      // currently-running tool is cancelled via the cancelTool checkbox.
+      const accepted = await session.guidance(content, cancelTool());
       if (accepted) {
         setText('');
         if (textareaRef) textareaRef.style.height = 'auto';
@@ -276,7 +280,7 @@ export default function PromptInput() {
             onPaste={handlePaste}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={isRunning() ? "Agent is working… type to send mid-loop guidance (cancels current tool)" : "Ask anything, paste an error, or describe a task…"}
+            placeholder={isRunning() ? "Agent is working… type to send mid-loop guidance" : "Ask anything, paste an error, or describe a task…"}
             rows={1}
             class="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] text-zinc-100
                    placeholder-zinc-500 focus:outline-none
@@ -320,6 +324,23 @@ export default function PromptInput() {
             </Show>
 
             <Show when={isRunning()}>
+              {/* Cancel-tool checkbox: when checked (default), sending mid-loop
+                  guidance also cancels the currently-running tool so the loop can
+                  act on the guidance immediately. Uncheck to let the running tool
+                  finish naturally — the guidance still applies on the next
+                  iteration. */}
+              <label
+                class="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-300 cursor-pointer select-none transition-colors var(--spring-sm) h-8 px-1.5 rounded-lg hover:bg-[color:var(--bg-hover)]"
+                title={cancelTool() ? 'The running tool will be cancelled when you send guidance' : 'The running tool will be allowed to finish before guidance is applied'}
+              >
+                <input
+                  type="checkbox"
+                  checked={cancelTool()}
+                  onChange={(e) => setCancelTool((e.target as HTMLInputElement).checked)}
+                  class="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer"
+                />
+                <span>Cancel tool</span>
+              </label>
               <button
                 type="button"
                 onClick={() => session.abort()}
@@ -338,7 +359,7 @@ export default function PromptInput() {
               <button
                 type="submit"
                 disabled={!canSend()}
-                title={canSend() ? 'Send mid-loop guidance (Enter)' : 'Type guidance to send'}
+                title={canSend() ? `Send mid-loop guidance (Enter)${cancelTool() ? ' — cancels current tool' : ''}` : 'Type guidance to send'}
                 class={`h-8 w-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm)
                   ${canSend()
                     ? 'bg-[color:var(--accent)]/80 hover:bg-[color:var(--accent)] text-[color:var(--on-primary)] shadow-sm hover:scale-[1.06] active:scale-[0.95]'
