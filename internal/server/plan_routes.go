@@ -881,6 +881,13 @@ func (s *Server) handlePlanPrompt(w http.ResponseWriter, r *http.Request) {
 
 	// Start agent loop with PlanAgent
 	ctx, cancel := context.WithCancel(context.Background())
+	// Create a LoopControl so the plan loop also benefits from pre-flight
+	// guidance (elevates the user's prompt to the highest-priority directive).
+	lc := agent.NewLoopControl()
+	if content := strings.TrimSpace(input.Content); content != "" {
+		lc.SetPreflight(content)
+	}
+	ctx = agent.WithLoopControl(ctx, lc)
 	s.mu.Lock()
 	if old, ok := s.running[sessionID]; ok {
 		old()
@@ -890,6 +897,7 @@ func (s *Server) handlePlanPrompt(w http.ResponseWriter, r *http.Request) {
 	token := s.nextToken
 	s.running[sessionID] = cancel
 	s.runningToken[sessionID] = token
+	s.loopControls[sessionID] = lc
 	s.mu.Unlock()
 
 	go func() {
@@ -898,6 +906,7 @@ func (s *Server) handlePlanPrompt(w http.ResponseWriter, r *http.Request) {
 			if s.runningToken[sessionID] == token {
 				delete(s.running, sessionID)
 				delete(s.runningToken, sessionID)
+				delete(s.loopControls, sessionID)
 			}
 			s.mu.Unlock()
 		}()

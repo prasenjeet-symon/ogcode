@@ -6,6 +6,62 @@ import (
 	"testing"
 )
 
+func TestLoopControl_Preflight(t *testing.T) {
+	lc := NewLoopControl()
+
+	// Empty initially
+	if lc.Preflight() != "" {
+		t.Error("expected empty preflight initially")
+	}
+
+	// Set and read — value persists (not drained)
+	lc.SetPreflight("Fix the failing auth test in user_test.go")
+	if got := lc.Preflight(); got != "Fix the failing auth test in user_test.go" {
+		t.Errorf("expected preflight to persist, got %q", got)
+	}
+
+	// Preflight is NOT drained — reading it a second time still returns the value
+	if got := lc.Preflight(); got != "Fix the failing auth test in user_test.go" {
+		t.Errorf("expected preflight to persist across reads, got %q", got)
+	}
+
+	// Overwrite
+	lc.SetPreflight("new directive")
+	if got := lc.Preflight(); got != "new directive" {
+		t.Errorf("expected overwritten preflight, got %q", got)
+	}
+
+	// Empty string is a no-op (does not clear existing value)
+	lc.SetPreflight("")
+	if got := lc.Preflight(); got != "new directive" {
+		t.Errorf("expected empty SetPreflight to be a no-op, got %q", got)
+	}
+}
+
+func TestLoopControl_Preflight_NilSafe(t *testing.T) {
+	var lc *LoopControl
+	lc.SetPreflight("hello")   // must not panic
+	if lc.Preflight() != "" {   // must not panic
+		t.Error("expected empty from nil LoopControl")
+	}
+}
+
+func TestPreflightPrompt(t *testing.T) {
+	got := preflightPrompt("Fix the build")
+	if !strings.Contains(got, "Fix the build") {
+		t.Error("expected preflight text in prompt")
+	}
+	if !strings.Contains(got, "<system-reminder>") {
+		t.Error("expected system-reminder wrapper")
+	}
+	if !strings.Contains(got, "</system-reminder>") {
+		t.Error("expected closing system-reminder tag")
+	}
+	if !strings.Contains(got, "highest priority") {
+		t.Error("expected high-priority framing in preflight prompt")
+	}
+}
+
 func TestLoopControl_PushDrainGuidance(t *testing.T) {
 	lc := NewLoopControl()
 

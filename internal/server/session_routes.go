@@ -421,6 +421,14 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	// Create a LoopControl for this loop so the user can inject mid-loop
 	// guidance and cancel in-flight tools without killing the loop.
 	lc := agent.NewLoopControl()
+	// Seed pre-flight guidance: elevate the user's prompt to the highest-priority
+	// directive for the entire turn. This is injected as a system-reminder on
+	// every loop iteration so the model keeps the primary objective in scope
+	// even as tool-call follow-ups accumulate. Empty/whitespace-only prompts
+	// (e.g. image-only messages) are skipped.
+	if content := strings.TrimSpace(input.Content); content != "" {
+		lc.SetPreflight(content)
+	}
 	ctx = agent.WithLoopControl(ctx, lc)
 	// Cancel any already-running loop for this session before starting a new one.
 	s.mu.Lock()

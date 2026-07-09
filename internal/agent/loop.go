@@ -330,6 +330,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// breakpoint on the first (static) system block only, so the date —
 		// which changes every turn — does not invalidate the cache.
 		systemPrompts := []string{system, systemReminderPrompt()}
+		// Inject pre-flight guidance as a high-priority directive that persists
+		// for the entire turn. Unlike mid-loop guidance (which is drained and
+		// consumed once), the preflight directive is re-injected on every
+		// iteration — including tool-call follow-ups — so the model never loses
+		// the user's primary objective as the conversation grows. It sits after
+		// the date reminder so it does not pollute the Anthropic cacheable first
+		// block, and before the compaction summary / mid-loop guidance so it
+		// takes precedence over both. Final ordering:
+		// [static, date, preflight?, compactionSummary?, guidance?].
+		if lc := LoopControlFromContext(ctx); lc != nil {
+			if pf := lc.Preflight(); pf != "" {
+				systemPrompts = append(systemPrompts, preflightPrompt(pf))
+			}
+		}
 		// Inject mid-loop guidance as a trailing system-prompt entry. It is
 		// appended AFTER the static cacheable prefix and the date reminder so it
 		// does not pollute the Anthropic cache breakpoint (which targets the
