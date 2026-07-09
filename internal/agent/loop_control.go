@@ -22,14 +22,6 @@ type LoopControl struct {
 	// pending guidance texts, drained at the top of each loop iteration.
 	guidance []string
 
-	// preflight is a high-priority directive seeded from the user's prompt
-	// before the loop starts. Unlike mid-loop guidance it is NOT drained — it
-	// persists for the entire turn so every iteration (including tool-call
-	// follow-ups) keeps the directive in scope. Injected as a system-reminder
-	// entry positioned after the date reminder, before compaction/mid-loop
-	// guidance, so it never pollutes the Anthropic cacheable first block.
-	preflight string
-
 	// toolCancel cancels only the currently-running tool execution. It is
 	// set before the parallel tool-execution block and cleared (and called)
 	// after wg.Wait() returns. nil when no tools are running.
@@ -39,32 +31,6 @@ type LoopControl struct {
 // NewLoopControl creates a fresh LoopControl.
 func NewLoopControl() *LoopControl {
 	return &LoopControl{}
-}
-
-// SetPreflight seeds the pre-flight guidance — a high-priority directive
-// derived from the user's prompt that the loop injects on every iteration.
-// Unlike mid-loop guidance it is not drained: it persists for the whole turn.
-// Safe for concurrent use; typically called once before the loop starts.
-func (lc *LoopControl) SetPreflight(text string) {
-	if lc == nil || text == "" {
-		return
-	}
-	lc.mu.Lock()
-	lc.preflight = text
-	lc.mu.Unlock()
-}
-
-// Preflight returns the current pre-flight directive, or "" when none is set.
-// Called by RunLoop on each iteration to inject the directive into the system
-// prompt. The value is not cleared — it stays until a new loop starts with a
-// fresh LoopControl (or SetPreflight overwrites it).
-func (lc *LoopControl) Preflight() string {
-	if lc == nil {
-		return ""
-	}
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	return lc.preflight
 }
 
 // PushGuidance appends a guidance text to the pending queue. Safe for
@@ -184,19 +150,4 @@ func guidancePrompt(text string) string {
 	return "<system-reminder>\nThe user has sent new guidance while you are working. " +
 		"Adjust your approach to incorporate this. Do not restart from scratch — " +
 		"continue from where you are, but change direction as instructed:\n\n" + text + "\n</system-reminder>"
-}
-
-// preflightPrompt wraps the pre-flight directive in a <system-reminder> block
-// that elevates the user's prompt to the highest priority. Unlike mid-loop
-// guidance (which says "adjust your approach"), this tells the model that the
-// user's request is the primary objective for this turn and must be treated
-// with maximum focus and precedence over all other context. It is injected on
-// every loop iteration — including tool-call follow-ups — so the directive is
-// never lost as the conversation grows.
-func preflightPrompt(text string) string {
-	return "<system-reminder>\n## Pre-flight guidance — highest priority\n\n" +
-		"The following is the user's primary directive for this session. " +
-		"Treat it as your highest-priority objective. Everything you do — " +
-		"tool calls, file edits, research, responses — should serve this " +
-		"directive above all other context in this conversation:\n\n" + text + "\n</system-reminder>"
 }
