@@ -229,6 +229,24 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			return ctx.Err()
 		}
 
+		// Drain any mid-loop guidance that was injected since the last iteration.
+		// This is the ephemeral side-channel: the user can send new instructions
+		// while the loop is running. We drain them here and inject as a trailing
+		// system-prompt entry on the upcoming LLM call. The guidance is never
+		// persisted to the message DB, so it does not interact with compaction
+		// turn boundaries or agentic-memory <prior_context> slicing.
+		pendingGuidance := ""
+		if lc := LoopControlFromContext(ctx); lc != nil {
+			pendingGuidance = lc.DrainGuidance()
+			if pendingGuidance != "" {
+				slog.Info("mid-loop guidance injected", "session", sessionID, "step", step, "len", len(pendingGuidance))
+				lr.Bus.Publish("loop.guidance", map[string]string{
+					"sessionId": string(sessionID),
+					"status":    "delivered",
+				})
+			}
+		}
+
 		// Load all messages for this session (retry on DB contention)
 		var messages []*session.MessageWithParts
 		for dbAttempt := 0; dbAttempt < 3; dbAttempt++ {
@@ -312,6 +330,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// breakpoint on the first (static) system block only, so the date —
 		// which changes every turn — does not invalidate the cache.
 		systemPrompts := []string{system, systemReminderPrompt()}
+		// Inject mid-loop guidance as a trailing system-prompt entry. It is
+		// appended AFTER the static cacheable prefix and the date reminder so it
+		// does not pollute the Anthropic cache breakpoint (which targets the
+		// first system block). Being last also means a compaction summary (added
+		// below in the non-memory path) sits between the date and the guidance,
+		// keeping the ordering: [static, date, compactionSummary?, guidance?].
 		var modelMessages []provider.ModelMessage
 
 		if memoryEnabled {
@@ -334,6 +358,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if compactionSummary != "" {
 				systemPrompts = append(systemPrompts, compactionSummary)
 			}
+		}
+
+		// Mid-loop guidance: appended last so it's the freshest instruction the
+		// model sees. Ephemeral — never persisted, never shifts turn boundaries.
+		if pendingGuidance != "" {
+			systemPrompts = append(systemPrompts, guidancePrompt(pendingGuidance))
 		}
 
 		// Stream from LLM with retry for transient errors
@@ -835,6 +865,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				execInfos[i].tc = tc
 			}
 
+			// Derive a child context for tool execution. This allows mid-loop tool
+			// cancellation: CancelTool on the LoopControl cancels only this child,
+			// so wg.Wait() returns early with cancelled/errored results, and the
+			// loop continues to its next iteration (where it picks up any injected
+			// guidance). The loop's own ctx remains uncancelled, so the loop stays
+			// alive. When there is no LoopControl (CLI, search, indexer), the
+			// child is still derived but simply never independently cancelled —
+			// behaviour is identical to before.
+			toolCtx, toolCancel := context.WithCancel(ctx)
+			lc := LoopControlFromContext(ctx)
+			if lc != nil {
+				lc.SetToolCancel(toolCancel)
+			}
+
 			// Execute all ready tool calls concurrently
 			var wg sync.WaitGroup
 			for i := range readyCalls {
@@ -842,12 +886,25 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				go func(idx int) {
 					defer wg.Done()
 					tc := readyCalls[idx]
-					result, err := lr.executeTool(ctx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID)
+					result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID)
 					execInfos[idx].result = result
 					execInfos[idx].err = err
 				}(i)
 			}
 			wg.Wait()
+
+			// Clear the tool-cancel registration and release the child context.
+			if lc != nil {
+				lc.ClearToolCancel()
+			}
+			toolCancel()
+
+			// Detect mid-loop tool cancellation: the child context was cancelled
+			// but the loop context is still alive. This happens when the user
+			// cancelled the current tool via the guidance endpoint. Errored tools
+			// from the cancelled child get a clear "cancelled by user" message so
+			// the LLM understands why the result is incomplete.
+			toolCtxCancelled := toolCtx.Err() != nil && ctx.Err() == nil
 
 			// Update all tool parts with results (sequential — DB writes)
 			for _, info := range execInfos {
@@ -870,6 +927,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 				if info.err != nil {
 					errStr := info.err.Error()
+					// When the tool child context was cancelled mid-loop (not the
+					// loop itself), surface a clear cancellation message rather
+					// than a raw context.Canceled error string.
+					if toolCtxCancelled {
+						errStr = "Tool execution cancelled by user mid-loop guidance"
+					}
 					toolData.State = session.ToolState{
 						Status: session.ToolError,
 						Input:  tc.Input,
@@ -910,9 +973,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				})
 			}
 
-			// If context was cancelled during execution, bail out now. The
-			// tool-result message must not be created — it would contain
-			// partial/missing outputs for unexecuted tool calls.
+			// If the loop context (not just the tool child) was cancelled during
+			// execution, bail out now. The tool-result message must not be created
+			// — it would contain partial/missing outputs for unexecuted tool calls.
+			// When only the tool child was cancelled (mid-loop tool cancel via
+			// guidance), the loop context is still alive, so we fall through and
+			// create the tool-result message with the cancelled results — the
+			// call/result pairing the API expects stays valid.
 			if ctx.Err() != nil {
 				slog.Info("agent loop cancelled after tool execution", "session", sessionID)
 				exitReason = "aborted"

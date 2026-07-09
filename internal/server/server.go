@@ -75,6 +75,12 @@ type Server struct {
 	runningToken map[session.SessionID]uint64 // prevents goroutine from deleting a newer cancel
 	nextToken    uint64
 
+	// loopControls holds the LoopControl for each running agent loop, keyed by
+	// session ID. It lets the guidance endpoint push mid-loop instructions and
+	// cancel in-flight tools without killing the loop. Entries are managed
+	// alongside the running map (set when a loop starts, cleared when it exits).
+	loopControls map[session.SessionID]*agent.LoopControl
+
 	// gitMu serializes all repo-level git operations (worktree add/remove/prune,
 	// branch creation) to prevent concurrent writes from corrupting .git metadata.
 	gitMu sync.Mutex
@@ -86,7 +92,7 @@ type Server struct {
 }
 
 func New(port int, dir string, mode ServerMode) *Server {
-	return &Server{port: port, dir: dir, mode: mode, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64)}
+	return &Server{port: port, dir: dir, mode: mode, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64), loopControls: make(map[session.SessionID]*agent.LoopControl)}
 }
 
 func (s *Server) Start() error {

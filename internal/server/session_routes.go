@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -130,6 +131,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		delete(s.running, id)
 		delete(s.runningToken, id)
+		delete(s.loopControls, id)
 	}
 	s.mu.Unlock()
 
@@ -178,6 +180,7 @@ func (s *Server) handleAbortSession(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		delete(s.running, sessionID)
 		delete(s.runningToken, sessionID)
+		delete(s.loopControls, sessionID)
 	}
 	s.mu.Unlock()
 
@@ -236,6 +239,59 @@ func (s *Server) handleAbortSession(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGuidance injects a mid-loop instruction into a running agent loop
+// without starting a new user turn. The guidance text is delivered to the loop
+// at the top of its next iteration via the LoopControl side-channel and
+// injected as a trailing system-prompt entry — never persisted to the message
+// DB. Optionally cancels the currently-running tool call so the loop can act on
+// the new guidance immediately instead of waiting for the tool to finish.
+func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
+	sessionID := session.SessionID(chi.URLParam(r, "sessionID"))
+
+	var input struct {
+		Content    string `json:"content"`
+		CancelTool bool   `json:"cancelTool,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(input.Content) == "" && !input.CancelTool {
+		http.Error(w, "content or cancelTool required", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	lc, ok := s.loopControls[sessionID]
+	s.mu.Unlock()
+
+	if !ok || lc == nil {
+		// No running loop — nothing to inject into.
+		http.Error(w, "no running agent loop for this session", http.StatusConflict)
+		return
+	}
+
+	// Optionally cancel the in-flight tool call first, so the loop can proceed
+	// to the next iteration (where it drains the guidance) without waiting.
+	toolCancelled := false
+	if input.CancelTool {
+		toolCancelled = lc.CancelTool()
+	}
+
+	// Push the guidance text for the loop to drain at the next iteration.
+	if strings.TrimSpace(input.Content) != "" {
+		lc.PushGuidance(input.Content)
+	}
+
+	slog.Info("mid-loop guidance received", "session", sessionID, "len", len(input.Content), "cancelTool", input.CancelTool, "toolCancelled", toolCancelled)
+	s.bus.Publish("loop.guidance", map[string]string{
+		"sessionId": string(sessionID),
+		"status":    "queued",
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -362,6 +418,10 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 
 	// Start agent loop in background with cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
+	// Create a LoopControl for this loop so the user can inject mid-loop
+	// guidance and cancel in-flight tools without killing the loop.
+	lc := agent.NewLoopControl()
+	ctx = agent.WithLoopControl(ctx, lc)
 	// Cancel any already-running loop for this session before starting a new one.
 	s.mu.Lock()
 	if old, ok := s.running[sessionID]; ok {
@@ -372,6 +432,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	token := s.nextToken
 	s.running[sessionID] = cancel
 	s.runningToken[sessionID] = token
+	s.loopControls[sessionID] = lc
 	s.mu.Unlock()
 
 	go func() {
@@ -382,6 +443,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 			if s.runningToken[sessionID] == token {
 				delete(s.running, sessionID)
 				delete(s.runningToken, sessionID)
+				delete(s.loopControls, sessionID)
 			}
 			s.mu.Unlock()
 		}()

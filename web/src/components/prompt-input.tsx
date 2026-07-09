@@ -38,8 +38,10 @@ export default function PromptInput() {
   const [focused, setFocused] = createSignal(false);
   const [pendingImages, setPendingImages] = createSignal<PendingImage[]>([]);
   const [imageError, setImageError] = createSignal('');
+  const [guidanceSent, setGuidanceSent] = createSignal(false); // brief confirmation after sending guidance
   let textareaRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
+  let guidanceSentTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Auto-resize textarea
   createEffect(() => {
@@ -131,16 +133,44 @@ export default function PromptInput() {
 
   onCleanup(() => {
     pendingImages().forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    if (guidanceSentTimer) clearTimeout(guidanceSentTimer);
   });
 
   const hasImages = () => pendingImages().length > 0;
-  const canSend = () => !isRunning() && (text().trim().length > 0 || hasImages());
+  // When the agent is running, the user can still type and send — this becomes
+  // mid-loop guidance (not a new prompt). Images are not supported for guidance.
+  const canSend = () => {
+    if (isRunning()) return text().trim().length > 0;
+    return text().trim().length > 0 || hasImages();
+  };
 
-  const handleSubmit = (e: Event) => {
+  const handleSubmit = async (e: Event) => {
     e.preventDefault();
     const content = text().trim();
+    if (!content) return;
+
+    if (isRunning()) {
+      // Mid-loop guidance: inject into the running loop. If no loop is running
+      // (409), fall back to a normal prompt. Always cancel the current tool so
+      // the loop can act on the guidance immediately.
+      const accepted = await session.guidance(content, true);
+      if (accepted) {
+        setText('');
+        if (textareaRef) textareaRef.style.height = 'auto';
+        setGuidanceSent(true);
+        if (guidanceSentTimer) clearTimeout(guidanceSentTimer);
+        guidanceSentTimer = setTimeout(() => setGuidanceSent(false), 2500);
+      } else {
+        // No running loop — fall back to a normal prompt
+        setText('');
+        if (textareaRef) textareaRef.style.height = 'auto';
+        session.prompt(content);
+      }
+      return;
+    }
+
     const images = pendingImages();
-    if ((!content && images.length === 0) || isRunning()) return;
+    if (images.length === 0 && !content) return;
 
     // Convert pending images to the API format
     const apiImages: ImagePartData[] = images.map((img) => ({
@@ -229,6 +259,14 @@ export default function PromptInput() {
             <div class="px-4 pt-2 text-[11px] text-amber-400/80">{imageError()}</div>
           </Show>
 
+          {/* Guidance-in-flight indicator */}
+          <Show when={session.guidanceActive()}>
+            <div class="px-4 pt-2 flex items-center gap-1.5 text-[11px] text-[color:var(--accent)]/80">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse" />
+              Guidance queued — will be applied on the next loop iteration
+            </div>
+          </Show>
+
           {/* Textarea */}
           <textarea
             ref={textareaRef}
@@ -238,11 +276,10 @@ export default function PromptInput() {
             onPaste={handlePaste}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={isRunning() ? "Agent is working…" : "Ask anything, paste an error, or describe a task…"}
-            disabled={isDisabled()}
+            placeholder={isRunning() ? "Agent is working… type to send mid-loop guidance (cancels current tool)" : "Ask anything, paste an error, or describe a task…"}
             rows={1}
             class="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] text-zinc-100
-                   placeholder-zinc-500 focus:outline-none disabled:opacity-60
+                   placeholder-zinc-500 focus:outline-none
                    min-h-[44px] max-h-[240px] leading-relaxed"
           />
 
@@ -275,6 +312,13 @@ export default function PromptInput() {
 
             <div class="flex-1" />
 
+            {/* Guidance-sent confirmation badge */}
+            <Show when={guidanceSent()}>
+              <span class="text-[11px] font-medium text-[color:var(--accent)]/80 select-none animate-pulse">
+                Guidance sent
+              </span>
+            </Show>
+
             <Show when={isRunning()}>
               <button
                 type="button"
@@ -288,6 +332,22 @@ export default function PromptInput() {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
                 Cancel
+              </button>
+              {/* Send-as-guidance button: visible while running so the user has
+                  an explicit affordance that submitting injects mid-loop guidance. */}
+              <button
+                type="submit"
+                disabled={!canSend()}
+                title={canSend() ? 'Send mid-loop guidance (Enter)' : 'Type guidance to send'}
+                class={`h-8 w-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm)
+                  ${canSend()
+                    ? 'bg-[color:var(--accent)]/80 hover:bg-[color:var(--accent)] text-[color:var(--on-primary)] shadow-sm hover:scale-[1.06] active:scale-[0.95]'
+                    : 'bg-[color:var(--bg-elevated)] text-zinc-600 cursor-not-allowed scale-95'
+                  }`}
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6" />
+                </svg>
               </button>
             </Show>
 

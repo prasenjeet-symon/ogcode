@@ -152,6 +152,21 @@ export function abortSession(sessionId: string): Promise<void> {
   return fetchAPI(`/session/${sessionId}/abort`, { method: 'POST' });
 }
 
+// Mid-loop guidance: inject a new instruction into a running agent loop without
+// starting a new user turn. The guidance is delivered to the loop at the top of
+// its next iteration. When cancelTool is true, the currently-running tool call
+// is cancelled so the loop can act on the guidance immediately. Returns 409
+// when no loop is running for the session — the caller should fall back to a
+// regular prompt in that case.
+export function sendGuidance(sessionId: string, content: string, cancelTool?: boolean): Promise<void> {
+  const body: Record<string, unknown> = { content };
+  if (cancelTool) body.cancelTool = true;
+  return fetchAPI(`/session/${sessionId}/guidance`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 // Config API
 export interface ConfigInfo {
   directory: string;

@@ -58,6 +58,7 @@ func (s *Server) routes() http.Handler {
 				r.Delete("/", s.handleDeleteSession)
 				r.Post("/abort", s.handleAbortSession)
 				r.Post("/prompt", s.handlePrompt)
+				r.Post("/guidance", s.handleGuidance)
 				r.Get("/message", s.handleGetMessages)
 				r.Post("/permission/{permissionID}", s.handlePermissionReply)
 			})

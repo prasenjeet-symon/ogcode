@@ -9,6 +9,7 @@ import {
   createSession,
   getMessages,
   sendPrompt,
+  sendGuidance,
   getModels,
   updateSession,
   abortSession,
@@ -48,12 +49,14 @@ interface SessionContextValue {
   loading: () => boolean;
   hasRunningTools: () => boolean;
   compacted: () => boolean;
+  guidanceActive: () => boolean;
   models: () => ModelInfo[];
   selectedModel: () => string;
   selectModel: (modelId: string) => void;
   selectSession: (id: string) => Promise<void>;
   newSession: (model?: string) => Promise<Session>;
   prompt: (content: string, images?: ImagePartData[]) => Promise<void>;
+  guidance: (content: string, cancelTool?: boolean) => Promise<boolean>;
   abort: () => Promise<void>;
   refreshModels: () => Promise<void>;
   toggleModel: (model: ModelInfo, enabled: boolean) => Promise<void>;
@@ -173,6 +176,12 @@ export const SessionProvider: ParentComponent = (props) => {
   // Transient flag: true for 5 s after the server auto-compacts the context window
   const [compacted, setCompacted] = createSignal(false);
   let compactedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Transient flag: true while mid-loop guidance is queued/delivered to the
+  // running loop. Cleared when the loop picks it up (loop.guidance: delivered)
+  // or when the loop exits.
+  const [guidanceActive, setGuidanceActive] = createSignal(false);
+  let guidanceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const [models, setModels] = createSignal<ModelInfo[]>([]);
   // Model selection chosen before any session exists (e.g. on the home page).
@@ -635,6 +644,31 @@ export const SessionProvider: ParentComponent = (props) => {
     }
   }
 
+  // Mid-loop guidance: inject a new instruction into the running agent loop
+  // without starting a new user turn. The guidance is delivered at the top of
+  // the next loop iteration. When cancelTool is true, the currently-running
+  // tool call is cancelled so the loop can act on the guidance immediately.
+  // Returns true if the guidance was accepted (a loop was running), false if
+  // no loop was running (the caller should fall back to a regular prompt).
+  async function guidance(content: string, cancelTool?: boolean): Promise<boolean> {
+    const session = activeSession();
+    if (!session) return false;
+    try {
+      await sendGuidance(session.id, content, cancelTool);
+      // The server accepted the guidance — show the indicator until the loop
+      // picks it up (loop.guidance: delivered) or the loop exits (loop.done).
+      if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
+      setGuidanceActive(true);
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // 409 = no running loop — the caller can fall back to a normal prompt.
+      if (msg.includes('409')) return false;
+      console.error('send guidance failed:', e);
+      return false;
+    }
+  }
+
   // Load sessions on mount
   createEffect(on(server.directory, (dir) => {
     if (dir) refresh();
@@ -672,6 +706,9 @@ export const SessionProvider: ParentComponent = (props) => {
     if (last.type === 'loop.done') {
       const evtSessionId = last.properties?.sessionId;
       if (evtSessionId && evtSessionId === sess.id) {
+        // Clear any lingering guidance indicator — the loop is done.
+        if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
+        setGuidanceActive(false);
         // Fetch final messages then clear loading
         getMessages(sess.id).then((msgs) => {
           if (activeSession()?.id !== sess.id) return;
@@ -696,6 +733,26 @@ export const SessionProvider: ParentComponent = (props) => {
         if (compactedTimer) clearTimeout(compactedTimer);
         setCompacted(true);
         compactedTimer = setTimeout(() => setCompacted(false), 5000);
+      }
+      return;
+    }
+
+    // Handle loop.guidance: mid-loop guidance was queued or delivered.
+    // "queued" = guidance received by the server, waiting for the loop's next
+    // iteration; "delivered" = the loop has picked it up and injected it.
+    if (last.type === 'loop.guidance') {
+      const evtSessionId = last.properties?.sessionId;
+      if (evtSessionId && evtSessionId === sess.id) {
+        const status = last.properties?.status;
+        if (status === 'delivered') {
+          // Loop picked up the guidance — clear the indicator shortly.
+          if (guidanceTimer) clearTimeout(guidanceTimer);
+          guidanceTimer = setTimeout(() => setGuidanceActive(false), 3000);
+        } else if (status === 'queued') {
+          // Server received guidance, waiting for the loop's next iteration.
+          if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
+          setGuidanceActive(true);
+        }
       }
       return;
     }
@@ -780,12 +837,14 @@ export const SessionProvider: ParentComponent = (props) => {
     loading,
     hasRunningTools,
     compacted,
+    guidanceActive,
     models,
     selectedModel,
     selectModel,
     selectSession,
     newSession,
     prompt,
+    guidance,
     abort,
     refreshModels,
     toggleModel,
