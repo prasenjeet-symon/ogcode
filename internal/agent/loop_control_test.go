@@ -63,6 +63,14 @@ func TestLoopControl_NilSafe(t *testing.T) {
 	}
 	lc.SetToolCancel(func() {})
 	lc.ClearToolCancel()
+	if lc.CancelStream() {
+		t.Error("expected false from nil CancelStream")
+	}
+	lc.SetStreamCancel(func() {})
+	lc.ClearStreamCancel()
+	if lc.CancelAll() {
+		t.Error("expected false from nil CancelAll")
+	}
 }
 
 func TestLoopControl_CancelTool(t *testing.T) {
@@ -104,6 +112,91 @@ func TestLoopControl_ClearToolCancel(t *testing.T) {
 	}
 	if cancelled {
 		t.Error("expected cancel func NOT to be called after ClearToolCancel")
+	}
+}
+
+func TestLoopControl_CancelStream(t *testing.T) {
+	lc := NewLoopControl()
+
+	// No stream running — CancelStream returns false
+	if lc.CancelStream() {
+		t.Error("expected CancelStream to return false when no stream is running")
+	}
+
+	// Register a cancel func
+	cancelled := false
+	lc.SetStreamCancel(func() { cancelled = true })
+
+	// CancelStream should call it and return true
+	if !lc.CancelStream() {
+		t.Error("expected CancelStream to return true when a stream is running")
+	}
+	if !cancelled {
+		t.Error("expected cancel func to be called")
+	}
+
+	// After cancel, the stored func is cleared — second call returns false
+	if lc.CancelStream() {
+		t.Error("expected CancelStream to return false after cancel clears the func")
+	}
+}
+
+func TestLoopControl_ClearStreamCancel(t *testing.T) {
+	lc := NewLoopControl()
+
+	cancelled := false
+	lc.SetStreamCancel(func() { cancelled = true })
+	lc.ClearStreamCancel()
+
+	// After ClearStreamCancel, CancelStream returns false without calling
+	if lc.CancelStream() {
+		t.Error("expected CancelStream to return false after ClearStreamCancel")
+	}
+	if cancelled {
+		t.Error("expected cancel func NOT to be called after ClearStreamCancel")
+	}
+}
+
+func TestLoopControl_CancelAll(t *testing.T) {
+	lc := NewLoopControl()
+
+	// Nothing running — CancelAll returns false
+	if lc.CancelAll() {
+		t.Error("expected CancelAll to return false when nothing is running")
+	}
+
+	// Register both
+	streamCancelled := false
+	toolCancelled := false
+	lc.SetStreamCancel(func() { streamCancelled = true })
+	lc.SetToolCancel(func() { toolCancelled = true })
+
+	// CancelAll should call both
+	if !lc.CancelAll() {
+		t.Error("expected CancelAll to return true when work is running")
+	}
+	if !streamCancelled {
+		t.Error("expected stream cancel func to be called")
+	}
+	if !toolCancelled {
+		t.Error("expected tool cancel func to be called")
+	}
+
+	// After cancel, both are cleared
+	if lc.CancelAll() {
+		t.Error("expected CancelAll to return false after both are cancelled")
+	}
+
+	// Only stream running
+	lc.SetStreamCancel(func() { streamCancelled = true })
+	if !lc.CancelAll() {
+		t.Error("expected CancelAll to return true when only stream is running")
+	}
+
+	// Only tool running
+	lc.SetToolCancel(func() { toolCancelled = true })
+	if !lc.CancelAll() {
+		t.Error("expected CancelAll to return true when only tool is running")
 	}
 }
 

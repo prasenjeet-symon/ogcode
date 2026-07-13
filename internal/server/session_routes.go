@@ -275,19 +275,33 @@ func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Optionally cancel the in-flight tool call first, so the loop can proceed
-	// to the next iteration (where it drains the guidance) without waiting.
-	toolCancelled := false
-	if input.CancelTool {
-		toolCancelled = lc.CancelTool()
-	}
-
-	// Push the guidance text for the loop to drain at the next iteration.
+	// Push the guidance text FIRST, then cancel. Ordering matters: cancellation
+	// is what wakes the loop and advances it to the next iteration, where it
+	// drains the queue and decides whether to keep running. If we cancelled
+	// before pushing, the loop could wake, drain an empty queue, see the
+	// stream/tool finished as a normal "stop", and exit — silently dropping the
+	// guidance that lands a moment later. PushGuidance and DrainGuidance share
+	// the same mutex, so once PushGuidance returns the guidance is guaranteed
+	// visible before any cancellation can propagate.
 	if strings.TrimSpace(input.Content) != "" {
 		lc.PushGuidance(input.Content)
 	}
 
-	slog.Info("mid-loop guidance received", "session", sessionID, "len", len(input.Content), "cancelTool", input.CancelTool, "toolCancelled", toolCancelled)
+	// Now cancel the in-flight work so the loop can proceed to the next
+	// iteration (where it drains the guidance) without waiting. This cancels
+	// BOTH the LLM stream (if the model is currently generating) AND any running
+	// tool execution (if tools are currently running). Without stream
+	// cancellation the user has to wait for the full model generation to
+	// complete — sometimes tens of seconds — before the guidance is acted on,
+	// which makes the feature feel unresponsive.
+	streamCancelled := false
+	toolCancelled := false
+	if input.CancelTool {
+		streamCancelled = lc.CancelStream()
+		toolCancelled = lc.CancelTool()
+	}
+
+	slog.Info("mid-loop guidance received", "session", sessionID, "len", len(input.Content), "cancelTool", input.CancelTool, "streamCancelled", streamCancelled, "toolCancelled", toolCancelled)
 	s.bus.Publish("loop.guidance", map[string]string{
 		"sessionId": string(sessionID),
 		"status":    "queued",

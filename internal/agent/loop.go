@@ -375,13 +375,37 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			systemPrompts = append(systemPrompts, guidancePrompt(pendingGuidance))
 		}
 
+		// Derive a child context for the LLM stream. This allows mid-loop stream
+		// cancellation: when the user sends guidance, CancelStream cancels only
+		// this child, so the stream winds down (the provider's HTTP request is
+		// cancelled and the event channel closes) and the loop proceeds to the
+		// next iteration where it drains the guidance. The loop's own ctx stays
+		// alive, so the loop keeps running. When there is no LoopControl, the
+		// child is still derived but never independently cancelled — behaviour
+		// is identical to before.
+		streamCtx, streamCancelFn := context.WithCancel(ctx)
+		// Safety net: guarantee the child context is released on every path. The
+		// happy path releases it promptly via the explicit streamCancelFn() call
+		// after the stream is consumed (before tool execution, so it doesn't
+		// linger through long tool calls, and so ctx's child set doesn't grow one
+		// entry per loop step). But the retry and event loops below have several
+		// early error/abort returns that would otherwise skip that release and
+		// leak the cancel func — go vet flags this as a lostcancel. This deferred
+		// call covers those returns; on the happy path it is a harmless idempotent
+		// no-op because the context is already cancelled.
+		defer streamCancelFn()
+		lc := LoopControlFromContext(ctx)
+		if lc != nil {
+			lc.SetStreamCancel(streamCancelFn)
+		}
+
 		// Stream from LLM with retry for transient errors
 		streamReq := provider.StreamRequest{
 			Model:    modelID,
 			System:   systemPrompts,
 			Messages: modelMessages,
 			Tools:    providerTools,
-			Abort:    ctx,
+			Abort:    streamCtx,
 		}
 
 		compactionCount := 0
@@ -420,8 +444,19 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			streamCh, streamErr = p.StreamChat(ctx, streamReq)
+			streamCh, streamErr = p.StreamChat(streamCtx, streamReq)
 			if streamErr == nil {
+				break
+			}
+			// Stream was cancelled by mid-loop guidance (the stream child context
+			// was cancelled but the loop context is still alive). Don't retry, don't
+			// error — just break out so the loop continues to the next iteration
+			// where it drains the guidance. The partial assistant message (if any
+			// text was streamed) is finalized below as a normal "stop".
+			if streamCtx.Err() != nil && ctx.Err() == nil {
+				slog.Info("stream cancelled by mid-loop guidance", "session", sessionID, "step", step)
+				streamCh = nil
+				streamErr = nil
 				break
 			}
 			slog.Warn("stream chat attempt failed", "session", sessionID, "attempt", attempt, "err", streamErr)
@@ -543,7 +578,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		}
 
 		for evt := range streamCh {
-			// Check for context cancellation while processing stream events
+			// Check for loop context cancellation (full abort) while processing stream events
 			if ctx.Err() != nil {
 				slog.Info("agent loop cancelled during stream processing", "session", sessionID)
 				flushTextPart(true)
@@ -554,7 +589,29 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				lr.Store.UpdateMessage(assistantMsg)
 				lr.Bus.Publish("message.updated", assistantMsg)
 				exitReason = "aborted"
+				// Drain the rest of the channel so the provider's stream reader
+				// unblocks and closes the HTTP connection instead of leaking it.
+				go drainStreamEvents(streamCh)
 				return ctx.Err()
+			}
+
+			// Check for mid-loop guidance cancellation: the stream child context
+			// was cancelled but the loop context is still alive. Stop consuming
+			// events so the loop can proceed to the next iteration and drain the
+			// guidance. Whatever text/tool calls were streamed so far are kept as
+			// a partial assistant turn — the model will see them in the next
+			// iteration's history.
+			if streamCtx.Err() != nil {
+				slog.Info("stream cancelled by mid-loop guidance during event processing", "session", sessionID, "step", step)
+				// Drain the remaining events in the background so the provider's
+				// stream-reader goroutine can finish (its next read errors on the
+				// cancelled context) and close the underlying HTTP connection,
+				// rather than blocking forever on a send into a now-unread channel.
+				// A leaked connection starves rate-limited free endpoints and makes
+				// the *next* request stall — the observed "guidance queued, then
+				// nothing happens" hang.
+				go drainStreamEvents(streamCh)
+				break
 			}
 
 			switch evt.Type {
@@ -781,8 +838,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// Detect stream interruption: if the channel closed without a finish event
 		// and without any error event, the stream was likely interrupted (network,
 		// timeout, etc.). Do NOT default to "stop" — that silently kills long loops.
+		// Exception: when the stream was cancelled by mid-loop guidance (the stream
+		// child context is done but the loop context is alive), treat it as a normal
+		// "stop" so the loop continues to the next iteration and drains the guidance.
+		streamCancelledByGuidance := streamCtx.Err() != nil && ctx.Err() == nil
 		if finishReason == "" {
-			if currentText.Len() > 0 || len(pendingToolCalls) > 0 {
+			if streamCancelledByGuidance {
+				// Stream was interrupted by guidance — not an error. Treat as a
+				// normal stop so the loop continues and picks up the guidance.
+				slog.Info("stream cancelled by guidance, treating as stop", "session", sessionID, "step", step, "textLen", currentText.Len(), "toolCalls", len(pendingToolCalls))
+				finishReason = "stop"
+			} else if currentText.Len() > 0 || len(pendingToolCalls) > 0 {
 				// We received content but no finish signal — stream was interrupted
 				slog.Warn("stream ended without finish_reason, treating as error", "session", sessionID, "textLen", currentText.Len(), "toolCalls", len(pendingToolCalls))
 				finishReason = "error"
@@ -816,13 +882,38 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		}
 		lr.Bus.Publish("message.updated", assistantMsg)
 
+		// Release the stream child context and clear the registration so a
+		// future guidance event doesn't cancel a stream that's already done.
+		if lc != nil {
+			lc.ClearStreamCancel()
+		}
+		streamCancelFn()
+
 		// Execute ready tool calls in parallel for improved throughput.
 		// Built-in tools (bash, read, write, etc.) are stateless and safe for
 		// concurrent use. MCP calls are serialized by the client's mutex, so
 		// they won't truly run in parallel with each other but will run in
 		// parallel with built-in tools. DB part updates are sequential before
 		// and after the parallel execution phase to keep state consistent.
+		//
+		// Skip tool execution when the stream was cancelled by mid-loop guidance:
+		// the tool calls are partial (the model was interrupted mid-generation) and
+		// the user wants the loop to act on the guidance immediately, not execute
+		// a half-formed tool call first.
 		var readyCalls []pendingToolCall
+		if streamCancelledByGuidance && len(pendingToolCalls) > 0 {
+			slog.Info("skipping tool execution after guidance-cancelled stream", "session", sessionID, "step", step, "pendingToolCalls", len(pendingToolCalls))
+			// The stream was interrupted while the model was still emitting tool
+			// calls. We won't execute these partial calls, but each tool_use we
+			// already persisted on the assistant message MUST be paired with a
+			// tool_result in the following user message — otherwise the next LLM
+			// request fails the API's tool_use/tool_result pairing check (Anthropic
+			// and OpenAI both 400 on a dangling tool_use). cancelPartialToolCalls
+			// marks each part cancelled (for the UI) and emits the matching error
+			// tool-result message so the conversation history stays valid.
+			lr.cancelPartialToolCalls(sessionID, assistantID, pendingToolCalls)
+			pendingToolCalls = nil
+		}
 		for _, tc := range pendingToolCalls {
 			if tc.Ready {
 				readyCalls = append(readyCalls, tc)
@@ -1069,6 +1160,122 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		lr.writeMemory(ctx, sessionID, p, modelID)
 	}
 	return nil
+}
+
+// drainStreamEvents consumes any remaining events from a stream channel that the
+// loop has stopped reading after a cancel/abort break. This lets the provider's
+// stream-reader goroutine run to completion — its next read errors on the
+// cancelled context, so it closes the channel and, crucially, the underlying
+// HTTP connection — instead of blocking forever on a send into a channel nobody
+// reads and leaking the connection. Leaked connections accumulate against a
+// rate-limited endpoint's concurrency budget and stall subsequent requests.
+func drainStreamEvents(ch <-chan provider.StreamEvent) {
+	for range ch {
+	}
+}
+
+// cancelPartialToolCalls handles tool calls that were still being streamed when
+// mid-loop guidance cancelled the LLM stream. These calls are never executed,
+// but the assistant message already carries a persisted tool_use block for each
+// one. The Anthropic and OpenAI APIs both require every tool_use to be followed
+// by a matching tool_result, so leaving them unpaired makes the *next* request
+// fail with a 400. This marks each part as cancelled (so the UI stops showing it
+// as running) and creates a single tool-result user message pairing every
+// cancelled tool_use with an error result, keeping the conversation valid — the
+// same call/result pairing the mid-loop tool-execution cancel path maintains.
+func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assistantID session.MessageID, calls []pendingToolCall) {
+	if len(calls) == 0 {
+		return
+	}
+
+	// First pass: mark each partial tool part as cancelled (for the UI) and
+	// collect the data needed to emit a matching tool_result for each. We defer
+	// creating the result message until we know at least one part is real, so a
+	// batch of vanished parts never produces an empty (invalid) user message.
+	type cancelledCall struct {
+		tool   string
+		callID string
+		state  session.ToolState
+	}
+	var results []cancelledCall
+	for _, tc := range calls {
+		part, perr := lr.Store.GetPart(tc.PartID)
+		if perr != nil || part == nil {
+			continue
+		}
+		var toolData session.ToolPartData
+		if err := json.Unmarshal(part.Data, &toolData); err != nil {
+			continue
+		}
+		// A stream cancelled mid-tool-call leaves partial, invalid JSON in the
+		// accumulated input. convertMessages re-sends this verbatim as the
+		// tool_use arguments on the resumed request; strict OpenAI-compatible
+		// endpoints reject or stall on invalid JSON. Coerce any non-object /
+		// invalid input to an empty object so the resumed request stays valid.
+		callInput := tc.Input
+		var obj map[string]json.RawMessage
+		if len(callInput) == 0 || json.Unmarshal(callInput, &obj) != nil {
+			callInput = json.RawMessage("{}")
+		}
+		errStr := "Cancelled by mid-loop guidance"
+		toolData.State = session.ToolState{
+			Status: session.ToolError,
+			Input:  callInput,
+			Error:  &errStr,
+			Title:  &tc.Name,
+			Time:   toolData.State.Time,
+		}
+		updatedData, _ := json.Marshal(toolData)
+		part.Data = updatedData
+		part.UpdatedAt = session.Now()
+		if err := lr.Store.UpdatePart(part); err != nil {
+			slog.Error("update cancelled tool part", "err", err)
+		}
+		lr.Bus.Publish("message.part.updated", map[string]string{
+			"sessionId": string(sessionID),
+			"partId":    string(part.ID),
+		})
+		results = append(results, cancelledCall{tool: toolData.Tool, callID: toolData.CallID, state: toolData.State})
+	}
+
+	if len(results) == 0 {
+		return
+	}
+
+	// Emit one tool-result user message pairing every cancelled tool_use with an
+	// error result, so the assistant's tool_use blocks are never left dangling.
+	resultID := session.MessageID(id.NewMessageID())
+	resultMsg := &session.MessageInfo{
+		ID:        resultID,
+		SessionID: sessionID,
+		Role:      session.RoleUser,
+		ParentID:  &assistantID,
+		CreatedAt: session.Now(),
+	}
+	if err := lr.Store.CreateMessage(resultMsg); err != nil {
+		slog.Error("create cancelled tool-result message", "err", err)
+		return
+	}
+	for _, r := range results {
+		resultData, _ := json.Marshal(session.ToolPartData{
+			Tool:   r.tool,
+			CallID: r.callID,
+			State:  r.state,
+		})
+		resultPart := &session.Part{
+			ID:        session.PartID(id.NewPartID()),
+			MessageID: resultID,
+			SessionID: sessionID,
+			Type:      session.PartTool,
+			Data:      resultData,
+			CreatedAt: session.Now(),
+			UpdatedAt: session.Now(),
+		}
+		if err := lr.Store.CreatePart(resultPart); err != nil {
+			slog.Error("create cancelled tool-result part", "err", err)
+		}
+	}
+	lr.Bus.Publish("message.updated", resultMsg)
 }
 
 // writeMemory extracts the last conversation turn and persists it via memory_add.

@@ -324,14 +324,14 @@ export default function PromptInput() {
             </Show>
 
             <Show when={isRunning()}>
-              {/* Cancel-tool checkbox: when checked (default), sending mid-loop
-                  guidance also cancels the currently-running tool so the loop can
-                  act on the guidance immediately. Uncheck to let the running tool
-                  finish naturally — the guidance still applies on the next
-                  iteration. */}
+              {/* Cancel-in-flight checkbox: when checked (default), sending mid-loop
+                  guidance cancels the currently-running LLM stream AND any running
+                  tool so the loop acts on the guidance immediately. Uncheck to let
+                  the current generation/tool finish naturally — the guidance still
+                  applies on the next iteration. */}
               <label
                 class="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-300 cursor-pointer select-none transition-colors var(--spring-sm) h-8 px-1.5 rounded-lg hover:bg-[color:var(--bg-hover)]"
-                title={cancelTool() ? 'The running tool will be cancelled when you send guidance' : 'The running tool will be allowed to finish before guidance is applied'}
+                title={cancelTool() ? 'The running LLM stream and tools will be cancelled when you send guidance' : 'The current generation/tool will be allowed to finish before guidance is applied'}
               >
                 <input
                   type="checkbox"
@@ -339,7 +339,7 @@ export default function PromptInput() {
                   onChange={(e) => setCancelTool((e.target as HTMLInputElement).checked)}
                   class="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer"
                 />
-                <span>Cancel tool</span>
+                <span>Cancel current work</span>
               </label>
               <button
                 type="button"

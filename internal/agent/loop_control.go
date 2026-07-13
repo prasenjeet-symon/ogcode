@@ -26,6 +26,15 @@ type LoopControl struct {
 	// set before the parallel tool-execution block and cleared (and called)
 	// after wg.Wait() returns. nil when no tools are running.
 	toolCancel context.CancelFunc
+
+	// streamCancel cancels only the currently-running LLM stream. It is set
+	// before the StreamChat call and cleared (and called) after the stream is
+	// fully consumed. nil when no stream is in progress. This is the key to
+	// making guidance feel responsive: when the user sends guidance while the
+	// model is generating (which can take tens of seconds), we cancel the
+	// stream immediately so the loop proceeds to the next iteration and drains
+	// the guidance instead of waiting for the full generation to complete.
+	streamCancel context.CancelFunc
 }
 
 // NewLoopControl creates a fresh LoopControl.
@@ -120,6 +129,66 @@ func (lc *LoopControl) CancelTool() bool {
 	}
 	cancel()
 	return true
+}
+
+// SetStreamCancel registers the cancel func for the currently-running LLM
+// stream. Called by RunLoop just before calling StreamChat. The stored func is
+// used by CancelStream to interrupt the stream without killing the loop.
+// RunLoop clears it (and calls it to release the child context) after the
+// stream is fully consumed.
+func (lc *LoopControl) SetStreamCancel(cancel context.CancelFunc) {
+	if lc == nil {
+		return
+	}
+	lc.mu.Lock()
+	lc.streamCancel = cancel
+	lc.mu.Unlock()
+}
+
+// ClearStreamCancel removes the stored stream-cancel func without calling it.
+// Called by RunLoop after the stream is fully consumed (or the guidance handler
+// after it has called the cancel and the stream has wound down).
+func (lc *LoopControl) ClearStreamCancel() {
+	if lc == nil {
+		return
+	}
+	lc.mu.Lock()
+	lc.streamCancel = nil
+	lc.mu.Unlock()
+}
+
+// CancelStream cancels the currently-running LLM stream, if any. Returns true
+// if a stream cancellation was issued, false if no stream is in progress (or
+// the control is nil). This is the primary mechanism for making mid-loop
+// guidance feel responsive: it interrupts the model's generation so the loop
+// can immediately proceed to the next iteration where it drains the guidance.
+func (lc *LoopControl) CancelStream() bool {
+	if lc == nil {
+		return false
+	}
+	lc.mu.Lock()
+	cancel := lc.streamCancel
+	lc.streamCancel = nil
+	lc.mu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
+// CancelAll cancels both the LLM stream and any running tool execution. This
+// is the full "stop whatever you're doing right now" entry point used by the
+// guidance handler so the user does not have to wait for the model to finish
+// generating or for a long-running tool to complete before the loop picks up
+// the new guidance. Returns true if at least one cancellation was issued.
+func (lc *LoopControl) CancelAll() bool {
+	if lc == nil {
+		return false
+	}
+	streamed := lc.CancelStream()
+	tooled := lc.CancelTool()
+	return streamed || tooled
 }
 
 // --- context integration ---
