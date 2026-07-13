@@ -1,3 +1,84 @@
+# Release Notes — v0.19.0
+
+## Instant Mid-Loop Guidance — Stream Cancellation
+
+This minor release makes mid-loop guidance **feel instant**. When you steer an
+agent mid-task, ogcode now interrupts the in-flight LLM generation immediately
+instead of waiting for the full response to stream in — so the loop acts on your
+new instructions right away. It also fixes the "guidance queued, then nothing
+happens" hang that occurred on free endpoints that stay connected but emit
+nothing.
+
+---
+
+### ⚡ Cancel the LLM Stream (Not Just Tools)
+
+Previously, sending mid-loop guidance cancelled only the currently-running tool
+call; the model still had to finish its full generation (sometimes tens of
+seconds) before the loop could proceed. Now the guidance handler cancels both
+the LLM stream and any running tool, so the loop advances to the next iteration
+and drains your guidance without delay.
+
+- **Stream child context** — Each loop iteration derives a per-step child
+  context for the LLM stream. `LoopControl` gains `CancelStream` / `CancelAll`
+  so the guidance handler can cancel this child independently of the loop
+  context — the stream winds down while the loop itself keeps running.
+- **No retry, no error** — A guidance-cancelled stream is treated as a normal
+  "stop", not a transient failure. The loop simply proceeds to the next
+  iteration, injects the guidance into the system prompt, and resumes.
+- **Connection hygiene** — Stalled streams are drained in a background goroutine
+  so the provider unblocks and releases the underlying HTTP connection. Without
+  this, leaked connections accumulate against a rate-limited endpoint's
+  concurrency budget and stall the *next* request — the root cause of the
+  observed hang.
+
+### 🔗 Cancelled Partial Tool Calls Stay Valid
+
+When the stream is cancelled mid-generation, the model may have already emitted
+partial tool-call blocks. These are never executed, but leaving them unpaired
+breaks the next API request (both Anthropic and OpenAI 400 on a dangling
+`tool_use` without a matching `tool_result`).
+
+- **`cancelPartialToolCalls`** — Marks each partial tool part as cancelled (so
+  the UI stops showing it as running) and emits a single paired error
+  `tool_result` user message for every cancelled `tool_use`, keeping the
+  conversation history valid.
+- **Invalid JSON sanitization** — A tool call interrupted mid-arguments leaves
+  partial, invalid JSON. This is coerced to a valid empty object `{}` before
+  being re-sent, so strict OpenAI-compatible endpoints don't reject or stall the
+  resumed request.
+
+### 🔄 Guidance-First Ordering
+
+The guidance handler now pushes the guidance text **before** issuing the
+cancellation. Ordering matters: if cancellation happened first, the loop could
+wake, drain an empty queue, see the finished stream as a normal "stop", and exit
+— silently dropping the guidance that lands a moment later.
+
+### 🖥️ Frontend
+
+- The in-flight cancel checkbox is relabelled from "Cancel tool" to **"Cancel
+  current work"** to reflect that both the LLM stream and running tools are now
+  interrupted. The tooltip is updated accordingly.
+
+### 🧪 Tests
+
+- `LoopControl` stream-cancel and cancel-all unit tests (including nil-safe and
+  double-cancel guards).
+- `cancelPartialToolCalls` coverage: tool_use↔tool_result pairing, invalid-JSON
+  sanitization, and the vanished-parts (no empty message) edge case.
+- A full end-to-end loop test (`TestRunLoop_GuidanceCancelsAndResumes`) that
+  reproduces the stalled-stream hang and asserts the loop resumes with guidance
+  injected into the resumed system prompt.
+- An OpenAI provider test verifying context cancellation promptly closes a
+  silent SSE stream's event channel.
+
+---
+
+*Full changelog: https://github.com/prasenjeet-symon/ogcode/compare/v0.18.0...v0.19.0*
+
+---
+
 # Release Notes — v0.18.0
 
 ## Mid-Loop Guidance & Model-Switch Popover
