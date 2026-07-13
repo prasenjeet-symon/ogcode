@@ -47,6 +47,16 @@ export default function PromptInput() {
   let fileInputRef: HTMLInputElement | undefined;
   let guidanceSentTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Clear per-session transient state when the active session changes.
+  // PromptInput stays mounted across session switches (the route param changes
+  // but the component is reused), so local signals like guidanceSent would
+  // otherwise linger on the destination session's UI.
+  createEffect(() => {
+    session.activeSession()?.id;
+    setGuidanceSent(false);
+    if (guidanceSentTimer) { clearTimeout(guidanceSentTimer); guidanceSentTimer = null; }
+  });
+
   // Auto-resize textarea
   createEffect(() => {
     text();
@@ -157,13 +167,21 @@ export default function PromptInput() {
       // Mid-loop guidance: inject into the running loop. If no loop is running
       // (409), fall back to a normal prompt. The user controls whether the
       // currently-running tool is cancelled via the cancelTool checkbox.
+      const targetSessionId = session.activeSession()?.id;
       const accepted = await session.guidance(content, cancelTool());
-      if (accepted) {
+      // Guard against session-switch race: if the user navigated to a different
+      // session while the guidance request was in flight, don't show the
+      // "Guidance sent" badge on the destination session.
+      if (accepted && session.activeSession()?.id === targetSessionId) {
         setText('');
         if (textareaRef) textareaRef.style.height = 'auto';
         setGuidanceSent(true);
         if (guidanceSentTimer) clearTimeout(guidanceSentTimer);
         guidanceSentTimer = setTimeout(() => setGuidanceSent(false), 2500);
+      } else if (accepted) {
+        // Session changed after guidance was accepted — still clear the input.
+        setText('');
+        if (textareaRef) textareaRef.style.height = 'auto';
       } else {
         // No running loop — fall back to a normal prompt
         setText('');

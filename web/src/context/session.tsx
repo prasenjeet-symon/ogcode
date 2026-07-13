@@ -411,6 +411,10 @@ export const SessionProvider: ParentComponent = (props) => {
       setLoadingSessionId('');
       setCompacted(false);
       if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
+      // Clear any lingering guidance indicator — guidance is per-session and
+      // must not leak into the destination session's UI.
+      if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
+      setGuidanceActive(false);
       setMessages([]);
     }
     // Re-entering the same session keeps cached messages and refreshes in place.
@@ -655,6 +659,10 @@ export const SessionProvider: ParentComponent = (props) => {
     if (!session) return false;
     try {
       await sendGuidance(session.id, content, cancelTool);
+      // Guard against session-switch race: if the user navigated to a different
+      // session while the request was in flight, don't set the guidance indicator
+      // on the destination session — guidance is per-session and must not leak.
+      if (activeSession()?.id !== session.id) return true;
       // The server accepted the guidance — show the indicator until the loop
       // picks it up (loop.guidance: delivered) or the loop exits (loop.done).
       if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
