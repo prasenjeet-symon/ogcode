@@ -757,7 +757,7 @@ export const SessionProvider: ParentComponent = (props) => {
       return;
     }
 
-    if (last.type !== 'message.updated' && last.type !== 'message.part.updated') return;
+    if (last.type !== 'message.updated' && last.type !== 'message.part.updated' && last.type !== 'message.deleted') return;
     // Only refresh if the event is for the active session
     const evtSessionId = last.properties?.sessionId || last.properties?.id;
     if (evtSessionId && evtSessionId !== sess.id) return;

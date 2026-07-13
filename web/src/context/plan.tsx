@@ -662,7 +662,7 @@ export const PlanProvider: ParentComponent = (props) => {
     }
 
     // Handle message events for the plan's session
-    if (last.type !== 'message.updated' && last.type !== 'message.part.updated') return;
+    if (last.type !== 'message.updated' && last.type !== 'message.part.updated' && last.type !== 'message.deleted') return;
     const evtSessionId = last.properties?.sessionId || last.properties?.id;
     if (evtSessionId && evtSessionId !== plan.sessionId) return;
 

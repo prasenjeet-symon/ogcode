@@ -405,7 +405,6 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			System:   systemPrompts,
 			Messages: modelMessages,
 			Tools:    providerTools,
-			Abort:    streamCtx,
 		}
 
 		compactionCount := 0
@@ -882,6 +881,24 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		}
 		lr.Bus.Publish("message.updated", assistantMsg)
 
+		// When mid-loop guidance cancels a text-only stream (no tool calls), the
+		// partial assistant message has no matching tool_result and no valid
+		// continuation. Leaving it in the DB would produce two consecutive
+		// assistant role messages on the next prompt — the Anthropic and OpenAI
+		// APIs both require strictly alternating user/assistant roles and reject
+		// this with a 400. Delete the orphan so the history stays valid. The
+		// guidance itself is delivered on the next iteration's system prompt.
+		if streamCancelledByGuidance && len(pendingToolCalls) == 0 {
+			slog.Info("deleting text-only assistant message cancelled by guidance", "session", sessionID, "step", step, "textLen", currentText.Len())
+			if err := lr.Store.DeleteMessage(assistantID); err != nil {
+				slog.Error("delete guidance-cancelled assistant message", "err", err)
+			}
+			lr.Bus.Publish("message.deleted", map[string]string{
+				"sessionId": string(sessionID),
+				"messageId": string(assistantID),
+			})
+		}
+
 		// Release the stream child context and clear the registration so a
 		// future guidance event doesn't cancel a stream that's already done.
 		if lc != nil {
@@ -1095,10 +1112,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// iteration's streaming/tool execution. Such guidance was queued
 			// after we drained at the top of this iteration, so it would be
 			// silently lost if we exited now (guidance is never persisted).
-			// Continue the loop so the next iteration drains and injects it.
-			if lc := LoopControlFromContext(ctx); lc != nil && lc.HasPendingGuidance() {
-				slog.Info("agent loop continuing for guidance received during iteration", "session", sessionID, "step", step)
-				continue
+			// Drain it (rather than just checking) to close the narrow race
+			// where guidance arrives between a non-locking HasPendingGuidance
+			// check and the return: any guidance that lands before
+			// DrainGuidance returns is captured. Re-push it back onto the
+			// queue so the next iteration's top-of-loop drain picks it up and
+			// injects it into the system prompt — draining consumes it, so
+			// without re-pushing the shouldBreak guard at the next iteration's
+			// top would see an empty queue and exit, dropping the guidance.
+			if lc != nil {
+				if lateGuidance := lc.DrainGuidance(); lateGuidance != "" {
+					lc.PushGuidance(lateGuidance)
+					slog.Info("agent loop continuing for guidance received during iteration", "session", sessionID, "step", step, "len", len(lateGuidance))
+					continue
+				}
 			}
 			slog.Info("agent loop complete", "session", sessionID, "steps", step, "reason", finishReason)
 			exitReason = finishReason
@@ -2105,7 +2132,6 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, model
 		Messages: []provider.ModelMessage{
 			{Role: "user", Content: summarizerContent},
 		},
-		Abort: ctx,
 	}
 
 	ch, err := p.StreamChat(ctx, summaryReq)

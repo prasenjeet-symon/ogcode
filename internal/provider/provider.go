@@ -93,7 +93,6 @@ type StreamRequest struct {
 	Tools       []ToolDefinition `json:"tools"`
 	Temperature float64          `json:"temperature,omitempty"`
 	MaxTokens   int              `json:"maxTokens,omitempty"`
-	Abort       context.Context  `json:"-"`
 }
 
 type ModelInfo struct {

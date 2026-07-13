@@ -979,7 +979,6 @@ func (c *chatClient) Chat(ctx context.Context, system, prompt string) (string, e
 		Messages: []provider.ModelMessage{
 			{Role: "user", Content: json.RawMessage(fmt.Sprintf("%q", prompt))},
 		},
-		Abort: ctx,
 	}
 	ch, err := c.provider.StreamChat(ctx, req)
 	if err != nil {

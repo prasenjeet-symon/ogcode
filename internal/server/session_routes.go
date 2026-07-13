@@ -518,7 +518,6 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 		Model:    titleModel,
 		System:   []string{"You generate concise, descriptive titles. Respond with only the title text, nothing else."},
 		Messages: []provider.ModelMessage{{Role: "user", Content: promptContent}},
-		Abort:    ctx,
 	}
 
 	ch, err := p.StreamChat(ctx, req)

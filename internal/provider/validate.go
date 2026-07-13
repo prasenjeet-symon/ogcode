@@ -27,7 +27,6 @@ func ValidateCredentials(ctx context.Context, providerID, apiKey, baseURL string
 		Model:     models[0].ID,
 		Messages:  []ModelMessage{{Role: "user", Content: prompt}},
 		MaxTokens: 1,
-		Abort:     ctx,
 	}
 
 	ch, startErr := p.StreamChat(ctx, req)

@@ -1260,7 +1260,6 @@ func collectStreamText(ctx context.Context, pr provider.Provider, modelID, syste
 		},
 		Temperature: 0.3,
 		MaxTokens:   500, // enough budget for thinking models to reason + answer
-		Abort:       ctx,
 	}
 
 	ch, err := pr.StreamChat(ctx, req)

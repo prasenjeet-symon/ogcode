@@ -34,7 +34,6 @@ func TestOpenAIStreamChat_CancelUnblocksSilentStream(t *testing.T) {
 	req := StreamRequest{
 		Model:    "test-model",
 		Messages: []ModelMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
-		Abort:    ctx,
 	}
 	ch, err := p.StreamChat(ctx, req)
 	if err != nil {

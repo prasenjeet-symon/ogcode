@@ -284,7 +284,6 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 		Model:    model,
 		System:   []string{systemPrompt},
 		Messages: []provider.ModelMessage{{Role: "user", Content: promptContent}},
-		Abort:    ctx,
 	}
 
 	ch, err := p.StreamChat(ctx, req)
@@ -402,7 +401,6 @@ func (s *Server) rewriteNoteQuery(sourceSessionID, originalQuery, model string) 
 		Model:    rewriteModel,
 		System:   []string{"You rewrite short user queries into detailed, self-contained descriptions for a note-taking agent. Respond with only the rewritten text."},
 		Messages: []provider.ModelMessage{{Role: "user", Content: promptContent}},
-		Abort:    ctx,
 	}
 
 	ch, err := p.StreamChat(ctx, req)

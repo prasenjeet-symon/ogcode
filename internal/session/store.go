@@ -133,6 +133,16 @@ func (s *Store) UpdateMessage(msg *MessageInfo) error {
 	return err
 }
 
+// DeleteMessage removes a message and all of its parts. Foreign-key cascade
+// handles part deletion automatically. Used to clean up partial assistant
+// messages left behind when mid-loop guidance cancels a text-only stream —
+// keeping them would produce two consecutive assistant role messages on the
+// next prompt, which the Anthropic and OpenAI APIs reject with a 400.
+func (s *Store) DeleteMessage(messageID MessageID) error {
+	_, err := s.db.Exec(`DELETE FROM message WHERE id = ?`, messageID)
+	return err
+}
+
 func (s *Store) GetMessages(sessionID SessionID, before MessageID, limit int) ([]*MessageWithParts, error) {
 	var rows *sql.Rows
 	var err error

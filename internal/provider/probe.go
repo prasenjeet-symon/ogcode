@@ -53,7 +53,6 @@ func ProbeImageSupport(ctx context.Context, p Provider, modelID string) (support
 			Images:  []MessageImage{{MediaType: "image/jpeg", Data: tinyImage()}},
 		}},
 		MaxTokens: 16,
-		Abort:     ctx,
 	}
 
 	ch, startErr := p.StreamChat(ctx, req)
