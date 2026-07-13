@@ -1,3 +1,29 @@
+# Release Notes — v0.19.1
+
+## Patch: Guidance Indicator & Deep-Search Context Fixes
+
+This patch release fixes two bugs introduced by the mid-loop guidance work in
+v0.19.0:
+
+1. **Guidance indicator leaked across sessions on switch** — When you sent
+   mid-loop guidance and then switched sessions while the HTTP request was
+   still in flight, the "guidance active" indicator and the local "Guidance
+   sent" badge could appear on the *destination* session. The root cause was an
+   `await` race: the shared `guidanceActive` signal and the `PromptInput`
+   component's `guidanceSent` flag were set after the await resolved, without
+   verifying the active session was still the same one that initiated the
+   guidance. Fixed by capturing the session ID before the await and guarding
+   the state updates, plus a reactive `createEffect` that clears stale badge
+   state whenever the active session changes.
+
+2. **Deep-search child session inherited parent `LoopControl`** — Child
+   sessions spawned by `deep_search` were receiving the parent's `LoopControl`
+   context, causing cancellation signals (e.g. guidance cancellation) to leak
+   into the child loop. Fixed by stripping the parent `LoopControl` from the
+   deep-search child session context so each loop owns its own control.
+
+---
+
 # Release Notes — v0.19.0
 
 ## Instant Mid-Loop Guidance — Stream Cancellation
