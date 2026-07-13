@@ -210,6 +210,17 @@ func LoopControlFromContext(ctx context.Context) *LoopControl {
 	return lc
 }
 
+// WithoutLoopControl returns a copy of ctx with any LoopControl value cleared
+// (set to nil). This is used by nested loop invocations — notably the
+// deep_search tool's RunSearchSession — so the child loop does not inherit the
+// parent session's LoopControl. Without this, the child loop would drain the
+// parent's pending guidance (stealing mid-loop instructions) and overwrite the
+// parent's stream/tool cancel funcs, hijacking the parent's guidance
+// side-channel for the duration of the search.
+func WithoutLoopControl(ctx context.Context) context.Context {
+	return context.WithValue(ctx, loopControlKey{}, nil)
+}
+
 // guidancePrompt wraps guidance text in a <system-reminder> block so the model
 // treats it as an authoritative mid-flight instruction. Using system-reminder
 // (the same wrapper used for the current-date injection) keeps it outside the

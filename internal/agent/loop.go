@@ -2263,9 +2263,18 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model st
 	// The search agent prompt instructs the model to combine search and
 	// fetch into 2 LLM rounds where possible, so 8 steps gives ample
 	// room (each round = 1 user + 1 assistant + potential tool-result msg).
+	//
+	// Strip the parent session's LoopControl from the context so the child
+	// search loop does not inherit it. Without this, the child loop would
+	// drain the parent's pending guidance (stealing mid-loop instructions)
+	// and overwrite the parent's stream/tool cancel funcs — hijacking the
+	// parent's guidance side-channel for the duration of the search. The
+	// search session is ephemeral and has no user-facing guidance channel of
+	// its own, so a nil LoopControl is the correct, intended behaviour.
+	searchCtx := WithoutLoopControl(ctx)
 	childRunner := *lr
 	childRunner.MaxSteps = 8
-	if err := childRunner.RunLoop(ctx, sess.ID, "search", 0, 0); err != nil {
+	if err := childRunner.RunLoop(searchCtx, sess.ID, "search", 0, 0); err != nil {
 		return "", fmt.Errorf("search loop: %w", err)
 	}
 
