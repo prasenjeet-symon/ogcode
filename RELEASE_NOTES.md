@@ -1,3 +1,45 @@
+# Release Notes — v0.19.3
+
+## Patch: Task Session Model, Tool-Cancel False-Positive, and Stale-Index Purge
+
+This patch release fixes three bugs found after v0.19.2:
+
+1. **Task agent session showed the wrong model** — When a plan task is
+   executed, the backend creates a session with the worktree path as its
+   directory, not the main project directory. The frontend
+   `selectSession` looked up the authoritative session record via
+   `listSessions` filtered by the main project directory, so
+   worktree-based task sessions were never found. The UI fell back to a
+   stub without a model field, causing `selectedModel` to pick the
+   default/enabled model instead of the task's configured model. Fixed
+   by falling back to `getSession` by session ID when the session is not
+   in the directory-filtered list.
+
+2. **False-positive "tool execution cancelled" on every errored tool
+   call** — The `toolCtxCancelled` check read `toolCtx.Err()` *after*
+   `toolCancel()` was already called unconditionally as cleanup. Since
+   `toolCancel()` always cancels the child context, `toolCtx.Err()` was
+   non-nil on every tool execution — even when tools completed normally
+   with no user guidance or cancellation. This surfaced a spurious
+   "Tool execution cancelled by user mid-loop guidance" error on every
+   errored tool call. Fixed by capturing the cancellation state *before*
+   the cleanup `toolCancel()` call, so it only reports true when
+   `CancelTool` (via the guidance endpoint) actually cancelled the child
+   context mid-flight.
+
+3. **Stale index entries for deleted files were never purged** — On
+   incremental re-index (non-rebuild), the indexer only added new files
+   and skipped already-indexed ones; it never checked whether
+   previously-indexed files had been deleted from disk, leaving stale
+   entries in `doc_page_index` forever. Added a `purgeDeletedDocs` step
+   to `Indexer.Run` that compares currently-indexed doc paths (via new
+   `Store.ListDocPaths`) against the fresh filesystem walk and deletes
+   entries for any file that no longer exists. Also handles the
+   early-return path where all files are gone. Includes tests for
+   `ListDocPaths`, `DeleteByDoc`, and the purge logic.
+
+---
+
 # Release Notes — v0.19.2
 
 ## Patch: Home Page Headline Update
