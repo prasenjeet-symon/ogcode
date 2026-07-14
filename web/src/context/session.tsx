@@ -7,6 +7,7 @@ import {
   type ImagePartData,
   listSessions,
   createSession,
+  getSession,
   getMessages,
   sendPrompt,
   sendGuidance,
@@ -423,10 +424,19 @@ export const SessionProvider: ParentComponent = (props) => {
       setMessages(msgs);
 
       // Fetch the authoritative session record so we have the real memoryTokensSaved,
-      // not the potentially-stale cached value.
+      // not the potentially-stale cached value. listSessions filters by the main
+      // project directory, so sessions created in task worktrees (which use the
+      // worktree path as their directory) won't appear in that list. Fall back to a
+      // direct getSession fetch — it queries by session ID, not directory — so the
+      // task session's real model is picked up instead of falling back to the default.
       const sessionsList = await listSessions(server.directory());
       setSessions(sessionsList);
-      const fresh = sessionsList.find((s) => s.id === id);
+      let fresh = sessionsList.find((s) => s.id === id);
+      if (!fresh) {
+        try {
+          fresh = await getSession(id);
+        } catch (_e) { /* session may not exist yet — ignore */ }
+      }
       if (fresh) {
         setActiveSession(fresh);
         setMemorySavedTokens(fresh.memoryTokensSaved ?? 0);
