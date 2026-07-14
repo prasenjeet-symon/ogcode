@@ -239,37 +239,54 @@
     .pillar h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
     .pillar p { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; padding-right: 64px; }
 
-    /* ── Workflow steps ────────────────────────────────────────── */
-    .workflow {
+    /* ── Project index ─────────────────────────────────────────── */
+    .index-card {
       border-radius: 16px; border: 1px solid var(--border-subtle);
       background: rgba(255,255,255,0.015); overflow: hidden;
     }
-    .workflow-header {
+    .index-header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 16px 24px;
       border-bottom: 1px solid var(--border-subtle);
     }
-    .workflow-header .title { display: flex; align-items: center; gap: 8px; }
-    .workflow-header .title svg { width: 16px; height: 16px; color: var(--accent); }
-    .workflow-header .title span { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-    .workflow-header .link { font-size: 11.5px; font-weight: 500; color: var(--accent); transition: color 0.15s; }
-    .workflow-header .link:hover { color: #8b9cf7; }
-    .steps {
-      display: grid; grid-template-columns: repeat(3, 1fr);
+    .index-header .title { display: flex; align-items: center; gap: 8px; }
+    .index-header .title svg { width: 16px; height: 16px; color: var(--accent); }
+    .index-header .title span { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+    .index-header .link { font-size: 11.5px; font-weight: 500; color: var(--accent); transition: color 0.15s; }
+    .index-header .link:hover { color: #8b9cf7; }
+    .index-body {
+      display: grid; grid-template-columns: 1.3fr 1fr; gap: 0;
     }
-    .step {
+    .index-tree {
       padding: 20px 24px;
       border-right: 1px solid var(--border-subtle);
+      font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+      font-size: 12px; line-height: 1.9;
+      overflow-x: auto;
     }
-    .step:last-child { border-right: none; }
-    .step .head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-    .step .num {
-      font-size: 10px; font-family: monospace; font-weight: 600;
+    .tree-dir { color: var(--text-secondary); font-weight: 600; }
+    .tree-file { color: var(--text-muted); padding-left: 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .tree-file .fname { color: var(--text-primary); font-weight: 500; flex-shrink: 0; }
+    .tree-label {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      font-size: 10px; font-weight: 500;
       color: var(--accent); background: var(--accent-soft);
-      padding: 2px 6px; border-radius: 4px;
+      padding: 1px 7px; border-radius: 4px;
+      border: 1px solid rgba(94, 106, 210, 0.15);
+      white-space: nowrap;
     }
-    .step .name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-    .step .desc { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+    .tree-label.muted { color: var(--text-dim); background: rgba(255,255,255,0.03); border-color: var(--border-subtle); }
+    .index-points { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; justify-content: center; }
+    .index-point { display: flex; gap: 12px; align-items: flex-start; }
+    .index-point .pi {
+      flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px;
+      background: var(--accent-soft); border: 1px solid rgba(94, 106, 210, 0.15);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent);
+    }
+    .index-point .pi svg { width: 15px; height: 15px; }
+    .index-point .pt-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+    .index-point .pt-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
 
     /* ── Comparison ────────────────────────────────────────────── */
     .comparison-wrap { overflow-x: auto; }
@@ -371,9 +388,8 @@
     /* ── Responsive ────────────────────────────────────────────── */
     @media (max-width: 768px) {
       .pillars { grid-template-columns: 1fr; }
-      .steps { grid-template-columns: 1fr; }
-      .step { border-right: none; border-bottom: 1px solid var(--border-subtle); }
-      .step:last-child { border-bottom: none; }
+      .index-body { grid-template-columns: 1fr; }
+      .index-tree { border-right: none; border-bottom: 1px solid var(--border-subtle); }
       .features { grid-template-columns: 1fr; }
       .nav-links .btn-ghost { display: none; }
       .nav-links .btn-ghost:last-child { display: inline-flex; }
@@ -488,30 +504,55 @@
     </div>
   </section>
 
-  <!-- ── Workflow steps ──────────────────────────────────────── -->
+  <!-- ── Project index ────────────────────────────────────────── -->
   <section class="section">
     <div class="container">
-      <div class="section-label fade-in-up">Plan Mode &rarr; Parallel PRs</div>
-      <div class="workflow fade-in-up delay-1">
-        <div class="workflow-header">
+      <div class="section-label fade-in-up">Full Source-Code Index</div>
+      <div class="index-card fade-in-up delay-1">
+        <div class="index-header">
           <div class="title">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4" /></svg>
-            <span>From a one-line goal to conflict-free pull requests</span>
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" /></svg>
+            <span>Every file indexed with semantic topic labels</span>
           </div>
-          <a class="link" href="https://github.com/prasenjeet-symon/ogcode#plan-mode--parallel-prs--ship-features-not-just-suggestions" target="_blank" rel="noopener">Learn more &rarr;</a>
+          <a class="link" href="https://github.com/prasenjeet-symon/ogcode#full-source-code-index" target="_blank" rel="noopener">Learn more &rarr;</a>
         </div>
-        <div class="steps">
-          <div class="step">
-            <div class="head"><span class="num">01</span><span class="name">Describe</span></div>
-            <p class="desc">Open a plan and state your goal. The agent reads your codebase and refines the approach with you.</p>
+        <div class="index-body">
+          <div class="index-tree">
+            <div class="tree-dir">internal/</div>
+            <div class="tree-file"><span class="fname">loop.go</span><span class="tree-label">Run Loop</span><span class="tree-label">Streaming</span></div>
+            <div class="tree-file"><span class="fname">prompt_builder.go</span><span class="tree-label">System Prompt</span></div>
+            <div class="tree-dir">tool/</div>
+            <div class="tree-file"><span class="fname">bash.go</span><span class="tree-label">Shell Exec</span></div>
+            <div class="tree-file"><span class="fname">read.go</span><span class="tree-label">File Reader</span></div>
+            <div class="tree-dir">indexer/</div>
+            <div class="tree-file"><span class="fname">indexer.go</span><span class="tree-label">Batch Index</span><span class="tree-label">Workers</span></div>
+            <div class="tree-file"><span class="fname">pdf.go</span><span class="tree-label">PDF Extract</span></div>
+            <div class="tree-dir">provider/</div>
+            <div class="tree-file"><span class="fname">anthropic.go</span><span class="tree-label">Claude API</span></div>
+            <div class="tree-file"><span class="fname">local.go</span><span class="tree-label">Local Embedder</span></div>
           </div>
-          <div class="step">
-            <div class="head"><span class="num">02</span><span class="name">Lock</span></div>
-            <p class="desc">Lock the plan. A breakdown agent turns it into structured tasks with effort estimates and a dependency graph.</p>
-          </div>
-          <div class="step">
-            <div class="head"><span class="num">03</span><span class="name">Execute</span></div>
-            <p class="desc">Each task gets its own git branch and isolated agent. Independent tasks run in parallel — conflict-free PRs.</p>
+          <div class="index-points">
+            <div class="index-point">
+              <div class="pi"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z" /></svg></div>
+              <div>
+                <div class="pt-title">Navigate, don't guess</div>
+                <div class="pt-desc">The agent scans the labeled tree first and jumps straight to the files that matter — no blind grep or glob probing.</div>
+              </div>
+            </div>
+            <div class="index-point">
+              <div class="pi"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg></div>
+              <div>
+                <div class="pt-title">Indexed in seconds</div>
+                <div class="pt-desc">Concurrent workers batch every source file and PDF page, extracting topic labels in parallel on first load.</div>
+              </div>
+            </div>
+            <div class="index-point">
+              <div class="pi"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M12 3a9 9 0 100 18 9 9 0 000-18z" /></svg></div>
+              <div>
+                <div class="pt-title">Knows before it reads</div>
+                <div class="pt-desc">Labels tell the model what each file contains up front, so it skips irrelevant ones and cuts wasted tokens.</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
