@@ -272,6 +272,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// message DB (it's an ephemeral system-prompt entry). Continue so
 			// the guidance reaches the LLM on this iteration's call.
 			if pendingGuidance == "" {
+				// Re-check: guidance may have arrived after DrainGuidance at
+				// the top of this iteration but before/during the DB load
+				// above. Without this re-check the loop would exit and silently
+				// drop the guidance (it is never persisted to the message DB).
+				// Drain it here so the loop continues and injects it into the
+				// upcoming system prompt.
+				if lc := LoopControlFromContext(ctx); lc != nil {
+					pendingGuidance = lc.DrainGuidance()
+				}
+			}
+			if pendingGuidance == "" {
 				last := messages[len(messages)-1]
 				finish := "stop"
 				if last.Info.Finish != nil {
@@ -397,6 +408,23 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		lc := LoopControlFromContext(ctx)
 		if lc != nil {
 			lc.SetStreamCancel(streamCancelFn)
+
+			// Close the race window between DrainGuidance at the top of this
+			// iteration and SetStreamCancel above. Guidance pushed in that gap
+			// is now in the queue but pendingGuidance was drained before it
+			// arrived, so it is NOT in this iteration's system prompt. The
+			// HTTP handler's CancelStream also returned false (the cancel func
+			// wasn't registered yet), so the stream was never interrupted.
+			// Without this check the stream would run to completion (10-30s)
+			// and the guidance would only be applied on the NEXT iteration.
+			// Re-check the queue: if guidance arrived, cancel the stream so
+			// the next iteration drains it and injects it promptly.
+			if lc.HasPendingGuidance() {
+				slog.Info("guidance arrived during pre-stream gap, cancelling stream before it starts", "session", sessionID, "step", step)
+				streamCancelFn()
+				lc.ClearStreamCancel()
+				continue
+			}
 		}
 
 		// Stream from LLM with retry for transient errors
