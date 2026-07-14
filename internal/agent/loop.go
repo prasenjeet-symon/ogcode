@@ -1038,18 +1038,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 			wg.Wait()
 
+			// Detect mid-loop tool cancellation BEFORE calling toolCancel() ourself.
+			// The child context was cancelled (by CancelTool via the guidance
+			// endpoint) but the loop context is still alive. We must capture this
+			// state before the cleanup call to toolCancel() below, because that
+			// call always cancels toolCtx — which would make toolCtx.Err() non-nil
+			// even on perfectly normal tool completion, producing a false-positive
+			// "cancelled by user" message.
+			toolCtxCancelled := toolCtx.Err() != nil && ctx.Err() == nil
+
 			// Clear the tool-cancel registration and release the child context.
 			if lc != nil {
 				lc.ClearToolCancel()
 			}
 			toolCancel()
-
-			// Detect mid-loop tool cancellation: the child context was cancelled
-			// but the loop context is still alive. This happens when the user
-			// cancelled the current tool via the guidance endpoint. Errored tools
-			// from the cancelled child get a clear "cancelled by user" message so
-			// the LLM understands why the result is incomplete.
-			toolCtxCancelled := toolCtx.Err() != nil && ctx.Err() == nil
 
 			// Update all tool parts with results (sequential — DB writes)
 			for _, info := range execInfos {
