@@ -214,6 +214,30 @@ func (s *Store) IsDocIndexed(docPath string) (bool, error) {
 	return count > 0, nil
 }
 
+// ListDocPaths returns the distinct doc_path values whose path starts with
+// dirPrefix. It is used by the indexer to detect stale entries for files that
+// no longer exist on disk.
+func (s *Store) ListDocPaths(dirPrefix string) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT doc_path FROM doc_page_index WHERE doc_path LIKE ? ORDER BY doc_path`,
+		dirPrefix+"%",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list doc paths: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan doc path: %w", err)
+		}
+		paths = append(paths, p)
+	}
+	return paths, rows.Err()
+}
+
 // DeleteAllByPrefix deletes all entries for docs whose path starts with dirPrefix.
 func (s *Store) DeleteAllByPrefix(dirPrefix string) error {
 	_, err := s.db.Exec(`DELETE FROM doc_page_index WHERE doc_path LIKE ?`, dirPrefix+"%")

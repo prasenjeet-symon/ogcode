@@ -148,6 +148,10 @@ func (idx *Indexer) Run(ctx context.Context) error {
 
 	if len(allFiles) == 0 {
 		slog.Info("no indexable files found", "dir", idx.dir)
+		// Still purge stale entries — every previously-indexed file is now gone.
+		if err := idx.purgeDeletedDocs(ctx, allFiles); err != nil {
+			slog.Warn("purge deleted docs failed, continuing", "err", err)
+		}
 		return nil
 	}
 
@@ -167,6 +171,11 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		}
 	}
 	slog.Info("file type breakdown", "pdf", pdfCount, "docx", docxCount, "text", textCount)
+
+	// Purge stale entries: remove index rows for files that no longer exist on disk.
+	if err := idx.purgeDeletedDocs(ctx, allFiles); err != nil {
+		slog.Warn("purge deleted docs failed, continuing", "err", err)
+	}
 
 	// Filter out already-indexed documents.
 	var toIndex []string
@@ -264,6 +273,49 @@ func (idx *Indexer) Run(ctx context.Context) error {
 
 	idx.publishProgress(ctx, "done")
 	slog.Info("indexing complete", "dir", idx.dir, "total", len(items))
+	return nil
+}
+
+// purgeDeletedDocs removes index entries for documents that were previously
+// indexed but no longer exist on disk. It compares the set of indexed doc
+// paths (under idx.dir) against the current filesystem walk (allFiles) and
+// deletes any indexed path that is not present in the walk. This keeps the
+// index in sync when files are deleted between runs.
+func (idx *Indexer) purgeDeletedDocs(ctx context.Context, allFiles []string) error {
+	if idx.docStore == nil {
+		return nil
+	}
+
+	// Build a set of current file paths for O(1) lookups.
+	currentFiles := make(map[string]struct{}, len(allFiles))
+	for _, p := range allFiles {
+		currentFiles[p] = struct{}{}
+	}
+
+	// Retrieve every indexed doc path under idx.dir.
+	indexedPaths, err := idx.docStore.ListDocPaths(idx.dir)
+	if err != nil {
+		return fmt.Errorf("list indexed doc paths: %w", err)
+	}
+
+	var deleted int
+	for _, docPath := range indexedPaths {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if _, exists := currentFiles[docPath]; exists {
+			continue
+		}
+		if err := idx.docStore.DeleteByDoc(docPath); err != nil {
+			slog.Warn("failed to purge stale index entry", "path", docPath, "err", err)
+			continue
+		}
+		deleted++
+		slog.Info("purged stale index entry for deleted file", "path", docPath)
+	}
+	if deleted > 0 {
+		slog.Info("purged stale index entries", "count", deleted)
+	}
 	return nil
 }
 

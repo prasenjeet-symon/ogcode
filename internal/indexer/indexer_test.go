@@ -1,7 +1,12 @@
 package indexer
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
+
+	"github.com/prasenjeet-symon/ogcode/internal/db"
+	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 )
 
 func TestAssembleBatches_PDFSeparation(t *testing.T) {
@@ -220,5 +225,119 @@ func TestProgressTracker(t *testing.T) {
 	}
 	if p.Failed.Load() != 2 {
 		t.Errorf("expected failed 2, got %d", p.Failed.Load())
+	}
+}
+
+func newTestDocStore(t *testing.T) *docindex.Store {
+	t.Helper()
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	return docindex.NewStore(database)
+}
+
+func TestPurgeDeletedDocs_RemovesStaleEntries(t *testing.T) {
+	dir := "/workspace"
+	store := newTestDocStore(t)
+	idx := New(dir, store, nil)
+
+	// Simulate three previously-indexed files.
+	indexedPaths := []string{
+		filepath.Join(dir, "a.go"),
+		filepath.Join(dir, "b.go"),
+		filepath.Join(dir, "c.go"),
+	}
+	for _, p := range indexedPaths {
+		if err := store.Upsert(&docindex.PageEntry{DocPath: p, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"}}); err != nil {
+			t.Fatalf("upsert %s: %v", p, err)
+		}
+	}
+
+	// Only a.go and b.go still exist on disk; c.go was deleted.
+	currentFiles := []string{
+		filepath.Join(dir, "a.go"),
+		filepath.Join(dir, "b.go"),
+	}
+
+	if err := idx.purgeDeletedDocs(context.Background(), currentFiles); err != nil {
+		t.Fatalf("purgeDeletedDocs: %v", err)
+	}
+
+	// c.go should be gone.
+	if indexed, _ := store.IsDocIndexed(filepath.Join(dir, "c.go")); indexed {
+		t.Error("expected deleted file c.go to be purged from index")
+	}
+	// a.go and b.go should still be indexed.
+	if indexed, _ := store.IsDocIndexed(filepath.Join(dir, "a.go")); !indexed {
+		t.Error("expected a.go to still be indexed")
+	}
+	if indexed, _ := store.IsDocIndexed(filepath.Join(dir, "b.go")); !indexed {
+		t.Error("expected b.go to still be indexed")
+	}
+}
+
+func TestPurgeDeletedDocs_NoStaleEntries(t *testing.T) {
+	dir := "/workspace"
+	store := newTestDocStore(t)
+	idx := New(dir, store, nil)
+
+	// Two indexed files, both still present.
+	for _, p := range []string{filepath.Join(dir, "a.go"), filepath.Join(dir, "b.go")} {
+		if err := store.Upsert(&docindex.PageEntry{DocPath: p, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{}}); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	currentFiles := []string{
+		filepath.Join(dir, "a.go"),
+		filepath.Join(dir, "b.go"),
+	}
+	if err := idx.purgeDeletedDocs(context.Background(), currentFiles); err != nil {
+		t.Fatalf("purgeDeletedDocs: %v", err)
+	}
+
+	// Both should still be indexed.
+	for _, p := range currentFiles {
+		if indexed, _ := store.IsDocIndexed(p); !indexed {
+			t.Errorf("expected %s to still be indexed", p)
+		}
+	}
+}
+
+func TestPurgeDeletedDocs_EmptyWalkPurgesAll(t *testing.T) {
+	dir := "/workspace"
+	store := newTestDocStore(t)
+	idx := New(dir, store, nil)
+
+	// Three indexed files, none exist on disk anymore.
+	for _, p := range []string{
+		filepath.Join(dir, "a.go"),
+		filepath.Join(dir, "b.go"),
+		filepath.Join(dir, "c.go"),
+	} {
+		if err := store.Upsert(&docindex.PageEntry{DocPath: p, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{}}); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	if err := idx.purgeDeletedDocs(context.Background(), nil); err != nil {
+		t.Fatalf("purgeDeletedDocs: %v", err)
+	}
+
+	paths, err := store.ListDocPaths(dir)
+	if err != nil {
+		t.Fatalf("ListDocPaths: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("expected all entries purged, got %d remaining: %v", len(paths), paths)
+	}
+}
+
+func TestPurgeDeletedDocs_NilStore(t *testing.T) {
+	idx := New("/workspace", nil, nil)
+	// Should be a no-op, not a panic.
+	if err := idx.purgeDeletedDocs(context.Background(), nil); err != nil {
+		t.Errorf("expected nil error with nil store, got %v", err)
 	}
 }
