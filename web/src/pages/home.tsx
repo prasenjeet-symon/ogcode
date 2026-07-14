@@ -218,19 +218,20 @@ function HomeContent() {
             {/* Headline */}
             <h1 class="text-center text-[42px] md:text-[54px] font-bold tracking-tight text-zinc-50 leading-[1.05]
                        animate-fade-in-up max-w-3xl" style={{ 'animation-delay': '40ms' }}>
-              Build software at the
+              Where everyone is a
               <span class="block mt-1 bg-gradient-to-r from-[color:var(--accent)] via-[#8b9cf7] to-[color:var(--accent)]
                            bg-clip-text text-transparent">
-                speed of thought.
+                software developer.
               </span>
             </h1>
 
             {/* Subheadline */}
             <p class="mt-5 max-w-xl text-center text-[15px] md:text-[16px] text-zinc-400 leading-relaxed
                       animate-fade-in-up" style={{ 'animation-delay': '80ms' }}>
-              Ogcode curates the <em class="not-italic text-zinc-200 font-medium">relevant</em> context for each turn —
-              not the full transcript — so it cuts <strong class="text-zinc-100 font-semibold">70%+ of tokens</strong>,
-              sharpens accuracy, and lets conversations run <strong class="text-zinc-100 font-semibold">effectively forever</strong>.
+              No gatekeepers, no boilerplate. Describe what you want in plain English and ogcode builds it —
+              curating <em class="not-italic text-zinc-200 font-medium">relevant</em> context per turn, cutting
+              <strong class="text-zinc-100 font-semibold"> 70%+ of tokens</strong>, and letting conversations run
+              <strong class="text-zinc-100 font-semibold"> effectively forever</strong>.
             </p>
           </section>
 
