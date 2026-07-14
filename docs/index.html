@@ -3,24 +3,710 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ogcode</title>
+  <meta name="description" content="The token-efficient agentic coding workbench. Ogcode curates only the relevant context per turn — cutting 70%+ of tokens, sharpening accuracy, and letting conversations run effectively forever on any model.">
+  <title>ogcode — The token-efficient agentic coding workbench</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235e6ad2'/><path d='M55 30L35 54h13l-3 16 20-24H52l3-16z' fill='%23fff'/></svg>">
   <style>
-    body {
-      font-family: system-ui, sans-serif;
-      background: #000;
-      color: #fff;
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0;
+    /* ── Design tokens ─────────────────────────────────────────── */
+    :root {
+      --bg-base: #0a0a0c;
+      --bg-surface: #131316;
+      --bg-elevated: #1b1b20;
+      --accent: #5e6ad2;
+      --accent-hover: #6f7be0;
+      --accent-soft: rgba(94, 106, 210, 0.12);
+      --on-primary: #fff;
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-default: rgba(255, 255, 255, 0.09);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text-primary: #f4f4f5;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --text-dim: #52525b;
+      --max-width: 1024px;
     }
-    p {
-      margin: 0;
+
+    /* ── Reset ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+    code, .mono { font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace; }
+
+    /* ── Layout helpers ───────────────────────────────────────── */
+    .container { max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
+
+    /* ── Ambient background ────────────────────────────────────── */
+    .ambient {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 70% 50% at 50% -8%, rgba(94, 106, 210, 0.12), transparent 70%),
+        radial-gradient(ellipse 50% 35% at 80% 20%, rgba(94, 106, 210, 0.05), transparent 60%);
+    }
+    .dot-grid {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.35;
+      background-image: radial-gradient(circle, rgba(255,255,255,0.045) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+
+    /* ── Animations ────────────────────────────────────────────── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in-up { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .delay-1 { animation-delay: 60ms; }
+    .delay-2 { animation-delay: 120ms; }
+    .delay-3 { animation-delay: 180ms; }
+    .delay-4 { animation-delay: 240ms; }
+    .delay-5 { animation-delay: 300ms; }
+    .delay-6 { animation-delay: 360ms; }
+
+    @keyframes ping {
+      75%, 100% { transform: scale(2); opacity: 0; }
+    }
+    .ping-dot { animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+    /* ── Nav ───────────────────────────────────────────────────── */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(12px);
+      background: rgba(10, 10, 12, 0.72);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px;
+      max-width: var(--max-width); margin: 0 auto;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-logo {
+      width: 28px; height: 28px; border-radius: 8px;
+      background: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 12px rgba(94, 106, 210, 0.3);
+      ring: 1px solid rgba(255,255,255,0.1);
+    }
+    .brand-logo svg { width: 14px; height: 14px; }
+    .brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+    .brand-ver {
+      font-size: 9.5px; font-family: monospace; font-weight: 500;
+      color: var(--accent); background: var(--accent-soft);
+      padding: 1px 6px; border-radius: 4px;
+      border: 1px solid rgba(94, 106, 210, 0.2);
+      margin-left: 6px;
+    }
+    .nav-links { display: flex; align-items: center; gap: 12px; }
+    .btn-ghost {
+      height: 32px; padding: 0 14px; border-radius: 8px;
+      font-size: 12.5px; font-weight: 500; color: var(--text-secondary);
+      border: 1px solid var(--border-default);
+      background: rgba(255,255,255,0.02);
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .btn-ghost:hover { color: var(--text-primary); border-color: var(--border-strong); background: rgba(255,255,255,0.04); }
+
+    /* ── Hero ──────────────────────────────────────────────────── */
+    .hero {
+      position: relative; z-index: 1;
+      text-align: center;
+      padding: 90px 24px 40px;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 20px;
+      border: 1px solid var(--border-default);
+      background: rgba(255,255,255,0.03);
+      font-size: 11.5px; color: var(--text-secondary);
+      margin-bottom: 28px;
+    }
+    .badge .dot {
+      position: relative; display: flex; width: 6px; height: 6px;
+    }
+    .badge .dot::before {
+      content: ''; position: absolute; inset: 0; border-radius: 50%;
+      background: var(--accent); opacity: 0.6;
+      animation: ping 1.5s cubic-bezier(0,0,0.2,1) infinite;
+    }
+    .badge .dot::after {
+      content: ''; position: relative; width: 6px; height: 6px;
+      border-radius: 50%; background: var(--accent);
+    }
+    .hero h1 {
+      font-size: clamp(36px, 6vw, 54px);
+      font-weight: 700; letter-spacing: -0.03em;
+      line-height: 1.06; max-width: 720px; margin: 0 auto;
+    }
+    .gradient-text {
+      display: block; margin-top: 4px;
+      background: linear-gradient(90deg, var(--accent), #8b9cf7, var(--accent));
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      max-width: 560px; margin: 22px auto 0;
+      font-size: 16px; color: var(--text-secondary);
+      line-height: 1.65;
+    }
+    .hero p strong { color: var(--text-primary); font-weight: 600; }
+    .hero p em { color: var(--text-primary); font-style: normal; font-weight: 500; }
+
+    /* ── Install ───────────────────────────────────────────────── */
+    .install-block { margin: 36px auto 0; max-width: 520px; }
+    .install-cmd {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px; border-radius: 14px;
+      border: 1px solid var(--border-default);
+      background: var(--bg-surface);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+      font-size: 13.5px; color: var(--text-primary);
+      transition: border-color 0.2s;
+    }
+    .install-cmd:hover { border-color: rgba(94, 106, 210, 0.35); }
+    .install-cmd .prompt { color: var(--text-dim); user-select: none; }
+    .install-cmd .code { flex: 1; overflow-x: auto; white-space: nowrap; }
+    .install-cmd .copy {
+      flex-shrink: 0; padding: 5px 10px; border-radius: 7px;
+      font-size: 11px; font-weight: 500; color: var(--text-muted);
+      border: 1px solid var(--border-default); background: var(--bg-elevated);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .install-cmd .copy:hover { color: var(--accent); border-color: rgba(94,106,210,0.3); }
+    .install-cmd .copy.copied { color: var(--accent); border-color: rgba(94,106,210,0.4); }
+
+    /* ── Section ───────────────────────────────────────────────── */
+    .section {
+      position: relative; z-index: 1;
+      padding: 64px 0;
+    }
+    .section-label {
+      text-align: center;
+      font-size: 12.5px; font-weight: 600;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+
+    /* ── Value pillars ─────────────────────────────────────────── */
+    .pillars {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+    }
+    .pillar {
+      position: relative;
+      border-radius: 16px; border: 1px solid var(--border-default);
+      background: rgba(255,255,255,0.02);
+      padding: 24px;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .pillar:hover {
+      border-color: rgba(94, 106, 210, 0.3);
+      background: rgba(255,255,255,0.035);
+    }
+    .pillar .stat {
+      position: absolute; top: 20px; right: 20px;
+      text-align: right;
+    }
+    .pillar .stat-num {
+      font-size: 28px; font-weight: 700; line-height: 1;
+      background: linear-gradient(135deg, var(--accent), #8b9cf7);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .pillar .stat-label {
+      font-size: 9.5px; color: var(--text-dim);
+      margin-top: 4px; max-width: 90px; line-height: 1.3;
+    }
+    .pillar .icon {
+      width: 36px; height: 36px; border-radius: 11px;
+      background: var(--accent-soft);
+      border: 1px solid rgba(94, 106, 210, 0.15);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent); margin-bottom: 16px;
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .pillar:hover .icon { transform: scale(1.1); }
+    .pillar .icon svg { width: 20px; height: 20px; }
+    .pillar h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
+    .pillar p { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; padding-right: 64px; }
+
+    /* ── Workflow steps ────────────────────────────────────────── */
+    .workflow {
+      border-radius: 16px; border: 1px solid var(--border-subtle);
+      background: rgba(255,255,255,0.015); overflow: hidden;
+    }
+    .workflow-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .workflow-header .title { display: flex; align-items: center; gap: 8px; }
+    .workflow-header .title svg { width: 16px; height: 16px; color: var(--accent); }
+    .workflow-header .title span { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+    .workflow-header .link { font-size: 11.5px; font-weight: 500; color: var(--accent); transition: color 0.15s; }
+    .workflow-header .link:hover { color: #8b9cf7; }
+    .steps {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+    }
+    .step {
+      padding: 20px 24px;
+      border-right: 1px solid var(--border-subtle);
+    }
+    .step:last-child { border-right: none; }
+    .step .head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .step .num {
+      font-size: 10px; font-family: monospace; font-weight: 600;
+      color: var(--accent); background: var(--accent-soft);
+      padding: 2px 6px; border-radius: 4px;
+    }
+    .step .name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+    .step .desc { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+
+    /* ── Comparison ────────────────────────────────────────────── */
+    .comparison-wrap { overflow-x: auto; }
+    .comparison {
+      width: 100%; border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    .comparison th, .comparison td {
+      padding: 11px 14px; text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+      white-space: nowrap;
+    }
+    .comparison th {
+      font-size: 11px; font-weight: 600;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.015);
+    }
+    .comparison th:first-child, .comparison td:first-child {
+      font-weight: 600; color: var(--text-secondary);
+    }
+    .comparison tbody tr:hover { background: rgba(255,255,255,0.015); }
+    .comparison .og-col { color: var(--accent); font-weight: 600; }
+    .comparison .check { color: #4ade80; }
+    .comparison .cross { color: var(--text-dim); }
+
+    /* ── Feature grid ──────────────────────────────────────────── */
+    .features {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+    }
+    .feature {
+      display: flex; gap: 12px; padding: 16px;
+      border-radius: 12px; border: 1px solid var(--border-subtle);
+      background: rgba(255,255,255,0.015);
+      transition: border-color 0.2s;
+    }
+    .feature:hover { border-color: var(--border-default); }
+    .feature .f-icon {
+      flex-shrink: 0; width: 20px; height: 20px;
+      color: var(--accent); margin-top: 1px;
+    }
+    .feature .f-icon svg { width: 100%; height: 100%; }
+    .feature h4 { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+    .feature p { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+    /* ── CTA ───────────────────────────────────────────────────── */
+    .cta {
+      text-align: center; padding: 72px 24px;
+    }
+    .cta h2 {
+      font-size: clamp(28px, 4vw, 38px);
+      font-weight: 700; letter-spacing: -0.03em;
+      line-height: 1.15; max-width: 580px; margin: 0 auto;
+    }
+    .cta p {
+      max-width: 480px; margin: 16px auto 28px;
+      font-size: 15px; color: var(--text-secondary);
+    }
+    .cta-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      height: 44px; padding: 0 22px; border-radius: 12px;
+      font-size: 14px; font-weight: 600;
+      color: var(--on-primary); background: var(--accent);
+      border: none; cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 14px rgba(94, 106, 210, 0.3);
+    }
+    .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(94, 106, 210, 0.4); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      height: 44px; padding: 0 20px; border-radius: 12px;
+      font-size: 14px; font-weight: 500; color: var(--text-secondary);
+      border: 1px solid var(--border-default); background: var(--bg-surface);
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn-secondary:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--bg-elevated); }
+
+    /* ── Footer ────────────────────────────────────────────────── */
+    .footer {
+      position: relative; z-index: 1;
+      padding: 36px 24px 40px;
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+    }
+    .footer-links {
+      display: flex; align-items: center; gap: 20px;
+      font-size: 11.5px; color: var(--text-muted);
+    }
+    .footer-links a {
+      display: flex; align-items: center; gap: 6px;
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--text-secondary); }
+    .footer-links svg { width: 14px; height: 14px; }
+    .footer-meta {
+      font-size: 10.5px; color: var(--text-dim);
+    }
+
+    /* ── Responsive ────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .pillars { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; }
+      .step { border-right: none; border-bottom: 1px solid var(--border-subtle); }
+      .step:last-child { border-bottom: none; }
+      .features { grid-template-columns: 1fr; }
+      .nav-links .btn-ghost { display: none; }
+      .nav-links .btn-ghost:last-child { display: inline-flex; }
+      .hero { padding: 60px 24px 30px; }
+      .section { padding: 48px 0; }
+      .cta { padding: 56px 24px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
     }
   </style>
 </head>
 <body>
-  <p>Coming soon</p>
+  <div class="ambient"></div>
+  <div class="dot-grid"></div>
+
+  <!-- ── Nav ─────────────────────────────────────────────────── -->
+  <header class="nav">
+    <div class="nav-inner">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg fill="none" viewBox="0 0 24 24" stroke="#fff" stroke-width="2.4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <span class="brand-name">ogcode</span>
+        <span class="brand-ver">v0.19.1</span>
+      </div>
+      <div class="nav-links">
+        <a class="btn-ghost" href="https://github.com/prasenjeet-symon/ogcode#readme" target="_blank" rel="noopener">
+          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .5A11.5 11.5 0 00.5 12a11.5 11.5 0 007.86 10.94c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.3-5.24-1.28-5.24-5.67 0-1.25.45-2.27 1.18-3.07-.12-.3-.51-1.46.11-3.05 0 0 .96-.3 3.15 1.17a10.9 10.9 0 015.74 0c2.19-1.47 3.15-1.17 3.15-1.17.62 1.59.23 2.75.11 3.05.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.37-5.25 5.66.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12 11.5 11.5 0 0012 .5z"/></svg>
+          GitHub
+        </a>
+        <a class="btn-ghost" href="https://discord.gg/JQP9t8y2Zv" target="_blank" rel="noopener">
+          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M20.3 4.4A19.8 19.8 0 0015.4 3l-.3.5c1.5.4 2.7.9 4 1.7a13.6 13.6 0 00-11.9 0c1.2-.8 2.6-1.3 4-1.7L10.6 3a19.8 19.8 0 00-4.9 1.4C2.5 9.1 1.7 13.7 2.1 18.3a20 20 0 006 3l.5-.7c-1-.4-2-1-2.8-1.6l.7-.5a14.2 14.2 0 0012.7 0l.7.5c-.9.6-1.8 1.2-2.8 1.6l.5.7a20 20 0 006-3c.5-5.3-.8-9.9-3.3-14zM8.5 15c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2zm7 0c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2z"/></svg>
+          Discord
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Hero ────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="badge fade-in-up">
+      <span class="dot"></span>
+      The token-efficient agentic coding workbench
+    </div>
+    <h1 class="fade-in-up delay-1">
+      Build software at the
+      <span class="gradient-text">speed of thought.</span>
+    </h1>
+    <p class="fade-in-up delay-2">
+      Ogcode curates the <em>relevant</em> context for each turn — not the full transcript —
+      so it cuts <strong>70%+ of tokens</strong>, sharpens accuracy,
+      and lets conversations run <strong>effectively forever</strong>.
+    </p>
+
+    <div class="install-block fade-in-up delay-3">
+      <div class="install-cmd" id="installCmd">
+        <span class="prompt">$</span>
+        <code class="code" id="installText">curl -fsSL https://ogcode.xyz/install.sh | sh && ogcode</code>
+        <button class="copy" id="copyBtn" onclick="copyInstall()">Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Value pillars ───────────────────────────────────────── -->
+  <section class="section">
+    <div class="container">
+      <div class="section-label fade-in-up">Powered by Agentic Loop Memory</div>
+      <div class="pillars">
+        <div class="pillar fade-in-up delay-1">
+          <div class="stat">
+            <div class="stat-num">70%+</div>
+            <div class="stat-label">tokens saved on long sessions</div>
+          </div>
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2a10 10 0 100 20 10 10 0 000-20zM12 6v6l4 2" /></svg>
+          </div>
+          <h3>Agentic Loop Memory</h3>
+          <p>A persistent knowledge graph recalls only the facts relevant to each turn — never replaying the whole transcript.</p>
+        </div>
+        <div class="pillar fade-in-up delay-2">
+          <div class="stat">
+            <div class="stat-num">&uarr;</div>
+            <div class="stat-label">accuracy vs naive replay</div>
+          </div>
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5L12 3z" /></svg>
+          </div>
+          <h3>Sharper Accuracy</h3>
+          <p>A short, on-point context window lets the model focus — so it produces more correct results per turn, not fewer.</p>
+        </div>
+        <div class="pillar fade-in-up delay-3">
+          <div class="stat">
+            <div class="stat-num">&infin;</div>
+            <div class="stat-label">no hard context limit</div>
+          </div>
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M6.5 8a4 4 0 100 8c2.2 0 3.5-1.8 5.5-4s3.3-4 5.5-4a4 4 0 110 8c-2.2 0-3.5-1.8-5.5-4S8.7 8 6.5 8z" /></svg>
+          </div>
+          <h3>Near-Infinite Context</h3>
+          <p>The per-turn prompt stays flat no matter how long the session runs. Chat for days — on any model, frontier or local.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Workflow steps ──────────────────────────────────────── -->
+  <section class="section">
+    <div class="container">
+      <div class="section-label fade-in-up">Plan Mode &rarr; Parallel PRs</div>
+      <div class="workflow fade-in-up delay-1">
+        <div class="workflow-header">
+          <div class="title">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4" /></svg>
+            <span>From a one-line goal to conflict-free pull requests</span>
+          </div>
+          <a class="link" href="https://github.com/prasenjeet-symon/ogcode#plan-mode--parallel-prs--ship-features-not-just-suggestions" target="_blank" rel="noopener">Learn more &rarr;</a>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="head"><span class="num">01</span><span class="name">Describe</span></div>
+            <p class="desc">Open a plan and state your goal. The agent reads your codebase and refines the approach with you.</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">02</span><span class="name">Lock</span></div>
+            <p class="desc">Lock the plan. A breakdown agent turns it into structured tasks with effort estimates and a dependency graph.</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">03</span><span class="name">Execute</span></div>
+            <p class="desc">Each task gets its own git branch and isolated agent. Independent tasks run in parallel — conflict-free PRs.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Feature grid ────────────────────────────────────────── -->
+  <section class="section">
+    <div class="container">
+      <div class="section-label fade-in-up">Everything in one binary</div>
+      <div class="features">
+        <div class="feature fade-in-up delay-1">
+          <div class="f-icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg></div>
+          <div><h4>Build Mode + Plan Mode</h4><p>Chat with a coding agent in real time, or collaboratively plan complex features with effort estimates and dependency graphs.</p></div>
+        </div>
+        <div class="feature fade-in-up delay-1">
+          <div class="f-icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg></div>
+          <div><h4>Token-Efficient by Design</h4><p>Loop-level optimization recalls only relevant context per turn — saving 70%+ of tokens and sharpening accuracy simultaneously.</p></div>
+        </div>
+        <div class="feature fade-in-up delay-2">
+          <div class="f-icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 100-8 4 4 0 000 8z" /></svg></div>
+          <div><h4>Parallel Task Execution</h4><p>Independent tasks run simultaneously across isolated git worktree branches and open PRs directly to your GitHub repo.</p></div>
+        </div>
+        <div class="feature fade-in-up delay-2">
+          <div class="f-icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2a10 10 0 100 20 10 10 0 000-20zM12 6v6l4 2" /></svg></div>
+          <div><h4>Knowledge Graph Memory</h4><p>Semantic memory of your codebase (Topic &rarr; Concept &rarr; Fact) that persists across sessions — infinite context, no limits.</p></div>
+        </div>
+        <div class="feature fade-in-up delay-3">
+          <div class="f-icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z M3.6 9h16.8 M3.6 15h16.8 M11.5 3a17 17 0 000 18 M12.5 3a17 17 0 010 18" /></svg></div>
+          <div><h4>Multi-Provider LLM</h4><p>Anthropic Claude, OpenAI GPT, OpenRouter, or local Ollama models. Switch anytime from the UI — no vendor lock-in.</p></div>
+        </div>
+        <div class="feature fade-in-up delay-3">
+          <div class="f-icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg></div>
+          <div><h4>Private &amp; Self-Hosted</h4><p>One Go binary with an embedded SolidJS frontend. Zero cloud dependencies. Your code never leaves your machine.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Comparison ──────────────────────────────────────────── -->
+  <section class="section">
+    <div class="container">
+      <div class="section-label fade-in-up">How Ogcode Compares</div>
+      <div class="comparison-wrap fade-in-up delay-1">
+        <table class="comparison">
+          <thead>
+            <tr>
+              <th></th>
+              <th class="og-col">Ogcode</th>
+              <th>Cursor</th>
+              <th>Claude Code</th>
+              <th>Copilot</th>
+              <th>Aider</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Interface</td>
+              <td class="og-col">Web UI (any editor)</td>
+              <td>VS Code fork</td>
+              <td>Terminal</td>
+              <td>IDE extension</td>
+              <td>Terminal</td>
+            </tr>
+            <tr>
+              <td>Self-Hosted</td>
+              <td class="og-col">Single binary, zero deps</td>
+              <td class="cross">Cloud-required</td>
+              <td class="cross">Cloud-only</td>
+              <td class="cross">Cloud-only</td>
+              <td>Open source</td>
+            </tr>
+            <tr>
+              <td>Parallel Tasks</td>
+              <td class="og-col">Worktrees, conflict-free auto-PRs</td>
+              <td class="cross">Cloud agents</td>
+              <td>Subagents</td>
+              <td class="cross">Single agent</td>
+              <td class="cross">Sequential</td>
+            </tr>
+            <tr>
+              <td>Persistent Memory</td>
+              <td class="og-col">Knowledge graph</td>
+              <td class="cross">Session-only</td>
+              <td>CLAUDE.md</td>
+              <td class="cross">None</td>
+              <td class="cross">None</td>
+            </tr>
+            <tr>
+              <td>Token Efficiency</td>
+              <td class="og-col">~70% saved, higher accuracy</td>
+              <td class="cross">No</td>
+              <td class="cross">No</td>
+              <td class="cross">No</td>
+              <td class="cross">No</td>
+            </tr>
+            <tr>
+              <td>Model Choice</td>
+              <td class="og-col">Claude, GPT, OpenRouter, Ollama</td>
+              <td>Built-in + custom</td>
+              <td>Claude only</td>
+              <td>MS-managed</td>
+              <td>Any endpoint</td>
+            </tr>
+            <tr>
+              <td>Cost</td>
+              <td class="og-col">BYOK (tokens only)</td>
+              <td>$20&ndash;$40/mo</td>
+              <td>$20&ndash;$100/mo</td>
+              <td>$19&ndash;$39/mo</td>
+              <td>Free (BYOK)</td>
+            </tr>
+            <tr>
+              <td>License</td>
+              <td class="og-col">MIT</td>
+              <td class="cross">Proprietary</td>
+              <td class="cross">Proprietary</td>
+              <td class="cross">Proprietary</td>
+              <td>Apache-2.0</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA ─────────────────────────────────────────────────── -->
+  <section class="cta">
+    <h2 class="fade-in-up">Start building with ogcode.</h2>
+    <p class="fade-in-up delay-1">
+      One command. One binary. Your code stays on your machine.
+    </p>
+    <div class="cta-buttons fade-in-up delay-2">
+      <button class="btn-primary" onclick="copyInstall(true)">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+        Install ogcode
+      </button>
+      <a class="btn-secondary" href="https://github.com/prasenjeet-symon/ogcode" target="_blank" rel="noopener">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .5A11.5 11.5 0 00.5 12a11.5 11.5 0 007.86 10.94c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.3-5.24-1.28-5.24-5.67 0-1.25.45-2.27 1.18-3.07-.12-.3-.51-1.46.11-3.05 0 0 .96-.3 3.15 1.17a10.9 10.9 0 015.74 0c2.19-1.47 3.15-1.17 3.15-1.17.62 1.59.23 2.75.11 3.05.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.37-5.25 5.66.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12 11.5 11.5 0 0012 .5z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </section>
+
+  <!-- ── Footer ──────────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="footer-links">
+      <a href="https://github.com/prasenjeet-symon/ogcode" target="_blank" rel="noopener">
+        <svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 .5A11.5 11.5 0 00.5 12a11.5 11.5 0 007.86 10.94c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.3-5.24-1.28-5.24-5.67 0-1.25.45-2.27 1.18-3.07-.12-.3-.51-1.46.11-3.05 0 0 .96-.3 3.15 1.17a10.9 10.9 0 015.74 0c2.19-1.47 3.15-1.17 3.15-1.17.62 1.59.23 2.75.11 3.05.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.37-5.25 5.66.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12 11.5 11.5 0 0012 .5z"/></svg>
+        GitHub
+      </a>
+      <span style="color: var(--text-dim)">&middot;</span>
+      <a href="https://discord.gg/JQP9t8y2Zv" target="_blank" rel="noopener">
+        <svg fill="currentColor" viewBox="0 0 24 24"><path d="M20.3 4.4A19.8 19.8 0 0015.4 3l-.3.5c1.5.4 2.7.9 4 1.7a13.6 13.6 0 00-11.9 0c1.2-.8 2.6-1.3 4-1.7L10.6 3a19.8 19.8 0 00-4.9 1.4C2.5 9.1 1.7 13.7 2.1 18.3a20 20 0 006 3l.5-.7c-1-.4-2-1-2.8-1.6l.7-.5a14.2 14.2 0 0012.7 0l.7.5c-.9.6-1.8 1.2-2.8 1.6l.5.7a20 20 0 006-3c.5-5.3-.8-9.9-3.3-14zM8.5 15c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2zm7 0c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2z"/></svg>
+        Discord
+      </a>
+      <span style="color: var(--text-dim)">&middot;</span>
+      <a href="https://github.com/prasenjeet-symon/ogcode/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    </div>
+    <div class="footer-meta">Single binary &middot; Self-hosted &middot; Your code never leaves your machine</div>
+  </footer>
+
+  <script>
+    function copyInstall(redirect) {
+      var text = document.getElementById('installText').textContent;
+      var btn = document.getElementById('copyBtn');
+      var original = btn.textContent;
+      navigator.clipboard.writeText(text).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = original;
+          btn.classList.remove('copied');
+        }, 2000);
+        if (redirect) {
+          setTimeout(function() {
+            window.open('https://github.com/prasenjeet-symon/ogcode#quick-start', '_blank');
+          }, 600);
+        }
+      }).catch(function() {
+        // Fallback for older browsers
+        var range = document.createRange();
+        range.selectNode(document.getElementById('installText'));
+        window.getSelection().removeAllRanges();
+        window.getSelection().addRange(range);
+        document.execCommand('copy');
+        window.getSelection().removeAllRanges();
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = original;
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+  </script>
 </body>
 </html>
