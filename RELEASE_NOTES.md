@@ -1,3 +1,16 @@
+# Release Notes — v0.19.2
+
+## Patch: Home Page Headline Update
+
+Updated the home page hero headline from "Build software at the speed of
+thought." to **"Where everyone is a software developer."** — a stronger
+democratization-focused message that better communicates ogcode's mission of
+making software development accessible to everyone. The subheadline was
+realigned to match this narrative while preserving the core technical
+differentiators (token savings, infinite context).
+
+---
+
 # Release Notes — v0.19.1
 
 ## Patch: Guidance Indicator & Deep-Search Context Fixes
