@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 )
 
 func TestLoopControl_PushDrainGuidance(t *testing.T) {
@@ -217,19 +221,16 @@ func TestWithLoopControl_ContextRoundtrip(t *testing.T) {
 	}
 }
 
-func TestGuidancePrompt(t *testing.T) {
-	got := guidancePrompt("just fix the build")
+func TestGuidanceUserContent(t *testing.T) {
+	got := guidanceUserContent("just fix the build")
 	if !strings.Contains(got, "just fix the build") {
-		t.Error("expected guidance text in prompt")
+		t.Error("expected guidance text in content")
 	}
-	if !strings.Contains(got, "<system-reminder>") {
-		t.Error("expected system-reminder wrapper")
+	if !strings.Contains(got, guidanceLabel) {
+		t.Error("expected guidance label in content")
 	}
-	if !strings.Contains(got, "</system-reminder>") {
-		t.Error("expected closing system-reminder tag")
-	}
-	if !strings.Contains(got, "new guidance") {
-		t.Error("expected guidance context phrase in prompt")
+	if !strings.Contains(got, "Mid-loop guidance") {
+		t.Error("expected guidance context phrase in content")
 	}
 }
 
@@ -269,5 +270,86 @@ func TestLoopControl_PushConcurrent(t *testing.T) {
 	// coalesced into a single drain, but the total should be > 0).
 	if drained == 0 {
 		t.Error("expected at least one drain")
+	}
+}
+
+// TestLoopControl_DeliveredGuidanceAccumulates verifies that DrainGuidance
+// moves drained texts into the delivered accumulator, and that DeliveredGuidance
+// returns the full accumulated set across multiple drains.
+func TestLoopControl_DeliveredGuidanceAccumulates(t *testing.T) {
+	lc := NewLoopControl()
+
+	// Nothing delivered initially
+	if lc.DeliveredGuidance() != "" {
+		t.Error("expected empty delivered guidance initially")
+	}
+
+	// First drain
+	lc.PushGuidance("first guidance")
+	first := lc.DrainGuidance()
+	if first != "first guidance" {
+		t.Errorf("expected 'first guidance', got %q", first)
+	}
+	if got := lc.DeliveredGuidance(); got != "first guidance" {
+		t.Errorf("expected delivered to contain 'first guidance', got %q", got)
+	}
+
+	// Second drain accumulates
+	lc.PushGuidance("second guidance")
+	lc.DrainGuidance()
+	delivered := lc.DeliveredGuidance()
+	if !strings.Contains(delivered, "first guidance") {
+		t.Errorf("expected delivered to still contain 'first guidance', got %q", delivered)
+	}
+	if !strings.Contains(delivered, "second guidance") {
+		t.Errorf("expected delivered to contain 'second guidance', got %q", delivered)
+	}
+	if !strings.Contains(delivered, "---") {
+		t.Error("expected separator between accumulated guidance texts")
+	}
+}
+
+// TestAppendGuidanceToUserMessage verifies that guidance text is appended to
+// the first user text message's content with the proper label.
+func TestAppendGuidanceToUserMessage(t *testing.T) {
+	content, _ := json.Marshal("original user prompt")
+	msgs := []provider.ModelMessage{
+		{Role: "user", Content: content},
+		{Role: "assistant", Content: []byte(`"assistant response"`)},
+	}
+
+	appendGuidanceToUserMessage(msgs, "stop and do X")
+
+	var got string
+	json.Unmarshal(msgs[0].Content, &got)
+	if !strings.Contains(got, "original user prompt") {
+		t.Error("expected original user text preserved")
+	}
+	if !strings.Contains(got, "stop and do X") {
+		t.Error("expected guidance appended to user message content")
+	}
+	if !strings.Contains(got, guidanceLabel) {
+		t.Error("expected guidance label in appended content")
+	}
+
+	// Assistant message must be untouched
+	var assistantContent string
+	json.Unmarshal(msgs[1].Content, &assistantContent)
+	if assistantContent != "assistant response" {
+		t.Errorf("expected assistant message untouched, got %q", assistantContent)
+	}
+}
+
+// TestAppendGuidanceToUserMessage_NoUserMessage verifies the function is a
+// no-op when there are no user messages (guidance is not silently injected
+// into the wrong place).
+func TestAppendGuidanceToUserMessage_NoUserMessage(t *testing.T) {
+	msgs := []provider.ModelMessage{
+		{Role: "assistant", Content: []byte(`"response"`)},
+	}
+	original := msgs[0].Content
+	appendGuidanceToUserMessage(msgs, "some guidance")
+	if !bytes.Equal(msgs[0].Content, original) {
+		t.Error("expected no modification when no user message exists")
 	}
 }

@@ -246,8 +246,11 @@ func (s *Server) handleAbortSession(w http.ResponseWriter, r *http.Request) {
 // handleGuidance injects a mid-loop instruction into a running agent loop
 // without starting a new user turn. The guidance text is delivered to the loop
 // at the top of its next iteration via the LoopControl side-channel and
-// injected as a trailing system-prompt entry — never persisted to the message
-// DB. Optionally cancels the currently-running tool call so the loop can act on
+// appended to the user's turn message content (not the system prompt) — the
+// model sees it as additional user input within the current turn. The guidance
+// accumulates across iterations so the model continuously sees all guidance
+// sent during this loop run. It is never persisted to the message DB.
+// Optionally cancels the currently-running tool call so the loop can act on
 // the new guidance immediately instead of waiting for the tool to finish.
 func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
 	sessionID := session.SessionID(chi.URLParam(r, "sessionID"))

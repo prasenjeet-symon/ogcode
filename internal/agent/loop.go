@@ -231,10 +231,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 		// Drain any mid-loop guidance that was injected since the last iteration.
 		// This is the ephemeral side-channel: the user can send new instructions
-		// while the loop is running. We drain them here and inject as a trailing
-		// system-prompt entry on the upcoming LLM call. The guidance is never
-		// persisted to the message DB, so it does not interact with compaction
-		// turn boundaries or agentic-memory <prior_context> slicing.
+		// while the loop is running. We drain them here and append them to the
+		// user's turn message content on the upcoming LLM call. The guidance is
+		// never persisted to the message DB, so it does not interact with
+		// compaction turn boundaries or agentic-memory <prior_context> slicing.
 		pendingGuidance := ""
 		if lc := LoopControlFromContext(ctx); lc != nil {
 			pendingGuidance = lc.DrainGuidance()
@@ -269,15 +269,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// new instruction while the loop was running and we just drained
 			// it at the top of this iteration. If we broke here the guidance
 			// would be silently discarded because it is never persisted to the
-			// message DB (it's an ephemeral system-prompt entry). Continue so
-			// the guidance reaches the LLM on this iteration's call.
+			// message DB (it's an ephemeral append to the user message content).
+			// Continue so the guidance reaches the LLM on this iteration's call.
 			if pendingGuidance == "" {
 				// Re-check: guidance may have arrived after DrainGuidance at
 				// the top of this iteration but before/during the DB load
 				// above. Without this re-check the loop would exit and silently
 				// drop the guidance (it is never persisted to the message DB).
 				// Drain it here so the loop continues and injects it into the
-				// upcoming system prompt.
+				// upcoming user message.
 				if lc := LoopControlFromContext(ctx); lc != nil {
 					pendingGuidance = lc.DrainGuidance()
 				}
@@ -350,12 +350,6 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// breakpoint on the first (static) system block only, so the date —
 		// which changes every turn — does not invalidate the cache.
 		systemPrompts := []string{system, systemReminderPrompt()}
-		// Inject mid-loop guidance as a trailing system-prompt entry. It is
-		// appended AFTER the static cacheable prefix and the date reminder so it
-		// does not pollute the Anthropic cache breakpoint (which targets the
-		// first system block). Being last also means a compaction summary (added
-		// below in the non-memory path) sits between the date and the guidance,
-		// keeping the ordering: [static, date, compactionSummary?, guidance?].
 		var modelMessages []provider.ModelMessage
 
 		if memoryEnabled {
@@ -380,10 +374,18 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 		}
 
-		// Mid-loop guidance: appended last so it's the freshest instruction the
-		// model sees. Ephemeral — never persisted, never shifts turn boundaries.
-		if pendingGuidance != "" {
-			systemPrompts = append(systemPrompts, guidancePrompt(pendingGuidance))
+		// Mid-loop guidance: appended to the user's turn message content (not the
+		// system prompt) so the model sees it as additional user input within the
+		// current turn, not as a system directive. The guidance accumulates across
+		// iterations — DrainGuidance (called above) moved the fresh batch into the
+		// delivered accumulator, and DeliveredGuidance returns the full accumulated
+		// set for this loop run. We re-append the full set on every iteration so
+		// the model continuously sees all guidance the user has sent during this
+		// turn. Ephemeral — never persisted to the DB, never shifts turn boundaries.
+		if lc := LoopControlFromContext(ctx); lc != nil {
+			if accumulated := lc.DeliveredGuidance(); accumulated != "" {
+				appendGuidanceToUserMessage(modelMessages, accumulated)
+			}
 		}
 
 		// Derive a child context for the LLM stream. This allows mid-loop stream
@@ -412,7 +414,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// Close the race window between DrainGuidance at the top of this
 			// iteration and SetStreamCancel above. Guidance pushed in that gap
 			// is now in the queue but pendingGuidance was drained before it
-			// arrived, so it is NOT in this iteration's system prompt. The
+			// arrived, so it is NOT in this iteration's user message. The
 			// HTTP handler's CancelStream also returned false (the cancel func
 			// wasn't registered yet), so the stream was never interrupted.
 			// Without this check the stream would run to completion (10-30s)
@@ -915,7 +917,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// assistant role messages on the next prompt — the Anthropic and OpenAI
 		// APIs both require strictly alternating user/assistant roles and reject
 		// this with a 400. Delete the orphan so the history stays valid. The
-		// guidance itself is delivered on the next iteration's system prompt.
+		// guidance itself is delivered on the next iteration via the user message.
 		if streamCancelledByGuidance && len(pendingToolCalls) == 0 {
 			slog.Info("deleting text-only assistant message cancelled by guidance", "session", sessionID, "step", step, "textLen", currentText.Len())
 			if err := lr.Store.DeleteMessage(assistantID); err != nil {
@@ -1142,20 +1144,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// iteration's streaming/tool execution. Such guidance was queued
 			// after we drained at the top of this iteration, so it would be
 			// silently lost if we exited now (guidance is never persisted).
-			// Drain it (rather than just checking) to close the narrow race
-			// where guidance arrives between a non-locking HasPendingGuidance
-			// check and the return: any guidance that lands before
-			// DrainGuidance returns is captured. Re-push it back onto the
-			// queue so the next iteration's top-of-loop drain picks it up and
-			// injects it into the system prompt — draining consumes it, so
-			// without re-pushing the shouldBreak guard at the next iteration's
-			// top would see an empty queue and exit, dropping the guidance.
-			if lc != nil {
-				if lateGuidance := lc.DrainGuidance(); lateGuidance != "" {
-					lc.PushGuidance(lateGuidance)
-					slog.Info("agent loop continuing for guidance received during iteration", "session", sessionID, "step", step, "len", len(lateGuidance))
-					continue
-				}
+			// Use HasPendingGuidance (not DrainGuidance) so we don't move it
+			// into the delivered accumulator prematurely — the next iteration's
+			// top-of-loop DrainGuidance will drain it, move it to delivered, and
+			// inject it into the user message. Without this check the
+			// shouldBreak guard at the next iteration's top would see an empty
+			// queue and exit, dropping the guidance.
+			if lc != nil && lc.HasPendingGuidance() {
+				slog.Info("agent loop continuing for guidance received during iteration", "session", sessionID, "step", step)
+				continue
 			}
 			slog.Info("agent loop complete", "session", sessionID, "steps", step, "reason", finishReason)
 			exitReason = finishReason
@@ -2068,6 +2065,52 @@ func ensureStartsWithUser(messages []provider.ModelMessage) []provider.ModelMess
 		messages = messages[1:]
 	}
 	return messages
+}
+
+// appendGuidanceToUserMessage appends mid-loop guidance text to the content of
+// the first user text message in the slice. The guidance is labeled so the model
+// understands it is mid-loop guidance from the user, not a new turn. This keeps
+// the guidance within the user's turn message — the model sees it as additional
+// user input, not as a system directive — and avoids creating consecutive
+// same-role messages that would violate provider alternating-role requirements.
+//
+// If no user text message is found (e.g. the conversation starts with tool
+// results), the guidance is appended to the first user-role message regardless.
+// If there are no user messages at all, the guidance is dropped (the loop will
+// re-attempt on the next iteration).
+func appendGuidanceToUserMessage(messages []provider.ModelMessage, guidance string) {
+	if len(messages) == 0 || guidance == "" {
+		return
+	}
+	// Find the first user message that carries text content (not a tool result,
+	// which has a ToolCallID). This is the user's original turn prompt.
+	for i, m := range messages {
+		if m.Role != "user" || m.ToolCallID != "" {
+			continue
+		}
+		var content string
+		if m.Content != nil {
+			json.Unmarshal(m.Content, &content)
+		}
+		content += guidanceUserContent(guidance)
+		messages[i].Content, _ = json.Marshal(content)
+		return
+	}
+	// Fallback: no user text message — append to the first user message of any
+	// kind (e.g. a tool-result-only turn). This is rare but keeps guidance from
+	// being silently dropped.
+	for i, m := range messages {
+		if m.Role != "user" {
+			continue
+		}
+		var content string
+		if m.Content != nil {
+			json.Unmarshal(m.Content, &content)
+		}
+		content += guidanceUserContent(guidance)
+		messages[i].Content, _ = json.Marshal(content)
+		return
+	}
 }
 
 // isContextLengthError returns true when the provider rejects the request because

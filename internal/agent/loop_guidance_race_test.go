@@ -19,13 +19,15 @@ import (
 // blockingStreamProvider blocks its first StreamChat call until a gate channel
 // is closed (or the context is cancelled). This holds the loop inside the
 // stream-consumption phase so the test can push guidance at a controlled time.
-// It records the system prompt of every call so the test can verify whether
-// guidance was injected.
+// It records the system prompt and messages of every call so the test can
+// verify whether guidance was injected (now appended to the user message
+// content rather than the system prompt).
 type blockingStreamProvider struct {
-	mu      sync.Mutex
-	calls   int
-	systems [][]string
-	entered chan int
+	mu        sync.Mutex
+	calls     int
+	systems   [][]string
+	messages  [][]provider.ModelMessage
+	entered   chan int
 
 	// gateForCall blocks the stream goroutine of the given call number until
 	// closed. nil means no blocking. The goroutine also unblocks on ctx.Done.
@@ -42,6 +44,7 @@ func (m *blockingStreamProvider) StreamChat(ctx context.Context, req provider.St
 	m.calls++
 	call := m.calls
 	m.systems = append(m.systems, req.System)
+	m.messages = append(m.messages, req.Messages)
 	gate := m.gateForCall[call]
 	m.mu.Unlock()
 
@@ -187,27 +190,34 @@ func TestRunLoop_GuidanceWithoutCancelNotLost(t *testing.T) {
 		t.Errorf("expected 1 or 2 StreamChat calls, got %d", mock.calls)
 	}
 
-	// Verify the guidance was injected into the stream's system prompt.
+	// Verify the guidance was injected into a stream's user message content.
 	joinedAll := ""
-	for _, s := range mock.systems {
-		for _, entry := range s {
-			joinedAll += entry + "\n"
+	for _, msgs := range mock.messages {
+		for _, m := range msgs {
+			if m.Content != nil {
+				var content string
+				if json.Unmarshal(m.Content, &content) == nil {
+					joinedAll += content + "\n"
+				}
+			}
 		}
 	}
 	if !strings.Contains(joinedAll, "change direction immediately") {
-		t.Errorf("guidance was never injected into any stream's system prompt — it was lost.\nSystems: %v", mock.systems)
+		t.Errorf("guidance was never injected into any stream's user message content — it was lost.\nMessages: %v", mock.messages)
 	}
 }
 
 // finishThenBlockProvider completes its first stream immediately (finish=stop,
 // no tools), then blocks its second stream on a gate. This lets the test push
 // guidance in the window between the first stream finishing and the loop
-// exiting (Bug 1: guidance dropped at loop exit).
+// exiting (Bug 1: guidance dropped at loop exit). It records the messages of
+// every call so the test can verify guidance was injected.
 type finishThenBlockProvider struct {
-	mu      sync.Mutex
-	calls   int
-	systems [][]string
-	entered chan int
+	mu          sync.Mutex
+	calls       int
+	systems     [][]string
+	messages    [][]provider.ModelMessage
+	entered     chan int
 	// gateForCall2 blocks the second stream until closed.
 	gateForCall2 chan struct{}
 }
@@ -222,6 +232,7 @@ func (m *finishThenBlockProvider) StreamChat(ctx context.Context, req provider.S
 	m.calls++
 	call := m.calls
 	m.systems = append(m.systems, req.System)
+	m.messages = append(m.messages, req.Messages)
 	m.mu.Unlock()
 
 	ch := make(chan provider.StreamEvent)
@@ -356,17 +367,22 @@ func TestRunLoop_GuidanceAfterFinishNotDropped(t *testing.T) {
 		t.Fatal("RunLoop did not complete")
 	}
 
-	// Verify the guidance was injected into the second stream's system prompt.
+	// Verify the guidance was injected into the second stream's user message content.
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 	if mock.calls < 2 {
 		t.Fatalf("expected at least 2 stream calls, got %d", mock.calls)
 	}
 	joined := ""
-	for _, s := range mock.systems[1] {
-		joined += s + "\n"
+	for _, m := range mock.messages[1] {
+		if m.Content != nil {
+			var content string
+			if json.Unmarshal(m.Content, &content) == nil {
+				joined += content + "\n"
+			}
+		}
 	}
 	if !strings.Contains(joined, "actually do something different now") {
-		t.Errorf("second stream did not include the guidance in its system prompt; got: %v", mock.systems[1])
+		t.Errorf("second stream did not include the guidance in its user message content; got: %v", mock.messages[1])
 	}
 }

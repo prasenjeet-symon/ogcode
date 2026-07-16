@@ -18,13 +18,15 @@ import (
 
 // hangMockProvider simulates a provider whose first stream stalls (connects but
 // emits nothing — the free-tier "0 parts, stuck" case) and whose second stream
-// responds normally. It records the System prompt of each call so the test can
-// verify guidance was injected on the resumed call.
+// responds normally. It records the System prompt and Messages of each call so
+// the test can verify guidance was injected on the resumed call (now appended to
+// the user message content rather than the system prompt).
 type hangMockProvider struct {
-	mu      sync.Mutex
-	calls   int
-	systems [][]string
-	entered chan int // signals the call number each time StreamChat is entered
+	mu        sync.Mutex
+	calls     int
+	systems   [][]string
+	messages  [][]provider.ModelMessage
+	entered   chan int // signals the call number each time StreamChat is entered
 }
 
 func (m *hangMockProvider) ID() string { return "mock" }
@@ -37,6 +39,7 @@ func (m *hangMockProvider) StreamChat(ctx context.Context, req provider.StreamRe
 	m.calls++
 	call := m.calls
 	m.systems = append(m.systems, req.System)
+	m.messages = append(m.messages, req.Messages)
 	m.mu.Unlock()
 
 	ch := make(chan provider.StreamEvent)
@@ -147,18 +150,24 @@ func TestRunLoop_GuidanceCancelsAndResumes(t *testing.T) {
 		t.Fatal("RunLoop did not complete after resuming")
 	}
 
-	// The resumed (2nd) call must carry the guidance in its system prompt.
+	// The resumed (2nd) call must carry the guidance appended to the user
+	// message content (not in the system prompt).
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.systems) < 2 {
-		t.Fatalf("expected at least 2 stream calls, got %d", len(mock.systems))
+	if len(mock.messages) < 2 {
+		t.Fatalf("expected at least 2 stream calls, got %d", len(mock.messages))
 	}
 	joined := ""
-	for _, s := range mock.systems[1] {
-		joined += s + "\n"
+	for _, m := range mock.messages[1] {
+		if m.Content != nil {
+			var content string
+			if json.Unmarshal(m.Content, &content) == nil {
+				joined += content + "\n"
+			}
+		}
 	}
 	if !strings.Contains(joined, "STOP the current approach and do Y instead") {
-		t.Errorf("resumed request did not include the guidance in its system prompt; got system entries: %v", mock.systems[1])
+		t.Errorf("resumed request did not include the guidance in its user message content; got messages: %v", mock.messages[1])
 	}
 }
 

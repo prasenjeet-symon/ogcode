@@ -12,8 +12,9 @@ import (
 // whole loop.
 //
 // The guidance is ephemeral: it is never persisted to the database message
-// history. Instead it is injected as a trailing system-prompt entry on the
-// next LLM call. This avoids interactions with compaction boundaries,
+// history. Instead it is appended to the user's turn message content on the
+// next LLM call — the model sees it as additional user input, not as a system
+// directive. This avoids interactions with compaction boundaries,
 // findLastTextUserMessageIndex turn-slicing, and agentic-memory
 // <prior_context> filtering — all of which key off persisted user messages.
 type LoopControl struct {
@@ -21,6 +22,15 @@ type LoopControl struct {
 
 	// pending guidance texts, drained at the top of each loop iteration.
 	guidance []string
+
+	// accumulated guidance texts that have already been injected into a prior
+	// iteration of this loop run. These are re-appended on every subsequent
+	// iteration so the model continuously sees all guidance the user has sent
+	// during this turn — the guidance accumulates below the user's original
+	// message rather than being a one-shot ephemeral system prompt. Cleared
+	// when a new LoopControl is created (i.e. a new user turn starts a new
+	// loop run).
+	delivered []string
 
 	// toolCancel cancels only the currently-running tool execution. It is
 	// set before the parallel tool-execution block and cleared (and called)
@@ -56,6 +66,9 @@ func (lc *LoopControl) PushGuidance(text string) {
 
 // DrainGuidance returns and clears all pending guidance texts. Called at the
 // top of each loop iteration by RunLoop. Returns "" when nothing is pending.
+// Drained texts are moved into the delivered accumulator so they can be
+// re-injected on every subsequent iteration of this loop run — the guidance
+// accumulates below the user's message rather than being a one-shot injection.
 func (lc *LoopControl) DrainGuidance() string {
 	if lc == nil {
 		return ""
@@ -74,7 +87,33 @@ func (lc *LoopControl) DrainGuidance() string {
 		}
 		combined += g
 	}
+	// Move drained texts into the delivered accumulator.
+	lc.delivered = append(lc.delivered, lc.guidance...)
 	lc.guidance = lc.guidance[:0]
+	return combined
+}
+
+// DeliveredGuidance returns all guidance texts that have been drained (and thus
+// injected) during this loop run, joined into a single string. This is called
+// by RunLoop on every iteration to re-append accumulated guidance to the user's
+// turn message so the model continuously sees all mid-loop guidance. Returns ""
+// when no guidance has been delivered yet.
+func (lc *LoopControl) DeliveredGuidance() string {
+	if lc == nil {
+		return ""
+	}
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	if len(lc.delivered) == 0 {
+		return ""
+	}
+	var combined string
+	for i, g := range lc.delivered {
+		if i > 0 {
+			combined += "\n\n---\n\n"
+		}
+		combined += g
+	}
 	return combined
 }
 
@@ -221,13 +260,16 @@ func WithoutLoopControl(ctx context.Context) context.Context {
 	return context.WithValue(ctx, loopControlKey{}, nil)
 }
 
-// guidancePrompt wraps guidance text in a <system-reminder> block so the model
-// treats it as an authoritative mid-flight instruction. Using system-reminder
-// (the same wrapper used for the current-date injection) keeps it outside the
-// conversation message history — the model sees it as guidance, not as a new
-// user turn that shifts the turn boundary.
-func guidancePrompt(text string) string {
-	return "<system-reminder>\nThe user has sent new guidance while you are working. " +
-		"Adjust your approach to incorporate this. Do not restart from scratch — " +
-		"continue from where you are, but change direction as instructed:\n\n" + text + "\n</system-reminder>"
+// guidanceLabel is the heading prepended to accumulated guidance text when it
+// is appended to the user's turn message. It labels the injected content so the
+// model understands this is mid-loop guidance from the user, not a new turn.
+const guidanceLabel = "[Mid-loop guidance — the user sent this while you were working. " +
+	"Adjust your approach to incorporate it. Do not restart from scratch; continue from " +
+	"where you are, but change direction as instructed.]"
+
+// guidanceUserContent wraps accumulated guidance text into a labeled block
+// suitable for appending to a user-role message. The model sees this as
+// additional user input within the current turn, not as a system directive.
+func guidanceUserContent(text string) string {
+	return "\n\n" + guidanceLabel + "\n" + text
 }
