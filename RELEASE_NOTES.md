@@ -1,3 +1,43 @@
+# Release Notes — v0.19.4
+
+## Patch: Mid-Loop Guidance Injected as User Message Content
+
+This patch release changes how mid-loop guidance is delivered to the model,
+fixing a semantic mismatch between intent and implementation:
+
+1. **Guidance was injected as a system directive instead of user input** —
+   Mid-loop guidance (the `handleGuidance` endpoint) was previously wrapped in
+   a `<system-reminder>` block and appended as a trailing system-prompt entry.
+   The user's intent is that guidance acts like a modification of their
+   original message — additional user input within the current turn, not a
+   system directive. Fixed by replacing the `guidancePrompt()` system-reminder
+   wrapper with `guidanceUserContent()`, which appends the guidance as a
+   labeled block (`[Mid-loop guidance]`) to the user's turn message content.
+   The model now sees it as additional user input within the current turn.
+
+2. **Guidance was one-shot instead of accumulating** — Each iteration only
+   received the guidance drained at the top of that iteration; guidance sent
+   earlier in the turn was not re-delivered on subsequent iterations, so the
+   model could lose sight of earlier redirections after a few steps. Added a
+   `delivered` accumulator to `LoopControl`: `DrainGuidance` now moves drained
+   texts into `delivered`, and a new `DeliveredGuidance()` method returns the
+   full accumulated set. `appendGuidanceToUserMessage` re-appends the full
+   accumulated set on every iteration so the model continuously sees all
+   guidance the user has sent during this turn.
+
+3. **Late-guidance race used a fragile drain-and-re-push pattern** — The
+   loop-exit guard for guidance arriving mid-iteration drained the guidance
+   and re-pushed it onto the queue to keep it alive, a fragile workaround.
+   Replaced with a `HasPendingGuidance()` check that avoids moving the guidance
+   into the `delivered` accumulator prematurely — the next iteration's
+   top-of-loop drain handles it correctly. Tests for all three guidance race
+   scenarios (cancel-and-resume, without-cancel, after-finish) were updated
+   to assert against user message content instead of the system prompt, and
+   new tests cover `DeliveredGuidance` accumulation and
+   `appendGuidanceToUserMessage`.
+
+---
+
 # Release Notes — v0.19.3
 
 ## Patch: Task Session Model, Tool-Cancel False-Positive, and Stale-Index Purge
