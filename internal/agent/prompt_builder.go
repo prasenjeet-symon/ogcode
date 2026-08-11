@@ -26,7 +26,7 @@ func projectIndexPrompt(role string) string {
 
 	return `## Mandatory: Use Project Index Before Exploration
 
-**Rule:** Before exploring any file, folder, or project structure, you **MUST** use the "codebase_map" tool first.
+**Rule:** When the project has been indexed, you **MUST** use the "codebase_map" tool first — before exploring any file, folder, or project structure. (If it returns an empty result, the project has not been indexed yet; fall straight back to glob/grep — see below.)
 
 This applies to all of the following scenarios:
 
@@ -50,9 +50,9 @@ Task received
   → Then read specific files
   → ` + finalStep + `
 
-### When codebase_map is not enough
+### When codebase_map is empty or not enough
 
-If codebase_map doesn't cover what you need (e.g., unindexed files, binary patterns), you may fall back to glob and grep. But codebase_map must always be the **first** exploration step.`
+If codebase_map returns an empty (or nearly empty) result, the project has not been indexed yet — do not keep calling it this session; use glob and grep instead. If the index simply doesn't cover what you need (unindexed files, binary patterns), you may also fall back to glob and grep. codebase_map is your **first** exploration step whenever an index exists — but it is never a hard blocker on getting the work done.`
 }
 
 // memoryMDPrompt returns the MEMORY.md instructions section, adapted for the

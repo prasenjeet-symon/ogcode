@@ -6,11 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
-func TestBuildSystemPrompt_MemoryMDSection_AlwaysPresent(t *testing.T) {
+func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing.T) {
 	agent := BuildAgent
 	dir := "/tmp/test"
 
@@ -145,6 +146,58 @@ func TestBuildSystemPrompt_ViewportPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "responsive") {
 		t.Error("expected responsive design guidance in viewport prompt")
+	}
+}
+
+// TestBuildSystemPrompt_UtilityAgentsSkipProjectContext verifies that the
+// codebase agents get project context (working dir, AGENT.md, MEMORY.md) while
+// the utility agents (Index, Search) omit it, and that the agentic-memory block
+// only appears for agents that actually have the memory_recall tool.
+func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
+	dir := "/tmp/proj"
+	const agentMD = "AGENT_MD_SENTINEL rules"
+
+	// Project-scoped agent keeps the context sections and (memory on + has
+	// memory_recall) gets the agentic-memory block.
+	build := buildSystemPrompt(BuildAgent, dir, true, agentMD, "", nil, 0, 0)
+	for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall tool"} {
+		if !strings.Contains(build, s) {
+			t.Errorf("BuildAgent prompt should contain %q", s)
+		}
+	}
+
+	// Utility agents omit project context — even with memory enabled — because
+	// they don't operate on the codebase and lack memory_recall.
+	for _, a := range []Agent{IndexAgent, SearchAgent} {
+		p := buildSystemPrompt(a, dir, true, agentMD, "some memory content", nil, 0, 0)
+		for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall tool"} {
+			if strings.Contains(p, s) {
+				t.Errorf("%s prompt should NOT contain project-context %q", a.ID, s)
+			}
+		}
+		// The agent's own instructions must still be present.
+		if !strings.Contains(p, a.System) {
+			t.Errorf("%s prompt should still contain the agent's own System instructions", a.ID)
+		}
+	}
+}
+
+// TestBuildSystemPrompt_MCPSkillsOnlyForCodebaseAgents verifies the MCP
+// "Available Skills" section — which describes codebase-research tools — is
+// advertised to codebase agents but omitted from the utility agents.
+func TestBuildSystemPrompt_MCPSkillsOnlyForCodebaseAgents(t *testing.T) {
+	mcpTools := map[string]mcp.ToolDef{"answer_codebase": {}}
+
+	build := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", mcpTools, 0, 0)
+	if !strings.Contains(build, "## Available Skills") || !strings.Contains(build, "answer_codebase") {
+		t.Error("BuildAgent should advertise the available MCP skills")
+	}
+
+	for _, a := range []Agent{IndexAgent, SearchAgent} {
+		p := buildSystemPrompt(a, "/tmp/proj", false, "", "", mcpTools, 0, 0)
+		if strings.Contains(p, "## Available Skills") {
+			t.Errorf("%s should not advertise the MCP skills section", a.ID)
+		}
 	}
 }
 
@@ -466,6 +519,7 @@ func TestEstimateRequestSize(t *testing.T) {
 		t.Errorf("estimateRequestSize(empty) = %d, expected 0", emptySize)
 	}
 }
+
 // TestConvertMessagesReasoningParts verifies that convertMessages correctly
 // extracts reasoning parts from stored messages and includes them in the
 // ModelMessage so they can be forwarded back to Anthropic as thinking blocks.

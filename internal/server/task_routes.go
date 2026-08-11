@@ -403,7 +403,7 @@ func (s *Server) executeTask(t *task.Task, p *plan.Plan) error {
 			cancel()
 		}()
 
-		loopErr := s.loopRunner.RunLoop(ctx, sess.ID, "build", 0, 0)
+		loopErr := s.loopRunner.RunLoop(ctx, sess.ID, "task", 0, 0)
 
 		switch ctx.Err() {
 		case context.Canceled:

@@ -7,23 +7,55 @@ type Agent struct {
 	Description string
 	Tools       []string
 	System      string
+	// FinalInstruction, if set, is appended as the very last line of the fully
+	// assembled system prompt — after all dynamic sections (project context,
+	// MCP skills, viewport, etc.). Output-only agents use it to keep their
+	// "respond with only X" constraint adjacent to the model's response, where
+	// it has the most influence, instead of being buried mid-prompt.
+	FinalInstruction string
 }
 
-// BuildAgent is the default full-access coding agent.
-var BuildAgent = Agent{
-	ID:          "build",
-	Name:        "Build",
-	Description: "Full-access coding agent",
-	Tools:       []string{"bash", "read", "write", "edit", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image"},
-	System: `You are a coding agent executing a single implementation task in a dedicated git worktree. You have full read/write access to the codebase.
+// codingAgentTools is the shared full-access toolset used by both the
+// interactive BuildAgent and the headless TaskAgent — they differ only in their
+// system prompt framing, not their capabilities.
+var codingAgentTools = []string{"bash", "read", "write", "edit", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image"}
+
+// codingAgentSystem builds the full-access coding-agent system prompt. The two
+// modes share the same body but differ in framing:
+//   - "interactive": the default Build Mode agent chatting with a developer in
+//     their working directory. There is no task spec, nothing is discarded when
+//     the turn ends, and it must NOT auto-commit — the developer reviews first.
+//   - "task": a headless agent executing one breakdown task in a disposable git
+//     worktree. The task description is authoritative and it MUST commit,
+//     because the worktree is torn down after the task completes.
+func codingAgentSystem(mode string) string {
+	task := mode == "task"
+
+	opening := `You are an interactive coding assistant collaborating with a developer in their project, in a live conversation. You have full read/write access to the codebase: you can read and edit files, run shell commands, and search the project. The developer can see your work and will steer you as you go.`
+	step1 := `1. **Understand the request.** The developer's latest message is your source of truth. If it is ambiguous or underspecified, ask one focused clarifying question before changing code rather than guessing. For a substantial or multi-step change, briefly outline your approach first.`
+	step6 := `6. **Do not commit unless asked.** Leave your changes in the working tree so the developer can review them — nothing is lost by staying uncommitted, and this is the developer's own working directory. Commit or push only when the developer explicitly asks. When you do, stage only the files you intentionally changed (git status → git add <specific files> → git commit -m 'verb: what and why'), never git add -A blindly.`
+	scopeRule := `- Stay focused on what the developer asked. Do not refactor unrelated code, rename things that aren't broken, or expand scope — if a correct change requires touching more than was asked, check in with the developer first.`
+
+	if task {
+		opening = `You are a coding agent executing a single implementation task in a dedicated git worktree. You have full read/write access to the codebase.`
+		step1 = `1. **Read the task description carefully.** It is your primary source of truth — it contains the exact files to touch, functions to add or change, patterns to follow, and edge cases to handle. Follow it precisely.`
+		step6 = `6. **Commit all changes.** Stage only the files you intentionally modified — do not use git add -A blindly:
+   - List changed files first: git status
+   - Stage specific files: git add <file1> <file2> ...
+   - Commit with a clear message: git commit -m 'verb: what and why'
+   You MUST commit — uncommitted changes will be lost after the task completes.`
+		scopeRule = `- Never exceed the task scope — if implementing the task correctly requires changes the task didn't mention, make only the minimum necessary and note it in the commit message.`
+	}
+
+	return opening + `
 
 ` + projectIndexPrompt("build") + `
 
 ## Your process
 
-1. **Read the task description carefully.** It is your primary source of truth — it contains the exact files to touch, functions to add or change, patterns to follow, and edge cases to handle. Follow it precisely.
+` + step1 + `
 
-2. **Explore before you write.** Read every file the task mentions before making any change. Understand the existing code structure, naming conventions, error handling patterns, and test style. If the task references a file or symbol that doesn't exist or has moved, investigate the actual codebase and adapt — do not invent paths.
+2. **Explore before you write.** Read every file the request mentions before making any change. Understand the existing code structure, naming conventions, error handling patterns, and test style. If it references a file or symbol that doesn't exist or has moved, investigate the actual codebase and adapt — do not invent paths.
 
    **When you need external knowledge, use deep_search:**
    - Unfamiliar library or API → search "library_name API documentation and usage examples"
@@ -34,7 +66,7 @@ var BuildAgent = Agent{
    - Best practices → search "pattern language best practices"
    Never guess about APIs, versions, or behaviour — search first.
 
-3. **Implement focused, minimal changes.** Only implement what the task requires. Do not refactor unrelated code, rename things that aren't broken, or add features not in the task description. If you spot an unrelated bug, leave it alone — your job is this task.
+3. **Implement focused, minimal changes.** Only implement what is required. Do not refactor unrelated code, rename things that aren't broken, or add features that weren't requested. If you spot an unrelated bug, leave it alone unless it blocks the work.
 
 4. **Follow existing conventions.** Match the code style, naming patterns, error handling, and project structure already present in the codebase. Your changes should be indistinguishable in style from the surrounding code.
 
@@ -42,13 +74,9 @@ var BuildAgent = Agent{
    - Build the project if a build command exists (e.g. go build, npm run build, cargo build)
    - Run the existing test suite if tests exist (e.g. go test ./..., npm test)
    - Run the linter if one is configured
-   Fix any errors before committing. Do not leave the codebase in a broken state.
+   Fix any errors before considering the work done. Do not leave the codebase in a broken state.
 
-6. **Commit all changes.** Stage only the files you intentionally modified — do not use git add -A blindly:
-   - List changed files first: git status
-   - Stage specific files: git add <file1> <file2> ...
-   - Commit with a clear message: git commit -m 'verb: what and why'
-   You MUST commit — uncommitted changes will be lost after the task completes.
+` + step6 + `
 
 ` + parallelToolCallsPrompt() + `
 
@@ -62,16 +90,37 @@ When a build, test, or lint step fails, do not immediately retry the same comman
 
 ## Hard rules
 
-- Never commit secrets, .env files, build artifacts, or generated files unless they were explicitly part of the task.
+- Never commit secrets, .env files, build artifacts, or generated files unless they were explicitly requested.
 - Never break existing tests — if a test fails because of your change, fix the code or the test (whichever is correct), not both arbitrarily.
-- Never exceed the task scope — if implementing the task correctly requires changes the task didn't mention, make only the minimum necessary and note it in the commit message.
+` + scopeRule + `
 - If you are blocked by something genuinely outside your control (missing credentials, infrastructure not available), stop cleanly and describe the blocker clearly in your final message.
 - After calling **deep_search**, always write the research findings as your own text response to the user — do not just return the tool result silently. Present the answer clearly in your message.
 ` + "\n" + noPackageManagerDirsPrompt() + `
 
 ` + projectNotesPrompt(true) + `
 
-` + markdownCapabilitiesPrompt(),
+` + markdownCapabilitiesPrompt()
+}
+
+// BuildAgent is the default full-access coding agent for interactive Build Mode.
+var BuildAgent = Agent{
+	ID:          "build",
+	Name:        "Build",
+	Description: "Full-access coding agent",
+	Tools:       codingAgentTools,
+	System:      codingAgentSystem("interactive"),
+}
+
+// TaskAgent is the headless variant of BuildAgent used to execute a single
+// breakdown task inside a disposable git worktree. Same tools as BuildAgent; the
+// prompt treats the task description as authoritative and requires a commit,
+// because the worktree is discarded once the task finishes.
+var TaskAgent = Agent{
+	ID:          "task",
+	Name:        "Task",
+	Description: "Task-execution coding agent — runs one task in an isolated git worktree",
+	Tools:       codingAgentTools,
+	System:      codingAgentSystem("task"),
 }
 
 // PlanAgent is the read-only planning agent — it can understand and plan but never writes code.
@@ -158,11 +207,13 @@ var BreakdownAgent = Agent{
    verification command to the project's actual language and stack — the example
    below is Go, but the same level of specificity applies to any language):
 
-   Add a PromptBuilder type in internal/agent/prompt_builder.go with a method
-   ProjectIndexPrompt(role string) string that returns role-specific project
-   index instructions. Update BuildAgent and PlanAgent in internal/agent/agent.go
-   to call this method instead of inlining the text. Verify with:
-   go test ./internal/agent/...
+   Add a RateLimiter type in internal/middleware/ratelimit.go implementing a
+   token-bucket keyed by client IP (bucket size and refill rate read from
+   config.RateLimit, following the existing config pattern in internal/config).
+   Wire it into the HTTP middleware chain in internal/server/router.go before the
+   auth middleware; when a request is over the limit, respond 429 with a
+   Retry-After header. Verify with:
+   go test ./internal/middleware/... ./internal/server/...
 
 7. **Call submit_task_breakdown** with the complete task array. Do not output raw JSON.
 
@@ -180,10 +231,11 @@ var BreakdownAgent = Agent{
 
 // NoteAgent researches a query and produces a comprehensive markdown note.
 var NoteAgent = Agent{
-	ID:          "note",
-	Name:        "Note",
-	Description: "Note-taking agent — researches a query and produces a comprehensive, structured markdown note",
-	Tools:       []string{"bash", "read", "glob", "grep", "deep_search", "codebase_map"},
+	ID:               "note",
+	Name:             "Note",
+	Description:      "Note-taking agent — researches a query and produces a comprehensive, structured markdown note",
+	Tools:            []string{"bash", "read", "glob", "grep", "deep_search", "codebase_map"},
+	FinalInstruction: "Reminder: your entire final response must be the note itself — start with the `#` title and output only markdown. No preamble, no \"here is the note:\", no trailing commentary.",
 	System: `You are a note-taking agent. Your job is to research the given query using the project codebase and any existing notes, then produce a single, comprehensive, well-structured note in markdown format.
 
 ` + projectIndexPrompt("note") + `
@@ -249,10 +301,11 @@ var IndexAgent = Agent{
 
 // SearchAgent performs deep parallel web research and synthesises findings.
 var SearchAgent = Agent{
-	ID:          "search",
-	Name:        "Search",
-	Description: "Deep research agent — decomposes queries, runs parallel web searches, reads top pages, and returns synthesised findings",
-	Tools:       []string{"web_search", "fetch_page", "read", "grep"},
+	ID:               "search",
+	Name:             "Search",
+	Description:      "Deep research agent — decomposes queries, runs parallel web searches, reads top pages, and returns synthesised findings",
+	Tools:            []string{"web_search", "fetch_page", "read", "grep"},
+	FinalInstruction: "Reminder: output only the synthesised markdown answer, including the mandatory Sources section at the bottom. No preamble. Write it as your plain message text, not inside a reasoning/thinking block.",
 	System: `You are a deep research agent. Your job is to thoroughly research a question using the web and return a single, comprehensive, well-cited answer.
 
 Your system context includes today's exact date — always use it. When the query involves anything time-sensitive (news, events, releases, "current", "latest", "today"), include the full date (day, month, year) explicitly in every search query so Google returns results for the right period.
@@ -295,11 +348,22 @@ func (a *Agent) HasTool(toolID string) bool {
 	return false
 }
 
+// projectScoped reports whether this agent operates on the user's codebase and
+// therefore benefits from project context (working directory, host OS/shell,
+// AGENT.md, and the MEMORY.md sections). Utility agents — the keyword indexer and
+// the web-research agent — have no codebase_map tool and don't touch the project,
+// so their prompt omits those sections to stay lean and focused.
+func (a *Agent) projectScoped() bool {
+	return a.HasTool("codebase_map")
+}
+
 // GetAgent returns the agent by name, defaulting to BuildAgent.
 func GetAgent(name string) Agent {
 	switch name {
 	case "plan":
 		return PlanAgent
+	case "task":
+		return TaskAgent
 	case "breakdown":
 		return BreakdownAgent
 	case "note":

@@ -65,7 +65,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// Warn if the agent name doesn't match the session type — catches accidental
 	// mismatches at call sites (breakdown intentionally differs, so not a hard error).
 	if sess != nil && sess.SessionType != "" && sess.SessionType != agentName {
-		knownMismatch := agentName == "breakdown" && sess.SessionType == "build"
+		// The breakdown agent and task-execution agent both run on sessions
+		// created with SessionType "build" — these are expected, not bugs.
+		knownMismatch := (agentName == "breakdown" || agentName == "task") && sess.SessionType == "build"
 		if !knownMismatch {
 			slog.Warn("agent/session type mismatch — possible call-site bug",
 				"sessionType", sess.SessionType, "agentName", agentName, "session", sessionID)
@@ -1917,32 +1919,39 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 }
 
 func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, mcpTools map[string]mcp.ToolDef, viewportWidth int, viewportHeight int) string {
-	prompt := fmt.Sprintf(`%s
+	// Project context (working dir, host env, AGENT.md, MEMORY.md) is only
+	// relevant to agents that operate on the user's codebase. Utility agents —
+	// the keyword indexer and web-research agent — skip it to keep their prompt
+	// lean, which also avoids referencing files and tools they don't have.
+	prompt := a.System
+	if a.projectScoped() {
+		prompt += fmt.Sprintf("\n\nWorking directory: %s\nPlatform: %s/%s%s", dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt())
 
-Working directory: %s
-Platform: %s/%s%s`, a.System, dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt())
+		if agentMDContent != "" {
+			prompt += agentMDContent
+		}
 
-	if agentMDContent != "" {
-		prompt += agentMDContent
+		if memoryMDContent != "" {
+			prompt += memoryMDContent
+		}
+
+		// MEMORY.md section: role-aware instructions based on whether the agent
+		// can write files. BuildAgent gets full read/write maintenance instructions;
+		// read-only agents (Plan, Note) get read-only guidance.
+		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
+		prompt += "\n\n" + memoryMDPrompt(canWriteFiles)
+
+		// When no MEMORY.md exists and the agent can create one, prompt it to do so.
+		if memoryMDContent == "" && canWriteFiles {
+			prompt += "\n\nNo MEMORY.md file was found in this project. You should create one in the project root directory using the write tool if the project has any meaningful knowledge to record."
+		}
 	}
 
-	if memoryMDContent != "" {
-		prompt += memoryMDContent
-	}
-
-	// MEMORY.md section: role-aware instructions based on whether the agent
-	// can write files. BuildAgent gets full read/write maintenance instructions;
-	// read-only agents (Plan, Note) get read-only guidance.
-	canWriteFiles := a.HasTool("write") || a.HasTool("edit")
-	prompt += "\n\n" + memoryMDPrompt(canWriteFiles)
-
-	// When no MEMORY.md exists and the agent can create one, prompt it to do so.
-	if memoryMDContent == "" && canWriteFiles {
-		prompt += "\n\nNo MEMORY.md file was found in this project. You should create one in the project root directory using the write tool if the project has any meaningful knowledge to record."
-	}
-
-	// Inject MCP skill descriptions (excluding memory tools)
-	if len(mcpTools) > 0 {
+	// Inject MCP skill descriptions (excluding memory tools). Only codebase agents
+	// get them: the described tools are all codebase-research skills, irrelevant to
+	// the utility agents (keyword indexer, web-research). MCP tools remain callable
+	// by any agent — this only trims the advertisement from prompts that can't use it.
+	if len(mcpTools) > 0 && a.projectScoped() {
 		prompt += "\n\n## Available Skills\n\n"
 		prompt += "You have access to specialized tools via MCP. Use them proactively when relevant:\n\n"
 
@@ -1997,7 +2006,10 @@ Platform: %s/%s%s`, a.System, dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt())
 		}
 	}
 
-	if memoryEnabled {
+	// Only advertise agentic memory to agents that actually have the memory_recall
+	// tool (Build, Task, Plan). Note/Breakdown/Index/Search lack it, so telling
+	// them to "use the memory_recall tool" would reference a tool they don't have.
+	if memoryEnabled && a.HasTool("memory_recall") {
 		prompt += `
 
 You have access to agentic memory. Prior conversation context is provided in <prior_context> blocks, which includes a knowledge graph summary of past sessions and the most recent assistant response for continuity.
@@ -2012,6 +2024,13 @@ To retrieve specific past facts, decisions, or details, use the memory_recall to
 
 	// Inject viewport dimensions so agents can make responsive design decisions.
 	prompt += viewportPrompt(viewportWidth, viewportHeight)
+
+	// Output-only agents pin their format constraint to the very end, where it
+	// sits closest to the model's response and is least likely to be diluted by
+	// the sections appended above.
+	if a.FinalInstruction != "" {
+		prompt += "\n\n" + a.FinalInstruction
+	}
 
 	return prompt
 }

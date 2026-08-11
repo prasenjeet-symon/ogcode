@@ -384,6 +384,32 @@ func TestBreakdownAgent_SystemPrompt_ContainsNotes(t *testing.T) {
 	if !strings.Contains(BreakdownAgent.System, "verification step") {
 		t.Error("BreakdownAgent should require a per-task verification step")
 	}
+	// The worked example must not reference a fictional internal API.
+	if strings.Contains(BreakdownAgent.System, "PromptBuilder") {
+		t.Error("BreakdownAgent example should not reference the non-existent PromptBuilder type")
+	}
+}
+
+// TestBuildSystemPrompt_FinalInstructionLast verifies an agent's FinalInstruction
+// is pinned to the very end of the assembled prompt (after viewport and every
+// other dynamic section), and that agents without one get no stray trailer.
+func TestBuildSystemPrompt_FinalInstructionLast(t *testing.T) {
+	if NoteAgent.FinalInstruction == "" {
+		t.Fatal("NoteAgent should define a FinalInstruction")
+	}
+	// Viewport dims are provided so a dynamic section is appended before the
+	// final instruction — proving it really is last.
+	p := buildSystemPrompt(NoteAgent, "/tmp/proj", false, "", "", nil, 1920, 1080)
+	if !strings.HasSuffix(p, NoteAgent.FinalInstruction) {
+		t.Error("NoteAgent FinalInstruction should be the final content of the assembled prompt")
+	}
+	if BuildAgent.FinalInstruction != "" {
+		t.Error("BuildAgent should not define a FinalInstruction")
+	}
+	bp := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", nil, 0, 0)
+	if strings.HasSuffix(bp, "Reminder:") {
+		t.Error("BuildAgent prompt should not gain a stray final reminder")
+	}
 }
 
 func TestGetAgent(t *testing.T) {
@@ -395,6 +421,7 @@ func TestGetAgent(t *testing.T) {
 		{"breakdown", "breakdown"},
 		{"note", "note"},
 		{"build", "build"},
+		{"task", "task"},
 		{"unknown", "build"}, // default
 		{"", "build"},        // default
 	}
@@ -402,6 +429,57 @@ func TestGetAgent(t *testing.T) {
 		agent := GetAgent(tc.name)
 		if agent.ID != tc.expected {
 			t.Errorf("GetAgent(%q) = %q, want %q", tc.name, agent.ID, tc.expected)
+		}
+	}
+}
+
+// TestBuildVsTaskAgent_Framing locks in the fix that BuildAgent (interactive
+// Build Mode) and TaskAgent (headless worktree execution) share tools but frame
+// commits and the source-of-truth differently. The interactive agent must NOT
+// tell the developer their uncommitted work will be lost or that it must commit.
+func TestBuildVsTaskAgent_Framing(t *testing.T) {
+	// Same capabilities.
+	if len(BuildAgent.Tools) != len(TaskAgent.Tools) {
+		t.Fatalf("BuildAgent and TaskAgent should share the same toolset")
+	}
+
+	// Task-only framing must appear in TaskAgent and NOT in BuildAgent.
+	taskOnly := []string{
+		"executing a single implementation task in a dedicated git worktree",
+		"You MUST commit",
+		"uncommitted changes will be lost after the task completes",
+		"Read the task description carefully",
+	}
+	for _, s := range taskOnly {
+		if !strings.Contains(TaskAgent.System, s) {
+			t.Errorf("TaskAgent.System should contain %q", s)
+		}
+		if strings.Contains(BuildAgent.System, s) {
+			t.Errorf("BuildAgent.System (interactive) must NOT contain task-only framing %q", s)
+		}
+	}
+
+	// Interactive-only framing must appear in BuildAgent and NOT in TaskAgent.
+	interactiveOnly := []string{
+		"Do not commit unless asked",
+		"nothing is lost by staying uncommitted",
+	}
+	for _, s := range interactiveOnly {
+		if !strings.Contains(BuildAgent.System, s) {
+			t.Errorf("BuildAgent.System (interactive) should contain %q", s)
+		}
+		if strings.Contains(TaskAgent.System, s) {
+			t.Errorf("TaskAgent.System must NOT contain interactive-only framing %q", s)
+		}
+	}
+
+	// Shared sections must be present in both.
+	for _, s := range []string{"Parallel tool calls", "Error recovery", "Project notes"} {
+		if !strings.Contains(BuildAgent.System, s) {
+			t.Errorf("BuildAgent.System should contain shared section %q", s)
+		}
+		if !strings.Contains(TaskAgent.System, s) {
+			t.Errorf("TaskAgent.System should contain shared section %q", s)
 		}
 	}
 }
