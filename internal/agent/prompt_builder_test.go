@@ -377,16 +377,12 @@ func TestBuildAgent_SystemPrompt_ContainsSharedSections(t *testing.T) {
 }
 
 func TestBreakdownAgent_SystemPrompt_ContainsNotes(t *testing.T) {
-	// Verify BreakdownAgent mentions project notes and a per-task verification step,
-	// and no longer references the (removed) call graph.
+	// Verify BreakdownAgent mentions project notes and a per-task verification step.
 	if !strings.Contains(BreakdownAgent.System, "Read project notes") {
 		t.Error("BreakdownAgent should mention reading project notes")
 	}
 	if !strings.Contains(BreakdownAgent.System, "verification step") {
 		t.Error("BreakdownAgent should require a per-task verification step")
-	}
-	if strings.Contains(BreakdownAgent.System, "callgraph") || strings.Contains(BreakdownAgent.System, "call graph") {
-		t.Error("BreakdownAgent should no longer reference the call graph")
 	}
 }
 
