@@ -1,6 +1,6 @@
 #!/bin/sh
 # Ogcode installer for macOS and Linux
-# Usage: curl -fsSL https://ogcode.xyz/install.sh | sh
+# Usage: curl -fsSL http://ogcode.xyz/install.sh | sh
 
 set -e
 
@@ -54,8 +54,13 @@ curl -fsSL "$URL" -o "$TMP_DIR/$ASSET"
 echo "Extracting..."
 tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR"
 
+# Ensure the install directory exists (create with sudo if we can't write it)
+if [ ! -d "$INSTALL_DIR" ]; then
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || sudo mkdir -p "$INSTALL_DIR"
+fi
+
 # Check if we can write to install dir
-if [ -w "$INSTALL_DIR" ] || [ ! -e "$INSTALL_DIR" ]; then
+if [ -w "$INSTALL_DIR" ]; then
     mv "$TMP_DIR/$BINARY" "$INSTALL_DIR/$BINARY"
     chmod +x "$INSTALL_DIR/$BINARY"
     echo ""
@@ -70,16 +75,12 @@ else
 fi
 
 # Verify
-if command -v ogcode >/dev/null 2>&1; then
+echo ""
+echo "✅ ogcode $LATEST is installed at $INSTALL_DIR/$BINARY"
+echo "Run 'ogcode --help' to get started."
+if ! command -v ogcode >/dev/null 2>&1; then
     echo ""
-    echo "✅ ogcode $LATEST is installed at $INSTALL_DIR/$BINARY"
-    echo "Run 'ogcode --help' to get started."
-else
-    echo ""
-    echo "✅ ogcode $LATEST is installed at $INSTALL_DIR/$BINARY"
-    echo "Run 'ogcode --help' to get started."
-    echo ""
-    echo "ogcode is not in your PATH. Add $INSTALL_DIR to your PATH:"
+    echo "⚠️  $INSTALL_DIR is not in your PATH. Add it with:"
     echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
 fi
 

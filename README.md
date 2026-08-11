@@ -289,7 +289,7 @@ An LLM API key or a local Ollama installation is required. See [Configuration](#
 Via Homebrew (recommended):
 
 ```bash
-brew tap prasenjeet-symon/ogcode
+brew tap prasenjeet-symon/tap
 brew install ogcode
 ```
 
