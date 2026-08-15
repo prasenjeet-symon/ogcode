@@ -1,3 +1,72 @@
+# Release Notes — v0.21.0
+
+## Minor: Agent-Loop Hardening, Interactive Tool Permissions, and Auto-Approval Mode
+
+This minor release brings four changes that landed after v0.20.0 — a major
+agent-loop hardening pass, a redesigned tool-permission UX, and a new
+auto-approval mode with hybrid risk assessment.
+
+1. **Agent-loop hardening from the OpenCode architecture audit** — Implements
+   every P0–P2 item from `docs/ARCHITECTURE_AUDIT.md`, comparing ogcode's agent
+   loop against both OpenCode implementations:
+   - **P0-1** Interactive tool-permission gating (a `permission.Manager` wired
+     through `executeTool`, with SSE prompts and reply) plus a conservative
+     bash denylist.
+   - **P0-2** Per-path lock so concurrent write/edit calls to the same file
+     can't clobber each other.
+   - **P1-1** Four behavior-preserving `RunLoop` extractions
+     (`compactRequest`, `resolveRunModel`, `executeReadyToolCalls`,
+     `writeToolResultMessage`).
+   - **P1-2** In-memory working set via known-ID folding (no time cursor).
+   - **P1-3** Token-based compaction budgeting (a BPE-approx estimator, tool
+     schemas, flat image cost).
+   - **P1-4** A model-callable, read-only, depth-1 task sub-agent
+     (`RunTaskSession`).
+   - **P2-1** Non-destructive, window-aware compaction (prior summary folded
+     in).
+   - **P2-2** Structured `provider.APIError` with typed classification and
+     `Retry-After` backoff.
+   - **P2-3** Detectable event drops (bus `Seq` + `Dropped`) with client
+     resync.
+   - **P2-4** Per-model-family prompt tuning (Claude / GPT / Gemini / local).
+   New tests accompany every change; `go build`/`vet` clean and
+   `go test -race` green across agent, provider, tool, permission, and bus.
+
+2. **Redesigned tool-permission prompt (Codex/Claude Code style)** — Replaces
+   the cramped full-bleed amber banner with a centered card that matches the
+   composer: a clear per-tool question ("Run this shell command?"), the command
+   or file path in a monospace block, and prominent Allow once / Always allow /
+   Reject buttons. Adds keyboard shortcuts — Enter approves (Allow is
+   auto-focused), "A" allows for the session, Esc rejects (captured so it
+   doesn't also abort the loop).
+
+3. **Minimal, inline tool-permission prompt in the composer** — Moves the
+   approval UI into the top of the composer card (like Claude Code / OpenCode)
+   instead of a separate floating card above the messages. It's now a compact
+   two-row strip — command/path on one line, Allow / Always / Reject on the
+   next — sharing the input box's surface with a divider above the textarea.
+   Keyboard shortcuts unchanged (Enter allow, "A" always, Esc reject).
+
+4. **Auto-approval mode with hybrid risk assessment** — Adds a per-session
+   approval mode, toggled from a compact Ask/Auto control in the composer
+   toolbar (persisted in the session's `permission` field):
+   - **Ask (default):** prompt before every bash/write/edit (unchanged
+     behavior).
+   - **Auto:** auto-run low-risk tool calls; still prompt for risky ones.
+   Risk is judged hybrid (`internal/permission/risk.go`):
+   - Rules classify the clear cases instantly — read-only/build/test
+     commands and in-project, non-sensitive writes are safe; `rm`, `sudo`,
+     `git push`, pipe-to-shell, writes outside the project or to
+     secrets/keys/system files are risky.
+   - The unclear middle (`mv`, `cp`, `chmod`, `npm install`, unknown tools, …)
+     gets a quick LLM risk check, cached by command; any failure/timeout
+     falls back to asking.
+   The catastrophic bash denylist and explicit "always allow" grants still
+   apply in both modes. Tests in `internal/permission/risk_test.go` cover the
+   rule tiers.
+
+---
+
 # Release Notes — v0.19.4
 
 ## Patch: Mid-Loop Guidance Injected as User Message Content
