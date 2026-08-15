@@ -3,6 +3,7 @@ import { useSession } from '../context/session';
 import { type ImagePartData } from '../api/client';
 import ModelSelector from './model-selector';
 import PermissionPrompt from './permission-prompt';
+import PermissionModeToggle from './permission-mode-toggle';
 
 // Maximum image file size: 10 MB
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
@@ -312,6 +313,9 @@ export default function PromptInput() {
           {/* Toolbar */}
           <div class="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
             <ModelSelector />
+
+            {/* Approval mode: Ask (default) vs Auto (risk-gated) */}
+            <PermissionModeToggle />
 
             {/* Image upload button */}
             <button

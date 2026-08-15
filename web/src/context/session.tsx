@@ -65,6 +65,8 @@ interface SessionContextValue {
   models: () => ModelInfo[];
   selectedModel: () => string;
   selectModel: (modelId: string) => void;
+  permissionMode: () => 'auto' | 'ask';
+  setPermissionMode: (mode: 'auto' | 'ask') => Promise<void>;
   selectSession: (id: string) => Promise<void>;
   newSession: (model?: string) => Promise<Session>;
   prompt: (content: string, images?: ImagePartData[]) => Promise<void>;
@@ -300,6 +302,26 @@ export const SessionProvider: ParentComponent = (props) => {
       setActiveSession(updated);
     } catch (e) {
       console.error('update model failed:', e);
+    }
+  }
+
+  // Permission mode for the active session: 'ask' (prompt before every mutating
+  // tool — the default) or 'auto' (auto-run low-risk tools, ask only for risky
+  // ones). Persisted on the session's `permission` field.
+  const permissionMode = (): 'auto' | 'ask' =>
+    activeSession()?.permission === 'auto' ? 'auto' : 'ask';
+
+  async function setPermissionMode(mode: 'auto' | 'ask') {
+    const sess = activeSession();
+    if (!sess || (sess.permission ?? 'ask') === mode) return;
+    setActiveSession({ ...sess, permission: mode }); // optimistic
+    try {
+      const updated = await updateSession(sess.id, { permission: mode });
+      setActiveSession(updated);
+      setSessions((list) => list.map((s) => (s.id === updated.id ? updated : s)));
+    } catch (e) {
+      console.error('update permission mode failed:', e);
+      setActiveSession(sess); // revert on failure
     }
   }
 
@@ -930,6 +952,8 @@ export const SessionProvider: ParentComponent = (props) => {
     models,
     selectedModel,
     selectModel,
+    permissionMode,
+    setPermissionMode,
     selectSession,
     newSession,
     prompt,

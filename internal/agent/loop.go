@@ -1658,6 +1658,16 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 		return action, nil
 	}
 
+	// action == Ask. In Auto mode, let the risk classifier auto-approve calls it
+	// judges safe (rules first, an LLM check for the unclear middle); genuinely
+	// risky calls still fall through to the prompt. Ask mode always prompts.
+	if sess, _ := lr.Store.Get(sessionID); sess != nil && sess.Permission == "auto" {
+		if lr.assessAutoRisk(ctx, sess, tc, pattern) == permission.RiskSafe {
+			slog.Info("auto-approved low-risk tool call", "session", sessionID, "tool", tc.Name)
+			return permission.Allow, nil
+		}
+	}
+
 	// Ask: register a pending request and surface it to the UI.
 	req := permission.Request{
 		ID:        permission.NewPermissionID(),
@@ -1704,6 +1714,87 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 			return permission.Deny, nil
 		}
 	}
+}
+
+// riskLLMTimeout bounds the Auto-mode LLM risk check so it can't stall a tool
+// call for long. On timeout/error the verdict is RiskAsk (fail safe).
+const riskLLMTimeout = 12 * time.Second
+
+// assessAutoRisk decides, in Auto mode, whether a tool call is safe to run
+// without asking. write/edit are judged purely by the path rules; bash uses the
+// command rules and escalates the unclear middle to a quick LLM check.
+func (lr *LoopRunner) assessAutoRisk(ctx context.Context, sess *session.Session, tc pendingToolCall, pattern string) permission.Risk {
+	switch tc.Name {
+	case "write", "edit":
+		return permission.ClassifyWrite(pattern, sess.Directory)
+	case "bash":
+		r := permission.ClassifyBash(pattern)
+		if r == permission.RiskUnclear {
+			r = lr.assessCommandRiskLLM(ctx, sess.Model, pattern)
+		}
+		return r
+	default:
+		// Any other gated tool with no specific rule → ask.
+		return permission.RiskAsk
+	}
+}
+
+// assessCommandRiskLLM asks the model whether a shell command the rules couldn't
+// classify is safe to auto-run. Verdicts are cached (command risk is context-
+// independent). Any failure — no provider, error, timeout, or an ambiguous
+// answer — resolves to RiskAsk so Auto mode never auto-runs something it isn't
+// confident about.
+func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, model, command string) permission.Risk {
+	if v, ok := lr.Permissions.CachedRisk(command); ok {
+		return v
+	}
+	p := lr.Registry.ResolveProvider(model)
+	if p == nil {
+		if dp := lr.Registry.Default(); dp != nil {
+			p = dp
+		} else {
+			p = lr.DefaultProvider
+		}
+	}
+	if p == nil {
+		return permission.RiskAsk
+	}
+
+	const system = "You are a strict security gate for an autonomous coding agent that runs shell " +
+		"commands in a developer's project. Decide whether a command is safe to run automatically " +
+		"WITHOUT asking the user. Answer SAFE only for read-only, inspection, build, test, lint, or " +
+		"routine easily-reversible project changes. Answer ASK if the command could delete or overwrite " +
+		"important data, write outside the project, exfiltrate data over the network, download and execute " +
+		"code, change system or global state, run with elevated privileges, or have irreversible side " +
+		"effects. When unsure, answer ASK. Reply with exactly one word: SAFE or ASK."
+	userContent, _ := json.Marshal("Command:\n" + command)
+
+	reqCtx, cancel := context.WithTimeout(ctx, riskLLMTimeout)
+	defer cancel()
+	ch, err := p.StreamChat(reqCtx, provider.StreamRequest{
+		Model:     model,
+		System:    []string{system},
+		Messages:  []provider.ModelMessage{{Role: "user", Content: userContent}},
+		MaxTokens: 8,
+	})
+	if err != nil {
+		slog.Warn("auto-mode risk check failed; asking", "err", err)
+		return permission.RiskAsk
+	}
+	var out strings.Builder
+	for evt := range ch {
+		if evt.Type == provider.EventTextDelta {
+			out.WriteString(evt.Text)
+		}
+	}
+	up := strings.ToUpper(out.String())
+	verdict := permission.RiskAsk
+	if strings.Contains(up, "SAFE") && !strings.Contains(up, "ASK") && !strings.Contains(up, "UNSAFE") && !strings.Contains(up, "DANGER") {
+		verdict = permission.RiskSafe
+	}
+	lr.Permissions.CacheRisk(command, verdict)
+	slog.Info("auto-mode risk verdict", "command", truncateText(command, 80), "verdict", verdict)
+	return verdict
 }
 
 // permissionPattern extracts the resource a tool call acts on, for ruleset

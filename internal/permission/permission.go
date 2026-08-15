@@ -72,16 +72,38 @@ type PendingRequest struct {
 // safe for concurrent use: the loop goroutine calls Create/Remove/AddRule while
 // the HTTP handler goroutine calls Reply.
 type Manager struct {
-	mu       sync.Mutex
-	pending  map[PermissionID]*PendingRequest
-	rulesets map[string]Ruleset // sessionID -> ruleset ("always" grants append here)
+	mu        sync.Mutex
+	pending   map[PermissionID]*PendingRequest
+	rulesets  map[string]Ruleset // sessionID -> ruleset ("always" grants append here)
+	riskCache map[string]Risk    // Auto-mode LLM risk verdicts, keyed by command
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		pending:  make(map[PermissionID]*PendingRequest),
-		rulesets: make(map[string]Ruleset),
+		pending:   make(map[PermissionID]*PendingRequest),
+		rulesets:  make(map[string]Ruleset),
+		riskCache: make(map[string]Risk),
 	}
+}
+
+// CachedRisk returns a previously-computed Auto-mode risk verdict for a command.
+func (m *Manager) CachedRisk(command string) (Risk, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.riskCache[command]
+	return r, ok
+}
+
+// CacheRisk records an Auto-mode risk verdict for a command. Command risk is
+// context-independent, so the cache is process-global. It is capped so a long
+// session with many distinct commands can't grow it without bound.
+func (m *Manager) CacheRisk(command string, r Risk) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.riskCache) >= 1000 {
+		m.riskCache = make(map[string]Risk)
+	}
+	m.riskCache[command] = r
 }
 
 func (m *Manager) Create(req Request) *PendingRequest {
