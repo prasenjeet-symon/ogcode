@@ -224,6 +224,10 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		MaxSteps:        runMaxTurns,
 	}
 
+	// Register the task sub-agent tool now that the runner exists (the build
+	// agent advertises it, so it must resolve to avoid an "unknown tool" result).
+	toolRegistry.Register(tool.TaskTool{Run: lr.RunTaskSession})
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

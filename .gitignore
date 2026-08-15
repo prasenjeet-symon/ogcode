@@ -12,6 +12,7 @@ embed-model/
 # Dependencies
 node_modules/
 web/dist/
+web/build/
 web/.solid/
 
 # Environment

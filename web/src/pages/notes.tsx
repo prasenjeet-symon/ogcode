@@ -207,7 +207,7 @@ export default function NotesPage() {
     <div class="flex h-screen w-full">
       <Sidebar />
 
-      <div class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
+      <div class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
 
         {/* Header */}
         <div class="shrink-0 border-b border-[color:var(--border-subtle)] px-6 py-4 flex items-center justify-between">

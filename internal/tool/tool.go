@@ -57,6 +57,11 @@ type Result struct {
 	// rendered PDF page). It is delivered to the model alongside Output, in a
 	// provider-appropriate way. Only honored for vision-capable models.
 	Image *ResultImage `json:"image,omitempty"`
+	// Truncated marks that the tool already capped its own Output to a safe size.
+	// The agent loop's global truncation backstop leaves such results untouched;
+	// results without this flag are capped to MaxToolOutputBytes/MaxToolOutputLines
+	// before they enter the model context.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // ResultImage is an image attachment on a tool Result.

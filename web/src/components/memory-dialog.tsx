@@ -123,7 +123,7 @@ export default function MemoryDialog(props: MemoryDialogProps) {
           onClick={() => setOpen(false)}
         >
           {/* Backdrop */}
-          <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div class="modal-backdrop absolute inset-0 bg-black/50 backdrop-blur-sm" />
 
           {/* Dialog */}
           <div

@@ -2,6 +2,20 @@
 @import "highlight.js/styles/github-dark-dimmed.css";
 
 /* ============================================================
+   Global motion defaults
+   Make every Tailwind transition-* utility use Linear's spring curve
+   by default. Much of the app wrote `transition-all var(--spring-sm)`,
+   where the var() token is not a real class and was silently inert —
+   so those transitions fell back to Tailwind's default ease. Setting
+   the theme defaults here fixes the easing everywhere in one place, so
+   hovers and state changes read as consistently smooth.
+   ============================================================ */
+@theme {
+  --default-transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  --default-transition-duration: 160ms;
+}
+
+/* ============================================================
    Design tokens — Linear-inspired dark-first color system
    ============================================================ */
 :root {
@@ -74,6 +88,25 @@ html, body, #root {
   height: 100%;
 }
 
+/* ============================================================
+   Fluid responsive typography
+   The root font-size scales smoothly with the viewport via clamp(),
+   so every rem-based size in the app — all Tailwind text-* utilities,
+   the chat prose, and any rem spacing — adapts to the screen with no
+   hard breakpoints: readable on small phones, comfortably larger on
+   big desktop / 4K displays. Bounded so it never gets uncomfortably
+   small or oversized. text-size-adjust stops mobile browsers from
+   re-inflating text on rotate/zoom.
+
+   Reference for the scale (viewport → root px):
+     375px → ~15.4   768px → ~16.6   1440px → ~17.6   ≥1920px → 18
+   ============================================================ */
+html {
+  font-size: clamp(15px, 0.9rem + 0.22vw, 18px);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--bg-base);
@@ -82,8 +115,10 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  /* Linear: 13px body text, tight line-height, slight negative tracking */
-  font-size: 13px;
+  /* Body base as rem so it scales with the fluid root (≈13px at the 16px
+     reference, growing gently on larger screens). Tight line-height and
+     slight negative tracking preserved from the Linear-inspired design. */
+  font-size: 0.8125rem;
   line-height: 1.55;
   letter-spacing: -0.005em;
 }
@@ -97,6 +132,21 @@ button, a, input, textarea, select,
               box-shadow var(--spring-sm),
               opacity var(--spring-sm),
               transform var(--spring-sm);
+}
+
+/* Tactile press feedback — controls dip slightly when pressed, giving a
+   physical, responsive feel app-wide. The transform transition above animates
+   both the press and the spring-back release. Kept subtle so it reads as
+   "responsive," not "bouncy." */
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: none;
+  }
 }
 
 ::selection {
@@ -245,6 +295,25 @@ input:focus-visible {
 
 /* Linear-style subtle message/list entrance */
 .anim-enter { animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Page-level entrance — a top-level route surface cross-fades in as it mounts,
+   so navigating between the landing screen, a session, notes, and settings feels
+   like a soft fade rather than a hard swap. Deliberately opacity-only: these
+   containers hold backdrop-blur headers, and a transform on them would create a
+   containing block that glitches the blur. */
+@keyframes pageEnter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.page-enter { animation: pageEnter 0.26s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Modal backdrop fade — pairs with a panel's popIn/scaleIn so the dimmed
+   overlay eases in rather than snapping to full opacity. */
+@keyframes backdropFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.modal-backdrop { animation: backdropFade 0.18s ease-out both; }
 
 /* Staggered list entrance — children animate in sequence with 30-50ms delay.
    Apply to parent, nth-child delays go on the children. */

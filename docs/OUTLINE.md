@@ -63,9 +63,6 @@ Entry point: `main.go` → `cli.Execute()` → `cli.serve()` → `server.New()` 
 | `OGCODE_AGENTIC_MEMORY_MODE` | Enable agentic memory (`true`) |
 | `OGCODE_EMBED_PROVIDER` | Embedding provider for memory |
 | `OGCODE_EMBED_MODEL` | Embedding model for memory |
-| `OGCODE_MCP_ENABLED` | Enable MCP tool server (`true`) |
-| `OGCODE_MCP_COMMAND` | MCP server command |
-| `OGCODE_MCP_ARGS` | MCP server args |
 | `OGCODE_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` |
 | `OGCODE_LOG_FORMAT` | Log format: `text` (default), `json` |
 
@@ -127,9 +124,9 @@ sequenceDiagram
 ```
 
 Key subroutines:
-- **`buildSystemPrompt()`**: Assembles agent directive + AGENT.md + MEMORY.md + tool descriptions + MCP tool definitions
+- **`buildSystemPrompt()`**: Assembles agent directive + AGENT.md + MEMORY.md + tool descriptions
 - **`toProviderMessages()`**: Converts session messages to provider format, injecting memory context as a system message
-- **`executeTool()`**: Resolves tool from registry, validates agent has access via `Agent.HasTool()`, runs built-in or MCP tool
+- **`executeTool()`**: Resolves tool from registry, validates agent has access via `Agent.HasTool()`, runs the built-in tool
 - **`writeMemory()`**: Reads existing memory context, persists conversation turn to knowledge graph via `Memory.WriteMemory()`
 - **`shouldBreak()`**: Checks if last assistant message has no pending tool calls (loop termination condition)
 
@@ -378,7 +375,7 @@ type ToolDef interface {
 
 ### 7.2 Tool Registry
 
-`NewRegistry()` registers all built-in tools. MCP tools are added dynamically when `OGCODE_MCP_ENABLED=true`.
+`NewRegistry()` registers all built-in tools.
 
 `ForAgent(toolIDs)` filters tools to those available for a given agent. `ToProviderTools()` converts for LLM function calling format.
 
@@ -628,7 +625,6 @@ sequenceDiagram
     participant Reg as Provider Registry
     participant Tools as Tool Registry
     participant Mem as Memory
-    participant MCP as MCP Client
 
     Main->>CLI: Execute()
     CLI->>S: New(port, dir, mode)
@@ -640,7 +636,6 @@ sequenceDiagram
     S->>DB: Load provider configs + model preferences
     S->>Tools: NewRegistry() + Register builtin tools
     S->>Mem: Initialize if enabled
-    S->>MCP: Connect if enabled
     S->>S: Create LoopRunner
     S->>S: routes() → start HTTP server
     S->>S: openBrowser()
@@ -658,19 +653,9 @@ sequenceDiagram
 
 ---
 
-## 14. MCP Integration (`internal/mcp/`)
+## 14. Note System (`internal/note/`)
 
-- Enabled via `OGCODE_MCP_ENABLED=true`
-- Spawns an external process (default: `ogden mcp`) as MCP server
-- Discovers tools dynamically via MCP protocol
-- MCP tools are dispatched through the same `Registry.ForAgent()` mechanism
-- Tools are added to agent system prompts at `buildSystemPrompt()` time
-
----
-
-## 15. Note System (`internal/note/`)
-
-### 15.1 Lifecycle
+### 14.1 Lifecycle
 
 1. User creates a note with a query → `POST /api/notes`
 2. Server creates a "note"-type session + Note record (status: `generating`)
@@ -679,17 +664,17 @@ sequenceDiagram
 5. Status transitions: `generating` → `done` or `error`
 6. Stuck notes from server crashes are recovered on startup
 
-### 15.2 Note Versioning
+### 14.2 Note Versioning
 
 Each re-research of the same query creates a new version. `NoteVersion` records track the history.
 
-### 15.3 Persistence
+### 14.3 Persistence
 
 Notes are saved to `.ogcode/notes/<noteID>.md` as markdown files, enabling the NoteAgent to reference them via the `read` tool.
 
 ---
 
-## 16. Key Design Decisions
+## 15. Key Design Decisions
 
 1. **Single binary**: Go backend + embedded React frontend via `web/embed.go`
 2. **Two-database strategy**: Workspace DB for project data, global config DB for settings that persist across projects

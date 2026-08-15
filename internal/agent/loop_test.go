@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
@@ -16,7 +15,7 @@ func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing
 	dir := "/tmp/test"
 
 	// Case 1: No MEMORY.md content — section should still appear
-	prompt := buildSystemPrompt(agent, dir, false, "", "", nil, 0, 0)
+	prompt := buildSystemPrompt(agent, dir, false, "", "", 0, 0)
 	if !strings.Contains(prompt, "## MEMORY.md — Project Long-Term Memory") {
 		t.Error("expected MEMORY.md section to appear even when memoryMDContent is empty")
 	}
@@ -26,7 +25,7 @@ func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing
 
 	// Case 2: With MEMORY.md content — section should appear with file content indicator
 	memContent := "\n\n<memory-md path=\"MEMORY.md\">\n# Project Notes\nSome facts.\n</memory-md>"
-	prompt = buildSystemPrompt(agent, dir, false, "", memContent, nil, 0, 0)
+	prompt = buildSystemPrompt(agent, dir, false, "", memContent, 0, 0)
 	if !strings.Contains(prompt, "## MEMORY.md — Project Long-Term Memory") {
 		t.Error("expected MEMORY.md section to appear when memoryMDContent is present")
 	}
@@ -45,7 +44,7 @@ func TestBuildSystemPrompt_MemoryMDSection_ContainsPurposeSection(t *testing.T) 
 	agent := BuildAgent
 	dir := "/tmp/test"
 
-	prompt := buildSystemPrompt(agent, dir, false, "", "", nil, 0, 0)
+	prompt := buildSystemPrompt(agent, dir, false, "", "", 0, 0)
 
 	// Verify key sections are always present
 	for _, sub := range []string{
@@ -65,7 +64,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	dir := "/tmp/test"
 
 	// BuildAgent has write and edit tools — should get read/write instructions
-	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", "", nil, 0, 0)
+	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", "", 0, 0)
 	if !strings.Contains(buildPrompt, "### How to maintain MEMORY.md") {
 		t.Error("expected 'How to maintain' heading for BuildAgent (has write tools)")
 	}
@@ -77,7 +76,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	}
 
 	// PlanAgent has no write/edit tools — should get read-only instructions
-	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", "", nil, 0, 0)
+	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", "", 0, 0)
 	if !strings.Contains(planPrompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading for PlanAgent (read-only)")
 	}
@@ -89,7 +88,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	}
 
 	// NoteAgent has no write/edit tools — should get read-only instructions
-	notePrompt := buildSystemPrompt(NoteAgent, dir, false, "", "", nil, 0, 0)
+	notePrompt := buildSystemPrompt(NoteAgent, dir, false, "", "", 0, 0)
 	if !strings.Contains(notePrompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading for NoteAgent (read-only)")
 	}
@@ -103,7 +102,7 @@ func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
 	memContent := "\n\n<memory-md path=\"MEMORY.md\">\n# Project Notes\nSome facts.\n</memory-md>"
 
 	// BuildAgent with MEMORY.md content — should show content but NOT creation prompt
-	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", memContent, nil, 0, 0)
+	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", memContent, 0, 0)
 	if !strings.Contains(buildPrompt, "The content above in the <memory-md> tag") {
 		t.Error("expected content indicator when memoryMDContent is present for BuildAgent")
 	}
@@ -115,7 +114,7 @@ func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
 	}
 
 	// PlanAgent with MEMORY.md content — should show read-only version, no creation prompt
-	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", memContent, nil, 0, 0)
+	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", memContent, 0, 0)
 	if !strings.Contains(planPrompt, "The content above in the <memory-md> tag") {
 		t.Error("expected content indicator when memoryMDContent is present for PlanAgent")
 	}
@@ -128,13 +127,13 @@ func TestBuildSystemPrompt_ViewportPrompt(t *testing.T) {
 	dir := "/tmp/test"
 
 	// Without viewport dimensions — should NOT contain viewport section
-	prompt := buildSystemPrompt(BuildAgent, dir, false, "", "", nil, 0, 0)
+	prompt := buildSystemPrompt(BuildAgent, dir, false, "", "", 0, 0)
 	if strings.Contains(prompt, "Rendering viewport") {
 		t.Error("did not expect viewport section when dimensions are 0x0")
 	}
 
 	// With viewport dimensions — should contain viewport section
-	prompt = buildSystemPrompt(BuildAgent, dir, false, "", "", nil, 1920, 1080)
+	prompt = buildSystemPrompt(BuildAgent, dir, false, "", "", 1920, 1080)
 	if !strings.Contains(prompt, "Rendering viewport") {
 		t.Error("expected viewport section when dimensions are provided")
 	}
@@ -159,7 +158,7 @@ func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
 
 	// Project-scoped agent keeps the context sections and (memory on + has
 	// memory_recall) gets the agentic-memory block.
-	build := buildSystemPrompt(BuildAgent, dir, true, agentMD, "", nil, 0, 0)
+	build := buildSystemPrompt(BuildAgent, dir, true, agentMD, "", 0, 0)
 	for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall tool"} {
 		if !strings.Contains(build, s) {
 			t.Errorf("BuildAgent prompt should contain %q", s)
@@ -169,7 +168,7 @@ func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
 	// Utility agents omit project context — even with memory enabled — because
 	// they don't operate on the codebase and lack memory_recall.
 	for _, a := range []Agent{IndexAgent, SearchAgent} {
-		p := buildSystemPrompt(a, dir, true, agentMD, "some memory content", nil, 0, 0)
+		p := buildSystemPrompt(a, dir, true, agentMD, "some memory content", 0, 0)
 		for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall tool"} {
 			if strings.Contains(p, s) {
 				t.Errorf("%s prompt should NOT contain project-context %q", a.ID, s)
@@ -178,25 +177,6 @@ func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
 		// The agent's own instructions must still be present.
 		if !strings.Contains(p, a.System) {
 			t.Errorf("%s prompt should still contain the agent's own System instructions", a.ID)
-		}
-	}
-}
-
-// TestBuildSystemPrompt_MCPSkillsOnlyForCodebaseAgents verifies the MCP
-// "Available Skills" section — which describes codebase-research tools — is
-// advertised to codebase agents but omitted from the utility agents.
-func TestBuildSystemPrompt_MCPSkillsOnlyForCodebaseAgents(t *testing.T) {
-	mcpTools := map[string]mcp.ToolDef{"answer_codebase": {}}
-
-	build := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", mcpTools, 0, 0)
-	if !strings.Contains(build, "## Available Skills") || !strings.Contains(build, "answer_codebase") {
-		t.Error("BuildAgent should advertise the available MCP skills")
-	}
-
-	for _, a := range []Agent{IndexAgent, SearchAgent} {
-		p := buildSystemPrompt(a, "/tmp/proj", false, "", "", mcpTools, 0, 0)
-		if strings.Contains(p, "## Available Skills") {
-			t.Errorf("%s should not advertise the MCP skills section", a.ID)
 		}
 	}
 }
@@ -484,7 +464,7 @@ func TestIsContextLengthError(t *testing.T) {
 	}
 }
 
-func TestEstimateRequestSize(t *testing.T) {
+func TestEstimateRequestTokens(t *testing.T) {
 	req := provider.StreamRequest{
 		System: []string{"You are a helpful assistant."},
 		Messages: []provider.ModelMessage{
@@ -499,24 +479,19 @@ func TestEstimateRequestSize(t *testing.T) {
 		},
 	}
 
-	size := estimateRequestSize(req)
-	if size <= 0 {
-		t.Errorf("estimateRequestSize returned %d, expected > 0", size)
+	tokens := estimateRequestTokens(req)
+	if tokens <= 0 {
+		t.Errorf("estimateRequestTokens returned %d, expected > 0", tokens)
+	}
+	// At minimum every message contributes framing overhead plus its content.
+	if tokens < len(req.Messages) {
+		t.Errorf("estimateRequestTokens = %d, expected at least %d (one per message)", tokens, len(req.Messages))
 	}
 
-	// System prompt + 2 messages should be roughly proportional
-	systemLen := len("You are a helpful assistant.")
-	userLen := len(`"Hello"`)
-	assistantLen := len(`"Hi there"`)
-	expectedMin := systemLen + userLen + assistantLen
-	if size < expectedMin {
-		t.Errorf("estimateRequestSize = %d, expected at least %d", size, expectedMin)
-	}
-
-	// Empty request should have zero size
-	emptySize := estimateRequestSize(provider.StreamRequest{})
-	if emptySize != 0 {
-		t.Errorf("estimateRequestSize(empty) = %d, expected 0", emptySize)
+	// Empty request should have zero tokens.
+	emptyTokens := estimateRequestTokens(provider.StreamRequest{})
+	if emptyTokens != 0 {
+		t.Errorf("estimateRequestTokens(empty) = %d, expected 0", emptyTokens)
 	}
 }
 
@@ -604,11 +579,11 @@ func TestConvertMessagesReasoningPartsWithToolCalls(t *testing.T) {
 	}
 }
 
-// TestEstimateRequestSizeReasoningParts verifies that estimateRequestSize
+// TestEstimateRequestTokensReasoningParts verifies that estimateRequestTokens
 // accounts for ReasoningParts (thinking blocks) text and signatures. Thinking
 // content can be large; if it isn't counted, proactive compaction may trigger
 // too late, causing a context-overflow error from the model.
-func TestEstimateRequestSizeReasoningParts(t *testing.T) {
+func TestEstimateRequestTokensReasoningParts(t *testing.T) {
 	reasoningText := "Let me think about this problem step by step."
 	signature := "EuYBCg=="
 
@@ -634,15 +609,14 @@ func TestEstimateRequestSizeReasoningParts(t *testing.T) {
 		},
 	}
 
-	sizeWith := estimateRequestSize(withReasoning)
-	sizeWithout := estimateRequestSize(withoutReasoning)
+	tokensWith := estimateRequestTokens(withReasoning)
+	tokensWithout := estimateRequestTokens(withoutReasoning)
 
-	if sizeWith <= sizeWithout {
-		t.Fatalf("expected size with reasoning (%d) to exceed without (%d)", sizeWith, sizeWithout)
+	if tokensWith <= tokensWithout {
+		t.Fatalf("expected tokens with reasoning (%d) to exceed without (%d)", tokensWith, tokensWithout)
 	}
-	// The difference should be at least the text + signature length.
-	expectedDelta := len(reasoningText) + len(signature)
-	if sizeWith-sizeWithout < expectedDelta {
-		t.Errorf("expected size delta >= %d (text+signature), got %d", expectedDelta, sizeWith-sizeWithout)
+	// The difference should reflect the reasoning text (plus signature) tokens.
+	if delta, want := tokensWith-tokensWithout, estimateTokens(reasoningText); delta < want {
+		t.Errorf("expected token delta >= %d (reasoning text), got %d", want, delta)
 	}
 }

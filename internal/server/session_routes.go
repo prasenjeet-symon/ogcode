@@ -439,6 +439,10 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	// guidance and cancel in-flight tools without killing the loop.
 	lc := agent.NewLoopControl()
 	ctx = agent.WithLoopControl(ctx, lc)
+	// This is an interactive session with a UI that can answer permission
+	// prompts, so mark it gated: mutating tools (bash/write/edit) will pause for
+	// approval. Headless loops (task/breakdown/note/search) never set this flag.
+	ctx = agent.WithPermissionGating(ctx)
 	// Cancel any already-running loop for this session before starting a new one.
 	s.mu.Lock()
 	if old, ok := s.running[sessionID]; ok {

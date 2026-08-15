@@ -21,9 +21,9 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/git"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
-	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/memory"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
+	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/plan"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
@@ -56,9 +56,8 @@ type Server struct {
 	registry        *provider.Registry
 	defaultProvider provider.Provider
 	loopRunner      *agent.LoopRunner
-	mcpClient       *mcp.Client
-	mcpCfg          mcp.ServerConfig
 	mem             *memory.Memory
+	permissions     *permission.Manager
 
 	// Version check manager
 	versionManager *version.Manager
@@ -280,19 +279,7 @@ func (s *Server) Start() error {
 	}
 	dlCancel()
 
-	// Initialize MCP client (for tool exposure, unrelated to agentic memory
-	// database, which is now local SQLite with its own embed provider)
-	if strings.EqualFold(os.Getenv("OGCODE_MCP_ENABLED"), "true") {
-		cfg := mcp.ConfigFromEnv()
-		s.mcpCfg = cfg
-		mcpClient, err := mcp.NewClient(context.Background(), cfg)
-		if err != nil {
-			slog.Warn("failed to connect to MCP server, MCP tools unavailable", "err", err)
-		} else {
-			s.mcpClient = mcpClient
-		}
-	}
-
+	s.permissions = permission.NewManager()
 	s.loopRunner = &agent.LoopRunner{
 		Store:           s.store,
 		Bus:             s.bus,
@@ -301,8 +288,8 @@ func (s *Server) Start() error {
 		Tools:           toolRegistry,
 		Dir:             s.dir,
 		Memory:          mem,
-		MCP:             s.mcpClient,
 		NoteStore:       s.noteStore,
+		Permissions:     s.permissions,
 	}
 
 	// Register deep_search after loopRunner is built (needs RunSearchSession).
@@ -310,6 +297,11 @@ func (s *Server) Start() error {
 		toolRegistry.Register(tool.DeepSearchTool{Run: s.loopRunner.RunSearchSession})
 		slog.Info("deep_search tool registered")
 	}
+
+	// Register the task sub-agent tool (needs RunTaskSession). Available
+	// regardless of the search bridge — the sub-agent is a read-only codebase
+	// investigator that only optionally uses deep_search.
+	toolRegistry.Register(tool.TaskTool{Run: s.loopRunner.RunTaskSession})
 
 	// Initialize version manager
 	s.versionManager = version.New()
@@ -388,13 +380,6 @@ func (s *Server) Start() error {
 	// Close listener explicitly
 	if err := listener.Close(); err != nil {
 		slog.Warn("close listener", "err", err)
-	}
-
-	// Close MCP client
-	if s.mcpClient != nil {
-		if err := s.mcpClient.Close(); err != nil {
-			slog.Warn("close mcp client", "err", err)
-		}
 	}
 
 	// Stop search bridge
@@ -568,6 +553,7 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 func collectionFromBaseURLEq(p *provider.OpenAIProvider, baseURL string) bool {
 	return p != nil && provider.CollectionFromBaseURL(p.BaseURL()) == provider.CollectionFromBaseURL(baseURL)
 }
+
 // credentials and swaps it into the running server in place, so credential
 // changes from the settings/onboarding UI take effect without a restart. The
 // shared *provider.Registry pointer (held by the loop runner and handlers) is

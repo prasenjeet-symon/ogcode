@@ -22,6 +22,8 @@ func projectIndexPrompt(role string) string {
 		finalStep = "Then produce your plan"
 	case "note":
 		finalStep = "Then produce your note"
+	case "subagent":
+		finalStep = "Then report your findings"
 	}
 
 	return `## Mandatory: Use Project Index Before Exploration
@@ -399,4 +401,63 @@ The .ogcode/notes/ directory is managed exclusively by the NoteAgent. Do not cre
 // dependency directories.
 func noPackageManagerDirsPrompt() string {
 	return `- Never explore or read package manager or dependency directories (e.g. node_modules, vendor, .venv, __pycache__, dist) unless a specific issue explicitly requires it. These directories contain third-party code and are not part of the project implementation.`
+}
+
+// modelFamily classifies a provider/model into a prompt family so the coding
+// prompt can be tuned to how that family follows instructions. Model-name signals
+// win over the provider id, because aggregators (OpenRouter, the free pool) serve
+// Claude, GPT, and Gemini models under a single provider id.
+func modelFamily(providerID, modelID string) string {
+	p := strings.ToLower(providerID)
+	m := strings.ToLower(modelID)
+	switch {
+	case p == "ollama" || strings.Contains(p, "ollama"):
+		// Local runtime — size/quantization matters more than the base model, so
+		// treat all local models the same regardless of name.
+		return "local"
+	case strings.Contains(m, "claude"):
+		return "anthropic"
+	case strings.Contains(m, "gemini") || strings.Contains(m, "gemma"):
+		return "gemini"
+	case strings.Contains(m, "gpt") || strings.Contains(m, "chatgpt") || strings.Contains(m, "codex") ||
+		strings.Contains(m, "o1") || strings.Contains(m, "o3") || strings.Contains(m, "o4"):
+		return "openai"
+	case p == "anthropic":
+		return "anthropic"
+	case p == "openai":
+		return "openai"
+	default:
+		return "generic"
+	}
+}
+
+// modelFamilyStylePrompt returns a short, family-specific working-style block
+// appended to the coding prompt. The base prompt is already tuned for Claude, so
+// "anthropic" and "generic" add nothing; the other families get guidance that
+// nudges them toward the behaviour the base prompt assumes (act decisively, stay
+// concise, one tool at a time for small local models).
+func modelFamilyStylePrompt(family string) string {
+	switch family {
+	case "openai":
+		return `## Working style for this model
+
+- Be decisive and act. Do not narrate what you are about to do or ask permission for routine steps — take the action (read the file, run the command) and report the result.
+- Lead with the action or the answer; keep preamble and self-commentary to a minimum.
+- When you have the tools to verify something, verify it rather than asserting it.`
+	case "gemini":
+		return `## Working style for this model
+
+- Follow the requested output format exactly, and do not restate the task before starting it.
+- Be concise and concrete — prefer specific file paths, symbols, and commands over general description.
+- Use tools directly to gather facts instead of describing what you intend to do.`
+	case "local":
+		return `## Working style for this model
+
+- Keep responses short and focused; long, meandering output drifts off task.
+- Call exactly ONE tool at a time and wait for its result before deciding the next step.
+- Never invent file paths, APIs, function names, or command output — if you are unsure, use a tool to check first.
+- Prefer the simplest solution that works over a clever one.`
+	default: // "anthropic", "generic", ""
+		return ""
+	}
 }

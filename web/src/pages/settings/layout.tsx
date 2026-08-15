@@ -109,7 +109,7 @@ function SettingsShell(props: { children?: any }) {
         </div>
       </aside>
 
-      <main class="flex-1 min-w-0 overflow-y-auto bg-[color:var(--bg-base)]">
+      <main class="page-enter flex-1 min-w-0 overflow-y-auto bg-[color:var(--bg-base)]">
         {props.children}
       </main>
     </div>

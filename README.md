@@ -168,7 +168,6 @@ Ogcode is the only agentic coding assistant that combines a **browser-native UI*
 - **PDF Support** — Read and index PDF documentation directly in the agent.
 - **Codebase Map** — A semantic index of your entire project for intelligent file discovery.
 - **Single Binary, Self-Contained** — One Go binary with an embedded SolidJS frontend. Zero external server dependencies.
-- **MCP Extensibility** — Model Context Protocol support for custom tools and integrations.
 - **Rich Visual Output** — Agents render Mermaid diagrams, LaTeX math, Plotly charts, and full HTML/CSS/JS interactive content directly in the chat, with viewport-aware responsive design.
 
 ---

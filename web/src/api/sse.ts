@@ -2,6 +2,10 @@ import { onCleanup } from 'solid-js';
 
 export interface SSEEvent {
   type: string;
+  // Monotonic per-connection sequence stamped by the bus on every event (absent
+  // on control frames like server.connected/heartbeat). A gap means the server
+  // dropped events to a full buffer and the client should resync.
+  seq?: number;
   properties?: any;
 }
 

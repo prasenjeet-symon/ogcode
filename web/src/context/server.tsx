@@ -18,6 +18,9 @@ interface ServerContextValue {
   // Consumers use this as a reactive dependency to know when to re-fetch.
   eventTick: () => number;
   lastEvent: () => SSEEvent | null;
+  // Ticks whenever a gap in the server's event sequence is detected (events were
+  // dropped to a full buffer). Consumers should force a full state re-fetch.
+  resyncTick: () => number;
 }
 
 const ServerContext = createContext<ServerContextValue>();
@@ -35,6 +38,10 @@ export const ServerProvider: ParentComponent = (props) => {
   const [searchRunning, setSearchRunning] = createSignal(false);
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
+  const [resyncTick, setResyncTick] = createSignal(0);
+  // Highest event seq seen on this connection, for drop detection. Reset to 0 on
+  // reconnect (a new EventSource restarts the server's per-connection numbering).
+  let lastSeq = 0;
 
   // Load server info
   getPath().then((info) => {
@@ -62,6 +69,23 @@ export const ServerProvider: ParentComponent = (props) => {
 
   // Connect to SSE
   createSSE('/event', (event) => {
+    // Drop detection: the bus stamps a monotonic seq on every event. A jump
+    // beyond lastSeq+1 means the server dropped events to a full buffer, so ask
+    // consumers to resync. Out-of-order or duplicate seqs (possible under
+    // concurrent publishes) at worst cause a harmless extra resync. Control
+    // frames (connected/config/heartbeat) carry no seq and are skipped.
+    const seq = typeof event.seq === 'number' ? event.seq : 0;
+    if (seq > 0) {
+      if (lastSeq !== 0 && seq > lastSeq + 1) {
+        setResyncTick((n) => n + 1);
+      }
+      if (seq > lastSeq) lastSeq = seq;
+    } else if (event.type === 'server.connected') {
+      // New connection → the server restarts seq numbering; reset our tracker so
+      // the first real event doesn't look like a gap.
+      lastSeq = 0;
+    }
+
     if (event.type === 'server.connected') {
       setConnected(true);
     } else if (event.type === 'server.config') {
@@ -88,6 +112,7 @@ export const ServerProvider: ParentComponent = (props) => {
     searchRunning,
     eventTick,
     lastEvent,
+    resyncTick,
   };
 
   return (

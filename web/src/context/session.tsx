@@ -11,6 +11,8 @@ import {
   getMessages,
   sendPrompt,
   sendGuidance,
+  replyPermission,
+  type PermissionResponse,
   getModels,
   updateSession,
   abortSession,
@@ -43,6 +45,13 @@ function shallowEqualMessage(a: MessageWithParts, b: MessageWithParts): boolean 
   return true;
 }
 
+export interface PendingPermission {
+  permissionId: string;
+  tool: string;
+  pattern: string;
+  input: string;
+}
+
 interface SessionContextValue {
   sessions: () => Session[];
   activeSession: () => Session | null;
@@ -51,6 +60,8 @@ interface SessionContextValue {
   hasRunningTools: () => boolean;
   compacted: () => boolean;
   guidanceActive: () => boolean;
+  pendingPermissions: () => PendingPermission[];
+  respondPermission: (permissionId: string, response: PermissionResponse) => Promise<void>;
   models: () => ModelInfo[];
   selectedModel: () => string;
   selectModel: (modelId: string) => void;
@@ -183,6 +194,7 @@ export const SessionProvider: ParentComponent = (props) => {
   // or when the loop exits.
   const [guidanceActive, setGuidanceActive] = createSignal(false);
   let guidanceTimer: ReturnType<typeof setTimeout> | null = null;
+  const [pendingPermissions, setPendingPermissions] = createSignal<PendingPermission[]>([]);
 
   const [models, setModels] = createSignal<ModelInfo[]>([]);
   // Model selection chosen before any session exists (e.g. on the home page).
@@ -818,6 +830,63 @@ export const SessionProvider: ParentComponent = (props) => {
     setMemorySavedTokens((prev) => prev + saved);
   }));
 
+  // --- Tool permission prompts ---
+  // The backend blocks a mutating tool call (bash/write/edit) until the user
+  // approves it, publishing permission.requested and, on resolution,
+  // permission.replied. We keep a per-session queue and answer via
+  // respondPermission. The tick-guard ensures each event is processed once.
+  let lastProcessedPermTick = 0;
+  createEffect(on(server.eventTick, (tick) => {
+    if (tick === lastProcessedPermTick) return;
+    lastProcessedPermTick = tick;
+    const last = server.lastEvent();
+    if (!last) return;
+    const p = (last.properties as any) || {};
+    if (last.type === 'permission.requested') {
+      const sess = activeSession();
+      if (!sess || p.sessionId !== sess.id) return;
+      setPendingPermissions((prev) =>
+        prev.some((x) => x.permissionId === p.permissionId)
+          ? prev
+          : [...prev, { permissionId: p.permissionId, tool: p.tool, pattern: p.pattern, input: p.input }],
+      );
+    } else if (last.type === 'permission.replied') {
+      setPendingPermissions((prev) => prev.filter((x) => x.permissionId !== p.permissionId));
+    }
+  }));
+
+  // Permission prompts are per-session — drop the queue when switching sessions.
+  createEffect(on(activeSession, () => setPendingPermissions([])));
+
+  // Resync on detected event drops: when the server's event sequence gaps (a
+  // slow client overflowed the bus buffer), re-fetch the active session's
+  // messages so the UI can't be left stale by a lost message.updated event.
+  createEffect(on(server.resyncTick, (tick) => {
+    if (!tick) return;
+    const sess = activeSession();
+    if (!sess) return;
+    getMessages(sess.id).then((msgs) => {
+      if (activeSession()?.id !== sess.id) return;
+      setMessages(msgs);
+      lastSSEUpdate = Date.now();
+    }).catch(() => {});
+  }));
+
+  async function respondPermission(permissionId: string, response: PermissionResponse) {
+    const sess = activeSession();
+    // Optimistically dismiss so the UI feels instant; the backend also emits
+    // permission.replied which reconciles any other client.
+    setPendingPermissions((prev) => prev.filter((x) => x.permissionId !== permissionId));
+    if (!sess) return;
+    try {
+      await replyPermission(sess.id, permissionId, response);
+    } catch (e) {
+      // 404 = already resolved/cancelled server-side — safe to ignore.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('404')) console.error('permission reply failed:', e);
+    }
+  }
+
   // Global hotkey listener: Alt+1–4 switches the active model to the one
   // registered in that slot. Uses e.code (Digit1–Digit4) for layout independence.
   // On macOS Option+1 sets e.key to "¡" but e.code stays "Digit1".
@@ -856,6 +925,8 @@ export const SessionProvider: ParentComponent = (props) => {
     hasRunningTools,
     compacted,
     guidanceActive,
+    pendingPermissions,
+    respondPermission,
     models,
     selectedModel,
     selectModel,

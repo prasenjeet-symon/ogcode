@@ -40,6 +40,12 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		path = filepath.Join(tctx.SessionDir, path)
 	}
 
+	// Serialize the read-modify-write with any concurrent write/edit to the same
+	// file. The agent loop runs a turn's tool calls in parallel; without this an
+	// interleaved write could make edit operate on stale content or clobber it.
+	unlock := lockPath(path)
+	defer unlock()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read file: %w", err)

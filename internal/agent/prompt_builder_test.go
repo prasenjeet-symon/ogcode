@@ -96,7 +96,7 @@ func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
 	// The base system prompt must NOT contain the current date — it's injected
 	// separately as a system-reminder so the Anthropic prompt cache prefix stays
 	// byte-for-byte identical across turns.
-	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", nil, 1920, 1080)
+	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", 1920, 1080)
 	if strings.Contains(prompt, "Current date:") {
 		t.Error("did not expect 'Current date:' in the base system prompt (it should be in a separate system-reminder entry)")
 	}
@@ -125,9 +125,9 @@ func TestBuildSystemPrompt_OSEnvStaticAcrossAgents(t *testing.T) {
 	// gets the same cacheable prefix lines, so the prompt stays cache-stable
 	// regardless of which agent runs.
 	detectedOSEnv = nil // force re-detection
-	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", nil, 0, 0)
-	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", nil, 0, 0)
-	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", nil, 0, 0)
+	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", 0, 0)
+	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", 0, 0)
+	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", 0, 0)
 
 	for name, p := range map[string]string{"build": buildPrompt, "plan": planPrompt, "note": notePrompt} {
 		if !strings.Contains(p, "OS:") {
@@ -399,14 +399,14 @@ func TestBuildSystemPrompt_FinalInstructionLast(t *testing.T) {
 	}
 	// Viewport dims are provided so a dynamic section is appended before the
 	// final instruction — proving it really is last.
-	p := buildSystemPrompt(NoteAgent, "/tmp/proj", false, "", "", nil, 1920, 1080)
+	p := buildSystemPrompt(NoteAgent, "/tmp/proj", false, "", "", 1920, 1080)
 	if !strings.HasSuffix(p, NoteAgent.FinalInstruction) {
 		t.Error("NoteAgent FinalInstruction should be the final content of the assembled prompt")
 	}
 	if BuildAgent.FinalInstruction != "" {
 		t.Error("BuildAgent should not define a FinalInstruction")
 	}
-	bp := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", nil, 0, 0)
+	bp := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0)
 	if strings.HasSuffix(bp, "Reminder:") {
 		t.Error("BuildAgent prompt should not gain a stray final reminder")
 	}
@@ -614,14 +614,14 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 
 	// BuildAgent has latex_to_pdf tool — should get LaTeX info injected
 	if _, err := exec.LookPath("pdflatex"); err == nil {
-		prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", nil, 1920, 1080)
+		prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", 1920, 1080)
 		if !strings.Contains(prompt, "LaTeX environment") {
 			t.Error("expected LaTeX environment section in BuildAgent prompt when pdflatex is available")
 		}
 	}
 
 	// PlanAgent does NOT have latex_to_pdf tool — should NOT get LaTeX info
-	prompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", nil, 1920, 1080)
+	prompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", 1920, 1080)
 	if strings.Contains(prompt, "LaTeX environment") {
 		t.Error("did NOT expect LaTeX environment section in PlanAgent prompt (no latex_to_pdf tool)")
 	}

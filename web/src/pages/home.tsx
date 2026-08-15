@@ -150,7 +150,7 @@ function HomeContent() {
     <div class="flex h-screen w-full">
       <SessionSidebar />
 
-      <div class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
+      <div class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
         {/* Ambient background glow — subtle accent radial */}
         <div
           class="pointer-events-none absolute inset-0 opacity-60"

@@ -4,6 +4,7 @@ import { useServer } from '../context/server';
 import { createEffect, createMemo, createSignal, on, Show } from 'solid-js';
 import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
+import PermissionPrompt from '../components/permission-prompt';
 import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
 import MemoryDialog from '../components/memory-dialog';
@@ -74,7 +75,7 @@ function ChatContent() {
   return (
     <div class="flex h-screen w-full">
       <SessionSidebar />
-      <div class="flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
+      <div class="page-enter flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
         {/* Header */}
         <header class="h-11 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-4 backdrop-blur-sm overflow-visible" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(15,15,18,0.8)', 'z-index': 100 }}>
           <div class="flex items-center gap-2 min-w-0 flex-1">
@@ -145,6 +146,9 @@ function ChatContent() {
 
         {/* Messages */}
         <MessageList />
+
+        {/* Tool permission approval (blocks the loop until answered) */}
+        <PermissionPrompt />
 
         {/* Input */}
         <PromptInput />

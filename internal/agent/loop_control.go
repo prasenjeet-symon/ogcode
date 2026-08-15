@@ -260,6 +260,26 @@ func WithoutLoopControl(ctx context.Context) context.Context {
 	return context.WithValue(ctx, loopControlKey{}, nil)
 }
 
+// --- permission gating integration ---
+
+type permissionGatingKey struct{}
+
+// WithPermissionGating marks a context as belonging to an interactive session
+// that has a UI able to answer permission prompts. Only loops started with this
+// flag will pause on an "Ask" permission decision; headless loops (task,
+// breakdown, note, search, CLI) never carry it, so they never block waiting for
+// an approval that no one is there to give.
+func WithPermissionGating(ctx context.Context) context.Context {
+	return context.WithValue(ctx, permissionGatingKey{}, true)
+}
+
+// PermissionGatingEnabled reports whether this context was started as an
+// interactive, permission-gated session.
+func PermissionGatingEnabled(ctx context.Context) bool {
+	enabled, _ := ctx.Value(permissionGatingKey{}).(bool)
+	return enabled
+}
+
 // guidanceLabel is the heading prepended to accumulated guidance text when it
 // is appended to the user's turn message. It labels the injected content so the
 // model understands this is mid-loop guidance from the user, not a new turn.

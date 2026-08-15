@@ -9,16 +9,16 @@ type Agent struct {
 	System      string
 	// FinalInstruction, if set, is appended as the very last line of the fully
 	// assembled system prompt — after all dynamic sections (project context,
-	// MCP skills, viewport, etc.). Output-only agents use it to keep their
-	// "respond with only X" constraint adjacent to the model's response, where
-	// it has the most influence, instead of being buried mid-prompt.
+	// viewport, etc.). Output-only agents use it to keep their "respond with
+	// only X" constraint adjacent to the model's response, where it has the most
+	// influence, instead of being buried mid-prompt.
 	FinalInstruction string
 }
 
 // codingAgentTools is the shared full-access toolset used by both the
 // interactive BuildAgent and the headless TaskAgent — they differ only in their
 // system prompt framing, not their capabilities.
-var codingAgentTools = []string{"bash", "read", "write", "edit", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image"}
+var codingAgentTools = []string{"bash", "read", "write", "edit", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task"}
 
 // codingAgentSystem builds the full-access coding-agent system prompt. The two
 // modes share the same body but differ in framing:
@@ -128,7 +128,7 @@ var PlanAgent = Agent{
 	ID:          "plan",
 	Name:        "Plan",
 	Description: "Planning agent — reads and understands code, plans changes but never writes",
-	Tools:       []string{"bash", "read", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image"},
+	Tools:       []string{"bash", "read", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image", "task"},
 	System: `You are a planning agent. Your role is to understand the user's goal, ground it in the actual codebase, and produce a clear, structured implementation plan that can be directly broken into executable git tasks.
 
 ` + projectIndexPrompt("plan") + `
@@ -339,6 +339,41 @@ Do NOT add a third round of searches or fetches unless the results are clearly i
 ` + parallelToolCallsPrompt(),
 }
 
+// SubagentAgent is the autonomous, read-only sub-agent invoked via the `task`
+// tool. It runs headless from a clean context to investigate a self-contained
+// question, then returns a written answer. It is deliberately depth-1 — its
+// toolset omits `task`, so it cannot spawn further sub-agents — and read-only —
+// no write/edit and no bash, so a headless, ungated child can never mutate the
+// project or run shell commands.
+var SubagentAgent = Agent{
+	ID:               "subagent",
+	Name:             "Subagent",
+	Description:      "Read-only investigation sub-agent invoked via the task tool",
+	Tools:            []string{"read", "glob", "grep", "memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image"},
+	FinalInstruction: "Reminder: your entire final message is what the caller receives. Answer the task directly and completely — findings, file paths, and specifics — with no preamble like \"here is what I found\". If you could not determine something, say so plainly.",
+	System: `You are an autonomous investigation sub-agent. Another agent has delegated a single, self-contained task to you. You work from a clean context: you cannot see the parent conversation, only the task you were given. You are read-only — you explore and report, you never change anything.
+
+` + projectIndexPrompt("subagent") + `
+
+## Your job
+
+1. **Read the task carefully.** It is your complete and only source of truth. Do exactly what it asks — no more, no less.
+
+2. **Investigate efficiently.** Start with codebase_map (scoped to the relevant area) to orient, then use read, glob, and grep to gather the specific facts the task needs. If the task requires current external knowledge (library docs, APIs, versions), use deep_search. Focus tightly on what the task asks — do not explore the whole codebase.
+
+3. **Report back.** Produce a single, self-contained written answer that fully addresses the task. Be concrete: exact file paths, symbol names, line references, and short relevant snippets. Your answer is consumed by another agent that will act on it, so precision matters more than prose.
+
+` + parallelToolCallsPrompt() + `
+
+## Hard rules
+
+- You are READ-ONLY. You have no write, edit, or shell tools — do not claim to have made any change.
+- Only reference file paths and symbols you have actually read. Never invent paths, names, or details.
+- Stay strictly within the delegated task. Do not expand scope or start unrelated work.
+- If the task is ambiguous or you hit a dead end, report what you found and what remains uncertain — do not guess.
+` + "\n" + noPackageManagerDirsPrompt(),
+}
+
 func (a *Agent) HasTool(toolID string) bool {
 	for _, t := range a.Tools {
 		if t == toolID {
@@ -372,6 +407,8 @@ func GetAgent(name string) Agent {
 		return IndexAgent
 	case "search":
 		return SearchAgent
+	case "subagent":
+		return SubagentAgent
 	default:
 		return BuildAgent
 	}

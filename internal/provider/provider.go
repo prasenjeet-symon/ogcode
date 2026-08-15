@@ -5,7 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 )
+
+// streamIdleTimeout bounds how long a streaming response may go with NO data
+// before it is aborted. The HTTP client timeout covers the whole request (600s),
+// which lets a silently-stalled stream hang for minutes; this idle watchdog —
+// reset on every received chunk — surfaces a dead connection promptly instead.
+// It is deliberately generous so a slow time-to-first-token doesn't trip it.
+const streamIdleTimeout = 120 * time.Second
 
 type StreamEventType string
 
@@ -104,6 +112,10 @@ type ModelInfo struct {
 	InputPricePerM  float64 `json:"inputPricePerM"`
 	OutputPricePerM float64 `json:"outputPricePerM"`
 	SupportsImages  bool    `json:"supportsImages"`
+	// ContextWindow is the model's total context length in tokens (0 = unknown).
+	// Used to size the compaction trigger; when 0 the loop falls back to a fixed
+	// byte-size heuristic.
+	ContextWindow int `json:"contextWindow,omitempty"`
 	// Collection is an optional grouping label for dynamically-fetched models
 	// from OpenAI-compatible providers (e.g. "DeepSeek", "Gemini") so the UI can
 	// group them instead of collapsing everything under the OpenAI provider id.
@@ -201,6 +213,23 @@ func (r *Registry) ModelSupportsImages(modelID string) bool {
 		}
 	}
 	return false
+}
+
+// ContextWindow returns the model's total context length in tokens, or 0 when
+// unknown (dynamically-fetched models without catalog metadata). Callers treat
+// 0 as "fall back to a size heuristic".
+func (r *Registry) ContextWindow(modelID string) int {
+	if modelID == "" {
+		return 0
+	}
+	for _, p := range r.snapshot() {
+		for _, m := range p.Models() {
+			if m.ID == modelID {
+				return m.ContextWindow
+			}
+		}
+	}
+	return 0
 }
 
 func (r *Registry) RegisterCustomModel(modelID, providerID string) {

@@ -11,15 +11,22 @@ import (
 
 type ReadTool struct{}
 
-func (ReadTool) ID() string          { return "read" }
-func (ReadTool) Description() string { return "Read file contents or list directory contents" }
+// defaultReadLimit is the number of lines returned when the caller passes no
+// limit. It bounds a single read so a large file doesn't flood the context;
+// callers page through the rest with offset.
+const defaultReadLimit = 2000
+
+func (ReadTool) ID() string { return "read" }
+func (ReadTool) Description() string {
+	return "Read file contents or list directory contents. Reads up to 2000 lines by default; use offset/limit to page through larger files."
+}
 func (ReadTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File or directory path"},
-			"offset": {"type": "number", "description": "Line offset to start reading from"},
-			"limit": {"type": "number", "description": "Maximum number of lines to read"}
+			"offset": {"type": "number", "description": "Line offset to start reading from (0-based)"},
+			"limit": {"type": "number", "description": "Maximum number of lines to read (default 2000)"}
 		},
 		"required": ["path"]
 	}`)
@@ -70,23 +77,66 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	}
 
 	lines := strings.Split(string(data), "\n")
+	totalLines := len(lines)
+
 	start := input.Offset
-	if start > len(lines) {
-		start = len(lines)
+	if start < 0 {
+		start = 0
 	}
-	end := len(lines)
-	if input.Limit > 0 && start+input.Limit < end {
-		end = start + input.Limit
+	if start > totalLines {
+		start = totalLines
 	}
 
-	// Add line numbers
+	// Default to a bounded window when the caller gives no limit, so reading a
+	// large file doesn't dump the whole thing into the model context (and re-send
+	// it on every subsequent step of the turn). The model can page with offset.
+	limit := input.Limit
+	if limit <= 0 {
+		limit = defaultReadLimit
+	}
+	end := start + limit
+	if end > totalLines {
+		end = totalLines
+	}
+
+	// Add line numbers, capping any single very long line and the total byte
+	// size so one read can't blow the budget on its own.
 	var numbered []string
-	for i := start; i < end; i++ {
-		numbered = append(numbered, fmt.Sprintf("%6d\t%s", i+1, lines[i]))
+	byteCount := 0
+	truncatedByBytes := false
+	i := start
+	for ; i < end; i++ {
+		ln := lines[i]
+		if len(ln) > MaxLineLength {
+			ln = ln[:MaxLineLength] + lineTruncatedSuffix
+		}
+		entry := fmt.Sprintf("%6d\t%s", i+1, ln)
+		// Stop before exceeding the byte cap, but always emit at least one line.
+		if byteCount+len(entry) > MaxToolOutputBytes && len(numbered) > 0 {
+			truncatedByBytes = true
+			break
+		}
+		numbered = append(numbered, entry)
+		byteCount += len(entry) + 1 // +1 for the joining newline
+	}
+	shownEnd := i // exclusive index of the last line shown + 1
+
+	output := strings.Join(numbered, "\n")
+	truncated := false
+	switch {
+	case truncatedByBytes:
+		output += fmt.Sprintf("\n\n(Output capped at %d KB. Showing lines %d-%d of %d. Use offset=%d to continue.)",
+			MaxToolOutputBytes/1024, start+1, shownEnd, totalLines, shownEnd)
+		truncated = true
+	case shownEnd < totalLines:
+		output += fmt.Sprintf("\n\n(Showing lines %d-%d of %d. Use offset=%d to continue.)",
+			start+1, shownEnd, totalLines, shownEnd)
+		truncated = true
 	}
 
 	return Result{
-		Title:  filepath.Base(path),
-		Output: strings.Join(numbered, "\n"),
+		Title:     filepath.Base(path),
+		Output:    output,
+		Truncated: truncated,
 	}, nil
 }

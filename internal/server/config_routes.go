@@ -144,20 +144,13 @@ func (s *Server) configPayload() map[string]any {
 	if s.mem != nil && s.mem.Graph != nil && s.mem.Graph.Embed != nil {
 		memoryProvider = "ogcode-embedded"
 	}
-	mcpEnabled := s.mcpClient != nil
-	mcpProvider := ""
-	if mcpEnabled {
-		mcpProvider = s.mcpCfg.Command
-	}
 	return map[string]any{
-		"directory":       s.dir,
-		"port":            s.port,
-		"memoryEnabled":   memoryEnabled,
-		"memoryProvider":  memoryProvider,
-		"mcpEnabled":      mcpEnabled,
-		"mcpProvider":     mcpProvider,
-		"searchEnabled":   s.searchBridge != nil,
-		"searchRunning":   s.searchBridge != nil,
+		"directory":      s.dir,
+		"port":           s.port,
+		"memoryEnabled":  memoryEnabled,
+		"memoryProvider": memoryProvider,
+		"searchEnabled":  s.searchBridge != nil,
+		"searchRunning":  s.searchBridge != nil,
 	}
 }
 

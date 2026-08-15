@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -472,6 +473,7 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 				InputPricePerM:  m.InputPricePerM,
 				OutputPricePerM: m.OutputPricePerM,
 				SupportsImages:  m.SupportsImages,
+				ContextWindow:   m.ContextWindow,
 			})
 		}
 	}
@@ -655,6 +657,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	flushImages()
 
 	tools := make([]oaiTool, 0, len(req.Tools))
+	toolNames := make(map[string]bool, len(req.Tools))
 	for _, t := range req.Tools {
 		tools = append(tools, oaiTool{
 			Type: "function",
@@ -664,6 +667,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 				Parameters:  t.Parameters,
 			},
 		})
+		toolNames[t.Name] = true
 	}
 
 	body := oaiRequest{
@@ -685,7 +689,19 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 
 	url := strings.TrimRight(p.baseURL, "/") + "/chat/completions"
 	slog.Info("streaming chat request", "provider", p.id, "model", model, "url", url, "body_bytes", len(jsonBody))
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+
+	// Derive a cancellable request context so the idle watchdog in streamEvents
+	// can abort a silently-stalled stream. On any early return (before the reader
+	// goroutine takes ownership) the deferred guard cancels it so it never leaks.
+	reqCtx, reqCancel := context.WithCancel(ctx)
+	streamStarted := false
+	defer func() {
+		if !streamStarted {
+			reqCancel()
+		}
+	}()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -742,7 +758,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 			return nil, ctx.Err()
 		case <-time.After(delay):
 		}
-		httpReq, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+		httpReq, err = http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(jsonBody))
 		if err != nil {
 			return nil, fmt.Errorf("create retry request: %w", err)
 		}
@@ -765,18 +781,26 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		slog.Error("API error response", "provider", p.id, "status", resp.StatusCode, "body", string(body))
-		return nil, fmt.Errorf("%s API error %d: %s", p.id, resp.StatusCode, string(body))
+		return nil, NewAPIError(p.id, resp, string(body))
 	}
 	slog.Info("stream connected", "provider", p.id, "model", model)
 
 	ch := make(chan StreamEvent, 256)
-	go p.streamEvents(resp.Body, ch)
+	streamStarted = true
+	go p.streamEvents(resp.Body, ch, reqCancel, toolNames)
 	return ch, nil
 }
 
-func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent) {
+func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent, cancel context.CancelFunc, toolNames map[string]bool) {
 	defer body.Close()
 	defer close(ch)
+	defer cancel()
+
+	// Idle watchdog: if the stream goes silent for streamIdleTimeout, cancel the
+	// request context so the blocked read unblocks and the stream ends, instead
+	// of hanging until the 600s HTTP client timeout. Reset on every line received.
+	idle := time.AfterFunc(streamIdleTimeout, cancel)
+	defer idle.Stop()
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -784,7 +808,16 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent)
 	// Track active tool calls by index so we can match deltas
 	activeToolCalls := make(map[int]string) // index -> callID
 
+	// Weak/open models (e.g. many served via Ollama) sometimes emit a tool call
+	// as plain text — a JSON object in the content — instead of via the structured
+	// tool_calls field. That leaves the agent with nothing to execute, so the turn
+	// stops mid-task. Accumulate the text content and, if the stream produced no
+	// structured tool call, try to recover one from the text at the end.
+	var contentBuf strings.Builder
+	sawToolCall := false
+
 	for scanner.Scan() {
+		idle.Reset(streamIdleTimeout)
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -832,10 +865,12 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent)
 		}
 
 		if delta.Content != "" {
+			contentBuf.WriteString(delta.Content)
 			ch <- StreamEvent{Type: EventTextDelta, Text: delta.Content}
 		}
 
 		if len(delta.ToolCalls) > 0 {
+			sawToolCall = true
 			for _, tc := range delta.ToolCalls {
 				if tc.ID != "" {
 					// New tool call starting
@@ -870,6 +905,120 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent)
 			ch <- StreamEvent{Type: EventFinish, FinishReason: choice.FinishReason}
 		}
 	}
+
+	// Fallback: the model produced no structured tool call. If its text content
+	// contains a tool call it emitted as JSON prose (naming a tool that was
+	// actually offered), synthesise a real tool call so the agent executes it and
+	// the task continues instead of stalling. Guarded by the offered-tool-name set
+	// to avoid mistaking an illustrative JSON snippet for a call.
+	if !sawToolCall {
+		if name, args, ok := parseTextToolCall(contentBuf.String(), toolNames); ok {
+			id := fmt.Sprintf("call_txt_%d", textToolCallSeq.Add(1))
+			slog.Info("recovered tool call emitted as text", "provider", p.id, "tool", name, "callID", id)
+			ch <- StreamEvent{Type: EventToolCallStart, ToolCallID: id, ToolName: name, ToolInput: args}
+			ch <- StreamEvent{Type: EventToolCallEnd, ToolCallID: id, ToolName: name}
+		}
+	}
+}
+
+// textToolCallSeq generates process-unique IDs for tool calls recovered from
+// text, so each synthesised call has a distinct tool_call id like a real one.
+var textToolCallSeq atomic.Uint64
+
+// parseTextToolCall scans free-form model output for a tool call the model wrote
+// as text — a JSON object with a "name" (or "tool") field plus "arguments"/
+// "parameters" — instead of using the structured tool_calls API. It returns the
+// tool name and its arguments as a JSON object. To avoid false positives it only
+// accepts a name present in offered (the set of tools actually advertised this
+// request); ok is false when nothing qualifies.
+func parseTextToolCall(text string, offered map[string]bool) (name string, args json.RawMessage, ok bool) {
+	for _, obj := range candidateJSONObjects(text) {
+		var probe struct {
+			Name       string          `json:"name"`
+			Tool       string          `json:"tool"`
+			Arguments  json.RawMessage `json:"arguments"`
+			Parameters json.RawMessage `json:"parameters"`
+		}
+		if json.Unmarshal(obj, &probe) != nil {
+			continue
+		}
+		n := probe.Name
+		if n == "" {
+			n = probe.Tool
+		}
+		if n == "" || !offered[n] {
+			continue
+		}
+		raw := probe.Arguments
+		if len(raw) == 0 {
+			raw = probe.Parameters
+		}
+		return n, normalizeToolArgs(raw), true
+	}
+	return "", nil, false
+}
+
+// candidateJSONObjects returns every top-level balanced {...} region in text, in
+// order. It tracks string literals so braces inside JSON strings are ignored.
+func candidateJSONObjects(text string) []json.RawMessage {
+	var out []json.RawMessage
+	depth, start := 0, -1
+	inStr, esc := false, false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+				if depth == 0 && start >= 0 {
+					out = append(out, json.RawMessage(text[start:i+1]))
+					start = -1
+				}
+			}
+		}
+	}
+	return out
+}
+
+// normalizeToolArgs coerces a tool call's arguments into a JSON object. The value
+// may be an object, a JSON string that itself contains an object (double-encoded,
+// as some models emit), or absent — anything that isn't a usable object becomes {}.
+func normalizeToolArgs(raw json.RawMessage) json.RawMessage {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 {
+		return json.RawMessage("{}")
+	}
+	if raw[0] == '{' {
+		return raw
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			s = strings.TrimSpace(s)
+			if len(s) > 0 && s[0] == '{' && json.Valid([]byte(s)) {
+				return json.RawMessage(s)
+			}
+		}
+	}
+	return json.RawMessage("{}")
 }
 
 // OpenAI API types

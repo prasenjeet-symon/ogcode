@@ -141,7 +141,12 @@ export function sendPrompt(sessionId: string, content: string, images?: ImagePar
   });
 }
 
-export function replyPermission(sessionId: string, permissionId: string, response: string): Promise<void> {
+export type PermissionResponse = 'once' | 'always' | 'reject';
+
+// Answer a pending tool-permission request. The agent loop is blocked waiting on
+// this reply; the backend returns 404 when the request is already gone (already
+// answered or cancelled), which the caller can safely ignore.
+export function replyPermission(sessionId: string, permissionId: string, response: PermissionResponse): Promise<void> {
   return fetchAPI(`/session/${sessionId}/permission/${permissionId}`, {
     method: 'POST',
     body: JSON.stringify({ response }),

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -12,9 +13,9 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/id"
-	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/memory"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
+	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
@@ -30,8 +31,12 @@ type LoopRunner struct {
 	Dir             string
 	MaxSteps        int
 	Memory          *memory.Memory
-	MCP             *mcp.Client
 	NoteStore       *note.Store
+	// Permissions gates mutating tool calls (bash/write/edit) behind user
+	// approval. nil disables gating entirely (CLI, tests). Even when set, a loop
+	// only prompts when its context carries WithPermissionGating — so headless
+	// runs (task, breakdown, note, search) never block on an approval UI.
+	Permissions *permission.Manager
 }
 
 // RunLoop executes the core agent loop: prompt -> stream -> tools -> loop back.
@@ -121,33 +126,16 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 	memoryEnabled := lr.Memory != nil && lr.Memory.Enabled()
 
-	var p provider.Provider
-	var modelID string
-	if sess != nil && sess.Model != "" {
-		slog.Info("resolving model for session", "session", sessionID, "requestedModel", sess.Model)
-		p = lr.Registry.ResolveProvider(sess.Model)
-		modelID = sess.Model
-		if p != nil {
-			slog.Info("resolved provider for model", "session", sessionID, "model", sess.Model, "provider", p.ID())
-		} else {
-			slog.Warn("failed to resolve provider for model, using default", "session", sessionID, "model", sess.Model)
-		}
-	}
-	if p == nil {
-		slog.Info("using default provider", "session", sessionID)
-		// Prefer the registry's current default so credential changes applied at
-		// runtime (onboarding/settings) take effect; fall back to the immutable
-		// startup default only when no provider is configured at all.
-		if dp := lr.Registry.Default(); dp != nil {
-			p = dp
-		} else {
-			p = lr.DefaultProvider
-		}
-	}
+	// Resolve the provider/model and the two fixed per-run model attributes.
+	p, modelID, modelSupportsImages, modelContextWindow := lr.resolveRunModel(ctx, sess, sessionID)
+	compactionThreshold := compactionThresholdTokens(modelContextWindow)
 
-	// Whether the active model accepts image input — passed to tools so they can
-	// decide to return an image (e.g. a rendered PDF page) instead of text.
-	modelSupportsImages := lr.resolveImageSupport(ctx, p, modelID)
+	// lastInputTokens is the provider-reported input-side token count from the
+	// previous step's response (Input + CacheRead + CacheWrite) — the exact size
+	// the model processed. The proactive-compaction check prefers it over the
+	// byte estimate once a step has completed; it stays 0 on the first step,
+	// where the estimate is the only signal available.
+	lastInputTokens := 0
 
 	// Restore compaction summary from a previous turn (persisted in the session row).
 	// Applied on every step so all future LLM calls stay within the context window.
@@ -218,6 +206,23 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		}
 	}
 
+	// In-memory working set of the conversation. The DB stays the durable log
+	// (all streaming/tool writes go there), but re-reading and re-unmarshaling the
+	// entire history on every iteration is wasteful on long, many-step turns.
+	// Instead we load the full history once, then fold in only the messages this
+	// loop creates, identified by their known IDs. We deliberately do NOT use a
+	// time/ID cursor: the message ULIDs are millisecond-timestamped with
+	// non-monotonic entropy, so two messages in the same millisecond can sort in
+	// either order — a "> lastID" delta fetch could silently skip one. Known-ID
+	// folding is exact and preserves creation order; a message deleted mid-turn
+	// (an orphaned, guidance-cancelled assistant) returns (nil,nil) from
+	// GetMessage and is skipped, so the working set matches what a full reload
+	// would produce. Draining at the top of the loop covers every loop-back path.
+	const workingSetCap = 1000
+	var messages []*session.MessageWithParts
+	messagesLoaded := false
+	var newMessageIDs []session.MessageID // created in the prior iteration, folded in next
+
 	for step := 1; step <= maxSteps; step++ {
 		if step == maxSteps {
 			slog.Warn("agent loop reached MaxSteps limit", "session", sessionID, "maxSteps", maxSteps)
@@ -249,21 +254,48 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 		}
 
-		// Load all messages for this session (retry on DB contention)
-		var messages []*session.MessageWithParts
-		for dbAttempt := 0; dbAttempt < 3; dbAttempt++ {
-			messages, err = lr.Store.GetMessages(sessionID, "", 1000)
-			if err == nil {
-				break
+		// Refresh the in-memory working set. First iteration: full load (retry on
+		// DB contention). Subsequent iterations: fold in the messages the previous
+		// iteration created, by known ID and in creation order.
+		if !messagesLoaded {
+			for dbAttempt := 0; dbAttempt < 3; dbAttempt++ {
+				messages, err = lr.Store.GetMessages(sessionID, "", workingSetCap)
+				if err == nil {
+					break
+				}
+				slog.Warn("get messages failed, retrying", "session", sessionID, "attempt", dbAttempt+1, "err", err)
+				if dbAttempt < 2 {
+					time.Sleep(time.Duration(dbAttempt+1) * 500 * time.Millisecond)
+				}
 			}
-			slog.Warn("get messages failed, retrying", "session", sessionID, "attempt", dbAttempt+1, "err", err)
-			if dbAttempt < 2 {
-				time.Sleep(time.Duration(dbAttempt+1) * 500 * time.Millisecond)
+			if err != nil {
+				return fmt.Errorf("load messages: %w", err)
+			}
+			messagesLoaded = true
+		} else {
+			for _, mid := range newMessageIDs {
+				m, gerr := lr.Store.GetMessage(mid)
+				if gerr != nil {
+					// A transient read failure would drop a message from the working
+					// set and desync the conversation, so fall back to a full reload.
+					slog.Warn("fold message into working set failed; reloading", "session", sessionID, "message", mid, "err", gerr)
+					messages, err = lr.Store.GetMessages(sessionID, "", workingSetCap)
+					if err != nil {
+						return fmt.Errorf("reload messages: %w", err)
+					}
+					break
+				}
+				if m != nil { // nil ⇒ deleted (orphaned assistant) — skip
+					messages = append(messages, m)
+				}
+			}
+			// Bound the working set to the most recent messages, mirroring the old
+			// full-reload window; compaction bounds the actual request size.
+			if len(messages) > workingSetCap {
+				messages = messages[len(messages)-workingSetCap:]
 			}
 		}
-		if err != nil {
-			return fmt.Errorf("load messages: %w", err)
-		}
+		newMessageIDs = newMessageIDs[:0]
 
 		// Check if we should continue: last assistant finished means done
 		if shouldBreak(messages) {
@@ -313,6 +345,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		if err := lr.Store.CreateMessage(assistantMsg); err != nil {
 			return fmt.Errorf("create assistant message: %w", err)
 		}
+		// Track for folding into the next iteration's working set. If this message
+		// is later orphaned and deleted, GetMessage returns nil and it's skipped.
+		newMessageIDs = append(newMessageIDs, assistantID)
 
 		// Resolve tools for this agent
 		agentTools := lr.Tools.ForAgent(agent.Tools)
@@ -325,24 +360,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			})
 		}
 
-		// Add MCP tools if available
-		if lr.MCP != nil {
-			for name, td := range lr.MCP.Tools() {
-				providerTools = append(providerTools, provider.ToolDefinition{
-					Name:        name,
-					Description: td.Description,
-					Parameters:  td.InputSchema,
-				})
-			}
-		}
 		slog.Info("resolved tools", "count", len(providerTools))
 
-		// Build system prompt
-		var mcpTools map[string]mcp.ToolDef
-		if lr.MCP != nil {
-			mcpTools = lr.MCP.Tools()
+		// Build system prompt, tuned to the model's family (Claude / GPT / Gemini /
+		// local). The family is fixed for the session, so this stays cache-stable.
+		providerID := ""
+		if p != nil {
+			providerID = p.ID()
 		}
-		system := buildSystemPrompt(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, mcpTools, viewportWidth, viewportHeight)
+		system := buildSystemPromptForFamily(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID))
 
 		// The base system prompt is static within a session (no date, no
 		// per-turn content) so it stays byte-for-byte identical across turns.
@@ -446,23 +472,27 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// requests that will fail with context-length errors (especially with
 		// smaller local models like Ollama). We only do this once per step
 		// to avoid compaction loops.
-		const maxRequestBodyBytes = 500 * 1024 // 500KB is a safe upper bound for most models
-		estimatedSize := estimateRequestSize(streamReq)
-		if !memoryEnabled && estimatedSize > maxRequestBodyBytes && compactionCount == 0 {
+		//
+		// The threshold is derived from the model's context window when known
+		// (compact at contextWindow − reserve), so a 200k model uses far more of
+		// its window than a small local model — instead of a single fixed cap
+		// that is simultaneously too high for tiny models and too low for large
+		// ones. Unknown windows fall back to a fixed token cap.
+		maxRequestTokens := compactionThreshold
+		// Prefer the provider-reported input token count from the previous step
+		// when we have one: it is the exact size the model processed. Otherwise use
+		// the local estimate (which now counts tool schemas and uses a BPE-aware
+		// heuristic instead of bytes÷4). Take the larger of the two — the reported
+		// count catches under-counting, and the fresh estimate catches the newest
+		// tool results not yet reflected in any reported count — so the check errs
+		// toward compacting early rather than overflowing.
+		requestTokens := effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
+		if !memoryEnabled && requestTokens > maxRequestTokens && compactionCount == 0 {
 			before := len(streamReq.Messages)
-			slog.Info("proactive compaction: estimated request body exceeds threshold", "session", sessionID, "estimatedBytes", estimatedSize, "threshold", maxRequestBodyBytes, "messages", before)
-			summaryAddendum, compactedMsgs := lr.llmCompact(ctx, p, modelID, streamReq.Messages)
-			streamReq.Messages = compactedMsgs
-			if summaryAddendum != "" {
-				streamReq.System = append(streamReq.System, summaryAddendum)
-				compactionSummary = summaryAddendum
-				if err := lr.Store.UpdateCompactionSummary(sessionID, summaryAddendum); err != nil {
-					slog.Error("persist compaction summary", "err", err)
-				}
-			}
+			slog.Info("proactive compaction: request tokens exceed threshold", "session", sessionID, "estimatedTokens", requestTokens, "reportedInputTokens", lastInputTokens, "thresholdTokens", maxRequestTokens, "contextWindow", modelContextWindow, "messages", before)
+			compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
 			compactionCount++
-			slog.Info("proactive compaction completed", "session", sessionID, "before", before, "after", len(streamReq.Messages), "newEstimatedBytes", estimateRequestSize(streamReq))
-			lr.Bus.Publish("loop.compacted", map[string]string{"sessionId": string(sessionID)})
+			slog.Info("proactive compaction completed", "session", sessionID, "before", before, "after", len(streamReq.Messages), "newEstimatedTokens", estimateRequestTokens(streamReq))
 		}
 
 		slog.Info("calling LLM", "session", sessionID, "step", step, "model", modelID, "messages", len(streamReq.Messages))
@@ -486,7 +516,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// text was streamed) is finalized below as a normal "stop".
 			if streamCtx.Err() != nil && ctx.Err() == nil {
 				slog.Info("stream cancelled by mid-loop guidance", "session", sessionID, "step", step)
-				streamCh = nil
+				// Use a pre-closed channel, NOT nil: ranging over a nil channel
+				// blocks forever, which would deadlock the loop at the
+				// `for evt := range streamCh` below with no way to recover — the
+				// abort check is inside that loop body and never runs. A closed
+				// channel makes the range exit immediately and fall through to the
+				// guidance-cancel finalization path (which finishes the turn as a
+				// "stop", deletes the orphan assistant message, and continues the
+				// loop to drain the pending guidance).
+				closed := make(chan provider.StreamEvent)
+				close(closed)
+				streamCh = closed
 				streamErr = nil
 				break
 			}
@@ -497,27 +537,25 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if !memoryEnabled && compactionCount < maxCompactions && isContextLengthError(streamErr) {
 				before := len(streamReq.Messages)
 				slog.Info("context length exceeded, using LLM to compact history", "session", sessionID, "messages", before)
-				summaryAddendum, compactedMsgs := lr.llmCompact(ctx, p, modelID, streamReq.Messages)
-				streamReq.Messages = compactedMsgs
-				if summaryAddendum != "" {
-					streamReq.System = append(streamReq.System, summaryAddendum)
-					// Persist so future steps and future turns reuse the same summary.
-					// Use the column-specific updater to avoid overwriting concurrent
-					// changes to other session fields (title, model, etc.).
-					compactionSummary = summaryAddendum
-					if err := lr.Store.UpdateCompactionSummary(sessionID, summaryAddendum); err != nil {
-						slog.Error("persist compaction summary", "err", err)
-					}
-				}
+				compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
 				compactionCount++
 				slog.Info("llm-compacted context", "session", sessionID, "before", before, "after", len(streamReq.Messages))
-				lr.Bus.Publish("loop.compacted", map[string]string{"sessionId": string(sessionID)})
 				attempt-- // don't count compaction as a retry attempt
 				continue
 			}
 			if attempt < maxRetries && isTransientError(streamErr) {
+				// Default to a quadratic backoff (1s, 4s, 9s). When the server sent
+				// a Retry-After, honor it — it knows the rate-limit window better
+				// than our fixed schedule — but cap it so a pathological value can't
+				// stall the loop for minutes.
 				backoff := time.Duration(attempt*attempt) * time.Second
-				slog.Info("retrying stream chat", "session", sessionID, "backoff", backoff)
+				if ra := retryAfterFromError(streamErr); ra > 0 {
+					backoff = ra
+					if backoff > maxRetryBackoff {
+						backoff = maxRetryBackoff
+					}
+				}
+				slog.Info("retrying stream chat", "session", sessionID, "attempt", attempt, "backoff", backoff)
 				select {
 				case <-ctx.Done():
 					exitReason = "aborted"
@@ -803,6 +841,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				assistantMsg.Finish = &finish
 				lr.Store.UpdateMessage(assistantMsg)
 				lr.Bus.Publish("message.updated", assistantMsg)
+				// Drain the remaining events in the background (as the abort and
+				// guidance exit paths do) so the provider's reader goroutine can
+				// finish and release the HTTP connection, instead of leaking it if
+				// it was mid-send on a full channel buffer.
+				go drainStreamEvents(streamCh)
 				return fmt.Errorf("stream error: %s", evt.Error)
 			}
 		}
@@ -907,6 +950,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					streamUsage.CacheWriteTokens + streamUsage.OutputTokens,
 			}
 			assistantMsg.Tokens = &tc
+			// Carry the reported input-side token count forward so the next step's
+			// proactive-compaction check can use the exact size the model saw
+			// instead of the byte estimate.
+			lastInputTokens = streamUsage.InputTokens + streamUsage.CacheReadTokens + streamUsage.CacheWriteTokens
 		}
 		if err := lr.Store.UpdateMessage(assistantMsg); err != nil {
 			slog.Error("update message finish", "err", err)
@@ -940,10 +987,8 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 		// Execute ready tool calls in parallel for improved throughput.
 		// Built-in tools (bash, read, write, etc.) are stateless and safe for
-		// concurrent use. MCP calls are serialized by the client's mutex, so
-		// they won't truly run in parallel with each other but will run in
-		// parallel with built-in tools. DB part updates are sequential before
-		// and after the parallel execution phase to keep state consistent.
+		// concurrent use. DB part updates are sequential before and after the
+		// parallel execution phase to keep state consistent.
 		//
 		// Skip tool execution when the stream was cancelled by mid-loop guidance:
 		// the tool calls are partial (the model was interrupted mid-generation) and
@@ -960,7 +1005,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// and OpenAI both 400 on a dangling tool_use). cancelPartialToolCalls
 			// marks each part cancelled (for the UI) and emits the matching error
 			// tool-result message so the conversation history stays valid.
-			lr.cancelPartialToolCalls(sessionID, assistantID, pendingToolCalls)
+			if cancelID := lr.cancelPartialToolCalls(sessionID, assistantID, pendingToolCalls); cancelID != "" {
+				newMessageIDs = append(newMessageIDs, cancelID)
+			}
 			pendingToolCalls = nil
 		}
 		for _, tc := range pendingToolCalls {
@@ -971,168 +1018,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		toolCallsExecuted := len(readyCalls) > 0
 
 		if toolCallsExecuted {
-			if len(readyCalls) > 1 {
-				slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
-			}
-			// Check for context cancellation before starting any execution
-			if ctx.Err() != nil {
-				slog.Info("agent loop cancelled before tool execution", "session", sessionID)
-				exitReason = "aborted"
-				return ctx.Err()
-			}
-
-			type toolExecInfo struct {
-				tc     pendingToolCall
-				result tool.Result
-				err    error
-			}
-
-			// Mark all ready tool parts as "running" first (sequential — fast DB ops)
-			execInfos := make([]toolExecInfo, len(readyCalls))
-			for i, tc := range readyCalls {
-				part, _ := lr.Store.GetPart(tc.PartID)
-				if part != nil {
-					var toolData session.ToolPartData
-					json.Unmarshal(part.Data, &toolData)
-					toolData.State = session.ToolState{
-						Status: session.ToolRunning,
-						Input:  toolData.State.Input,
-						Title:  &tc.Name,
-						Time: session.ToolTime{
-							Start: session.Now(),
-						},
-					}
-					updatedData, _ := json.Marshal(toolData)
-					part.Data = updatedData
-					part.UpdatedAt = session.Now()
-					lr.Store.UpdatePart(part)
-					lr.Bus.Publish("message.part.updated", map[string]string{
-						"sessionId": string(sessionID),
-						"partId":    string(part.ID),
-					})
-				}
-				execInfos[i].tc = tc
-			}
-
-			// Derive a child context for tool execution. This allows mid-loop tool
-			// cancellation: CancelTool on the LoopControl cancels only this child,
-			// so wg.Wait() returns early with cancelled/errored results, and the
-			// loop continues to its next iteration (where it picks up any injected
-			// guidance). The loop's own ctx remains uncancelled, so the loop stays
-			// alive. When there is no LoopControl (CLI, search, indexer), the
-			// child is still derived but simply never independently cancelled —
-			// behaviour is identical to before.
-			toolCtx, toolCancel := context.WithCancel(ctx)
-			lc := LoopControlFromContext(ctx)
-			if lc != nil {
-				lc.SetToolCancel(toolCancel)
-			}
-
-			// Execute all ready tool calls concurrently
-			var wg sync.WaitGroup
-			for i := range readyCalls {
-				wg.Add(1)
-				go func(idx int) {
-					defer wg.Done()
-					tc := readyCalls[idx]
-					result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID)
-					execInfos[idx].result = result
-					execInfos[idx].err = err
-				}(i)
-			}
-			wg.Wait()
-
-			// Detect mid-loop tool cancellation BEFORE calling toolCancel() ourself.
-			// The child context was cancelled (by CancelTool via the guidance
-			// endpoint) but the loop context is still alive. We must capture this
-			// state before the cleanup call to toolCancel() below, because that
-			// call always cancels toolCtx — which would make toolCtx.Err() non-nil
-			// even on perfectly normal tool completion, producing a false-positive
-			// "cancelled by user" message.
-			toolCtxCancelled := toolCtx.Err() != nil && ctx.Err() == nil
-
-			// Clear the tool-cancel registration and release the child context.
-			if lc != nil {
-				lc.ClearToolCancel()
-			}
-			toolCancel()
-
-			// Update all tool parts with results (sequential — DB writes)
-			for _, info := range execInfos {
-				tc := info.tc
-				part, perr := lr.Store.GetPart(tc.PartID)
-				if perr != nil {
-					slog.Error("get tool part", "err", perr)
-					continue
-				}
-				if part == nil {
-					slog.Error("tool part not found", "partId", tc.PartID)
-					continue
-				}
-
-				var toolData session.ToolPartData
-				if err := json.Unmarshal(part.Data, &toolData); err != nil {
-					slog.Error("unmarshal tool data", "err", err)
-					continue
-				}
-
-				if info.err != nil {
-					errStr := info.err.Error()
-					// When the tool child context was cancelled mid-loop (not the
-					// loop itself), surface a clear cancellation message rather
-					// than a raw context.Canceled error string.
-					if toolCtxCancelled {
-						errStr = "Tool execution cancelled by user mid-loop guidance"
-					}
-					toolData.State = session.ToolState{
-						Status: session.ToolError,
-						Input:  tc.Input,
-						Error:  &errStr,
-						Title:  &tc.Name,
-						Time:   toolData.State.Time,
-					}
-				} else {
-					toolData.State = session.ToolState{
-						Status:   session.ToolCompleted,
-						Input:    tc.Input,
-						Output:   &info.result.Output,
-						Title:    &info.result.Title,
-						Metadata: mustMarshal(info.result.Metadata),
-						Time: session.ToolTime{
-							Start: toolData.State.Time.Start,
-							End:   session.Now(),
-						},
-					}
-					if info.result.Image != nil {
-						toolData.State.Image = &session.ToolImage{
-							MediaType: info.result.Image.MediaType,
-							Data:      info.result.Image.Data,
-						}
-					}
-				}
-
-				updatedData, _ := json.Marshal(toolData)
-				part.Data = updatedData
-				part.UpdatedAt = session.Now()
-				if err := lr.Store.UpdatePart(part); err != nil {
-					slog.Error("update tool part", "err", err)
-				}
-
-				lr.Bus.Publish("message.part.updated", map[string]string{
-					"sessionId": string(sessionID),
-					"partId":    string(part.ID),
-				})
-			}
-
-			// If the loop context (not just the tool child) was cancelled during
-			// execution, bail out now. The tool-result message must not be created
-			// — it would contain partial/missing outputs for unexecuted tool calls.
-			// When only the tool child was cancelled (mid-loop tool cancel via
-			// guidance), the loop context is still alive, so we fall through and
-			// create the tool-result message with the cancelled results — the
-			// call/result pairing the API expects stays valid.
-			if ctx.Err() != nil {
-				slog.Info("agent loop cancelled after tool execution", "session", sessionID)
+			if lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, agent, workDir, modelSupportsImages, modelID) {
 				exitReason = "aborted"
 				return ctx.Err()
 			}
@@ -1164,49 +1050,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			return nil
 		}
 
-		// Create a user message with tool results so the next LLM iteration sees them.
-		toolResultID := session.MessageID(id.NewMessageID())
-		toolResultMsg := &session.MessageInfo{
-			ID:        toolResultID,
-			SessionID: sessionID,
-			Role:      session.RoleUser,
-			ParentID:  &assistantID,
-			CreatedAt: session.Now(),
-		}
-		if err := lr.Store.CreateMessage(toolResultMsg); err != nil {
-			slog.Error("create tool result message", "err", err)
-		} else {
-			for _, tc := range pendingToolCalls {
-				if !tc.Ready {
-					continue
-				}
-				part, perr := lr.Store.GetPart(tc.PartID)
-				if perr != nil || part == nil {
-					continue
-				}
-				var toolData session.ToolPartData
-				if err := json.Unmarshal(part.Data, &toolData); err != nil {
-					continue
-				}
-				resultData, _ := json.Marshal(session.ToolPartData{
-					Tool:   toolData.Tool,
-					CallID: toolData.CallID,
-					State:  toolData.State,
-				})
-				resultPart := &session.Part{
-					ID:        session.PartID(id.NewPartID()),
-					MessageID: toolResultID,
-					SessionID: sessionID,
-					Type:      session.PartTool,
-					Data:      resultData,
-					CreatedAt: session.Now(),
-					UpdatedAt: session.Now(),
-				}
-				if err := lr.Store.CreatePart(resultPart); err != nil {
-					slog.Error("create tool result part", "err", err)
-				}
-			}
-			lr.Bus.Publish("message.updated", toolResultMsg)
+		// Create a user message with tool results so the next LLM iteration sees
+		// them, and fold it into the working set.
+		if resultID := lr.writeToolResultMessage(sessionID, assistantID, pendingToolCalls); resultID != "" {
+			newMessageIDs = append(newMessageIDs, resultID)
 		}
 	}
 
@@ -1230,6 +1077,58 @@ func drainStreamEvents(ch <-chan provider.StreamEvent) {
 	}
 }
 
+// writeToolResultMessage creates the user message that carries the executed tool
+// results back to the model on the next iteration, with one tool-result part per
+// ready call (copied from the assistant's now-completed tool parts). It returns
+// the new message's ID (empty on failure) so the caller can fold it into the
+// working set.
+func (lr *LoopRunner) writeToolResultMessage(sessionID session.SessionID, assistantID session.MessageID, pendingToolCalls []pendingToolCall) session.MessageID {
+	toolResultID := session.MessageID(id.NewMessageID())
+	toolResultMsg := &session.MessageInfo{
+		ID:        toolResultID,
+		SessionID: sessionID,
+		Role:      session.RoleUser,
+		ParentID:  &assistantID,
+		CreatedAt: session.Now(),
+	}
+	if err := lr.Store.CreateMessage(toolResultMsg); err != nil {
+		slog.Error("create tool result message", "err", err)
+		return ""
+	}
+	for _, tc := range pendingToolCalls {
+		if !tc.Ready {
+			continue
+		}
+		part, perr := lr.Store.GetPart(tc.PartID)
+		if perr != nil || part == nil {
+			continue
+		}
+		var toolData session.ToolPartData
+		if err := json.Unmarshal(part.Data, &toolData); err != nil {
+			continue
+		}
+		resultData, _ := json.Marshal(session.ToolPartData{
+			Tool:   toolData.Tool,
+			CallID: toolData.CallID,
+			State:  toolData.State,
+		})
+		resultPart := &session.Part{
+			ID:        session.PartID(id.NewPartID()),
+			MessageID: toolResultID,
+			SessionID: sessionID,
+			Type:      session.PartTool,
+			Data:      resultData,
+			CreatedAt: session.Now(),
+			UpdatedAt: session.Now(),
+		}
+		if err := lr.Store.CreatePart(resultPart); err != nil {
+			slog.Error("create tool result part", "err", err)
+		}
+	}
+	lr.Bus.Publish("message.updated", toolResultMsg)
+	return toolResultID
+}
+
 // cancelPartialToolCalls handles tool calls that were still being streamed when
 // mid-loop guidance cancelled the LLM stream. These calls are never executed,
 // but the assistant message already carries a persisted tool_use block for each
@@ -1239,9 +1138,11 @@ func drainStreamEvents(ch <-chan provider.StreamEvent) {
 // as running) and creates a single tool-result user message pairing every
 // cancelled tool_use with an error result, keeping the conversation valid — the
 // same call/result pairing the mid-loop tool-execution cancel path maintains.
-func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assistantID session.MessageID, calls []pendingToolCall) {
+// It returns the ID of the tool-result message it creates (empty when none was
+// created), so the caller can fold that message into its in-memory working set.
+func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assistantID session.MessageID, calls []pendingToolCall) session.MessageID {
 	if len(calls) == 0 {
-		return
+		return ""
 	}
 
 	// First pass: mark each partial tool part as cancelled (for the UI) and
@@ -1295,7 +1196,7 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 	}
 
 	if len(results) == 0 {
-		return
+		return ""
 	}
 
 	// Emit one tool-result user message pairing every cancelled tool_use with an
@@ -1310,7 +1211,7 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 	}
 	if err := lr.Store.CreateMessage(resultMsg); err != nil {
 		slog.Error("create cancelled tool-result message", "err", err)
-		return
+		return ""
 	}
 	for _, r := range results {
 		resultData, _ := json.Marshal(session.ToolPartData{
@@ -1332,6 +1233,7 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 		}
 	}
 	lr.Bus.Publish("message.updated", resultMsg)
+	return resultID
 }
 
 // writeMemory extracts the last conversation turn and persists it via memory_add.
@@ -1434,6 +1336,43 @@ func buildTurnResponse(messages []*session.MessageWithParts, userMsgIdx int) str
 // provider can't stall the first turn for long.
 const probeImageTimeout = 15 * time.Second
 
+// resolveRunModel picks the provider and model for a run and resolves the two
+// fixed per-run model attributes the loop needs (image support, context window).
+// It prefers the session's model, falling back to the registry's current default
+// and then the immutable startup default.
+func (lr *LoopRunner) resolveRunModel(ctx context.Context, sess *session.Session, sessionID session.SessionID) (p provider.Provider, modelID string, supportsImages bool, contextWindow int) {
+	if sess != nil && sess.Model != "" {
+		slog.Info("resolving model for session", "session", sessionID, "requestedModel", sess.Model)
+		p = lr.Registry.ResolveProvider(sess.Model)
+		modelID = sess.Model
+		if p != nil {
+			slog.Info("resolved provider for model", "session", sessionID, "model", sess.Model, "provider", p.ID())
+		} else {
+			slog.Warn("failed to resolve provider for model, using default", "session", sessionID, "model", sess.Model)
+		}
+	}
+	if p == nil {
+		slog.Info("using default provider", "session", sessionID)
+		// Prefer the registry's current default so credential changes applied at
+		// runtime (onboarding/settings) take effect; fall back to the immutable
+		// startup default only when no provider is configured at all.
+		if dp := lr.Registry.Default(); dp != nil {
+			p = dp
+		} else {
+			p = lr.DefaultProvider
+		}
+	}
+	// Whether the active model accepts image input — passed to tools so they can
+	// decide to return an image (e.g. a rendered PDF page) instead of text.
+	supportsImages = lr.resolveImageSupport(ctx, p, modelID)
+	// The active model's context window (0 = unknown), used to size the
+	// proactive-compaction trigger.
+	if lr.Registry != nil {
+		contextWindow = lr.Registry.ContextWindow(modelID)
+	}
+	return p, modelID, supportsImages, contextWindow
+}
+
 // resolveImageSupport determines whether modelID accepts image input, in order:
 //  1. a persisted capability record (probed once, permanent until manual refresh);
 //  2. the static catalog for Anthropic/OpenAI, which is authoritative (no probe);
@@ -1484,6 +1423,23 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 		return tool.Result{Output: fmt.Sprintf("tool %q is not available to the %s agent", tc.Name, a.ID)}, nil
 	}
 
+	// Permission gate: for interactive, gated sessions, mutating tools
+	// (bash/write/edit) require user approval. Non-gated runs (headless task,
+	// breakdown, note, search, CLI) and a nil manager skip this entirely.
+	if lr.Permissions != nil && PermissionGatingEnabled(ctx) {
+		action, err := lr.requestPermission(ctx, sessionID, tc)
+		if err != nil {
+			return tool.Result{}, err // context cancelled while awaiting approval
+		}
+		if action == permission.Deny {
+			slog.Info("tool call denied by user", "session", sessionID, "tool", tc.Name)
+			return tool.Result{
+				Title:  tc.Name,
+				Output: fmt.Sprintf("Permission denied by the user — the %s call was not run. Do not retry it; ask the user how to proceed or take a different approach.", tc.Name),
+			}, nil
+		}
+	}
+
 	// Try built-in tools first
 	t := lr.Tools.Get(tc.Name)
 	if t != nil {
@@ -1498,33 +1454,296 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 			ModelSupportsImages: modelSupportsImages,
 			Model:               model,
 		}
-		return t.Execute(ctx, tc.Input, tctx)
-	}
-
-	// Try MCP tools
-	if lr.MCP != nil {
-		for name, td := range lr.MCP.Tools() {
-			if name == tc.Name {
-				slog.Info("executing MCP tool", "tool", name)
-				var args map[string]any
-				if err := json.Unmarshal(tc.Input, &args); err != nil {
-					return tool.Result{}, fmt.Errorf("parse MCP tool input: %w", err)
-				}
-				output, duration, err := lr.MCP.CallTool(ctx, name, args)
-				title := td.Name
-				metadata := map[string]any{
-					"duration_ms": duration.Milliseconds(),
-				}
-				if err != nil {
-					return tool.Result{Title: title, Output: err.Error(), Metadata: metadata}, err
-				}
-				return tool.Result{Title: title, Output: output, Metadata: metadata}, nil
-			}
+		// Honor cancellation at the dispatch boundary. Several built-in tools do
+		// bounded local work and don't check ctx themselves, so a mid-loop abort
+		// or guidance-cancel wouldn't stop one that's about to run. Checking here
+		// gives every tool a single cooperative cancellation point, so the loop
+		// doesn't kick off new tool work after the user has already cancelled.
+		if err := ctx.Err(); err != nil {
+			return tool.Result{}, err
 		}
+		res, err := t.Execute(ctx, tc.Input, tctx)
+		if err == nil {
+			res = capToolOutput(res)
+		}
+		return res, err
 	}
 
 	slog.Warn("unknown tool requested", "tool", tc.Name)
 	return tool.Result{}, fmt.Errorf("unknown tool: %s", tc.Name)
+}
+
+// executeReadyToolCalls runs the ready tool calls concurrently, writing each
+// tool part's running → completed/error state to the DB (and publishing part
+// updates) as it goes. It returns loopAborted=true when the loop's OWN context
+// was cancelled — the caller must then stop and return ctx.Err() without creating
+// a tool-result message. A mid-loop tool cancel (only the tool child context is
+// cancelled) is handled internally and returns false, so the loop continues and
+// pairs the cancelled results with a tool-result message (keeping tool_use /
+// tool_result pairing valid).
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID string) (loopAborted bool) {
+	if len(readyCalls) > 1 {
+		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
+	}
+	// Check for context cancellation before starting any execution
+	if ctx.Err() != nil {
+		slog.Info("agent loop cancelled before tool execution", "session", sessionID)
+		return true
+	}
+
+	type toolExecInfo struct {
+		tc     pendingToolCall
+		result tool.Result
+		err    error
+	}
+
+	// Mark all ready tool parts as "running" first (sequential — fast DB ops)
+	execInfos := make([]toolExecInfo, len(readyCalls))
+	for i, tc := range readyCalls {
+		part, _ := lr.Store.GetPart(tc.PartID)
+		if part != nil {
+			var toolData session.ToolPartData
+			json.Unmarshal(part.Data, &toolData)
+			toolData.State = session.ToolState{
+				Status: session.ToolRunning,
+				Input:  toolData.State.Input,
+				Title:  &tc.Name,
+				Time: session.ToolTime{
+					Start: session.Now(),
+				},
+			}
+			updatedData, _ := json.Marshal(toolData)
+			part.Data = updatedData
+			part.UpdatedAt = session.Now()
+			lr.Store.UpdatePart(part)
+			lr.Bus.Publish("message.part.updated", map[string]string{
+				"sessionId": string(sessionID),
+				"partId":    string(part.ID),
+			})
+		}
+		execInfos[i].tc = tc
+	}
+
+	// Derive a child context for tool execution. This allows mid-loop tool
+	// cancellation: CancelTool on the LoopControl cancels only this child, so
+	// wg.Wait() returns early with cancelled/errored results, and the loop
+	// continues to its next iteration (where it picks up any injected guidance).
+	// The loop's own ctx remains uncancelled, so the loop stays alive. When there
+	// is no LoopControl (CLI, search, indexer), the child is still derived but
+	// simply never independently cancelled — behaviour is identical to before.
+	toolCtx, toolCancel := context.WithCancel(ctx)
+	lc := LoopControlFromContext(ctx)
+	if lc != nil {
+		lc.SetToolCancel(toolCancel)
+	}
+
+	// Execute all ready tool calls concurrently
+	var wg sync.WaitGroup
+	for i := range readyCalls {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			tc := readyCalls[idx]
+			result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID)
+			execInfos[idx].result = result
+			execInfos[idx].err = err
+		}(i)
+	}
+	wg.Wait()
+
+	// Detect mid-loop tool cancellation BEFORE calling toolCancel() ourself. The
+	// child context was cancelled (by CancelTool via the guidance endpoint) but
+	// the loop context is still alive. We must capture this state before the
+	// cleanup call to toolCancel() below, because that call always cancels toolCtx
+	// — which would make toolCtx.Err() non-nil even on perfectly normal tool
+	// completion, producing a false-positive "cancelled by user" message.
+	toolCtxCancelled := toolCtx.Err() != nil && ctx.Err() == nil
+
+	// Clear the tool-cancel registration and release the child context.
+	if lc != nil {
+		lc.ClearToolCancel()
+	}
+	toolCancel()
+
+	// Update all tool parts with results (sequential — DB writes)
+	for _, info := range execInfos {
+		tc := info.tc
+		part, perr := lr.Store.GetPart(tc.PartID)
+		if perr != nil {
+			slog.Error("get tool part", "err", perr)
+			continue
+		}
+		if part == nil {
+			slog.Error("tool part not found", "partId", tc.PartID)
+			continue
+		}
+
+		var toolData session.ToolPartData
+		if err := json.Unmarshal(part.Data, &toolData); err != nil {
+			slog.Error("unmarshal tool data", "err", err)
+			continue
+		}
+
+		if info.err != nil {
+			errStr := info.err.Error()
+			// When the tool child context was cancelled mid-loop (not the loop
+			// itself), surface a clear cancellation message rather than a raw
+			// context.Canceled error string.
+			if toolCtxCancelled {
+				errStr = "Tool execution cancelled by user mid-loop guidance"
+			}
+			toolData.State = session.ToolState{
+				Status: session.ToolError,
+				Input:  tc.Input,
+				Error:  &errStr,
+				Title:  &tc.Name,
+				Time:   toolData.State.Time,
+			}
+		} else {
+			toolData.State = session.ToolState{
+				Status:   session.ToolCompleted,
+				Input:    tc.Input,
+				Output:   &info.result.Output,
+				Title:    &info.result.Title,
+				Metadata: mustMarshal(info.result.Metadata),
+				Time: session.ToolTime{
+					Start: toolData.State.Time.Start,
+					End:   session.Now(),
+				},
+			}
+			if info.result.Image != nil {
+				toolData.State.Image = &session.ToolImage{
+					MediaType: info.result.Image.MediaType,
+					Data:      info.result.Image.Data,
+				}
+			}
+		}
+
+		updatedData, _ := json.Marshal(toolData)
+		part.Data = updatedData
+		part.UpdatedAt = session.Now()
+		if err := lr.Store.UpdatePart(part); err != nil {
+			slog.Error("update tool part", "err", err)
+		}
+
+		lr.Bus.Publish("message.part.updated", map[string]string{
+			"sessionId": string(sessionID),
+			"partId":    string(part.ID),
+		})
+	}
+
+	// If the loop context (not just the tool child) was cancelled during
+	// execution, bail out now. The tool-result message must not be created — it
+	// would contain partial/missing outputs for unexecuted tool calls. When only
+	// the tool child was cancelled (mid-loop tool cancel via guidance), the loop
+	// context is still alive, so we fall through and let the caller create the
+	// tool-result message with the cancelled results — the call/result pairing
+	// the API expects stays valid.
+	if ctx.Err() != nil {
+		slog.Info("agent loop cancelled after tool execution", "session", sessionID)
+		return true
+	}
+	return false
+}
+
+// requestPermission evaluates the session ruleset for a tool call and, when the
+// decision is "ask", publishes a permission.requested event and blocks until the
+// user replies (or the tool/loop context is cancelled). It returns the resolved
+// action (Allow or Deny). An "always" reply is recorded so subsequent matching
+// calls in this session auto-allow.
+func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.SessionID, tc pendingToolCall) (permission.Action, error) {
+	pattern := permissionPattern(tc)
+	action := lr.Permissions.Ruleset(string(sessionID)).Evaluate(tc.Name, pattern)
+	if action == permission.Allow || action == permission.Deny {
+		return action, nil
+	}
+
+	// Ask: register a pending request and surface it to the UI.
+	req := permission.Request{
+		ID:        permission.NewPermissionID(),
+		SessionID: string(sessionID),
+		Tool:      tc.Name,
+		Input:     string(tc.Input),
+		Patterns:  []string{pattern},
+	}
+	pr := lr.Permissions.Create(req)
+	lr.Bus.Publish("permission.requested", map[string]string{
+		"sessionId":    string(sessionID),
+		"permissionId": string(req.ID),
+		"tool":         tc.Name,
+		"pattern":      pattern,
+		"input":        string(tc.Input),
+	})
+	slog.Info("awaiting tool permission", "session", sessionID, "tool", tc.Name, "permission", req.ID)
+
+	select {
+	case <-ctx.Done():
+		// The tool child context was cancelled (mid-loop guidance) or the whole
+		// loop was aborted while we waited. Drop the pending request so it can't
+		// leak, and let the caller unwind on the context error.
+		lr.Permissions.Remove(req.ID)
+		lr.Bus.Publish("permission.replied", map[string]string{
+			"sessionId":    string(sessionID),
+			"permissionId": string(req.ID),
+			"response":     "cancelled",
+		})
+		return permission.Deny, ctx.Err()
+	case reply := <-pr.ReplyCh:
+		switch reply {
+		case "always":
+			// Grant this tool for the rest of the session.
+			lr.Permissions.AddRule(string(sessionID), permission.Rule{
+				Permission: tc.Name,
+				Pattern:    "*",
+				Action:     permission.Allow,
+			})
+			return permission.Allow, nil
+		case "once":
+			return permission.Allow, nil
+		default: // "reject" or anything unexpected
+			return permission.Deny, nil
+		}
+	}
+}
+
+// permissionPattern extracts the resource a tool call acts on, for ruleset
+// matching and UI display: the target path for write/edit, the command for bash,
+// otherwise "*".
+func permissionPattern(tc pendingToolCall) string {
+	switch tc.Name {
+	case "write", "edit", "read":
+		var in struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(tc.Input, &in) == nil && in.Path != "" {
+			return in.Path
+		}
+	case "bash":
+		var in struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(tc.Input, &in) == nil && in.Command != "" {
+			return in.Command
+		}
+	}
+	return "*"
+}
+
+// capToolOutput is the global backstop that bounds any tool result before it
+// enters the model context. Tools that already truncated themselves (read,
+// bash) set Result.Truncated and are left untouched; everything else — grep,
+// glob, and any future or MCP-style tool — is capped to
+// tool.MaxToolOutputBytes/MaxToolOutputLines, keeping the head. This stops a
+// single oversized result from dominating the turn and being re-sent on every
+// later step.
+func capToolOutput(res tool.Result) tool.Result {
+	if res.Truncated || res.Output == "" {
+		return res
+	}
+	output, truncated := tool.TruncateOutput(res.Output, tool.KeepHead)
+	res.Output = output
+	res.Truncated = truncated
+	return res
 }
 
 type pendingToolCall struct {
@@ -1918,13 +2137,27 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 	return result
 }
 
-func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, mcpTools map[string]mcp.ToolDef, viewportWidth int, viewportHeight int) string {
+// buildSystemPrompt builds the system prompt with no model-family tuning
+// (family = generic). Retained for callers/tests that have no model in hand.
+func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int) string {
+	return buildSystemPromptForFamily(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, "")
+}
+
+// buildSystemPromptForFamily is buildSystemPrompt with a model-family working-style
+// block injected for codebase agents, so non-Claude models (GPT/o-series, Gemini,
+// small local models) get appropriately-tuned guidance. The block is part of the
+// static, cacheable base prefix — the model is fixed per session, so it stays
+// byte-identical across turns and does not disturb prompt caching.
+func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string) string {
 	// Project context (working dir, host env, AGENT.md, MEMORY.md) is only
 	// relevant to agents that operate on the user's codebase. Utility agents —
 	// the keyword indexer and web-research agent — skip it to keep their prompt
 	// lean, which also avoids referencing files and tools they don't have.
 	prompt := a.System
 	if a.projectScoped() {
+		if style := modelFamilyStylePrompt(family); style != "" {
+			prompt += "\n\n" + style
+		}
 		prompt += fmt.Sprintf("\n\nWorking directory: %s\nPlatform: %s/%s%s", dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt())
 
 		if agentMDContent != "" {
@@ -1944,65 +2177,6 @@ func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent s
 		// When no MEMORY.md exists and the agent can create one, prompt it to do so.
 		if memoryMDContent == "" && canWriteFiles {
 			prompt += "\n\nNo MEMORY.md file was found in this project. You should create one in the project root directory using the write tool if the project has any meaningful knowledge to record."
-		}
-	}
-
-	// Inject MCP skill descriptions (excluding memory tools). Only codebase agents
-	// get them: the described tools are all codebase-research skills, irrelevant to
-	// the utility agents (keyword indexer, web-research). MCP tools remain callable
-	// by any agent — this only trims the advertisement from prompts that can't use it.
-	if len(mcpTools) > 0 && a.projectScoped() {
-		prompt += "\n\n## Available Skills\n\n"
-		prompt += "You have access to specialized tools via MCP. Use them proactively when relevant:\n\n"
-
-		skillSections := []struct {
-			heading string
-			tools   []skillDesc
-		}{
-			{
-				heading: "### Codebase Research",
-				tools: []skillDesc{
-					{name: "answer_codebase", tip: "PREFERRED for grounded, synthesized answers about committed code with file paths and line citations."},
-					{name: "query_codebase", tip: "For targeted search across the committed index (semantic, pattern, or hybrid)."},
-					{name: "cache_map", tip: "Use first to understand what a source contains before deeper queries."},
-				},
-			},
-			{
-				heading: "### Live / Uncommitted Changes",
-				tools: []skillDesc{
-					{name: "hot_answer", tip: "PREFERRED for Q&A about uncommitted working-tree edits. Use when user asks about 'my changes' or recent local modifications."},
-					{name: "hot_query", tip: "For real-time search across uncommitted changes."},
-				},
-			},
-			{
-				heading: "### Multi-Repo (Tracks)",
-				tools: []skillDesc{
-					{name: "track_answer", tip: "For synthesized answers across multiple repos in a Track."},
-					{name: "track_query", tip: "For targeted search across all sources in a Track."},
-					{name: "hot_track_answer", tip: "For Q&A across live uncommitted changes in a Track."},
-					{name: "hot_track_query", tip: "For real-time search across live changes in a Track."},
-				},
-			},
-		}
-
-		for _, section := range skillSections {
-			hasTool := false
-			for _, s := range section.tools {
-				if _, ok := mcpTools[s.name]; ok {
-					hasTool = true
-					break
-				}
-			}
-			if !hasTool {
-				continue
-			}
-			prompt += section.heading + "\n"
-			for _, s := range section.tools {
-				if _, ok := mcpTools[s.name]; ok {
-					prompt += fmt.Sprintf("- **%s**: %s\n", s.name, s.tip)
-				}
-			}
-			prompt += "\n"
 		}
 	}
 
@@ -2035,11 +2209,6 @@ To retrieve specific past facts, decisions, or details, use the memory_recall to
 	return prompt
 }
 
-type skillDesc struct {
-	name string
-	tip  string
-}
-
 func mustMarshal(v any) json.RawMessage {
 	if v == nil {
 		return nil
@@ -2048,11 +2217,21 @@ func mustMarshal(v any) json.RawMessage {
 	return data
 }
 
+// maxRetryBackoff caps how long a single retry waits, so a server-provided
+// Retry-After (which can be large) can never stall the loop for minutes.
+const maxRetryBackoff = 120 * time.Second
+
 // isTransientError returns true for errors that are worth retrying
-// (rate limits, timeouts, connection resets, server errors).
+// (rate limits, timeouts, connection resets, server errors). It prefers the
+// provider's structured status code and falls back to string matching for
+// stream-level and network errors that carry no HTTP status.
 func isTransientError(err error) bool {
 	if err == nil {
 		return false
+	}
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.IsTransient()
 	}
 	msg := err.Error()
 	lower := strings.ToLower(msg)
@@ -2133,18 +2312,19 @@ func appendGuidanceToUserMessage(messages []provider.ModelMessage, guidance stri
 }
 
 // isContextLengthError returns true when the provider rejects the request because
-// the prompt exceeds the model's maximum context window.
+// the prompt exceeds the model's maximum context window. It prefers the provider's
+// structured status/body classification and falls back to string matching.
 func isContextLengthError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.IsContextLength()
+	}
 	msg := err.Error()
 	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "too long") ||
-		strings.Contains(lower, "context length") ||
-		strings.Contains(lower, "maximum context") ||
-		strings.Contains(lower, "context_length_exceeded") ||
-		strings.Contains(lower, "prompt is too long") ||
+	return provider.IsContextLengthMessage(msg) ||
 		// Ollama returns a bare 400 with empty body when the prompt exceeds
 		// the model's context window. The error format is "ollama API error 400: "
 		// (with empty body after the colon-space) — treat this as context length
@@ -2153,12 +2333,79 @@ func isContextLengthError(err error) bool {
 		(strings.Contains(lower, "api error 400") && strings.HasSuffix(strings.TrimSpace(lower), "400:"))
 }
 
-// llmCompact summarizes the older portion of the conversation using the LLM itself,
-// producing a rich technical summary that replaces the trimmed middle section.
-// It returns a system-prompt addendum containing the summary and the recent messages
-// to keep verbatim. Falls back to mechanical truncation if the LLM call fails.
-func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, modelID string, messages []provider.ModelMessage) (systemAddendum string, compacted []provider.ModelMessage) {
-	const keepRecent = 12
+// retryAfterFromError returns the server-provided Retry-After hint carried by a
+// structured provider error, or 0 when none is present.
+func retryAfterFromError(err error) time.Duration {
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.RetryAfter
+	}
+	return 0
+}
+
+// compactionKeepRecent returns how many of the most recent messages to keep
+// verbatim during compaction, scaled to the model's context window: a 200k model
+// can afford far more verbatim recent context than an 8k one. An unknown window
+// keeps the historical default of 12.
+func compactionKeepRecent(contextWindow int) int {
+	const minKeep, maxKeep = 8, 40
+	if contextWindow <= 0 {
+		return 12
+	}
+	keep := contextWindow / 10000
+	if keep < minKeep {
+		keep = minKeep
+	}
+	if keep > maxKeep {
+		keep = maxKeep
+	}
+	return keep
+}
+
+// replaceOrAppendSummary returns system with a fresh compaction summary. When the
+// prior summary is the last system entry (it was appended at the top of the
+// iteration), it is replaced in place — because the new summary already folds the
+// prior one in, appending would duplicate that content. Otherwise it is appended.
+func replaceOrAppendSummary(system []string, prevSummary, newSummary string) []string {
+	if n := len(system); n > 0 && prevSummary != "" && system[n-1] == prevSummary {
+		system[n-1] = newSummary
+		return system
+	}
+	return append(system, newSummary)
+}
+
+// compactRequest compacts a request's history in place: it summarizes the older
+// messages (folding in the prior summary so nothing is lost), swaps the trimmed
+// messages into streamReq, replaces the prior summary in the system prompt, and
+// persists + announces the compaction. It returns the updated compaction summary
+// (unchanged when the summarizer produced nothing). Shared by the proactive
+// (pre-send, size-based) and reactive (on context-length error) compaction paths.
+func (lr *LoopRunner) compactRequest(ctx context.Context, p provider.Provider, modelID string, sessionID session.SessionID, streamReq *provider.StreamRequest, prevSummary string, contextWindow int) string {
+	summaryAddendum, compactedMsgs := lr.llmCompact(ctx, p, modelID, streamReq.Messages, prevSummary, contextWindow)
+	streamReq.Messages = compactedMsgs
+	newSummary := prevSummary
+	if summaryAddendum != "" {
+		// The new summary folds in the prior one, so replace rather than append to
+		// avoid duplicating that content in the system prompt.
+		streamReq.System = replaceOrAppendSummary(streamReq.System, prevSummary, summaryAddendum)
+		newSummary = summaryAddendum
+		if err := lr.Store.UpdateCompactionSummary(sessionID, summaryAddendum); err != nil {
+			slog.Error("persist compaction summary", "err", err)
+		}
+	}
+	lr.Bus.Publish("loop.compacted", map[string]string{"sessionId": string(sessionID)})
+	return newSummary
+}
+
+// llmCompact summarizes the older portion of the conversation using the LLM
+// itself, producing a rich technical summary that replaces the trimmed middle
+// section. It returns a system-prompt addendum containing the summary and the
+// recent messages to keep verbatim. When prevSummary is non-empty it is folded
+// into the new summary so re-compaction never drops earlier context; keepRecent
+// scales with the model's context window. Falls back to mechanical truncation if
+// the LLM call fails.
+func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, modelID string, messages []provider.ModelMessage, prevSummary string, contextWindow int) (systemAddendum string, compacted []provider.ModelMessage) {
+	keepRecent := compactionKeepRecent(contextWindow)
 	if len(messages) <= keepRecent {
 		return "", messages
 	}
@@ -2200,16 +2447,46 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, model
 	}
 
 	historyText := history.String()
-	if len(historyText) > 30_000 {
-		historyText = historyText[:30_000] + "\n...(older history truncated)"
+	const maxHistoryChars = 30_000
+	if len(historyText) > maxHistoryChars {
+		// Keep the MOST RECENT slice of old history — older exchanges are already
+		// captured in the prior summary we fold in below (and matter less for
+		// continuing the work than what happened most recently).
+		historyText = "...(older history omitted — see the prior summary)\n" + historyText[len(historyText)-maxHistoryChars:]
 	}
 
-	summarizerPrompt := "Summarize the following conversation history concisely. Capture: the original task/goal, " +
-		"key decisions made, files modified (with paths), code written or changed, errors encountered " +
-		"and how they were resolved, and the current state of work. Be specific about technical details — " +
-		"file paths, function names, variable names, commands run. This summary will replace the full " +
-		"history so the conversation can continue within the model's context window." +
-		"\n\n" + historyText
+	// Anchored, structured template (modeled on opencode's compaction summary):
+	// a fixed set of sections yields more complete and consistent summaries than
+	// a free-form "summarize this" instruction, and the explicit "preserve exact
+	// …" rule stops the model from paraphrasing away paths and symbols the next
+	// steps depend on.
+	sectionTemplate := "Organize the result into exactly the following sections. " +
+		"Be specific and preserve exact file paths, function/type/variable names, commands run, and error " +
+		"strings verbatim — the agent will continue the work from this summary alone, without re-reading the history.\n\n" +
+		"## Objective\nThe user's overall goal, in one or two sentences.\n\n" +
+		"## Important Details\nKey facts, decisions, and constraints established so far (with file paths and symbols).\n\n" +
+		"## Work State\n### Completed\nWhat is finished — files created/modified (with paths) and code changed.\n" +
+		"### In progress\nWhat is currently being worked on.\n" +
+		"### Blocked / open questions\nAnything unresolved or waiting on the user.\n\n" +
+		"## Next Steps\nThe concrete next actions to take, in order.\n\n" +
+		"## Relevant Files\nFiles read or touched so far, each with a one-line note on its role.\n\n"
+
+	// When a prior summary exists, instruct the model to MERGE it with the new
+	// history rather than summarize the history alone — this is what makes
+	// re-compaction non-destructive (earlier context is retained instead of
+	// dropped when the prior summary is superseded).
+	var summarizerPrompt string
+	if prev := strings.TrimSpace(prevSummary); prev != "" {
+		summarizerPrompt = "You are maintaining a running summary of a long coding session. A PRIOR SUMMARY of earlier " +
+			"history is provided, followed by the NEW HISTORY since then. Produce a single, updated summary that MERGES " +
+			"both — keep every still-relevant fact from the prior summary and integrate the new history; do not drop " +
+			"earlier facts merely because the new history does not repeat them.\n\n" +
+			sectionTemplate +
+			"### PRIOR SUMMARY\n\n" + prev + "\n\n### NEW HISTORY\n\n" + historyText
+	} else {
+		summarizerPrompt = "Summarize the conversation history below. " + sectionTemplate +
+			"Conversation history:\n\n" + historyText
+	}
 
 	// json.Marshal properly encodes the combined string, including any special
 	// characters in historyText, producing a valid JSON string value for Content.
@@ -2218,8 +2495,10 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, model
 	summaryReq := provider.StreamRequest{
 		Model: modelID,
 		System: []string{
-			"You are a precise technical conversation summarizer. Produce a concise but complete summary " +
-				"that preserves all technical details needed to continue the work effectively.",
+			"You are a precise technical conversation summarizer for a coding agent. Produce a complete, " +
+				"structured summary that preserves every detail needed to continue the work without re-reading " +
+				"the original history. Preserve exact file paths, symbol names, commands, error strings, and URLs " +
+				"verbatim. Do not mention that the context was compacted.",
 		},
 		Messages: []provider.ModelMessage{
 			{Role: "user", Content: summarizerContent},
@@ -2366,6 +2645,9 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model st
 	searchCtx := WithoutLoopControl(ctx)
 	childRunner := *lr
 	childRunner.MaxSteps = 8
+	// The search child is headless — no UI to answer permission prompts. Its ctx
+	// also lacks the gating flag, but clear the manager too so it can never block.
+	childRunner.Permissions = nil
 	if err := childRunner.RunLoop(searchCtx, sess.ID, "search", 0, 0); err != nil {
 		return "", fmt.Errorf("search loop: %w", err)
 	}
@@ -2391,6 +2673,108 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model st
 	return answer, nil
 }
 
+// subagentMaxSteps caps a delegated sub-agent's loop. A read-only investigation
+// reads and searches many files but should converge well within this; the cap is
+// a backstop against a misbehaving child spinning forever.
+const subagentMaxSteps = 40
+
+// RunTaskSession creates an ephemeral read-only sub-agent session, runs the full
+// loop for a delegated investigation, and returns the sub-agent's final written
+// answer. The session is deleted on completion. Called by tool.TaskTool via the
+// tool.TaskFunc contract. The sub-agent (SubagentAgent) is depth-1 — its toolset
+// omits `task`, so it cannot spawn further sub-agents.
+func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, dir, model string) (string, error) {
+	if dir == "" {
+		dir = lr.Dir
+	}
+	if model == "" {
+		dp := lr.Registry.Default()
+		if dp == nil {
+			dp = lr.DefaultProvider
+		}
+		if dp != nil {
+			models := dp.Models()
+			if len(models) > 0 {
+				model = models[0].ID
+			}
+		}
+	}
+
+	label := description
+	if label == "" {
+		label = prompt
+	}
+	sess := &session.Session{
+		ID:          session.NewSessionID(),
+		ProjectID:   dir,
+		Directory:   dir,
+		Title:       "Task: " + truncateText(label, 60),
+		Model:       model,
+		SessionType: "subagent",
+		CreatedAt:   session.Now(),
+		UpdatedAt:   session.Now(),
+	}
+	if err := lr.Store.Create(sess); err != nil {
+		return "", fmt.Errorf("create subagent session: %w", err)
+	}
+
+	// Always clean up the ephemeral session when done.
+	defer func() {
+		if err := lr.Store.Delete(sess.ID); err != nil {
+			slog.Warn("delete ephemeral subagent session", "session", sess.ID, "err", err)
+		}
+	}()
+
+	// Create the initial user message carrying the delegated task.
+	userMsg := &session.MessageInfo{
+		ID:        session.NewMessageID(),
+		SessionID: sess.ID,
+		Role:      session.RoleUser,
+		Agent:     "subagent",
+		CreatedAt: session.Now(),
+	}
+	if err := lr.Store.CreateMessage(userMsg); err != nil {
+		return "", fmt.Errorf("create subagent user message: %w", err)
+	}
+	textData, _ := json.Marshal(session.TextPartData{Text: prompt})
+	userPart := &session.Part{
+		ID:        session.NewPartID(),
+		MessageID: userMsg.ID,
+		SessionID: sess.ID,
+		Type:      session.PartText,
+		Data:      textData,
+		CreatedAt: session.Now(),
+		UpdatedAt: session.Now(),
+	}
+	if err := lr.Store.CreatePart(userPart); err != nil {
+		return "", fmt.Errorf("create subagent user part: %w", err)
+	}
+
+	// Run a capped child loop. Strip the parent's LoopControl so the child does
+	// not drain the parent's mid-loop guidance or overwrite its cancel funcs
+	// (same rationale as RunSearchSession), and clear Permissions — the sub-agent
+	// is headless with no UI to answer prompts (and its read-only toolset needs
+	// no gating anyway). Cancellation still propagates via ctx.
+	childCtx := WithoutLoopControl(ctx)
+	childRunner := *lr
+	childRunner.MaxSteps = subagentMaxSteps
+	childRunner.Permissions = nil
+	if err := childRunner.RunLoop(childCtx, sess.ID, "subagent", 0, 0); err != nil {
+		return "", fmt.Errorf("subagent loop: %w", err)
+	}
+
+	// Extract the sub-agent's final written answer.
+	msgs, err := lr.Store.GetMessages(sess.ID, "", 1000)
+	if err != nil {
+		return "", fmt.Errorf("load subagent messages: %w", err)
+	}
+	answer := extractLastAssistantText(msgs)
+	if strings.TrimSpace(answer) == "" {
+		return "The sub-agent did not produce a final answer (it may have run out of steps). Try narrowing the task.", nil
+	}
+	return answer, nil
+}
+
 func truncateText(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -2398,42 +2782,5 @@ func truncateText(s string, max int) string {
 	return s[:max] + "…"
 }
 
-// estimateRequestSize provides a rough byte-size estimate of the request that
-// will be serialized and sent to the LLM provider. It walks the messages and
-// system prompts, summing content lengths, so it is fast and allocation-free.
-// The estimate is deliberately conservative (over-counts) to trigger proactive
-// compaction before the actual serialized body hits the model's context limit.
-func estimateRequestSize(req provider.StreamRequest) int {
-	size := 0
-	for _, s := range req.System {
-		size += len(s)
-	}
-	for _, m := range req.Messages {
-		size += len(m.Role)
-		if m.Content != nil {
-			size += len(m.Content)
-		}
-		if m.ToolCalls != nil {
-			size += len(m.ToolCalls)
-		}
-		if m.ToolCallID != "" {
-			size += len(m.ToolCallID)
-		}
-		if m.Name != "" {
-			size += len(m.Name)
-		}
-		for _, img := range m.Images {
-			size += len(img.Data)
-		}
-		// ReasoningParts (thinking blocks) are serialized into the request body
-		// for Anthropic. Account for their text + signature so the estimate
-		// triggers proactive compaction before a thinking-heavy history pushes
-		// the request over the model's context limit.
-		for _, rp := range m.ReasoningParts {
-			size += len(rp.Text)
-			size += len(rp.Signature)
-		}
-	}
-	// Tools JSON is also serialized but relatively small; skip for now.
-	return size
-}
+// Token budgeting for proactive compaction lives in tokens.go
+// (estimateRequestTokens / effectiveRequestTokens / compactionThresholdTokens).

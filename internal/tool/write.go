@@ -37,6 +37,12 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 		path = filepath.Join(tctx.SessionDir, path)
 	}
 
+	// Serialize with any concurrent write/edit to the same file. The agent loop
+	// runs a turn's tool calls in parallel, so two mutations to this path would
+	// otherwise race and lose one another's changes.
+	unlock := lockPath(path)
+	defer unlock()
+
 	// Capture the prior content (if any) so the UI can render a before/after diff.
 	// Cap the captured size so huge files don't bloat the persisted message.
 	const maxDiffBytes = 256 * 1024

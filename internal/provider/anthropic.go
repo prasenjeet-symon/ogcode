@@ -48,6 +48,7 @@ func (p *AnthropicProvider) Models() []ModelInfo {
 			InputPricePerM:  m.InputPricePerM,
 			OutputPricePerM: m.OutputPricePerM,
 			SupportsImages:  m.SupportsImages,
+			ContextWindow:   m.ContextWindow,
 		})
 	}
 	return all
@@ -208,7 +209,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 				}
 				messages = append(messages, anthropicMessage{
 					Role:    m.Role,
-				Content: content,
+					Content: content,
 				})
 			}
 		}
@@ -273,6 +274,13 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		tools[len(tools)-1].CacheControl = &anthropicCacheControl{Type: "ephemeral"}
 	}
 
+	// Cache the conversation prefix too: mark the end of the message history so
+	// the (often large) prior messages read from cache across the many LLM calls
+	// within a single agentic tool-use turn, instead of being reprocessed at each
+	// step. This is the 3rd of Anthropic's 4 allowed breakpoints (tools and the
+	// base system prompt are the other two).
+	attachMessageCacheBreakpoint(messages)
+
 	body := anthropicRequest{
 		Model:       model,
 		MaxTokens:   max(req.MaxTokens, 4096),
@@ -288,7 +296,18 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(p.baseURL, "/")+"/messages", bytes.NewReader(jsonBody))
+	// Derive a cancellable request context so the idle watchdog in streamEvents
+	// can abort a silently-stalled stream. On any early return (before the reader
+	// goroutine takes ownership) the deferred guard cancels it so it never leaks.
+	reqCtx, reqCancel := context.WithCancel(ctx)
+	streamStarted := false
+	defer func() {
+		if !streamStarted {
+			reqCancel()
+		}
+	}()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", strings.TrimRight(p.baseURL, "/")+"/messages", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -307,17 +326,25 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("anthropic API error %d: %s", resp.StatusCode, string(body))
+		return nil, NewAPIError("anthropic", resp, string(body))
 	}
 
 	ch := make(chan StreamEvent, 256)
-	go p.streamEvents(resp.Body, ch)
+	streamStarted = true
+	go p.streamEvents(resp.Body, ch, reqCancel)
 	return ch, nil
 }
 
-func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent) {
+func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent, cancel context.CancelFunc) {
 	defer body.Close()
 	defer close(ch)
+	defer cancel()
+
+	// Idle watchdog: if the stream goes silent for streamIdleTimeout, cancel the
+	// request context so the blocked read unblocks and the stream ends, instead
+	// of hanging until the 600s HTTP client timeout. Reset on every line received.
+	idle := time.AfterFunc(streamIdleTimeout, cancel)
+	defer idle.Stop()
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -328,6 +355,7 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 	usageDirty := false
 
 	for scanner.Scan() {
+		idle.Reset(streamIdleTimeout)
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -448,9 +476,9 @@ type anthropicRequest struct {
 // requires the system field to be an array of blocks (not a plain string) to
 // attach cache_control markers for prompt caching.
 type anthropicSystemBlock struct {
-	Type         string                  `json:"type"`
-	Text         string                  `json:"text"`
-	CacheControl *anthropicCacheControl  `json:"cache_control,omitempty"`
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 // anthropicCacheControl marks a content block or tool as cacheable. When set
@@ -463,6 +491,41 @@ type anthropicCacheControl struct {
 type anthropicMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`
+}
+
+// attachMessageCacheBreakpoint adds a prompt-cache breakpoint at the end of the
+// message history by attaching cache_control to the final content block of the
+// last message. Anthropic caches the whole prefix up to that point, so within an
+// agentic tool-use turn — where each successive LLM call only appends new tool
+// results to the prior messages — the earlier (often large) messages read from
+// cache instead of being reprocessed every step.
+//
+// Content may be a []map[string]any (blocks built here), a []any (blocks decoded
+// from stored JSON), or a plain string (which is normalized into one text block
+// so the marker has somewhere to live). A non-empty content is required; anything
+// else is left untouched.
+func attachMessageCacheBreakpoint(messages []anthropicMessage) {
+	if len(messages) == 0 {
+		return
+	}
+	cc := map[string]any{"type": "ephemeral"}
+	last := &messages[len(messages)-1]
+	switch c := last.Content.(type) {
+	case []map[string]any:
+		if len(c) > 0 {
+			c[len(c)-1]["cache_control"] = cc
+		}
+	case []any:
+		if len(c) > 0 {
+			if block, ok := c[len(c)-1].(map[string]any); ok {
+				block["cache_control"] = cc
+			}
+		}
+	case string:
+		if c != "" {
+			last.Content = []map[string]any{{"type": "text", "text": c, "cache_control": cc}}
+		}
+	}
 }
 
 type anthropicTool struct {
@@ -504,12 +567,12 @@ type anthropicContentBlock struct {
 }
 
 type anthropicDelta struct {
-	Type         string `json:"type"`
-	Text         string `json:"text,omitempty"`
-	PartialJson  string `json:"partial_json,omitempty"`
-	Thinking     string `json:"thinking,omitempty"`
-	Signature    string `json:"signature,omitempty"`
-	StopReason   string `json:"stop_reason,omitempty"`
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	PartialJson string `json:"partial_json,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
+	Signature   string `json:"signature,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 }
 
 func max(a, b int) int {

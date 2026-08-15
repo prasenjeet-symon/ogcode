@@ -6,11 +6,12 @@ require (
 	github.com/gen2brain/go-fitz v1.24.15
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/joho/godotenv v1.5.1
+	github.com/knights-analytics/hugot v0.7.5
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
-	github.com/mark3labs/mcp-go v0.49.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/image v0.41.0
 	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.49.1
 )
@@ -27,11 +28,9 @@ require (
 	github.com/gomlx/go-xla v0.2.2 // indirect
 	github.com/gomlx/gomlx v0.27.3 // indirect
 	github.com/gomlx/onnx-gomlx v0.4.2 // indirect
-	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jupiterrider/ffi v0.5.0 // indirect
-	github.com/knights-analytics/hugot v0.7.5 // indirect
 	github.com/knights-analytics/ortgenai v0.3.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
@@ -39,16 +38,13 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
-	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/viant/afs v1.30.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yalue/onnxruntime_go v1.31.0 // indirect
-	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect
-	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
