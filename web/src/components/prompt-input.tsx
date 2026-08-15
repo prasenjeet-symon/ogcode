@@ -2,6 +2,7 @@ import { createSignal, createEffect, Show, For, onCleanup, onMount } from 'solid
 import { useSession } from '../context/session';
 import { type ImagePartData } from '../api/client';
 import ModelSelector from './model-selector';
+import PermissionPrompt from './permission-prompt';
 
 // Maximum image file size: 10 MB
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
@@ -249,6 +250,9 @@ export default function PromptInput() {
               : 'border-[color:var(--border-default)] shadow-md shadow-black/20'
             }`}
         >
+          {/* Tool-permission request — surfaces at the very top of the composer */}
+          <PermissionPrompt />
+
           {/* Image previews */}
           <Show when={hasImages()}>
             <div class="flex flex-wrap gap-2 px-3 pt-3">

@@ -4,7 +4,6 @@ import { useServer } from '../context/server';
 import { createEffect, createMemo, createSignal, on, Show } from 'solid-js';
 import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
-import PermissionPrompt from '../components/permission-prompt';
 import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
 import MemoryDialog from '../components/memory-dialog';
@@ -147,10 +146,7 @@ function ChatContent() {
         {/* Messages */}
         <MessageList />
 
-        {/* Tool permission approval (blocks the loop until answered) */}
-        <PermissionPrompt />
-
-        {/* Input */}
+        {/* Input (the tool-permission prompt now surfaces inside the composer) */}
         <PromptInput />
       </div>
     </div>
