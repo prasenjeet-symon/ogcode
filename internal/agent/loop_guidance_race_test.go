@@ -218,6 +218,14 @@ type finishThenBlockProvider struct {
 	systems     [][]string
 	messages    [][]provider.ModelMessage
 	entered     chan int
+	// started signals that a stream goroutine has begun (before any gate).
+	// Buffered so it never blocks the goroutine. Index by call number.
+	started      chan int
+	// gateForCall1 blocks the first stream until closed. This lets the test
+	// push guidance while the first stream is deterministically in flight,
+	// avoiding a race where the fast-completing first stream finishes and the
+	// loop exits before PushGuidance runs.
+	gateForCall1 chan struct{}
 	// gateForCall2 blocks the second stream until closed.
 	gateForCall2 chan struct{}
 }
@@ -238,6 +246,14 @@ func (m *finishThenBlockProvider) StreamChat(ctx context.Context, req provider.S
 	ch := make(chan provider.StreamEvent)
 	go func() {
 		defer close(ch)
+		m.started <- call
+		if call == 1 && m.gateForCall1 != nil {
+			select {
+			case <-m.gateForCall1:
+			case <-ctx.Done():
+				return
+			}
+		}
 		if call == 2 && m.gateForCall2 != nil {
 			select {
 			case <-m.gateForCall2:
@@ -286,9 +302,12 @@ func TestRunLoop_GuidanceAfterFinishNotDropped(t *testing.T) {
 
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
+	gate1 := make(chan struct{})
 	gate2 := make(chan struct{})
 	mock := &finishThenBlockProvider{
 		entered:      make(chan int, 8),
+		started:      make(chan int, 8),
+		gateForCall1: gate1,
 		gateForCall2: gate2,
 	}
 	reg.Register(mock)
@@ -332,14 +351,21 @@ func TestRunLoop_GuidanceAfterFinishNotDropped(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- lr.RunLoop(ctx, sess.ID, "build", 0, 0) }()
 
-	// Wait for the first stream to start and finish (it completes immediately).
-	waitFor(t, mock.entered, 1, 3*time.Second, "first stream never started")
+	// Wait for the first stream's goroutine to start. It is gated on gate1,
+	// so it blocks before emitting any events — this gives us a deterministic
+	// window to push guidance while the stream is in flight.
+	waitFor(t, mock.started, 1, 3*time.Second, "first stream never started")
 
-	// Push guidance right after the first stream finishes. The lateGuidance
-	// check at the end of iteration 1 should catch it and re-push, causing
-	// the loop to continue to iteration 2 instead of exiting. Without any
-	// guidance catch, the loop would exit here and the guidance would be lost.
+	// Push guidance while the first stream is blocked. The lateGuidance check
+	// at the end of iteration 1 should catch it and re-push, causing the loop
+	// to continue to iteration 2 instead of exiting. Without any guidance
+	// catch, the loop would exit here and the guidance would be lost.
 	lc.PushGuidance("actually do something different now")
+
+	// Release the first stream so it completes. The loop's bottom-of-iteration
+	// HasPendingGuidance check now deterministically sees the queued guidance
+	// and continues to iteration 2 instead of exiting.
+	close(gate1)
 
 	// The loop should NOT exit — it should continue to iteration 2 to deliver
 	// the guidance. The second stream is gated, so it blocks. If the loop
