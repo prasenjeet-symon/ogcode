@@ -26,7 +26,7 @@ type Memory struct {
 // GraphOpts holds dependencies for initializing agentic memory.
 //
 // Embedding is always produced by the inbuilt local embedder
-// (all-MiniLM-L6-v2) — there is no embedder configuration. The synthesis LLM
+// (gte-small) — there is no embedder configuration. The synthesis LLM
 // (topic/concept inference and recall) is NOT configured here: it is supplied
 // per request by the caller, using the same provider+model the user selected
 // for their session. See WriteMemory and RecallWith.

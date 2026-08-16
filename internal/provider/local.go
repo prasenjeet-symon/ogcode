@@ -19,7 +19,7 @@ import (
 )
 
 // httpClient is the shared HTTP client used for the one-time model download.
-// It has a generous timeout because the ONNX weights are ~86 MB.
+// It has a generous timeout because the ONNX weights are ~133 MB.
 var httpClient = &http.Client{Timeout: 10 * time.Minute}
 
 // LocalEmbedder is a provider.Embedder implementation that runs a
@@ -28,13 +28,13 @@ var httpClient = &http.Client{Timeout: 10 * time.Minute}
 //
 // The small tokenizer/config assets are embedded in the binary (see
 // internal/provider/embedmodel) and lazily materialized to a cache directory
-// on first use. The large ONNX weight file (~86 MB) is downloaded from
+// on first use. The large ONNX weight file (~133 MB) is downloaded from
 // Hugging Face on first use rather than embedded, so the distributable binary
 // stays small — mirroring ogcode's search-bridge download pattern.
 //
 // It uses Hugot's pure-Go backend (GoMLX simplego), so the binary stays
-// CGO-free and self-contained. The default model is
-// sentence-transformers/all-MiniLM-L6-v2, producing 384-dim embeddings.
+// CGO-free and self-contained. The default model is thenlper/gte-small,
+// producing 384-dim embeddings.
 type LocalEmbedder struct {
 	id      string
 	model   string
@@ -48,7 +48,7 @@ type LocalEmbedder struct {
 }
 
 // EmbedModelID is the default model identifier returned by EmbedModel().
-const EmbedModelID = "all-MiniLM-L6-v2"
+const EmbedModelID = "gte-small"
 
 const localProviderID = "local"
 
@@ -84,7 +84,7 @@ func (e *LocalEmbedder) init(ctx context.Context) error {
 // EnsureModelDownloaded guarantees the local embedder's model weights are
 // present on disk (downloading them on first use and verifying the SHA-256)
 // but does NOT build the inference pipeline. It is meant for a startup
-// preflight: call it once at server boot so the one-time ~86 MB download
+// preflight: call it once at server boot so the one-time ~133 MB download
 // completes before the server accepts requests. A LocalEmbedder later used for
 // inference (e.g. by agentic memory) shares the same cache directory, finds the
 // cached model, and only pays the pipeline-build cost — never re-downloading.
@@ -105,7 +105,7 @@ func (e *LocalEmbedder) EnsureModelDownloaded(ctx context.Context) error {
 
 // EnsureLocalEmbedderModel performs a blocking preflight that guarantees the
 // inbuilt local embedder's model weights are present on disk in the default
-// cache directory. It downloads the ~86 MB ONNX file on first use; subsequent
+// cache directory. It downloads the ~133 MB ONNX file on first use; subsequent
 // calls hit the cache and return immediately.
 //
 // Call this once at server startup (before serving requests) so the one-time

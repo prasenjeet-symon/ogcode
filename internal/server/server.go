@@ -243,7 +243,7 @@ func (s *Server) Start() error {
 
 	var mem *memory.Memory
 	// Agentic memory is enabled from the settings UI. Embedding is always
-	// produced by the inbuilt local embedder (all-MiniLM-L6-v2) — zero config,
+	// produced by the inbuilt local embedder (gte-small) — zero config,
 	// no third-party service. The synthesis LLM is NOT configured here: it is
 	// injected per request (WriteMemory/Recall) using the session's selected
 	// model, so memory rides on whatever LLM the user is chatting with.
@@ -269,7 +269,7 @@ func (s *Server) Start() error {
 	// embedding backend) before the server accepts requests. The local embedder
 	// is the default and may be enabled at runtime via the settings UI without a
 	// restart, so we always run this preflight regardless of whether agentic
-	// memory is configured yet — it ensures the one-time ~86 MB download is out
+	// memory is configured yet — it ensures the one-time ~133 MB download is out
 	// of the way. Subsequent LocalEmbedder instances share the cache directory
 	// and skip the download entirely. Errors are non-fatal: the next Embed call
 	// retries, so we log and continue rather than refusing to start.

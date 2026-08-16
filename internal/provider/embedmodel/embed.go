@@ -2,14 +2,18 @@
 // works with zero external dependencies — no API key, no network call (after
 // the one-time model download), no separate model server required.
 //
-// The model is sentence-transformers/all-MiniLM-L6-v2 (384-dimensional
-// embeddings), run via Hugot's pure-Go (GoMLX simplego) backend. Because Hugot
-// loads models from filesystem paths, the small tokenizer/config assets are
-// embedded in the binary and lazily materialized to a cache directory on first
-// use, while the large ONNX weight file (~86 MB) is downloaded on first use
-// from Hugging Face rather than bloating the binary. This mirrors ogcode's
-// existing search-bridge download pattern and keeps the distributable binary
-// small while preserving the single-command, no-API-key experience.
+// The model is thenlper/gte-small (384-dimensional embeddings), run via Hugot's
+// pure-Go (GoMLX simplego) backend. Because Hugot loads models from filesystem
+// paths, the small tokenizer/config assets are embedded in the binary and
+// lazily materialized to a cache directory on first use, while the large ONNX
+// weight file (~133 MB) is downloaded on first use from Hugging Face rather
+// than bloating the binary. This mirrors ogcode's existing search-bridge
+// download pattern and keeps the distributable binary small while preserving
+// the single-command, no-API-key experience.
+//
+// gte-small was chosen over the previous all-MiniLM-L6-v2 because it scores
+// higher on the MTEB benchmark (~61.4 vs ~56.3), requires no query/passage
+// prefixing (unlike bge-small or e5-small), and is a drop-in 384-dim replacement.
 package embedmodel
 
 import (
@@ -33,18 +37,18 @@ var AssetNames = []string{
 }
 
 // ModelName is the human-readable identifier of the bundled model.
-const ModelName = "sentence-transformers/all-MiniLM-L6-v2"
+const ModelName = "thenlper/gte-small"
 
 // ModelFileName is the name of the ONNX weight file in the cache directory.
 const ModelFileName = "model.onnx"
 
 // ModelURL is the canonical download URL for the ONNX weights. The file is
 // fetched on first use when it is not already present in the cache directory.
-const ModelURL = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
+const ModelURL = "https://huggingface.co/thenlper/gte-small/resolve/main/onnx/model.onnx"
 
 // ModelSHA256 is the expected SHA-256 of the downloaded ONNX file, used to
 // verify integrity and detect partial/corrupt downloads.
-const ModelSHA256 = "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452"
+const ModelSHA256 = "0b01312b59bec0a2558a626f2937be4cbe4bb16d1511560153f598cec488f1f8"
 
 // EmbeddingDim is the dimensionality of the vectors produced by the model.
 const EmbeddingDim = 384

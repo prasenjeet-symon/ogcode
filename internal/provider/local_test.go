@@ -128,7 +128,7 @@ func TestLocalEmbedderEnsureModelDownloadedCached(t *testing.T) {
 	}
 }
 
-// --- Integration test: downloads the real ~86 MB model and runs inference. ---
+// --- Integration test: downloads the real ~133 MB model and runs inference. ---
 //
 // This is gated behind OGCODE_EMBED_INTEGRATION=1 so the default `go test ./...`
 // (including CI) stays fast and offline. To run it locally:
@@ -136,7 +136,7 @@ func TestLocalEmbedderEnsureModelDownloadedCached(t *testing.T) {
 //	OGCODE_EMBED_INTEGRATION=1 go test ./internal/provider/ -run TestLocalEmbedderIntegration -v -timeout 10m
 func TestLocalEmbedderIntegration(t *testing.T) {
 	if os.Getenv("OGCODE_EMBED_INTEGRATION") != "1" {
-		t.Skip("set OGCODE_EMBED_INTEGRATION=1 to run the local embedder integration test (downloads ~86 MB model)")
+		t.Skip("set OGCODE_EMBED_INTEGRATION=1 to run the local embedder integration test (downloads ~133 MB model)")
 	}
 
 	dir := setCacheDir(t)

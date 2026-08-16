@@ -10,7 +10,7 @@ import (
 // MemoryConfig holds the user's agentic-memory configuration stored in the DB.
 //
 // Embedding is always produced by the inbuilt local embedder
-// (all-MiniLM-L6-v2) — there is no embedder configuration. The synthesis LLM
+// (gte-small) — there is no embedder configuration. The synthesis LLM
 // is not configured here either: it uses the session's selected model at call
 // time. So the only persisted knob is whether agentic memory is enabled.
 //
@@ -24,7 +24,7 @@ type MemoryConfig struct {
 
 // GetMemoryConfig returns the stored agentic-memory config. If the row does not
 // exist, agentic memory defaults to enabled: the inbuilt local embedder
-// (all-MiniLM-L6-v2) needs zero setup — no API key, no external service — so
+// (gte-small) needs zero setup — no API key, no external service — so
 // memory is on out of the box. A user who has explicitly turned memory off has
 // a persisted row with enabled = 0, which is still honored.
 func GetMemoryConfig(database *db.DB) (*MemoryConfig, error) {

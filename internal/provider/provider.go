@@ -323,7 +323,7 @@ const LocalEmbedderProvider = "local"
 
 // NewEmbedder returns the inbuilt local embedder. ogcode no longer supports
 // third-party embedders (OpenAI, OpenRouter, Ollama) for agentic memory — the
-// pure-Go all-MiniLM-L6-v2 model runs in-process with zero configuration.
+// pure-Go gte-small model runs in-process with zero configuration.
 // The returned provider also satisfies Embedder.
 func NewEmbedder() Provider {
 	return NewLocalEmbedder("")
