@@ -1,5 +1,5 @@
 title: ogcode
-description: The context-engineered agentic coding workbench — it curates only the relevant context per turn, cutting 70%+ of tokens and sharpening accuracy so even lower-end models outperform frontier ones.
+description: Every coding agent re-sends your entire conversation, every turn. Ogcode recalls only what matters — 70% fewer tokens, no context ceiling, sharper answers. Self-hosted, one Go binary, bring your own model.
 url: "https://ogcode.xyz"
 
 theme: null
