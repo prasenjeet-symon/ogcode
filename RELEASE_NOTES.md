@@ -1,3 +1,59 @@
+# Release Notes — v0.22.0
+
+## Minor: Deterministic Deep-Research Pipeline, Configurable Research Tuning, and DB Index Optimization
+
+This minor release rewrites `deep_search` as a deterministic pipeline, surfaces
+user-configurable research knobs in the settings screen, and realigns the SQLite
+indexes with the queries the app actually runs.
+
+1. **Deterministic deep-research pipeline** — `RunSearchSession` is rebuilt as a
+   fixed 4-stage pipeline — search → rank → fetch → synthesise — with exactly two
+   LLM calls, replacing the old free-form tool-calling agent loop. The searches
+   and page fetches are orchestrated in parallel on the Go side, and the final
+   stage is always a plain synthesis call, so the result can no longer come back
+   empty the way the old loop did on weaker models that failed to converge. The
+   `deep_search` tool now also records start/end timestamps so the UI can show
+   how long a search took. (`internal/agent/search_pipeline.go`,
+   `internal/server/server.go`)
+
+2. **Configurable deep-research tuning** — Adds two knobs to the Web-search
+   settings card: **Pages fetched** (`fetchTopK`, 1–10, default 4) and
+   **Characters per page** (`pageChars`, 1000–20000, default 6000). Values are
+   clamped on both read and write so an invalid client payload can never store
+   bad numbers. Tuning changes apply live on the next `deep_search` — no server
+   restart needed (bridge enable / real-profile toggles still do). Backed by
+   migration `032_search_research_params.sql`.
+   (`internal/session/search_store.go`, `web/src/pages/settings/general.tsx`)
+
+3. **SQLite index optimization** — Migration `033_index_optimization.sql`
+   realigns indexes with the columns queries actually filter and sort on, and
+   drops the ones no query reads (verified against every query site). The hot
+   session/plan list queries were doing full table scans, the message loader
+   sorted in a temp b-tree every turn, and several indexes merely duplicated
+   UNIQUE constraints. After this pass every common list/sort path is
+   index-served, and write-heavy paths (parts stream in on every token) carry
+   less index upkeep.
+
+4. **Live elapsed-time readout for `deep_search`** — The tool-part card in the
+   chat now ticks an elapsed timer while a `deep_search` is running and shows
+   the exact total once it completes (e.g. `12.3s`, `1m 05s`), using the
+   persisted start/end timestamps. (`web/src/components/message-item.tsx`)
+
+5. **macOS install fix** — `make install` now removes the old binary before
+   copying the new one (fresh inode) and re-signs it ad-hoc with `codesign`,
+   avoiding the stale cached code-signature "Killed: 9" on macOS. (Makefile)
+
+6. **Selection highlight visibility** — Bumps the text-selection background
+   from a ~12%-alpha tint (nearly invisible) to a ~40% accent tint so the
+   highlight is clearly visible while keeping text high-contrast in both
+   themes. (`web/src/styles/index.css`)
+
+Build: `npm run build` then `go build -o ./ogcode`; `go vet` clean. Existing
+installs pick up the new schema columns and indexes automatically via the
+embedded migrations.
+
+---
+
 # Release Notes — v0.21.0
 
 ## Minor: Agent-Loop Hardening, Interactive Tool Permissions, and Auto-Approval Mode

@@ -150,7 +150,9 @@ button:not(:disabled):active,
 }
 
 ::selection {
-  background: var(--accent-soft);
+  /* accent-soft (12% alpha) was nearly invisible; a ~40% accent tint keeps the
+     highlight clearly visible while text-primary stays high-contrast in both themes. */
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--text-primary);
 }
 

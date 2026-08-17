@@ -1,4 +1,4 @@
-import { Index, Show, createEffect, createMemo, createSignal, onMount } from 'solid-js';
+import { Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData } from '../api/client';
 import MarkdownContent from './markdown-content';
 import FileDiff, { diffStat } from './file-diff';
@@ -15,6 +15,17 @@ function formatTime(ts: number): string {
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// formatDuration renders an elapsed span (ms) as "1.2s" / "27s" / "1m 05s".
+// `precise` (used for a finished total) keeps one decimal under a minute; the
+// live-ticking form uses whole seconds.
+function formatDuration(ms: number, precise: boolean): string {
+  const sec = ms / 1000;
+  if (sec < 60) return precise ? `${sec.toFixed(1)}s` : `${Math.floor(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}m ${s < 10 ? '0' : ''}${s}s`;
 }
 
 function summarizeInput(tool: string, input: any): string | null {
@@ -103,6 +114,29 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     }
   });
 
+  // Total-time readout for deep_search (the one long-running tool). While it runs
+  // we tick a signal every second so the elapsed time updates live; once it
+  // finishes we show the exact total from the persisted start/end timestamps.
+  const [nowTick, setNowTick] = createSignal(Date.now());
+  createEffect(() => {
+    if (isDeepSearch() && status() === 'running' && state().time?.start) {
+      const id = setInterval(() => setNowTick(Date.now()), 1000);
+      onCleanup(() => clearInterval(id));
+    }
+  });
+  const elapsedMs = (): number | null => {
+    const t = state().time;
+    if (!t?.start) return null;
+    if (t.end) return t.end - t.start;
+    if (status() === 'running') return nowTick() - t.start;
+    return null;
+  };
+  const durationLabel = (): string => {
+    const ms = elapsedMs();
+    if (ms == null || ms < 0) return '';
+    return formatDuration(ms, status() === 'completed');
+  };
+
   const statusColor = () => {
     switch (status()) {
       case 'running':   return 'text-[color:var(--accent)]';
@@ -169,6 +203,19 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
           <span class="flex items-center gap-1.5 shrink-0 text-[10px] font-mono tabular-nums">
             <span style={{ color: 'var(--success)' }}>+{diffStats()!.adds}</span>
             <span style={{ color: 'var(--danger)' }}>−{diffStats()!.dels}</span>
+          </span>
+        </Show>
+        <Show when={isDeepSearch() && durationLabel()}>
+          <span
+            class={`flex items-center gap-1 shrink-0 text-[10px] font-mono tabular-nums ${
+              status() === 'running' ? 'text-[color:var(--accent)]' : 'text-zinc-500'
+            }`}
+            title="Total time for this deep search"
+          >
+            <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {durationLabel()}
           </span>
         </Show>
         <Show when={hasOutput() && !expanded() && !isFileEdit()}>
@@ -385,6 +432,8 @@ function UserMessage(props: { msg: MessageWithParts }) {
   const [overflow, setOverflow] = createSignal(false);
   const [sendingToNote, setSendingToNote] = createSignal(false);
   const [noteSaved, setNoteSaved] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
+  let copyTimer: ReturnType<typeof setTimeout>;
   const noteCtx = useNote();
   const sessionCtx = useSession();
   let contentRef: HTMLDivElement | undefined;
@@ -417,6 +466,17 @@ function UserMessage(props: { msg: MessageWithParts }) {
     }
   };
 
+  const handleCopy = (e: MouseEvent) => {
+    e.stopPropagation();
+    const text = userText();
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  };
+
   // Clamp height for ~4 lines of text (4 × 1.65 line-height × 15px ≈ 99px + padding)
   const CLAMP_HEIGHT = 112;
 
@@ -438,11 +498,11 @@ function UserMessage(props: { msg: MessageWithParts }) {
   return (
     <div class="flex justify-end animate-fade-in-right group">
       <div class="max-w-[85%] flex flex-col items-end min-w-0">
-        <div class="relative min-w-0">
+        <div class="relative min-w-0 max-w-full">
           <div
             ref={contentRef}
             classList={{
-              'rounded-2xl rounded-br-sm px-4 py-2.5 border-l-2 border-l-[color:var(--accent)] border border-[color:var(--border-subtle)] min-w-0 break-words': true,
+              'rounded-2xl rounded-br-sm px-4 py-2.5 border-l-2 border-l-[color:var(--accent)] border border-[color:var(--border-subtle)] min-w-0 max-w-full break-words': true,
               'overflow-hidden': !expanded(),
             }}
             style={{ background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-elevated)', ...(!expanded() ? { 'max-height': `${CLAMP_HEIGHT}px` } : {}) }}
@@ -468,6 +528,30 @@ function UserMessage(props: { msg: MessageWithParts }) {
           </button>
         </Show>
         <div class="flex items-center justify-end gap-2 mt-1 mr-1">
+          <Show when={userText()}>
+            <button
+              type="button"
+              onClick={handleCopy}
+              title="Copy message"
+              class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md font-medium transition-all var(--spring-sm)
+                opacity-0 group-hover:opacity-100
+                ${copied()
+                  ? 'text-emerald-400 bg-emerald-500/10 opacity-100'
+                  : 'text-zinc-400 hover:text-[color:var(--accent)] hover:bg-[color:var(--accent-soft)] bg-[color:var(--bg-elevated)]'
+                }`}
+            >
+              <Show when={copied()} fallback={
+                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              }>
+                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </Show>
+              {copied() ? 'Copied!' : 'Copy'}
+            </button>
+          </Show>
           <Show when={userText()}>
             <button
               type="button"

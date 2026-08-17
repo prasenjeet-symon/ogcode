@@ -206,31 +206,55 @@ function Shortcut(props: { keys: string[]; description: string }) {
 }
 
 
+// Deep-research tuning bounds — must match session.SearchConfig clamps in Go.
+const RESEARCH_PARAMS = {
+  fetchTopK: { min: 1, max: 10, def: 4 },
+  pageChars: { min: 1000, max: 20000, def: 6000 },
+} as const;
+
 function SearchConfigForm() {
   const server = useServer();
   const [enabled, setEnabled] = createSignal(false);
   const [useRealProfile, setUseRealProfile] = createSignal(false);
+  const [fetchTopK, setFetchTopK] = createSignal<number>(RESEARCH_PARAMS.fetchTopK.def);
+  const [pageChars, setPageChars] = createSignal<number>(RESEARCH_PARAMS.pageChars.def);
   const [loading, setLoading] = createSignal(true);
   const [saving, setSaving] = createSignal(false);
   const [restartNeeded, setRestartNeeded] = createSignal(false);
+  const [paramsSaved, setParamsSaved] = createSignal(false);
 
   onMount(async () => {
     try {
       const cfg = await getSearchConfig();
       setEnabled(cfg.enabled);
       setUseRealProfile(cfg.useRealProfile);
+      if (cfg.fetchTopK) setFetchTopK(cfg.fetchTopK);
+      if (cfg.pageChars) setPageChars(cfg.pageChars);
     } catch {
-      // defaults stay false
+      // defaults stay in place
     } finally {
       setLoading(false);
     }
   });
 
-  const save = async (next: { enabled: boolean; useRealProfile: boolean }) => {
+  // save persists the full config. Bridge-lifecycle changes (enable / real
+  // profile) need a restart; research-param changes apply live on the next
+  // deep_search, so they show a transient "Saved" instead.
+  const save = async (opts: { restart: boolean }) => {
     setSaving(true);
     try {
-      await setSearchConfig(next);
-      setRestartNeeded(true);
+      await setSearchConfig({
+        enabled: enabled(),
+        useRealProfile: useRealProfile(),
+        fetchTopK: fetchTopK(),
+        pageChars: pageChars(),
+      });
+      if (opts.restart) {
+        setRestartNeeded(true);
+      } else {
+        setParamsSaved(true);
+        setTimeout(() => setParamsSaved(false), 1600);
+      }
     } finally {
       setSaving(false);
     }
@@ -240,7 +264,7 @@ function SearchConfigForm() {
     const next = !enabled();
     setEnabled(next);
     try {
-      await save({ enabled: next, useRealProfile: useRealProfile() });
+      await save({ restart: true });
     } catch {
       setEnabled(!next);
     }
@@ -250,9 +274,28 @@ function SearchConfigForm() {
     const next = !useRealProfile();
     setUseRealProfile(next);
     try {
-      await save({ enabled: enabled(), useRealProfile: next });
+      await save({ restart: true });
     } catch {
       setUseRealProfile(!next);
+    }
+  };
+
+  // commitParam clamps to bounds, updates the signal, and saves live.
+  const commitParam = async (
+    key: keyof typeof RESEARCH_PARAMS,
+    setter: (v: number) => void,
+    prev: number,
+    raw: string,
+  ) => {
+    const b = RESEARCH_PARAMS[key];
+    let v = Math.round(Number(raw));
+    if (!Number.isFinite(v)) v = b.def;
+    v = Math.min(b.max, Math.max(b.min, v));
+    setter(v);
+    try {
+      await save({ restart: false });
+    } catch {
+      setter(prev);
     }
   };
 
@@ -348,9 +391,81 @@ function SearchConfigForm() {
               </div>
             </Show>
           </div>
+
+          {/* Deep-research pipeline tuning — applies live, no restart */}
+          <div class="border-t border-[color:var(--border-subtle)] pt-3 mt-1 space-y-3">
+            <div class="min-w-0">
+              <div class="text-[13px] text-zinc-100 font-medium">Deep research tuning</div>
+              <div class="text-[11.5px] text-zinc-500 mt-0.5 leading-snug">
+                Controls the <code class="font-mono bg-[color:var(--bg-elevated)] px-1 rounded">deep_search</code> pipeline. Higher values dig deeper; lower values run faster. Changes apply on the next search — no restart needed.
+              </div>
+            </div>
+
+            <ResearchParamRow
+              label="Pages fetched"
+              hint="Top-ranked results read in full before answering."
+              value={fetchTopK()}
+              min={RESEARCH_PARAMS.fetchTopK.min}
+              max={RESEARCH_PARAMS.fetchTopK.max}
+              disabled={saving()}
+              onCommit={(raw, prev) => commitParam('fetchTopK', setFetchTopK, prev, raw)}
+            />
+            <ResearchParamRow
+              label="Characters per page"
+              hint="How much of each page feeds the final synthesis."
+              value={pageChars()}
+              min={RESEARCH_PARAMS.pageChars.min}
+              max={RESEARCH_PARAMS.pageChars.max}
+              step={500}
+              disabled={saving()}
+              onCommit={(raw, prev) => commitParam('pageChars', setPageChars, prev, raw)}
+            />
+
+            <Show when={paramsSaved()}>
+              <div class="flex items-center gap-1.5 text-[11.5px] text-emerald-400">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                Saved.
+              </div>
+            </Show>
+          </div>
         </Show>
       </div>
     </Show>
+  );
+}
+
+// ResearchParamRow renders one labelled numeric knob for the deep-research
+// tuning panel. It commits on change (blur/enter) so clamping never fights the
+// user mid-keystroke.
+function ResearchParamRow(props: {
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  disabled?: boolean;
+  onCommit: (raw: string, prev: number) => void;
+}) {
+  return (
+    <div class="flex items-center justify-between gap-4">
+      <div class="min-w-0">
+        <div class="text-[12.5px] text-zinc-200">{props.label}</div>
+        <div class="text-[11px] text-zinc-500 mt-0.5 leading-snug">{props.hint}</div>
+      </div>
+      <input
+        type="number"
+        min={props.min}
+        max={props.max}
+        step={props.step ?? 1}
+        value={props.value}
+        disabled={props.disabled}
+        onChange={(e) => props.onCommit(e.currentTarget.value, props.value)}
+        class="w-20 h-8 px-2.5 shrink-0 rounded-md border border-[color:var(--border-default)]
+               bg-[color:var(--bg-elevated)] text-[12px] font-mono text-zinc-200 text-right
+               focus:outline-none focus:border-[color:var(--accent)] transition disabled:opacity-50"
+      />
+    </div>
   );
 }
 

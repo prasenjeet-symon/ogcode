@@ -106,6 +106,8 @@ export interface ToolState {
   title?: string;
   metadata?: any;
   image?: { mediaType: string; data: string };
+  // Epoch-ms timestamps for when the tool started/finished executing.
+  time?: { start?: number; end?: number };
 }
 
 export interface ReasoningPartData {
@@ -665,6 +667,9 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 export interface SearchConfig {
   enabled: boolean;
   useRealProfile: boolean;
+  // Deep-research pipeline tuning (see settings → web search).
+  fetchTopK: number;
+  pageChars: number;
   updatedAt?: number;
 }
 

@@ -188,6 +188,7 @@ func (s *Server) Start() error {
 	} else {
 		searchEnabledDB = dbSearchCfg.Enabled
 	}
+	var searchClient *search.BridgeClient
 	if searchEnabledEnv || searchEnabledDB {
 		cfg := search.ConfigFromEnv()
 		// DB config takes precedence for UseRealProfile over env var when DB is the source of truth.
@@ -203,6 +204,7 @@ func (s *Server) Start() error {
 		} else {
 			s.searchBridge = proc
 			client := proc.Client()
+			searchClient = client
 			toolRegistry.Register(tool.WebSearchTool{Bridge: client})
 			toolRegistry.Register(tool.FetchPageTool{Bridge: client})
 			slog.Info("search bridge started; web_search and fetch_page tools registered")
@@ -289,7 +291,17 @@ func (s *Server) Start() error {
 		Dir:             s.dir,
 		Memory:          mem,
 		NoteStore:       s.noteStore,
-		Permissions:     s.permissions,
+		SearchBridge:    searchClient,
+		// Read the deep-research tuning fresh from the global config DB on each
+		// call so settings-screen changes apply without a server restart.
+		SearchParams: func() session.SearchConfig {
+			cfg, err := session.GetSearchConfig(globalDatabase)
+			if err != nil || cfg == nil {
+				return session.SearchConfig{}
+			}
+			return *cfg
+		},
+		Permissions: s.permissions,
 	}
 
 	// Register deep_search after loopRunner is built (needs RunSearchSession).

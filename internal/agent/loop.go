@@ -17,6 +17,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
@@ -32,6 +33,14 @@ type LoopRunner struct {
 	MaxSteps        int
 	Memory          *memory.Memory
 	NoteStore       *note.Store
+	// SearchBridge is the Playwright search bridge client used by the deep-research
+	// pipeline (RunSearchSession) for web_search and fetch_page. nil when the search
+	// bridge is disabled — deep_search is only registered when it is non-nil.
+	SearchBridge *search.BridgeClient
+	// SearchParams, when set, returns the current deep-research tuning read fresh
+	// from the global config DB, so settings-screen changes take effect on the next
+	// deep_search without a restart. nil → built-in defaults.
+	SearchParams func() session.SearchConfig
 	// Permissions gates mutating tool calls (bash/write/edit) behind user
 	// approval. nil disables gating entirely (CLI, tests). Even when set, a loop
 	// only prompts when its context carries WithPermissionGating — so headless
@@ -2651,117 +2660,6 @@ func compactMessagesTruncate(messages []provider.ModelMessage) []provider.ModelM
 	result = append(result, annotated)
 	result = append(result, recent[1:]...)
 	return result
-}
-
-// RunSearchSession creates an ephemeral search-agent session, runs the full loop,
-// and returns the synthesised assistant text. The session is deleted on completion.
-// This is called by tool.DeepSearchTool via the tool.DeepSearchFunc contract.
-func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model string) (string, error) {
-	if dir == "" {
-		dir = lr.Dir
-	}
-	if model == "" {
-		dp := lr.Registry.Default()
-		if dp == nil {
-			dp = lr.DefaultProvider
-		}
-		if dp != nil {
-			models := dp.Models()
-			if len(models) > 0 {
-				model = models[0].ID
-			}
-		}
-	}
-
-	sess := &session.Session{
-		ID:          session.NewSessionID(),
-		ProjectID:   dir,
-		Directory:   dir,
-		Title:       "Search: " + truncateText(query, 60),
-		Model:       model,
-		SessionType: "search",
-		CreatedAt:   session.Now(),
-		UpdatedAt:   session.Now(),
-	}
-	if err := lr.Store.Create(sess); err != nil {
-		return "", fmt.Errorf("create search session: %w", err)
-	}
-
-	// Always clean up the ephemeral session when done.
-	defer func() {
-		if err := lr.Store.Delete(sess.ID); err != nil {
-			slog.Warn("delete ephemeral search session", "session", sess.ID, "err", err)
-		}
-	}()
-
-	// Create the initial user message.
-	userMsg := &session.MessageInfo{
-		ID:        session.NewMessageID(),
-		SessionID: sess.ID,
-		Role:      session.RoleUser,
-		Agent:     "search",
-		CreatedAt: session.Now(),
-	}
-	if err := lr.Store.CreateMessage(userMsg); err != nil {
-		return "", fmt.Errorf("create search user message: %w", err)
-	}
-	textData, _ := json.Marshal(session.TextPartData{Text: query})
-	userPart := &session.Part{
-		ID:        session.NewPartID(),
-		MessageID: userMsg.ID,
-		SessionID: sess.ID,
-		Type:      session.PartText,
-		Data:      textData,
-		CreatedAt: session.Now(),
-		UpdatedAt: session.Now(),
-	}
-	if err := lr.Store.CreatePart(userPart); err != nil {
-		return "", fmt.Errorf("create search user part: %w", err)
-	}
-
-	// Run a capped child loop — search sessions need at most 5 turns
-	// (decompose → web_search → fetch_page → synthesise ± one extra round).
-	// Without a cap, a misbehaving LLM could spin for 1000 steps.
-	// The search agent prompt instructs the model to combine search and
-	// fetch into 2 LLM rounds where possible, so 8 steps gives ample
-	// room (each round = 1 user + 1 assistant + potential tool-result msg).
-	//
-	// Strip the parent session's LoopControl from the context so the child
-	// search loop does not inherit it. Without this, the child loop would
-	// drain the parent's pending guidance (stealing mid-loop instructions)
-	// and overwrite the parent's stream/tool cancel funcs — hijacking the
-	// parent's guidance side-channel for the duration of the search. The
-	// search session is ephemeral and has no user-facing guidance channel of
-	// its own, so a nil LoopControl is the correct, intended behaviour.
-	searchCtx := WithoutLoopControl(ctx)
-	childRunner := *lr
-	childRunner.MaxSteps = 8
-	// The search child is headless — no UI to answer permission prompts. Its ctx
-	// also lacks the gating flag, but clear the manager too so it can never block.
-	childRunner.Permissions = nil
-	if err := childRunner.RunLoop(searchCtx, sess.ID, "search", 0, 0); err != nil {
-		return "", fmt.Errorf("search loop: %w", err)
-	}
-
-	// Extract the final synthesised assistant text.
-	msgs, err := lr.Store.GetMessages(sess.ID, "", 1000)
-	if err != nil {
-		return "", fmt.Errorf("load search messages: %w", err)
-	}
-	answer := extractLastAssistantText(msgs)
-	if strings.TrimSpace(answer) == "" {
-		return "The search agent did not produce a final answer (it may have run out of steps or every page fetch failed). Try a narrower query.", nil
-	}
-
-	// Collect source URLs from all web_search and fetch_page tool calls in the
-	// session. This guarantees a Sources section even if the LLM forgets to
-	// include one in its final text.
-	sources := extractSearchSources(msgs)
-	if len(sources) > 0 && !hasSourcesSection(answer) {
-		answer += "\n\n## Sources\n\n" + formatSources(sources)
-	}
-
-	return answer, nil
 }
 
 // subagentMaxSteps caps a delegated sub-agent's loop. A read-only investigation
