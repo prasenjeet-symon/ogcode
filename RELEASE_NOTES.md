@@ -1,3 +1,28 @@
+# Release Notes — v0.22.1
+
+## Patch: Inline Session-Title Editing in the Sidebar
+
+You can now rename a session directly from the sidebar without leaving the
+chat or opening a separate dialog. Hover any session row to reveal a new
+pencil button, or double-click the row, to edit the title in place. Press
+**Enter** to save, **Esc** to cancel, or click away to commit. Empty titles
+fall back to "Untitled".
+
+- **Rename button on hover** — a pencil icon appears at the right of each
+  session row alongside the existing delete button. (`web/src/components/session-sidebar.tsx`)
+- **Double-click to rename** — double-clicking a session row enters edit mode
+  the same way; single-click still selects the session.
+- **Inline editor** — the title becomes a focused text input with the same
+  typography as the row; active-session indicator and timestamp hide while
+  editing so the input gets full width.
+- **Backend reuse** — the frontend `renameSession` helper calls the existing
+  `PATCH /api/sessions/:id` endpoint (`updateSession`), so no new API or
+  migration is needed. (`web/src/context/session.tsx`)
+
+Build: `npm run build` then `go build -o ./ogcode`; `go vet` clean.
+
+---
+
 # Release Notes — v0.22.0
 
 ## Minor: Deterministic Deep-Research Pipeline, Configurable Research Tuning, and DB Index Optimization
