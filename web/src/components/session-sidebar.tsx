@@ -34,6 +34,25 @@ export default function SessionSidebar() {
   const location = useLocation();
   const [query, setQuery] = createSignal('');
   const [collapsed, setCollapsed] = createSignal(false);
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  const [draftTitle, setDraftTitle] = createSignal('');
+
+  const startRename = (s: { id: string; title: string }) => {
+    setEditingId(s.id);
+    setDraftTitle(s.title || '');
+  };
+
+  const commitRename = async (id: string) => {
+    const title = draftTitle().trim();
+    setEditingId(null);
+    if (title === (session.sessions().find((s) => s.id === id)?.title || '')) return;
+    await session.renameSession(id, title);
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+    setDraftTitle('');
+  };
 
   const handleNew = async () => {
     const s = await session.newSession();
@@ -190,9 +209,11 @@ export default function SessionSidebar() {
         <For each={filtered()}>
           {(s) => {
             const isActive = () => session.activeSession()?.id === s.id;
+            const isEditing = () => editingId() === s.id;
             return (
               <div
-                onClick={() => handleSelect(s.id)}
+                onClick={() => !isEditing() && handleSelect(s.id)}
+                onDblClick={(e) => { e.stopPropagation(); startRename(s); }}
                 class={`group relative cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-all var(--spring-sm)
                   ${isActive()
                     ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
@@ -200,25 +221,60 @@ export default function SessionSidebar() {
                   }`}
               >
                 <div class="flex items-center gap-2">
-                  <Show when={isActive()}>
+                  <Show when={isActive() && !isEditing()}>
                     <span class="w-1 h-1 rounded-full bg-[color:var(--accent)] shrink-0 animate-pulse-ring" />
                   </Show>
-                  <span class="truncate flex-1 min-w-0">{s.title || 'Untitled'}</span>
-                  <span class={`text-[10.5px] tabular-nums shrink-0 transition-opacity var(--spring-sm) ${isActive() ? 'text-zinc-500' : 'text-zinc-600'} group-hover:opacity-0`}>
-                    {formatTime(s.updatedAt)}
-                  </span>
-                  <button
-                    onClick={(e) => handleDelete(e, s.id)}
-                    title="Delete"
-                    class="absolute right-1.5 w-6 h-6 rounded
-                           opacity-0 group-hover:opacity-100
-                           text-zinc-500 hover:text-red-400 hover:bg-red-500/10
-                           flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+                  <Show
+                    when={!isEditing()}
+                    fallback={
+                      <input
+                        type="text"
+                        value={draftTitle()}
+                        onInput={(e) => setDraftTitle(e.currentTarget.value)}
+                        onBlur={() => commitRename(s.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); commitRename(s.id); }
+                          else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onDblClick={(e) => e.stopPropagation()}
+                        placeholder="Untitled"
+                        autoFocus
+                        class="flex-1 min-w-0 bg-[color:var(--bg-base)] border border-[color:var(--border-default)]
+                               rounded px-1.5 py-0.5 text-[13px] text-zinc-100
+                               focus:outline-none focus:border-[color:var(--accent)]"
+                      />
+                    }
                   >
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 7V4a1 1 0 011-1h2a1 1 0 011 1v3" />
-                    </svg>
-                  </button>
+                    <span class="truncate flex-1 min-w-0">{s.title || 'Untitled'}</span>
+                    <span class={`text-[10.5px] tabular-nums shrink-0 transition-opacity var(--spring-sm) ${isActive() ? 'text-zinc-500' : 'text-zinc-600'} group-hover:opacity-0`}>
+                      {formatTime(s.updatedAt)}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); startRename(s); }}
+                      title="Rename"
+                      class="absolute right-8 w-6 h-6 rounded
+                             opacity-0 group-hover:opacity-100
+                             text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]
+                             flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(e, s.id)}
+                      title="Delete"
+                      class="absolute right-1.5 w-6 h-6 rounded
+                             opacity-0 group-hover:opacity-100
+                             text-zinc-500 hover:text-red-400 hover:bg-red-500/10
+                             flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 7V4a1 1 0 011-1h2a1 1 0 011 1v3" />
+                      </svg>
+                    </button>
+                  </Show>
                 </div>
               </div>
             );

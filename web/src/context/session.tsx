@@ -68,6 +68,7 @@ interface SessionContextValue {
   permissionMode: () => 'auto' | 'ask';
   setPermissionMode: (mode: 'auto' | 'ask') => Promise<void>;
   selectSession: (id: string) => Promise<void>;
+  renameSession: (id: string, title: string) => Promise<void>;
   newSession: (model?: string) => Promise<Session>;
   prompt: (content: string, images?: ImagePartData[]) => Promise<void>;
   guidance: (content: string, cancelTool?: boolean) => Promise<boolean>;
@@ -486,6 +487,17 @@ export const SessionProvider: ParentComponent = (props) => {
       }
     } catch (e) {
       console.error('load messages failed:', e);
+    }
+  }
+
+  async function renameSession(id: string, title: string) {
+    const trimmed = title.trim();
+    try {
+      const updated = await updateSession(id, { title: trimmed });
+      setSessions((list) => list.map((s) => (s.id === id ? updated : s)));
+      if (activeSession()?.id === id) setActiveSession(updated);
+    } catch (e) {
+      console.error('rename session failed:', e);
     }
   }
 
@@ -955,6 +967,7 @@ export const SessionProvider: ParentComponent = (props) => {
     permissionMode,
     setPermissionMode,
     selectSession,
+    renameSession,
     newSession,
     prompt,
     guidance,
