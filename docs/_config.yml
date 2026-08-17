@@ -1,5 +1,5 @@
 title: ogcode
-description: Every coding agent re-sends your entire conversation, every turn. Ogcode recalls only what matters — 70% fewer tokens, no context ceiling, sharper answers. Self-hosted, one Go binary, bring your own model.
+description: The coding agent with a memory. Ogcode remembers your project, your decisions and every conversation you've had about them — so it picks up where you left off, and costs about 70% less to run. Self-hosted, one Go binary, any model.
 url: "https://ogcode.xyz"
 
 theme: null

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ogcode — the coding agent that recalls instead of replays</title>
-  <meta name="description" content="Every coding agent re-sends your entire conversation, every turn. Ogcode recalls only what matters — 70% fewer tokens, no context ceiling, sharper answers. Self-hosted, one Go binary, bring your own model. MIT.">
+  <title>Ogcode — never explain your codebase twice</title>
+  <meta name="description" content="Ogcode is the coding agent with a memory. It remembers your project, your decisions and every conversation you've had about them — so it picks up where you left off, and costs about 70% less to run. Self-hosted, one Go binary, any model. MIT.">
   <!-- NOTE: these are http:// because GitHub Pages has not yet issued a TLS
        certificate for ogcode.xyz (it currently serves its default *.github.io
        cert). Once the custom domain is re-saved in Settings → Pages and
@@ -17,14 +17,14 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Ogcode">
   <meta property="og:url" content="http://ogcode.xyz/">
-  <meta property="og:title" content="Ogcode — the coding agent that recalls instead of replays">
-  <meta property="og:description" content="Every coding agent re-sends your entire conversation, every turn. Ogcode recalls only what matters — 70% fewer tokens, no context ceiling, sharper answers.">
+  <meta property="og:title" content="Ogcode — never explain your codebase twice">
+  <meta property="og:description" content="The coding agent with a memory. It remembers your project and your decisions, picks up where you left off, and costs about 70% less to run.">
   <meta property="og:image" content="http://ogcode.xyz/media/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Ogcode — the coding agent that recalls instead of replays">
-  <meta name="twitter:description" content="70% fewer tokens. No context ceiling. Self-hosted, one Go binary, bring your own model.">
+  <meta name="twitter:title" content="Ogcode — never explain your codebase twice">
+  <meta name="twitter:description" content="The coding agent with a memory. Remembers your project and decisions, costs about 70% less to run. Self-hosted, any model, MIT.">
   <meta name="twitter:image" content="http://ogcode.xyz/media/og.png">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235e6ad2'/><path d='M55 30L35 54h13l-3 16 20-24H52l3-16z' fill='%23fff'/></svg>">
@@ -143,12 +143,14 @@
     .lede strong { color: var(--text-primary); font-weight: 600; }
     .section-head { margin-bottom: 48px; }
 
-    /* ══ Ambience ═══════════════════════════════════════════════ */
+    /* ══ Ambience ═══════════════════════════════════════════════
+       Deliberately off-centre and low-contrast — a symmetric purple
+       bloom behind a centred hero is the stock look we're avoiding. */
     .ambient {
       position: fixed; inset: 0; pointer-events: none; z-index: 0;
       background:
-        radial-gradient(ellipse 60% 42% at 50% -6%, rgba(94,106,210,0.16), transparent 70%),
-        radial-gradient(ellipse 44% 30% at 88% 12%, rgba(94,106,210,0.06), transparent 62%);
+        radial-gradient(ellipse 46% 38% at 74% 4%, rgba(94,106,210,0.13), transparent 66%),
+        radial-gradient(ellipse 38% 26% at 4% 26%, rgba(94,106,210,0.045), transparent 62%);
     }
     .grid-bg {
       position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.5;
@@ -229,63 +231,113 @@
       padding-left: 8px; margin-left: 2px; border-left: 1px solid var(--border-default);
     }
 
-    /* ══ Hero ═══════════════════════════════════════════════════ */
-    .hero { padding: 92px 0 0; text-align: center; }
-    .badge {
-      display: inline-flex; align-items: center; gap: 9px;
-      padding: 5px 13px 5px 9px; border-radius: 999px;
-      border: 1px solid var(--border-default); background: rgba(255,255,255,0.025);
-      font-size: 12.5px; color: var(--text-secondary); margin-bottom: 26px;
+    /* ══ Hero ═══════════════════════════════════════════════════
+       Asymmetric two-column, left-aligned. No centred stack, no pill
+       badge, no gradient headline — those three together are the
+       stock AI-landing-page look. */
+    .hero { padding: 84px 0 0; }
+    .hero-grid {
+      display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+      gap: 52px; align-items: center;
     }
-    .badge b { color: var(--text-primary); font-weight: 600; }
-    .dot { position: relative; display: block; width: 6px; height: 6px; flex-shrink: 0; }
-    .dot::before {
-      content: ''; position: absolute; inset: 0; border-radius: 50%;
-      background: var(--success); animation: ping 2s cubic-bezier(0,0,0.2,1) infinite;
+
+    /* Kicker carries real information instead of a decorative pill. */
+    .kicker {
+      display: flex; align-items: center; gap: 11px; margin-bottom: 26px;
+      font-family: var(--font-mono); font-size: 11.5px; font-weight: 500;
+      letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-tertiary);
     }
-    .dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--success); }
-    @keyframes ping { 70%, 100% { transform: scale(2.4); opacity: 0; } }
+    .kicker i { width: 24px; height: 1px; background: var(--border-strong); flex-shrink: 0; }
+    .kicker b { color: var(--accent); font-weight: 600; }
 
     .hero h1 {
-      font-size: clamp(33px, 5.1vw, 58px); font-weight: 700;
-      letter-spacing: -0.038em; line-height: 1.06;
-      max-width: 19ch; margin: 0 auto;
+      font-size: clamp(40px, 4.2vw, 58px); font-weight: 680;
+      letter-spacing: -0.04em; line-height: 1.03;
       hyphens: none; text-wrap: balance;
     }
-    .hero h1 .nb { white-space: nowrap; }
-    .hero h1 .mark {
-      position: relative; white-space: nowrap;
-    }
-    /* Base state is drawn, so the underline survives even if the entrance
-       animation never runs. `backwards` holds it collapsed until the delay. */
-    .hero h1 .mark::after {
-      content: ''; position: absolute; left: -2px; right: -2px; bottom: -0.04em;
-      height: 4px; border-radius: 2px; background: var(--danger); opacity: 0.9;
+    .hero h1 .u { position: relative; white-space: nowrap; }
+    /* Drawn by default so the underline survives if the animation never
+       runs; `backwards` holds it collapsed through the delay. */
+    .hero h1 .u::after {
+      content: ''; position: absolute; left: 0; right: 0; bottom: -0.09em;
+      height: 5px; border-radius: 3px; background: var(--accent);
       transform: scaleX(1); transform-origin: left;
-      animation: underline 0.6s var(--spring) 0.65s backwards;
+      animation: underline 0.7s var(--spring) 0.45s backwards;
     }
     @keyframes underline { from { transform: scaleX(0); } }
-    .hero .h1-accent {
-      display: block; margin-top: 6px;
-      background: linear-gradient(96deg, #8b9cf7 0%, var(--accent) 45%, #8b9cf7 100%);
-      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-    }
+
     .hero-sub {
-      max-width: 58ch; margin: 24px auto 0;
-      font-size: 18px; line-height: 1.6; color: var(--text-secondary);
+      margin-top: 26px; max-width: 44ch;
+      font-size: 18.5px; line-height: 1.58; color: var(--text-secondary);
     }
     .hero-sub strong { color: var(--text-primary); font-weight: 600; }
-    .hero-what {
-      max-width: 52ch; margin: 14px auto 0;
-      font-size: 15px; line-height: 1.6; color: var(--text-tertiary);
+
+    /* ── Recall card — the hero's signature object ─────────────── */
+    .hero-copy, .hero-visual { min-width: 0; }
+    .recall {
+      border-radius: var(--radius-lg); border: 1px solid var(--border-default);
+      background: var(--bg-surface); box-shadow: var(--shadow-xl); overflow: hidden;
     }
+    .recall-head {
+      display: flex; align-items: center; gap: 9px;
+      padding: 11px 16px; border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    }
+    .recall-head .live {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--success); flex-shrink: 0;
+    }
+    .recall-head .when { margin-left: auto; }
+    .recall-body { padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; }
+    .turn { display: flex; gap: 10px; }
+    .turn .who {
+      flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
+      display: grid; place-items: center;
+      font-size: 9.5px; font-weight: 700; font-family: var(--font-mono);
+      background: var(--bg-hover); color: var(--text-tertiary);
+      border: 1px solid var(--border-subtle);
+    }
+    .turn.agent .who { background: var(--accent); color: #fff; border-color: transparent; }
+    .turn p { font-size: 13.5px; line-height: 1.5; color: var(--text-primary); }
+    .turn.agent p { color: var(--text-secondary); }
+
+    .recalled {
+      border-radius: var(--radius-md); border: 1px solid rgba(94,106,210,0.24);
+      background: rgba(94,106,210,0.055); padding: 12px 13px;
+    }
+    .recalled-label {
+      display: flex; align-items: center; gap: 7px; margin-bottom: 10px;
+      font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--accent);
+    }
+    .recalled-label svg { width: 12px; height: 12px; }
+    .recalled ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    .recalled li {
+      display: flex; gap: 9px;
+      font-size: 12.5px; color: var(--text-secondary); line-height: 1.45;
+    }
+    .recalled li::before {
+      content: ''; width: 4px; height: 4px; border-radius: 50%; margin-top: 6px;
+      background: var(--accent); flex-shrink: 0;
+    }
+    .recalled li em { font-style: normal; color: var(--text-muted); }
+    .recall-foot {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 12px 16px; border-top: 1px solid var(--border-subtle);
+      background: var(--bg-base);
+      font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    }
+    .recall-foot .sent { color: var(--accent); font-weight: 600; font-size: 13px; }
+    .recall-foot .was { margin-left: auto; text-align: right; }
+    .recall-foot .was s { opacity: 0.7; }
 
     /* ══ Install widget ═════════════════════════════════════════ */
-    .install { max-width: 620px; margin: 34px auto 0; text-align: left; }
+    .install { margin-top: 32px; text-align: left; }
     .os-tabs {
       display: flex; gap: 2px; padding: 3px; margin-bottom: 10px;
       background: var(--bg-surface); border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md); width: fit-content; margin-inline: auto;
+      border-radius: var(--radius-md); width: fit-content;
     }
     .os-tab {
       padding: 5px 13px; border-radius: 7px; border: none; background: transparent;
@@ -318,21 +370,22 @@
     .copy.done { color: var(--success); border-color: rgba(23,194,132,0.35); background: var(--success-soft); }
     .copy svg { width: 13px; height: 13px; }
     .install-note {
-      margin-top: 11px; text-align: center;
+      margin-top: 11px;
       font-size: 12.5px; color: var(--text-muted);
     }
     .install-note a { color: var(--text-tertiary); text-decoration: underline; text-underline-offset: 2px; }
     .install-note a:hover { color: var(--text-secondary); }
 
     .trust {
-      display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px;
-      margin-top: 30px; font-size: 12.5px; color: var(--text-tertiary);
+      display: flex; flex-wrap: wrap; gap: 8px 20px;
+      margin-top: 26px; font-size: 12.5px; color: var(--text-tertiary);
+      list-style: none;
     }
-    .trust span { display: inline-flex; align-items: center; gap: 6px; }
-    .trust svg { width: 13px; height: 13px; color: var(--success); }
+    .trust li { display: inline-flex; align-items: center; gap: 6px; }
+    .trust svg { width: 13px; height: 13px; color: var(--success); flex-shrink: 0; }
 
     /* ══ Demo video ═════════════════════════════════════════════ */
-    .demo { margin-top: 68px; padding-bottom: 8px; }
+    .demo { margin-top: 88px; padding-bottom: 8px; }
     .frame {
       position: relative; border-radius: var(--radius-xl); overflow: hidden;
       border: 1px solid var(--border-default); background: var(--bg-surface);
@@ -645,6 +698,9 @@
     /* ══ Responsive ═════════════════════════════════════════════ */
     @media (max-width: 980px) {
       .nav-menu { display: none; }
+      .hero-grid { grid-template-columns: 1fr; gap: 44px; }
+      .hero h1 { font-size: clamp(38px, 7vw, 52px); }
+      .hero-sub { max-width: 56ch; }
       .outcomes, .features, .qs { grid-template-columns: repeat(2, 1fr); }
       .steps { grid-template-columns: repeat(2, 1fr); gap: 20px; }
       .steps::before { display: none; }
@@ -652,14 +708,16 @@
     }
     @media (max-width: 720px) {
       .band { padding: 72px 0; }
-      .hero { padding: 56px 0 0; }
-      .hero h1 { max-width: 100%; }
-      .hero-sub { font-size: 16px; }
+      .hero { padding: 52px 0 0; }
+      .hero-sub { font-size: 16.5px; }
       .loops, .outcomes, .features, .qs, .rules { grid-template-columns: 1fr; }
       .steps { grid-template-columns: 1fr; }
       .demo { margin-top: 48px; }
       .frame-url { display: none; }
       .star-count { display: none; }
+      .recall-head .when { display: none; }
+      .recall-foot { flex-wrap: wrap; row-gap: 4px; }
+      .recall-foot .was { margin-left: 0; flex-basis: 100%; text-align: left; }
       .cta-band { margin: 0 16px; padding: 56px 20px; border-radius: 18px; }
       .footer-grid { grid-template-columns: 1fr; }
       .chart-card { padding: 20px 16px 14px; }
@@ -669,7 +727,7 @@
     @media (max-width: 560px) {
       .nav-actions .btn-ghost:first-child { display: none; }  /* Discord — GitHub is enough here */
       .brand .pill { display: none; }
-      .trust { flex-direction: column; align-items: center; gap: 7px; }
+      .trust { flex-direction: column; gap: 7px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -681,7 +739,7 @@
       .js .reveal { opacity: 1; transform: none; }
       .chart-line.draw { stroke-dashoffset: 0; }
       .chart-area { opacity: 1; }
-      .hero h1 .mark::after { transform: scaleX(1); animation: none; }
+      .hero h1 .u::after { transform: scaleX(1); animation: none; }
     }
   </style>
   <script>document.documentElement.classList.add('js');</script>
@@ -727,26 +785,16 @@
   <main>
     <!-- ══ Hero ════════════════════════════════════════════════ -->
     <section class="hero">
-      <div class="wrap">
-        <span class="badge">
-          <span class="dot" aria-hidden="true"></span>
-          <b>MIT</b> · self-hosted · bring your own model
-        </span>
+      <div class="wrap hero-grid">
+       <div class="hero-copy">
+        <p class="kicker"><i aria-hidden="true"></i> The coding agent with a memory <b>·</b> MIT</p>
 
-        <h1>
-          Every coding agent <span class="nb">re-sends</span> your entire conversation.
-          <span class="mark">Every turn.</span>
-          <span class="h1-accent">Ogcode recalls instead.</span>
-        </h1>
+        <h1>Never explain your codebase <span class="u">twice</span>.</h1>
 
         <p class="hero-sub">
-          A knowledge graph hands the model only the facts this turn needs —
-          so you spend <strong>70% fewer tokens</strong>, never hit a
-          <strong>context limit</strong>, and get answers that don't drift.
-        </p>
-        <p class="hero-what">
-          A self-hosted agentic coding workbench with a browser UI.
-          One Go binary, any model, your machine.
+          Ogcode remembers your project, your decisions and every conversation
+          you've had about them — so it picks up where you left off, on day one
+          or day ninety. <strong>And it costs about 70% less to run.</strong>
         </p>
 
         <div class="install">
@@ -772,12 +820,54 @@
           </p>
         </div>
 
-        <div class="trust">
-          <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Your code never leaves your machine</span>
-          <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Works with any editor</span>
-          <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> No account, no subscription</span>
-        </div>
+        <ul class="trust">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Runs on your machine</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Works with any editor</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> No account, no subscription</li>
+        </ul>
+       </div>
 
+       <!-- The signature object: memory doing its job, three days later. -->
+       <aside class="hero-visual reveal d1">
+        <div class="recall">
+          <div class="recall-head">
+            <span class="live" aria-hidden="true"></span>
+            <span>session 47 · payments-api</span>
+            <span class="when">reopened 3 days later</span>
+          </div>
+          <div class="recall-body">
+            <div class="turn">
+              <span class="who" aria-hidden="true">YOU</span>
+              <p>Why did we drop the cookie approach again?</p>
+            </div>
+
+            <div class="recalled">
+              <div class="recalled-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v6h6M20 9A8 8 0 006 5.3"/><path stroke-linecap="round" stroke-linejoin="round" d="M20 20v-6h-6M4 15a8 8 0 0014 3.7"/></svg>
+                Recalled 3 facts from memory
+              </div>
+              <ul>
+                <li>Auth is JWT, verified in <em>middleware/auth.go</em></li>
+                <li>Cookies were rejected — they broke SSR on the marketing site</li>
+                <li>You decided this on <em>Mar 4</em>, in session 12</li>
+              </ul>
+            </div>
+
+            <div class="turn agent">
+              <span class="who" aria-hidden="true">OG</span>
+              <p>You ruled cookies out because they broke SSR — JWT stayed. Want me to revisit that, or keep going on refresh tokens?</p>
+            </div>
+          </div>
+          <div class="recall-foot">
+            <span>context sent</span>
+            <span class="sent">4,200 tok</span>
+            <span class="was">a replay loop would send <s>98,400</s></span>
+          </div>
+        </div>
+       </aside>
+      </div>
+
+      <div class="wrap">
         <!-- Demo -->
         <div class="demo reveal">
           <div class="frame">
@@ -803,8 +893,8 @@
     <section class="band" id="how">
       <div class="wrap">
         <div class="section-head reveal">
-          <span class="eyebrow">The core idea</span>
-          <h2 class="title">Recall beats replay — on cost <em>and</em> on accuracy.</h2>
+          <span class="eyebrow">Why it's cheaper</span>
+          <h2 class="title">Most of your AI bill is repeated history.</h2>
           <p class="lede">
             Naive agents bundle the whole transcript into every request. The bill grows linearly,
             and the model has to find three relevant facts inside a hundred stale messages.
@@ -1242,7 +1332,7 @@ ogcode
     <!-- ══ CTA ═════════════════════════════════════════════════ -->
     <section>
       <div class="cta-band reveal">
-        <h2>Stop paying to re-send yesterday's conversation.</h2>
+        <h2>Your codebase, finally explained once.</h2>
         <p>One command, one binary, your models, your machine.</p>
         <div class="cta-actions">
           <button class="btn btn-lg btn-primary" type="button" id="ctaCopy">
@@ -1271,7 +1361,7 @@ ogcode
             </span>
             <span class="brand-name">ogcode</span>
           </a>
-          <p>The agentic coding workbench that recalls instead of replays. Self-hosted, MIT-licensed, yours.</p>
+          <p>The coding agent with a memory. Self-hosted, MIT-licensed, yours.</p>
         </div>
 
         <div>
@@ -1327,7 +1417,7 @@ ogcode
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Linux, Windows",
     "url": "http://ogcode.xyz/",
-    "description": "A self-hosted agentic coding workbench that recalls relevant context per turn instead of replaying the full conversation — cutting 70%+ of tokens, removing the context ceiling, and improving accuracy.",
+    "description": "A self-hosted coding agent with persistent memory of your codebase and decisions. It recalls only the context each turn needs instead of replaying the full conversation — cutting 70%+ of tokens, removing the context ceiling, and improving accuracy.",
     "license": "https://opensource.org/licenses/MIT",
     "isAccessibleForFree": true,
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
