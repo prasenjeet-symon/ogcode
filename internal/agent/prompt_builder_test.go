@@ -93,10 +93,11 @@ func TestSystemReminderPrompt(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
-	// The base system prompt must NOT contain the current date — it's injected
-	// separately as a system-reminder so the Anthropic prompt cache prefix stays
-	// byte-for-byte identical across turns.
-	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", 1920, 1080)
+	// The cacheable base — entry [0], the only block the provider marks with
+	// cache_control — must NOT contain the current date. It is injected as a
+	// separate system-reminder entry so the cached prefix stays byte-for-byte
+	// identical across turns.
+	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", 1920, 1080, "")[0]
 	if strings.Contains(prompt, "Current date:") {
 		t.Error("did not expect 'Current date:' in the base system prompt (it should be in a separate system-reminder entry)")
 	}
@@ -302,6 +303,9 @@ func TestBuildAgent_HasExpectedTools(t *testing.T) {
 	if !BuildAgent.HasTool("memory_recall") {
 		t.Error("BuildAgent should have memory_recall tool")
 	}
+	if !BuildAgent.HasTool("project_memory_recall") {
+		t.Error("BuildAgent should have project_memory_recall tool")
+	}
 }
 
 func TestPlanAgent_HasExpectedTools(t *testing.T) {
@@ -313,6 +317,9 @@ func TestPlanAgent_HasExpectedTools(t *testing.T) {
 	}
 	if !PlanAgent.HasTool("memory_recall") {
 		t.Error("PlanAgent should have memory_recall tool")
+	}
+	if !PlanAgent.HasTool("project_memory_recall") {
+		t.Error("PlanAgent should have project_memory_recall tool")
 	}
 	if !PlanAgent.HasTool("read") {
 		t.Error("PlanAgent should have read tool")
@@ -328,6 +335,9 @@ func TestNoteAgent_HasExpectedTools(t *testing.T) {
 	}
 	if NoteAgent.HasTool("memory_recall") {
 		t.Error("NoteAgent should not have memory_recall tool (single-iteration agent)")
+	}
+	if NoteAgent.HasTool("project_memory_recall") {
+		t.Error("NoteAgent should not have project_memory_recall tool (single-iteration agent)")
 	}
 	if !NoteAgent.HasTool("codebase_map") {
 		t.Error("NoteAgent should have codebase_map tool")
@@ -628,4 +638,52 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 
 	// Reset for other tests
 	detectedLatexEnv = nil
+}
+
+// TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant pins the
+// invariant that regressed when the viewport was appended to the base prompt:
+// entry [0] is the only block providers mark cacheable, and the browser resends
+// its window size with every prompt, so a resize must not change [0] by one byte.
+func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.T) {
+	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "")
+	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1280, 720, "")
+	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 0, 0, "")
+
+	if desktop[0] != laptop[0] {
+		t.Error("resizing the window changed the cacheable prefix — the tools+system cache is invalidated on every resize")
+	}
+	if desktop[0] != none[0] {
+		t.Error("cacheable prefix differs between a viewport-carrying request and one without")
+	}
+	if strings.Contains(desktop[0], "Rendering viewport") {
+		t.Error("viewport leaked into the cacheable prefix")
+	}
+	if strings.Contains(desktop[0], "Current date:") {
+		t.Error("date leaked into the cacheable prefix")
+	}
+
+	// The viewport must still reach the model, just in a later entry.
+	rest := strings.Join(desktop[1:], "\n\n")
+	if !strings.Contains(rest, "1920") || !strings.Contains(rest, "Rendering viewport") {
+		t.Errorf("viewport is missing from the dynamic entries: %q", rest)
+	}
+	if len(none) != len(desktop)-1 {
+		t.Errorf("expected no viewport entry when dimensions are absent: got %d entries, want %d", len(none), len(desktop)-1)
+	}
+}
+
+// TestBuildSystemPromptEntries_FinalInstructionIsLastEntry guards the pinning
+// that moving the viewport could have broken: an output-only agent's format
+// constraint must stay the last thing the model reads.
+func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
+	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", 1920, 1080, "")
+	if got := entries[len(entries)-1]; got != NoteAgent.FinalInstruction {
+		t.Errorf("last entry = %q, want the agent's FinalInstruction", got)
+	}
+	// An agent without one must not gain an empty trailing entry.
+	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "") {
+		if strings.TrimSpace(e) == "" {
+			t.Error("assembled entries contain an empty block")
+		}
+	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/plan"
+	"github.com/prasenjeet-symon/ogcode/internal/project"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -263,6 +264,8 @@ func (s *Server) Start() error {
 			})
 			s.mem = mem
 			toolRegistry.Register(tool.NewMemoryRecallTool(mem, registry))
+			toolRegistry.Register(tool.NewProjectMemoryRecallTool(mem, registry))
+			s.backfillMemoryProjects(memStore)
 			slog.Info("agentic memory enabled (local embedder; synthesis uses session LLM)")
 		}
 	}
@@ -573,6 +576,50 @@ func collectionFromBaseURLEq(p *provider.OpenAIProvider, baseURL string) bool {
 func (s *Server) reloadProviders() {
 	s.registry.ReplaceProviders(s.loadProviderMap())
 	slog.Info("reloaded provider registry", "providers", s.registry.List())
+}
+
+// backfillMemoryProjects stamps project identity onto memory nodes written
+// before the memory store tracked projects. Without it, every fact recorded by
+// an older build is invisible to project-scoped recall.
+//
+// Sessions are grouped by their resolved directory rather than assumed to all
+// belong to s.dir: this workspace's database also holds task-worktree sessions,
+// which resolve to their own project key. Only rows with an empty project_id are
+// touched, so the pass is idempotent and costs nothing once complete.
+func (s *Server) backfillMemoryProjects(memStore *memory.Store) {
+	sessions, err := s.store.ListAll()
+	if err != nil {
+		slog.Warn("memory backfill: failed to list sessions", "err", err)
+		return
+	}
+	byProject := make(map[string]map[string]string) // projectID → sessionID → sessionType
+	for _, sess := range sessions {
+		dir := sess.Directory
+		if dir == "" {
+			dir = sess.ProjectID
+		}
+		projectID := project.Resolve(dir)
+		if projectID == "" {
+			continue
+		}
+		if byProject[projectID] == nil {
+			byProject[projectID] = make(map[string]string)
+		}
+		byProject[projectID][string(sess.ID)] = sess.SessionType
+	}
+
+	var total int64
+	for projectID, sessionTypes := range byProject {
+		n, err := memStore.BackfillProject(projectID, sessionTypes)
+		if err != nil {
+			slog.Warn("memory backfill failed", "project", projectID, "err", err)
+			continue
+		}
+		total += n
+	}
+	if total > 0 {
+		slog.Info("memory backfill: stamped project identity on legacy nodes", "nodes", total, "projects", len(byProject))
+	}
 }
 
 func openBrowser(url string) {

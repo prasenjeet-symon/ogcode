@@ -94,7 +94,7 @@ MEMORY.md stores hard-won knowledge about this project that you would otherwise 
 ### How it differs from AGENT.md and agentic memory
 - **AGENT.md** = behavioral instructions ("follow these rules", "always do X before Y"). It tells you HOW to act.
 - **MEMORY.md** = factual knowledge ("we chose PostgreSQL over MongoDB because X", "the auth middleware lives in middleware/auth.go"). It tells you WHAT you know.
-- **Agentic memory** (the <prior_context> block and memory_recall tool) = per-session conversation summaries. It provides continuity within a single session. MEMORY.md persists across all sessions.
+- **Agentic memory** (the <prior_context> block, memory_recall and project_memory_recall tools) = conversation summaries mined from chat history. memory_recall covers the current session; project_memory_recall covers every past session in this project. Both are recalled on demand and reflect what was *said*; MEMORY.md is curated knowledge you deliberately write down.
 
 `
 	if canWriteFiles {

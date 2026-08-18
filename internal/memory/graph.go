@@ -41,6 +41,12 @@ type Graph struct {
 // GraphOptions tunes Graph inference behavior.
 type GraphOptions struct {
 	SessionID string
+	// ProjectID, SessionType and SessionName describe the session's workspace.
+	// They are denormalized onto every node written so project-scoped recall can
+	// filter and attribute facts without reaching into the session database.
+	ProjectID   string
+	SessionType string
+	SessionName string
 	Question  string
 	Response  string
 	UserTopic string
@@ -70,7 +76,12 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 		content = opts.Question
 	}
 
-	if err := g.Store.EnsureSession(opts.SessionID); err != nil {
+	if err := g.Store.EnsureSessionMeta(SessionUpsert{
+		ID:          opts.SessionID,
+		ProjectID:   opts.ProjectID,
+		SessionType: opts.SessionType,
+		Name:        opts.SessionName,
+	}); err != nil {
 		return nil, fmt.Errorf("ensure session: %w", err)
 	}
 
@@ -83,13 +94,28 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 		return nil, fmt.Errorf("list concepts: %w", err)
 	}
 
-	placement, related, err := g.inferPlacement(ctx, opts, topics, existingConcepts, content, opts.Chat)
+	// Topic names already used elsewhere in this project, so a fact written in a
+	// new session lands under the established topic instead of founding a
+	// near-duplicate. Without this, project recall's topic map fragments into
+	// dozens of one-session topics that all mean the same thing.
+	var projectTopics []TopicCount
+	if opts.ProjectID != "" {
+		projectTopics, err = g.Store.ListProjectTopics(opts.ProjectID,
+			ProjectFilter{SessionTypes: DefaultProjectSessionTypes}, maxPlacementTopics)
+		if err != nil {
+			slog.Warn("list project topics failed; placing with session topics only", "err", err)
+		}
+	}
+
+	placement, related, err := g.inferPlacement(ctx, opts, topics, existingConcepts, projectTopics, content, opts.Chat)
 	if err != nil {
 		return nil, fmt.Errorf("infer placement: %w", err)
 	}
 
 	topicNode := &Node{
 		SessionID: opts.SessionID,
+		ProjectID: opts.ProjectID,
+		SessionType: opts.SessionType,
 		Type:      TypeTopic,
 		Key:       placement.Topic,
 		Content:   "",
@@ -102,6 +128,8 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 
 	conceptNode := &Node{
 		SessionID: opts.SessionID,
+		ProjectID: opts.ProjectID,
+		SessionType: opts.SessionType,
 		Type:      TypeConcept,
 		Key:       placement.Concept,
 		Content:   "",
@@ -122,6 +150,8 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 
 	factNode := &Node{
 		SessionID: opts.SessionID,
+		ProjectID: opts.ProjectID,
+		SessionType: opts.SessionType,
 		Type:      TypeFact,
 		Key:       factKey,
 		Content:   content,
@@ -227,7 +257,12 @@ Respond with:
 	return labels, summary
 }
 
-func (g *Graph) inferPlacement(ctx context.Context, opts GraphOptions, topics []Node, existingConcepts []Node, content string, chat ChatClient) (Placement, []RelatedConcept, error) {
+// maxPlacementTopics bounds how many project topics are offered to the
+// placement LLM. The list rides on every memory write, so it is capped at the
+// largest topics rather than the whole taxonomy.
+const maxPlacementTopics = 50
+
+func (g *Graph) inferPlacement(ctx context.Context, opts GraphOptions, topics []Node, existingConcepts []Node, projectTopics []TopicCount, content string, chat ChatClient) (Placement, []RelatedConcept, error) {
 	if chat == nil {
 		topic := opts.UserTopic
 		if topic == "" {
@@ -241,9 +276,15 @@ func (g *Graph) inferPlacement(ctx context.Context, opts GraphOptions, topics []
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Existing topics:\n")
+	sb.WriteString("Existing topics in this conversation:\n")
 	for _, t := range topics {
 		sb.WriteString("  - " + t.Key + "\n")
+	}
+	if len(projectTopics) > 0 {
+		sb.WriteString("Topics already used elsewhere in this project (fact counts):\n")
+		for _, t := range projectTopics {
+			sb.WriteString(fmt.Sprintf("  - %s (%d)\n", t.Name, t.Facts))
+		}
 	}
 	sb.WriteString("Existing concepts:\n")
 	for _, c := range existingConcepts {
@@ -261,6 +302,12 @@ Structure: Topic → Concept (grouped fact) → Fact (leaf knowledge).
 %s
 New fact to organize: %q
 %s
+
+Reuse an existing topic name VERBATIM whenever the fact plausibly belongs to it —
+topics listed as used elsewhere in the project count, and matching one of those is
+how knowledge from different conversations ends up connected. Only invent a new
+topic when the fact genuinely fits none of them; never coin a near-synonym of a
+listed topic (e.g. do not add "Auth" when "Auth System" exists).
 
 Respond with exactly 3 lines:
 1. TOPIC: <topic name or "General" if no topic fits>

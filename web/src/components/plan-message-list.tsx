@@ -2,6 +2,7 @@ import { Index, Show, createEffect, on, onMount, onCleanup, createSignal } from 
 import { usePlan } from '../context/plan';
 import MessageItem from './message-item';
 import { saveScroll, getScroll } from '../lib/scroll-memory';
+import JumpToLatest from './jump-to-latest';
 
 function isToolResultMessage(msg: any): boolean {
   if (msg.info.role !== 'user') return false;
@@ -22,6 +23,9 @@ export default function PlanMessageList() {
   let restored = false;
   const [isScrolledUp, setIsScrolledUp] = createSignal(false);
   const [unreadCount, setUnreadCount] = createSignal(0);
+  // Messages already seen. Unread is (total - readMarker); without this the
+  // badge showed the whole conversation's length the moment you scrolled up.
+  const [readMarker, setReadMarker] = createSignal(0);
   const [stickToBottom, setStickToBottom] = createSignal(true);
 
   const scrollKey = () => {
@@ -50,7 +54,10 @@ export default function PlanMessageList() {
       const nearBottom = checkNearBottom();
       setIsScrolledUp(!nearBottom);
       setStickToBottom(nearBottom);
-      if (nearBottom) setUnreadCount(0);
+      if (nearBottom) {
+        setUnreadCount(0);
+        setReadMarker(visibleMessages().length);
+      }
     };
     scrollRef.addEventListener('scroll', handler, { passive: true });
     onCleanup(() => scrollRef?.removeEventListener('scroll', handler));
@@ -81,6 +88,7 @@ export default function PlanMessageList() {
       setStickToBottom(true);
       setIsScrolledUp(false);
       setUnreadCount(0);
+      setReadMarker(0);
     },
   ));
 
@@ -104,9 +112,9 @@ export default function PlanMessageList() {
         requestAnimationFrame(() => {
           bottomAnchor?.scrollIntoView({ behavior: 'instant' });
         });
+        setReadMarker(visibleMessages().length);
       } else {
-        const count = visibleMessages().length;
-        setUnreadCount(Math.max(0, count));
+        setUnreadCount(Math.max(0, visibleMessages().length - readMarker()));
       }
     },
   ));
@@ -117,10 +125,12 @@ export default function PlanMessageList() {
     setStickToBottom(true);
     setIsScrolledUp(false);
     setUnreadCount(0);
+    setReadMarker(visibleMessages().length);
   };
 
   return (
-    <div ref={scrollRef} class="flex-1 overflow-y-auto relative">
+    <div class="flex-1 min-h-0 relative flex flex-col">
+      <div ref={scrollRef} class="flex-1 overflow-y-auto">
         <div class="max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-6">
           <Show when={visibleMessages().length === 0 && !plan.loading()}>
             <div class="flex flex-col items-center justify-center py-24 text-center">
@@ -175,23 +185,15 @@ export default function PlanMessageList() {
           <div ref={bottomAnchor} />
         </div>
 
-        <Show when={isScrolledUp()}>
-          <button
-            onClick={scrollToBottom}
-            class="fixed bottom-24 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] text-[13px] font-medium shadow-md transition-all anim-enter"
-            title="Jump to latest message"
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-            </svg>
-            Jump to latest
-            <Show when={unreadCount() > 0}>
-              <span class="ml-1 px-2 py-0.5 bg-red-500 rounded-full text-xs font-bold">
-                {unreadCount()}
-              </span>
-            </Show>
-          </button>
-        </Show>
       </div>
+
+      {/* Anchored to the message column and just above the composer, so it
+          centres on the conversation and never overlaps a grown input. */}
+      <Show when={isScrolledUp()}>
+        <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+          <JumpToLatest count={unreadCount()} onClick={scrollToBottom} />
+        </div>
+      </Show>
+    </div>
   );
 }

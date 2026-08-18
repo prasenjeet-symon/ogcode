@@ -131,6 +131,79 @@ func (m *Memory) RecallMemory(ctx context.Context, sessionID, question string, c
 	return display
 }
 
+// DefaultProjectSessionTypes are the session types project-scoped recall reads.
+// Subagent, note, index and search sessions also write memory, but their turns
+// are tool traces rather than conversations with the user — including them
+// drowns project recall in noise.
+var DefaultProjectSessionTypes = []string{"build", "plan"}
+
+// ProjectRecallRequest is a project-scoped recall query.
+type ProjectRecallRequest struct {
+	ProjectID string
+	Question  string
+	Since     int64  // unix ms; 0 = the whole history
+	TopicName string // empty = every topic
+	// SessionID narrows the search to one conversation. The retrieval pipeline is
+	// otherwise unchanged, so a session-scoped answer still arrives dated,
+	// attributed and recency-ranked — which plain session recall does not provide.
+	SessionID string
+	Chat      ChatClient
+}
+
+// RecallProjectMemory performs semantic recall across every conversation held in
+// a project. chat is the synthesis LLM built from the session's selected model;
+// when nil, the assembled cross-session context is returned without synthesis.
+func (m *Memory) RecallProjectMemory(ctx context.Context, req ProjectRecallRequest) string {
+	if !m.Enabled() {
+		return ""
+	}
+	if m.Graph.Embed == nil {
+		slog.Warn("RecallProjectMemory: no embedder configured")
+		return ""
+	}
+	if req.ProjectID == "" {
+		slog.Warn("RecallProjectMemory: no project id resolved")
+		return ""
+	}
+
+	result, err := m.Graph.ProjectRecall(ctx, ProjectRecallOptions{
+		ProjectID:    req.ProjectID,
+		Question:     req.Question,
+		Since:        req.Since,
+		TopicName:    req.TopicName,
+		OnlySession:  req.SessionID,
+		SessionTypes: DefaultProjectSessionTypes,
+		Chat:         req.Chat,
+	})
+	if err != nil {
+		slog.Warn("project memory recall failed", "err", err)
+		return ""
+	}
+	if result.TotalFacts == 0 || strings.TrimSpace(result.Answer) == "" {
+		return ""
+	}
+
+	display := result.Answer
+	if result.Confidence > 0 {
+		display = fmt.Sprintf("[confidence: %.0f%% | rounds: %d | facts used: %d of %d across %d conversations]\n\n%s",
+			result.Confidence*100, result.Rounds, result.FactsUsed, result.TotalFacts, result.SessionsUsed, result.Answer)
+	}
+	slog.Info("project memory recall returned context",
+		"project", req.ProjectID, "len", len(display), "sessions", result.SessionsUsed, "facts", result.TotalFacts)
+	return display
+}
+
+// Scope identifies the session a memory write belongs to, plus the workspace
+// attributes stamped onto every node so the turn is later recallable at project
+// scope. ProjectID is a project.Resolve'd directory; SessionType mirrors the
+// session store's type ("", "plan", "subagent", …).
+type Scope struct {
+	SessionID   string
+	ProjectID   string
+	SessionType string
+	SessionName string
+}
+
 // WriteMemory persists a conversation turn. chat is the synthesis LLM client
 // to use for topic/concept inference and enrichment — it should be built from
 // the same provider+model the user selected for the current session. When chat
@@ -138,7 +211,7 @@ func (m *Memory) RecallMemory(ctx context.Context, sessionID, question string, c
 // to heuristic). Synthesis runs in a background goroutine; the chat client is
 // captured at dispatch time so it reflects the session's model even though the
 // call is asynchronous.
-func (m *Memory) WriteMemory(ctx context.Context, sessionID, question, response string, chat ChatClient) {
+func (m *Memory) WriteMemory(ctx context.Context, scope Scope, question, response string, chat ChatClient) {
 	if !m.Enabled() {
 		return
 	}
@@ -147,15 +220,18 @@ func (m *Memory) WriteMemory(ctx context.Context, sessionID, question, response 
 		defer cancel()
 
 		_, err := m.Graph.AddFact(bgCtx, GraphOptions{
-			SessionID: sessionID,
-			Question:  question,
-			Response:  response,
-			Chat:      chat,
+			SessionID:   scope.SessionID,
+			ProjectID:   scope.ProjectID,
+			SessionType: scope.SessionType,
+			SessionName: scope.SessionName,
+			Question:    question,
+			Response:    response,
+			Chat:        chat,
 		})
 		if err != nil {
 			slog.Warn("memory_add call failed", "err", err)
 		} else {
-			slog.Info("memory_add succeeded", "session", sessionID)
+			slog.Info("memory_add succeeded", "session", scope.SessionID, "project", scope.ProjectID)
 		}
 	}()
 }

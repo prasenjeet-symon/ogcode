@@ -66,6 +66,30 @@ func (s *Store) List(directory string) ([]*Session, error) {
 	return sessions, nil
 }
 
+// ListAll returns every session row regardless of directory or type, including
+// the note/index/search sessions List hides. Agentic memory uses it to backfill
+// project identity onto nodes written before that column existed.
+func (s *Store) ListAll() ([]*Session, error) {
+	rows, err := s.db.Query(
+		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, memory_tokens_saved, time_created, time_updated
+		 FROM session ORDER BY time_updated DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*Session
+	for rows.Next() {
+		var sess Session
+		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.MemoryTokensSaved, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, &sess)
+	}
+	return sessions, rows.Err()
+}
+
 func (s *Store) Update(session *Session) error {
 	_, err := s.db.Exec(
 		`UPDATE session SET title = ?, model = ?, session_type = ?, permission = ?, compaction_summary = ?, time_updated = ? WHERE id = ?`,

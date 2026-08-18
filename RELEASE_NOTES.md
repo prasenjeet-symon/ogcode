@@ -1,3 +1,76 @@
+# Release Notes — v0.23.0
+
+## Minor: Project-Scoped Agentic Memory Recall
+
+This minor release adds **project-scoped memory recall** — a second memory tool
+that searches every past conversation held in the same workspace, not just the
+current one. Until now `memory_recall` could only see the current session, so
+questions like "why did we choose PostgreSQL over Mongo here?" or "what did we
+try before the deterministic search pipeline?" had no answer unless they were
+asked in the session that made the decision. `project_memory_recall` closes
+that gap.
+
+1. **`project_memory_recall` tool** — A new agent tool that runs semantic
+   recall across the entire agentic-memory graph for the current workspace.
+   Results are **attributed to the conversation and date** they came from, and
+   the synthesis step is instructed to resolve contradictions in favour of the
+   most recent fact and call out supersessions explicitly, so the agent does not
+   present a stale decision as current. Synthesis uses the session's own
+   selected model (same contract as `memory_recall`). Supports an optional
+   `since_days` window, `topic` filter, and a `scope` parameter that can be
+   narrowed to `"session"` for a dated, recency-ranked view of just the current
+   conversation.
+   (`internal/tool/project_memory_recall.go`, `internal/memory/project.go`)
+
+2. **Project identity & backfill** — A new `internal/project` package resolves
+   the canonical (symlink-resolved) workspace path so `/var` and `/private/var`
+   do not split one workspace's memory into two. Every memory write now stamps
+   the workspace, session type and session name onto the node; on startup a
+   `backfillMemoryProjects` pass re-stamps legacy nodes written before the
+   column existed, so older conversations become recallable without re-indexing.
+   (`internal/project/project.go`, `internal/memory/store.go`,
+   `internal/session/store.go`, `internal/server/server.go`)
+
+3. **Project recall engine** — The recall pipeline (`Graph.ProjectRecall`) does
+   a single scan that simultaneously selects the top semantic matches (with a
+   per-session cap so one 400-turn conversation cannot starve the rest) and
+   builds an aggregate topic map. Matched facts are expanded with their
+   immediate neighbour turns (adjacency is only meaningful inside one session,
+   since per-session "order" restarts at 1), grouped by conversation oldest
+   first, and fitted to a character budget by trimming per-fact text before
+   dropping context-only neighbours. A multi-round refinement loop with an
+   LLM-driven follow-up query re-searches the project when the first answer is
+   low-confidence. (`internal/memory/project.go`, `internal/memory/store.go`)
+
+4. **Static/dynamic system-prompt split** — `buildSystemPrompt` is refactored
+   into `buildSystemPromptEntries`, returning the system prompt as separate
+   entries so the Anthropic provider can attach its `cache_control` breakpoint
+   to the static base only. The rendering viewport (which the browser resends
+   with every prompt) now lives in a dynamic trailing entry alongside the date,
+   so resizing the window no longer invalidates the cached tools+system prefix.
+   The `FinalInstruction` of output-only agents is kept as the last entry so it
+   sits closest to the model's response. (`internal/agent/loop.go`)
+
+5. **"Jump to latest" UI fixes** — The floating jump-to-latest button is
+   re-anchored to the message column (was `fixed left-1/2`, which centred on the
+   viewport and drifted sideways when the sidebar expanded/collapsed) and now
+   shows an accurate unread count via a read-marker signal (the old code
+   reported the whole conversation length the moment you scrolled up). Extracted
+   into a reusable `JumpToLatest` component shared by the chat and plan message
+   lists. (`web/src/components/jump-to-latest.tsx`,
+   `web/src/components/message-list.tsx`, `web/src/components/plan-message-list.tsx`)
+
+**Migration**: The memory database gains `project_id` and `session_type`
+columns on `nodes` and `sessions` plus three supporting indexes, added via
+idempotent `ALTER TABLE` statements (safe on existing DBs). The startup
+backfill then stamps project identity onto any legacy rows. No manual action
+required.
+
+Build: `npm run build` then `go build -o ./ogcode`; `go vet` clean;
+`go test ./...` green.
+
+---
+
 # Release Notes — v0.22.1
 
 ## Patch: Inline Session-Title Editing in the Sidebar

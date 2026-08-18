@@ -16,6 +16,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/memory"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
+	"github.com/prasenjeet-symon/ogcode/internal/project"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -377,16 +378,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		if p != nil {
 			providerID = p.ID()
 		}
-		system := buildSystemPromptForFamily(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID))
-
-		// The base system prompt is static within a session (no date, no
-		// per-turn content) so it stays byte-for-byte identical across turns.
-		// The current date is injected as a separate trailing system prompt
-		// entry via systemReminderPrompt(). This separation is critical for
-		// Anthropic prompt caching: the Anthropic provider puts the cache_control
-		// breakpoint on the first (static) system block only, so the date —
-		// which changes every turn — does not invalidate the cache.
-		systemPrompts := []string{system, systemReminderPrompt()}
+		// Entry [0] is static within a session so it stays byte-for-byte identical
+		// across turns; per-turn content (viewport, date) follows as separate
+		// entries. This separation is critical for Anthropic prompt caching: the
+		// provider puts the cache_control breakpoint on the first system block
+		// only, so anything that changes mid-session must stay out of it.
+		systemPrompts := buildSystemPromptEntries(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID))
 		var modelMessages []provider.ModelMessage
 
 		if memoryEnabled {
@@ -1294,7 +1291,24 @@ func (lr *LoopRunner) writeMemory(ctx context.Context, sessionID session.Session
 	if chatProvider != nil {
 		chat = memory.NewChatClient(chatProvider, chatModel)
 	}
-	lr.Memory.WriteMemory(ctx, string(sessionID), userText, responseText, chat)
+
+	// Stamp the workspace onto the write so project-scoped recall can find this
+	// turn later. The session row is the only place that knows the directory and
+	// type; a miss here is not fatal — the fact is still stored session-scoped.
+	scope := memory.Scope{SessionID: string(sessionID)}
+	if sess, err := lr.Store.Get(sessionID); err == nil && sess != nil {
+		dir := sess.Directory
+		if dir == "" {
+			dir = sess.ProjectID
+		}
+		scope.ProjectID = project.Resolve(dir)
+		scope.SessionType = sess.SessionType
+		scope.SessionName = sess.Title
+	} else if err != nil {
+		slog.Warn("writeMemory: session lookup failed; storing without project scope", "session", sessionID, "err", err)
+	}
+
+	lr.Memory.WriteMemory(ctx, scope, userText, responseText, chat)
 }
 
 // buildTurnResponse serializes all assistant messages after a given user message
@@ -2237,18 +2251,55 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 	return result
 }
 
-// buildSystemPrompt builds the system prompt with no model-family tuning
+// buildSystemPrompt builds the full system prompt with no model-family tuning
 // (family = generic). Retained for callers/tests that have no model in hand.
 func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int) string {
 	return buildSystemPromptForFamily(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, "")
 }
 
-// buildSystemPromptForFamily is buildSystemPrompt with a model-family working-style
-// block injected for codebase agents, so non-Claude models (GPT/o-series, Gemini,
-// small local models) get appropriately-tuned guidance. The block is part of the
-// static, cacheable base prefix — the model is fixed per session, so it stays
-// byte-identical across turns and does not disturb prompt caching.
+// buildSystemPromptForFamily returns the assembled entries joined into one
+// string. The provider is given the entries separately (see
+// buildSystemPromptEntries) so the cacheable prefix can be isolated; this
+// convenience form is for callers and tests that just want the whole text.
 func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string) string {
+	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, family), "\n\n")
+}
+
+// buildSystemPromptEntries returns the system-prompt entries in wire order:
+//
+//	[0]  the static base — agent instructions, project context, memory guidance.
+//	     Providers attach the cache breakpoint here, so it MUST NOT contain
+//	     anything that varies within a session.
+//	[1:] per-turn dynamic content: the rendering viewport (the browser resends
+//	     its window size with every prompt) and the current date.
+//	last the agent's FinalInstruction, kept adjacent to the model's response.
+//
+// Putting the viewport in [0] would invalidate the cached tools+system prefix
+// every time the user resized their window — the same reason the date lives out
+// here rather than in the base.
+func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string) []string {
+	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, agentMDContent, memoryMDContent, family)}
+
+	if vp := viewportPrompt(viewportWidth, viewportHeight); vp != "" {
+		entries = append(entries, strings.TrimSpace(vp))
+	}
+	entries = append(entries, systemReminderPrompt())
+
+	// Output-only agents pin their format constraint last, where it sits closest
+	// to the model's response and is least likely to be diluted by the sections
+	// above. It is static, but a couple of sentences outside the cached block
+	// cost far less than letting dynamic content into the block.
+	if a.FinalInstruction != "" {
+		entries = append(entries, a.FinalInstruction)
+	}
+	return entries
+}
+
+// staticSystemPrompt builds the cacheable base: the agent's own instructions
+// plus everything that is fixed for the whole session. The model-family
+// working-style block belongs here — the model is fixed per session, so it stays
+// byte-identical across turns.
+func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, family string) string {
 	// Project context (working dir, host env, AGENT.md, MEMORY.md) is only
 	// relevant to agents that operate on the user's codebase. Utility agents —
 	// the keyword indexer and web-research agent — skip it to keep their prompt
@@ -2286,24 +2337,26 @@ func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMD
 	if memoryEnabled && a.HasTool("memory_recall") {
 		prompt += `
 
-You have access to agentic memory. Prior conversation context is provided in <prior_context> blocks, which includes a knowledge graph summary of past sessions and the most recent assistant response for continuity.
+You have access to agentic memory. Prior conversation context is provided in <prior_context> blocks, which includes a knowledge graph summary of THIS conversation and the most recent assistant response for continuity. It does not contain anything from earlier sessions.
 
 To retrieve specific past facts, decisions, or details, use the memory_recall tool with a precise question. Use it proactively whenever the current query references past context, prior decisions, or earlier work — do not guess or hallucinate past details.`
+
+		if a.HasTool("project_memory_recall") {
+			prompt += `
+
+Agentic memory has two scopes, and picking the wrong one loses information:
+- memory_recall searches THIS conversation only. Use it for what was said or done earlier in this session.
+- project_memory_recall searches EVERY past conversation in this project. Use it when the question reaches beyond this session — why something was built the way it was, what was tried before, when a convention or decision was introduced, or anything referring to work you have no record of in this session.
+
+Results from project_memory_recall are attributed to the conversation and date they came from. Treat the most recent fact as current when two disagree, and say so rather than presenting a superseded decision as if it still stood.
+
+project_memory_recall also accepts scope: "session", which runs that same dated, attributed search over the current conversation only. Reach for it when you want this session's history with timestamps and ordering rather than the flat summary memory_recall returns.`
+		}
 	}
 
 	// Inject LaTeX environment info for agents that have the latex_to_pdf tool.
 	if a.HasTool("latex_to_pdf") {
 		prompt += latexInfoPrompt()
-	}
-
-	// Inject viewport dimensions so agents can make responsive design decisions.
-	prompt += viewportPrompt(viewportWidth, viewportHeight)
-
-	// Output-only agents pin their format constraint to the very end, where it
-	// sits closest to the model's response and is least likely to be diluted by
-	// the sections appended above.
-	if a.FinalInstruction != "" {
-		prompt += "\n\n" + a.FinalInstruction
 	}
 
 	return prompt

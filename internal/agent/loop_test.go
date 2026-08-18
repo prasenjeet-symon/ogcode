@@ -620,3 +620,43 @@ func TestEstimateRequestTokensReasoningParts(t *testing.T) {
 		t.Errorf("expected token delta >= %d (reasoning text), got %d", want, delta)
 	}
 }
+
+// TestBuildSystemPrompt_ProjectMemoryScopeGuidance verifies that every agent
+// holding project_memory_recall is actually told the two scopes exist. The
+// guidance is nested inside the memory_recall block, so an agent granted
+// project_memory_recall *without* memory_recall would silently get the tool and
+// no instructions on when to prefer it.
+func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
+	const scopeSentinel = "project_memory_recall searches EVERY past conversation"
+
+	all := []Agent{BuildAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, IndexAgent, SearchAgent, SubagentAgent}
+	for _, a := range all {
+		if !a.HasTool("project_memory_recall") {
+			continue
+		}
+		if !a.HasTool("memory_recall") {
+			t.Errorf("%s has project_memory_recall but not memory_recall; the scope guidance is gated on the latter and would never render", a.ID)
+		}
+		p := buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0)
+		if !strings.Contains(p, scopeSentinel) {
+			t.Errorf("%s prompt is missing the project-vs-session scope guidance", a.ID)
+		}
+		if !strings.Contains(p, `scope: "session"`) {
+			t.Errorf("%s prompt does not mention the session scope parameter", a.ID)
+		}
+	}
+
+	// Memory off: no memory guidance at all, whatever tools the agent holds.
+	off := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0)
+	if strings.Contains(off, scopeSentinel) {
+		t.Error("scope guidance leaked into the prompt with agentic memory disabled")
+	}
+
+	// Agents without the tool must not be told to use it.
+	for _, a := range []Agent{NoteAgent, BreakdownAgent, IndexAgent, SearchAgent} {
+		p := buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0)
+		if strings.Contains(p, scopeSentinel) {
+			t.Errorf("%s lacks project_memory_recall but its prompt advertises it", a.ID)
+		}
+	}
+}
