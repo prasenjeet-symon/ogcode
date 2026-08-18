@@ -167,6 +167,7 @@ Ogcode is the only agentic coding assistant that combines a **browser-native UI*
 - **Permission-Based Safety** — Destructive operations (write, edit, bash) require explicit approval per tool; read-only tools auto-approve.
 - **PDF Support** — Read and index PDF documentation directly in the agent.
 - **Codebase Map** — A semantic index of your entire project for intelligent file discovery.
+- **File Map** — Tree-sitter parses a source file into an outline of its declarations with line ranges, so the agent reads the 40 lines it needs instead of the whole 600-line file.
 - **Single Binary, Self-Contained** — One Go binary with an embedded SolidJS frontend. Zero external server dependencies.
 - **Rich Visual Output** — Agents render Mermaid diagrams, LaTeX math, Plotly charts, and full HTML/CSS/JS interactive content directly in the chat, with viewport-aware responsive design.
 
@@ -246,6 +247,8 @@ As the cost of using frontier AI climbs with every intelligence leap, tokens are
 | **Agentic Session Memory** | Replaces "send the whole conversation every turn" with a knowledge graph that returns only the facts relevant to the current query. | Largest single saving — grows with session length |
 | **Context compaction** | Summarizes stale history instead of replaying it verbatim, with truncation as a fallback. | Caps prompt size on long sessions |
 | **Targeted `memory_recall`** | The agent retrieves precise historical facts (config values, past decisions) rather than re-deriving them by re-reading code. | Fewer exploration turns |
+| **`file_map` ranged reads** | Tree-sitter outlines a file so the agent reads one declaration's line range instead of the entire file. Reading a file over 200 lines without a range returns the map instead. | A map costs 5–11% of the file it describes |
+| **Compact tool output** | Structural results render as indented text rather than JSON, which spends ~1.4x its own content on braces, quotes and one-label-per-line arrays. | 53% on every `codebase_map` call |
 
 ### Real session results
 
@@ -264,6 +267,48 @@ export OGCODE_AGENTIC_MEMORY_MODE=true
 ```
 
 See [Agentic Session Memory](#agentic-session-memory) for the technical deep dive.
+
+### File Map — read the range, not the file
+
+Reading a 600-line file to look at one 40-line function puts the other 560 lines in the context window for the rest of the turn — and they are re-sent on every step that follows. The `file_map` tool parses a file with [tree-sitter](https://tree-sitter.github.io/) and returns an outline of its declarations with line ranges, so the agent reads only the part it needs:
+
+```
+internal/tool/glob.go — go, 98 lines
+jump to any range with: read(path, start_line=N, end_line=M)
+
+    1  package tool
+ 3-10  import block
+   12  type GlobTool struct{}
+   14  func (GlobTool) ID() string
+   15  func (GlobTool) Description() string
+16-24  func (GlobTool) Parameters() json.RawMessage
+26-97  func (GlobTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error)
+```
+
+Each range already includes the declaration's doc comment, and ranges feed straight into `read(path, start_line, end_line)` with no arithmetic. Nested entries are indented, so a class's methods — or the handlers inside a component that is one large arrow function — are individually reachable rather than buried in a single opaque range.
+
+The map is parsed fresh on every call and never indexed, so its line numbers always describe the file as it is right now. Reading a file longer than 200 lines without a range returns its map instead of its contents, so a whole file cannot land in context by accident.
+
+| File | Full file | Map | Cost of the map |
+| ---- | --------- | --- | --------------- |
+| `internal/tool/bash.go` | 3.8 KB | 408 B | 10.8% |
+| `internal/server/server.go` | 23 KB | 1.1 KB | 4.9% |
+| `web/src/context/session.tsx` | 38 KB | 3.5 KB | 9.1% |
+| `internal/agent/loop.go` | 111 KB | 8.3 KB | 7.5% |
+
+#### Language support
+
+Three tree-sitter grammars give full parsing across nine file extensions:
+
+| Language | Extensions | Grammar |
+| -------- | ---------- | ------- |
+| Go | `.go` | `tree-sitter-go` |
+| TypeScript | `.ts` `.mts` `.cts` | `tree-sitter-typescript` |
+| TSX · JSX · JavaScript | `.tsx` `.jsx` `.js` `.mjs` `.cjs` | `tree-sitter-typescript` (TSX parser) |
+
+TypeScript is a syntactic superset of JavaScript and the TSX parser adds JSX on top, so plain `.js` and `.jsx` files — including `.js` files that carry JSX — parse correctly without a fourth grammar.
+
+Every other file type falls back to a heuristic scanner that recognises declarations in Python, Rust, shell, and the JavaScript/TypeScript family, plus Markdown headings. Its ranges are approximate — each declaration ends where the next one begins — but no file is left unmapped.
 
 ---
 

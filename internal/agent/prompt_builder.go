@@ -13,6 +13,11 @@ import (
 // scoped to the given agent role. The workflow tail is tailored to whether the
 // agent can make changes (build) or is read-only (plan, note). Agents that have
 // the codebase_map tool must use it before any file exploration.
+//
+// It also carries the file_map step. The two tools answer different questions —
+// codebase_map which file, file_map where inside it — and file_map deliberately
+// does not depend on the index, so it still applies in projects where
+// codebase_map comes back empty.
 func projectIndexPrompt(role string) string {
 	// The final workflow step differs by role: write-capable agents make changes,
 	// read-only agents produce their plan/note instead.
@@ -48,13 +53,37 @@ The project index provides **topic labels** and a **structured overview** of eve
 ### Workflow
 
 Task received
-  → codebase_map(subdir=...)   ← MANDATORY FIRST STEP
-  → Then read specific files
+  → codebase_map(subdir=...)          ← MANDATORY FIRST STEP: which files matter
+  → file_map(path)                    ← MANDATORY before reading an unfamiliar file: where things are inside it
+  → read(path, start_line, end_line)  ← only the region you need
   → ` + finalStep + `
+
+## Mandatory: Map a File Before Reading It
+
+**Rule:** Before reading a source file you do not already know, you **MUST** call "file_map" on it, then read only the range you need. Read a file in full only when it is short, or when the map shows you genuinely need all of it.
+
+This is enforced, not advisory: calling "read" on a file longer than 200 lines without a range returns that file's map instead of its contents. Reading the whole of a long file is not something you can do by accident, and pushing past it — with start_line=1 and end_line past the file length — should be rare and deliberate.
+
+"file_map" returns every declaration in the file with its 1-based line range and doc comment, and those ranges go straight into "read":
+
+  file_map("internal/tool/read.go")
+    → 37-159  func (ReadTool) Execute(ctx context.Context, ...) (Result, error)
+
+  read("internal/tool/read.go", start_line=37, end_line=159)
+
+"start_line" and "end_line" are inclusive and use exactly the numbering "file_map" prints, so copy a range across as-is — never convert it to "offset". Declaration ranges already include the doc comment above them, so one read gives you both the code and its explanation.
+
+Reading a 600-line file to look at one 40-line function puts the other 560 lines in your context for the rest of the turn, and they are re-sent on every step that follows. The map costs a few dozen lines and tells you which range to ask for.
+
+Unlike "codebase_map", "file_map" needs no index: it parses the file on every call, so it works in any project, indexed or not, and its ranges always describe the file's current contents.
+
+**After you edit a file, call "file_map" on it again.** An edit shifts every line below it, which silently invalidates any range you were given earlier in the session.
+
+Indented entries in a map are nested inside the entry above them — a class's methods, or the handlers inside a component — so you can jump to one handler rather than reading the whole component.
 
 ### When codebase_map is empty or not enough
 
-If codebase_map returns an empty (or nearly empty) result, the project has not been indexed yet — do not keep calling it this session; use glob and grep instead. If the index simply doesn't cover what you need (unindexed files, binary patterns), you may also fall back to glob and grep. codebase_map is your **first** exploration step whenever an index exists — but it is never a hard blocker on getting the work done.`
+If codebase_map returns an empty (or nearly empty) result, the project has not been indexed yet — do not keep calling it this session; use glob and grep instead. If the index simply doesn't cover what you need (unindexed files, binary patterns), you may also fall back to glob and grep. codebase_map is your **first** exploration step whenever an index exists — but it is never a hard blocker on getting the work done. Note that "file_map" is unaffected by any of this: it does not use the index, so it still applies to every source file you are about to read.`
 }
 
 // memoryMDPrompt returns the MEMORY.md instructions section, adapted for the

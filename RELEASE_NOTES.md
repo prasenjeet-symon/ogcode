@@ -1,3 +1,80 @@
+# Release Notes — v0.24.0
+
+## Minor: File Map — Tree-Sitter Outlines and Ranged Reads
+
+This minor release adds **`file_map`** — a tree-sitter-powered tool that parses
+a source file into an outline of its declarations with 1-based line ranges, so
+the agent reads the 40 lines it needs instead of the whole 600-line file. It
+pairs with `codebase_map` (which file?) to answer the second navigation question
+(where inside it?), and it deliberately has no dependency on the project index:
+it parses fresh on every call, so its line numbers always describe the file as
+it is right now, and it works in any project, indexed or not.
+
+Reading a 600-line file to look at one 40-line function puts the other 560 lines
+in the context window for the rest of the turn, and they are re-sent on every
+step that follows. The map costs a few dozen lines — 5–11% of the file it
+describes — and tells the agent exactly which range to ask for. On this repo's
+277-file index the two changes together cut a `codebase_map` call from 86 KB of
+JSON (past the 50 KB output ceiling, silently truncated) to a 44 KB indented
+outline, a 34% token saving over the JSON form.
+
+1. **`file_map` tool** — Parses a file with tree-sitter and returns every
+   top-level declaration with its 1-based line range and doc comment. Nested
+   entries (a class's methods, the handlers inside a component that is one large
+   arrow function) are individually reachable rather than buried in one opaque
+   range. Three grammars give full parsing across nine extensions: Go (`.go`),
+   TypeScript (`.ts` `.mts` `.cts`), and TSX/JSX/JS (`.tsx` `.jsx` `.js` `.mjs`
+   `.cjs`) via the TSX parser. Every other file type falls back to a heuristic
+   scanner that recognises declarations in Python, Rust, shell, and the
+   JavaScript/TypeScript family plus Markdown headings; its ranges are
+   approximate but no file is left unmapped. Files above 2 MB are not mapped.
+   (`internal/tool/file_map.go`, `internal/codemap/`)
+
+2. **New `internal/codemap` package** — Pure-Go tree-sitter bindings
+   (`tree-sitter/go-tree-sitter`, `tree-sitter-go`, `tree-sitter-typescript`)
+   that produce an outline of a file's symbols with line ranges. Renders as
+   plain text rather than JSON — measured on this repo, `MarshalIndent` spent
+   ~1.4x the content's own size on braces, quotes, and one-label-per-line arrays,
+   and nothing downstream unmarshals it: the output is read by a model.
+   (`internal/codemap/codemap.go`, `render.go`, `signature.go`, `languages.go`,
+   `fallback.go`, `queries/*.scm`)
+
+3. **Ranged reads** — `read` now accepts `start_line`/`end_line` (1-based,
+   inclusive, matching the numbering `file_map` prints), so a range is copied
+   across as-is rather than translated to a 0-based `offset` by hand — a
+   translation that, done wrong, silently shifts the window by a line instead of
+   erroring. An unranged read of a file longer than 200 lines now returns the
+   file's map instead of its contents, making "map before reading" structural
+   rather than advisory: a whole file cannot land in context by accident. An
+   explicit range (including `offset`/`limit` paging) is always honoured, so
+   `read(path, start_line=1, end_line=N)` remains the way to demand a whole file;
+   short files and files the mapper finds no declarations in still read through.
+   (`internal/tool/read.go`)
+
+4. **Compact `codebase_map` output** — The project index now renders as an
+   indented outline rather than JSON, keeping a file's labels on one line. Text
+   files are capped at 5 topic labels each (15 remain for PDF/DOCX); when the
+   whole tree would still exceed a 49 KB budget, labels are dropped wholesale
+   and the agent is told to re-scope with `subdir` for the part it cares about,
+   rather than being silently truncated mid-branch by the generic output
+   ceiling. (`internal/tool/project_index.go`)
+
+5. **Workflow & docs** — The agent system prompt and `AGENT.md` now carry a
+   mandatory `file_map` step between `codebase_map` and `read`, with the
+   "map a file before reading it" rule and its rationale. `file_map` is added to
+   every coding, plan, breakdown, note, and sub-agent toolset. `README.md`
+   documents the feature, its token economics, and language support.
+   (`internal/agent/prompt_builder.go`, `internal/agent/agent.go`,
+   `internal/server/server.go`, `AGENT.md`, `README.md`)
+
+### Dependencies
+
+Adds tree-sitter bindings (`tree-sitter/go-tree-sitter`, `tree-sitter-go`,
+`tree-sitter-typescript`) and the indirect `mattn/go-pointer`. The binary
+remains CGO-free.
+
+---
+
 # Release Notes — v0.23.0
 
 ## Minor: Project-Scoped Agentic Memory Recall

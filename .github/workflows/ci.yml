@@ -32,7 +32,7 @@ jobs:
           npm run build
 
       - name: Build Go binary
-        run: CGO_ENABLED=0 go build -ldflags "-s -w" -o ogcode .
+        run: CGO_ENABLED=1 go build -ldflags "-s -w" -o ogcode .
 
       - name: Run tests
-        run: go test ./...
+        run: CGO_ENABLED=1 go test ./...

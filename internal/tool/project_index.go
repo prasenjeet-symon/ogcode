@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 )
 
-// ProjectIndexTool returns a labeled JSON tree of all indexed files in the
+// ProjectIndexTool returns a labeled tree of all indexed files in the
 // session directory — text/code files, PDF documents, and DOCX documents alike
 // — so the agent can navigate the project by topic without knowing file paths
 // upfront.
@@ -32,7 +33,7 @@ func NewProjectIndexTool(store *docindex.Store) ProjectIndexTool {
 func (ProjectIndexTool) ID() string { return "codebase_map" }
 
 func (ProjectIndexTool) Description() string {
-	return "Return a labeled JSON tree of all indexed files — text, code, PDF, and DOCX documents. Every file appears as a leaf with its topic labels. For PDFs and DOCX files a concise subset of labels (up to 15) is aggregated across pages (no per-page breakdown). Use this to discover which files are relevant to a topic before reading them. Use the pdf_index tool when you need per-page labels for a specific PDF, or docx_index for a DOCX. Pass subdir to scope the results to a specific folder (e.g. \"internal/auth\") — recommended for large projects."
+	return "Return a labeled tree of all indexed files — text, code, PDF, and DOCX documents. Folders end in \"/\"; each file is followed by its topic labels. For PDFs and DOCX files a concise subset of labels (up to 15) is aggregated across pages (no per-page breakdown). Use this to discover which files are relevant to a topic before reading them. Use the pdf_index tool when you need per-page labels for a specific PDF, or docx_index for a DOCX. Pass subdir to scope the results to a specific folder (e.g. \"internal/auth\") — recommended for large projects."
 }
 
 func (ProjectIndexTool) Parameters() json.RawMessage {
@@ -85,14 +86,10 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 	}
 
 	tree := buildProjectTree(tctx.SessionDir, textEntries, pdfEntries, docxEntries)
-	out, err := json.MarshalIndent(tree, "", "  ")
-	if err != nil {
-		return Result{}, fmt.Errorf("marshal project tree: %w", err)
-	}
 
 	return Result{
 		Title:  fmt.Sprintf("%s (%d files)", title, totalFiles),
-		Output: string(out),
+		Output: renderProjectMap(tree, params.Subdir),
 	}, nil
 }
 
@@ -112,6 +109,92 @@ func countDistinctDocs(entries []*docindex.PageEntry) int {
 // stays concise. The full per-page breakdown is available through the
 // dedicated pdf_index / docx_index tools.
 const docLabelCap = 15
+
+// textLabelCap is the maximum number of topic labels shown per text/code file.
+//
+// Labels dominate this output: on a 277-file index of this repo they account
+// for 55 KB of the 64 KB of real content, against 8 KB of file paths. Uncapped,
+// the rendered map came to 86 KB — past the 50 KB MaxToolOutputBytes ceiling,
+// so the tail was being silently truncated before the agent ever saw it. Five
+// labels is enough to tell what a file covers; the file itself is one file_map
+// call away.
+const textLabelCap = 5
+
+// projectMapBudget is the byte budget for a rendered project map.
+//
+// Held just under MaxToolOutputBytes (50 KB) so the map degrades on its own
+// terms rather than being cut mid-tree by the generic backstop, which would
+// leave the agent with a truncated branch and no idea what it was missing.
+//
+// The margin is deliberately thin. Dropping labels is a heavy loss — they are
+// what makes this tool more than `find` — so it must happen only when the
+// alternative is genuinely not fitting. An earlier 40 KB budget pushed this
+// repo, which renders to 44 KB, onto the degraded path for nothing.
+const projectMapBudget = 49 * 1024
+
+// renderProjectMap renders the tree, dropping labels wholesale if the result
+// would not fit the budget.
+//
+// Capping labels per file is not by itself a guarantee: at five labels each,
+// this repo's 277 files render to 44 KB, but the same shape at 400 files passes
+// 60 KB. When that happens the structure is worth far more than the labels —
+// paths alone are 8 KB where labels are 55 KB — so the labels go and the agent
+// is told how to get them back for the part of the tree it actually cares about.
+func renderProjectMap(tree map[string]any, subdir string) string {
+	var b strings.Builder
+	b.WriteString("Folders end in \"/\". Each file is followed by its topic labels.\n\n")
+	renderProjectTree(tree, 0, &b, true)
+
+	if b.Len() <= projectMapBudget {
+		return b.String()
+	}
+
+	scope := "a subdirectory"
+	if subdir == "" {
+		scope = "a subdirectory (e.g. subdir=\"internal/auth\")"
+	}
+
+	b.Reset()
+	b.WriteString("Folders end in \"/\". This project is too large to show topic labels for every file, so only the structure is listed.\n")
+	fmt.Fprintf(&b, "Call codebase_map again scoped to %s to get labels for the files there.\n\n", scope)
+	renderProjectTree(tree, 0, &b, false)
+	return b.String()
+}
+
+// renderProjectTree writes the tree as an indented outline. With withLabels
+// false it emits paths only.
+//
+// Deliberately not JSON. Measured on this repo's 277-file index, MarshalIndent
+// spent 20,094 tokens carrying 64 KB of paths and labels — 1.4x the content
+// itself — because it puts every one of a file's labels on its own line, each
+// quoted and comma-separated. The same tree as an indented outline costs 13,212
+// tokens, a 34% saving, and roughly half of that comes from nothing more than
+// keeping a file's labels on one line.
+//
+// Nothing downstream unmarshals this: it is read by a model, not parsed. The
+// same reasoning gave file_map its plain-text output.
+func renderProjectTree(node map[string]any, depth int, b *strings.Builder, withLabels bool) {
+	keys := make([]string, 0, len(node))
+	for k := range node {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	indent := strings.Repeat("  ", depth)
+	for _, k := range keys {
+		switch v := node[k].(type) {
+		case map[string]any:
+			fmt.Fprintf(b, "%s%s/\n", indent, k)
+			renderProjectTree(v, depth+1, b, withLabels)
+		case []string:
+			if !withLabels || len(v) == 0 {
+				fmt.Fprintf(b, "%s%s\n", indent, k)
+				continue
+			}
+			fmt.Fprintf(b, "%s%s  %s\n", indent, k, strings.Join(v, ", "))
+		}
+	}
+}
 
 // buildProjectTree converts flat lists of indexed entries into a nested
 // folder/file tree. Every file — text/code, PDF, or DOCX — is a leaf holding a
@@ -140,6 +223,9 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 		}
 
 		labels := e.Labels
+		if len(labels) > textLabelCap {
+			labels = labels[:textLabelCap]
+		}
 		if labels == nil {
 			labels = []string{}
 		}

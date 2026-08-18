@@ -166,6 +166,7 @@ func (s *Server) Start() error {
 	toolRegistry := tool.NewRegistry()
 	toolRegistry.Register(tool.BashTool{})
 	toolRegistry.Register(tool.ReadTool{})
+	toolRegistry.Register(tool.FileMapTool{})
 	toolRegistry.Register(tool.WriteTool{})
 	toolRegistry.Register(tool.EditTool{})
 	toolRegistry.Register(tool.GlobTool{})

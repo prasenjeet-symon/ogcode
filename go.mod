@@ -11,6 +11,9 @@ require (
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/spf13/cobra v1.10.2
+	github.com/tree-sitter/go-tree-sitter v0.25.0
+	github.com/tree-sitter/tree-sitter-go v0.25.0
+	github.com/tree-sitter/tree-sitter-typescript v0.23.2
 	golang.org/x/image v0.41.0
 	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.49.1
@@ -33,6 +36,7 @@ require (
 	github.com/jupiterrider/ffi v0.5.0 // indirect
 	github.com/knights-analytics/ortgenai v0.3.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

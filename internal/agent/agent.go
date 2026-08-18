@@ -18,7 +18,7 @@ type Agent struct {
 // codingAgentTools is the shared full-access toolset used by both the
 // interactive BuildAgent and the headless TaskAgent — they differ only in their
 // system prompt framing, not their capabilities.
-var codingAgentTools = []string{"bash", "read", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task"}
+var codingAgentTools = []string{"bash", "read", "file_map", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task"}
 
 // codingAgentSystem builds the full-access coding-agent system prompt. The two
 // modes share the same body but differ in framing:
@@ -128,7 +128,7 @@ var PlanAgent = Agent{
 	ID:          "plan",
 	Name:        "Plan",
 	Description: "Planning agent — reads and understands code, plans changes but never writes",
-	Tools:       []string{"bash", "read", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image", "task"},
+	Tools:       []string{"bash", "read", "file_map", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image", "task"},
 	System: `You are a planning agent. Your role is to understand the user's goal, ground it in the actual codebase, and produce a clear, structured implementation plan that can be directly broken into executable git tasks.
 
 ` + projectIndexPrompt("plan") + `
@@ -180,7 +180,7 @@ var BreakdownAgent = Agent{
 	ID:          "breakdown",
 	Name:        "Breakdown",
 	Description: "Task breakdown agent — reads a locked plan and produces structured task definitions",
-	Tools:       []string{"bash", "read", "glob", "grep", "codebase_map", "deep_search", "submit_task_breakdown"},
+	Tools:       []string{"bash", "read", "file_map", "glob", "grep", "codebase_map", "deep_search", "submit_task_breakdown"},
 	System: `You are a task breakdown agent. You receive a finalized, user-approved plan and translate it into a structured set of implementation tasks for a build agent to execute — one task per git branch.
 
 ## Your process
@@ -234,7 +234,7 @@ var NoteAgent = Agent{
 	ID:               "note",
 	Name:             "Note",
 	Description:      "Note-taking agent — researches a query and produces a comprehensive, structured markdown note",
-	Tools:            []string{"bash", "read", "glob", "grep", "deep_search", "codebase_map"},
+	Tools:            []string{"bash", "read", "file_map", "glob", "grep", "deep_search", "codebase_map"},
 	FinalInstruction: "Reminder: your entire final response must be the note itself — start with the `#` title and output only markdown. No preamble, no \"here is the note:\", no trailing commentary.",
 	System: `You are a note-taking agent. Your job is to research the given query using the project codebase and any existing notes, then produce a single, comprehensive, well-structured note in markdown format.
 
@@ -349,7 +349,7 @@ var SubagentAgent = Agent{
 	ID:               "subagent",
 	Name:             "Subagent",
 	Description:      "Read-only investigation sub-agent invoked via the task tool",
-	Tools:            []string{"read", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image"},
+	Tools:            []string{"read", "file_map", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image"},
 	FinalInstruction: "Reminder: your entire final message is what the caller receives. Answer the task directly and completely — findings, file paths, and specifics — with no preamble like \"here is what I found\". If you could not determine something, say so plainly.",
 	System: `You are an autonomous investigation sub-agent. Another agent has delegated a single, self-contained task to you. You work from a clean context: you cannot see the parent's live conversation, only the task you were given. (project_memory_recall can still surface decisions recorded in this project's memory — use it when the task turns on history you were not given.) You are read-only — you explore and report, you never change anything.
 

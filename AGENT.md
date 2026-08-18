@@ -23,8 +23,9 @@ The project index provides topic labels and a structured overview of every index
 
 ```
 Task received
-  → codebase_map(subdir=...)   ← MANDATORY FIRST STEP
-  → Then read specific files
+  → codebase_map(subdir=...)          ← which files matter
+  → file_map(path)                    ← where things are inside one file
+  → read(path, start_line, end_line)  ← only the region you need
   → Then make changes
 ```
 
@@ -35,3 +36,51 @@ If `codebase_map` doesn't cover what you need (e.g., unindexed files, binary pat
 ### Scoping tip
 
 For large projects, always use the `subdir` parameter to scope `codebase_map` to the relevant directory (e.g., `"internal/tool"`, `"web/src"`). This keeps the response focused and fast.
+
+## Mandatory: Map a File Before Reading It
+
+**Rule:** Before reading a source file you do not already know, call `file_map`
+on it. Read the whole file only when the map shows you genuinely need all of it.
+
+`file_map` parses the file and returns every top-level declaration with its
+1-based line range and doc comment. Those ranges go straight into `read`:
+
+```
+file_map("internal/tool/read.go")
+  → 35-142  func (ReadTool) Execute(ctx context.Context, ...) (Result, error)
+
+read("internal/tool/read.go", start_line=35, end_line=142)
+```
+
+`start_line` and `end_line` are inclusive and use the same numbering `file_map`
+prints, so a range is copied across as-is — never convert it to `offset`.
+
+### Why?
+
+Reading a 600-line file to look at one 40-line function puts the other 560 lines
+in context for the rest of the turn, and they are re-sent on every step that
+follows. The map costs a few dozen lines and tells you which range to ask for.
+
+Declaration ranges include the doc comment above them, so one read gives you
+both the code and its explanation.
+
+### After editing a file, map it again
+
+`file_map` reads the file fresh on every call — it consults no index, so its
+ranges are never stale. **The ranges already in your context are.** Editing a
+file shifts every line below the edit, which silently invalidates ranges you
+were given earlier. Call `file_map` again before your next read of that file.
+
+### Limits
+
+- Files above 2 MB are not mapped — page through them with `read(path, offset, limit)`.
+- Go, TypeScript, TSX and JavaScript (`.go`, `.ts`, `.tsx`, `.js`, `.jsx`,
+  `.mts`, `.cts`, `.mjs`, `.cjs`) are fully parsed. Everything else falls back to
+  a heuristic scan: the declarations it finds are real, but each range ends where
+  the next declaration starts rather than at the true end, so allow some slack.
+- Indented entries are nested inside the entry above them — a class's methods, or
+  the handlers inside a component. A component that is one large arrow function
+  is mapped from the inside, so you can jump to one handler rather than reading
+  the whole component.
+- The map lists declarations, not struct fields, class properties, or non-function
+  local variables.
