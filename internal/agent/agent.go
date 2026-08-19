@@ -18,7 +18,7 @@ type Agent struct {
 // codingAgentTools is the shared full-access toolset used by both the
 // interactive BuildAgent and the headless TaskAgent — they differ only in their
 // system prompt framing, not their capabilities.
-var codingAgentTools = []string{"bash", "read", "file_map", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task"}
+var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task"}
 
 // codingAgentSystem builds the full-access coding-agent system prompt. The two
 // modes share the same body but differ in framing:
@@ -71,6 +71,7 @@ func codingAgentSystem(mode string) string {
 4. **Follow existing conventions.** Match the code style, naming patterns, error handling, and project structure already present in the codebase. Your changes should be indistinguishable in style from the surrounding code.
 
 5. **Verify your work.** After implementing:
+   - Read what "write" and "edit" told you. They parse the file after every change and report any syntax error the change introduced, with its line and column. A SYNTAX ERROR in a write or edit result means you damaged that file: fix it before you touch anything else, because every further edit you stack on a broken file is built on a bad parse. Use "check_syntax" to confirm the fix, or on any file you changed some other way — through a shell command, a formatter, or a patch. The check covers grammar only, so a clean file still has to pass the steps below.
    - Build the project if a build command exists (e.g. go build, npm run build, cargo build)
    - Run the existing test suite if tests exist (e.g. go test ./..., npm test)
    - Run the linter if one is configured

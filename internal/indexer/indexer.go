@@ -17,10 +17,19 @@ import (
 )
 
 // skipDirs are directories never worth scanning for documents.
+//
+// "grammars" is here for vendored tree-sitter output. A generated parser.c runs
+// to tens of megabytes of table data — ogcode's own Swift grammar is one 19.7 MB
+// file — and .c is an indexed extension, so a single such directory would
+// dominate an index while carrying nothing anyone would search for. Matching is
+// by directory name, so a project that keeps hand-written grammars under that
+// name loses them from the index too; that trade is worth it against indexing a
+// generated parser by default.
 var skipDirs = map[string]struct{}{
 	"node_modules": {}, "vendor": {}, ".git": {}, "dist": {}, "build": {},
 	"out": {}, "target": {}, "__pycache__": {}, ".venv": {}, "venv": {},
 	"env": {}, "coverage": {}, ".next": {}, ".nuxt": {}, ".cache": {}, ".ogcode": {},
+	"grammars": {},
 }
 
 // Indexer scans a workspace directory for PDF and text/code files and runs the

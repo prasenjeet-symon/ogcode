@@ -11,8 +11,10 @@ import (
 
 type EditTool struct{}
 
-func (EditTool) ID() string          { return "edit" }
-func (EditTool) Description() string { return "Make a search-and-replace edit to a file" }
+func (EditTool) ID() string { return "edit" }
+func (EditTool) Description() string {
+	return "Make a search-and-replace edit to a file. The result reports any syntax error the edit introduced, so a broken edit surfaces immediately rather than at the next build."
+}
 func (EditTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
@@ -67,8 +69,15 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		return Result{}, fmt.Errorf("write file: %w", err)
 	}
 
-	return Result{
+	// A replaced block that drops a brace or breaks an indent leaves a file that
+	// still writes fine and only fails much later, in a build the agent may not
+	// run for several turns. The bytes on both sides are already in hand here,
+	// so the check costs one parse and reports the damage while the change that
+	// caused it is still the last thing that happened.
+	note, check := syntaxNote(path, data, []byte(newContent))
+
+	return applySyntaxNote(Result{
 		Title:  filepath.Base(path),
 		Output: fmt.Sprintf("Edited %s (replaced 1 occurrence)", path),
-	}, nil
+	}, note, check), nil
 }

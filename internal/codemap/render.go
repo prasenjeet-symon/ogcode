@@ -106,3 +106,53 @@ func rangeWidth(symbols []*Symbol) int {
 	}
 	return width
 }
+
+// RenderCheck formats a CheckResult for a model to read.
+//
+// The three outcomes are worded to be unmistakable from each other, because the
+// cost of confusing them is the whole point of the check: a clean parse says
+// move on, a diagnostic says stop and fix, and an unchecked file says this
+// proved nothing. The last is the one worth being loud about — an agent that
+// reads "no grammar" as "no errors" has bought false confidence.
+func RenderCheck(res *CheckResult) string {
+	var b strings.Builder
+
+	if !res.Checked {
+		fmt.Fprintf(&b, "NOT CHECKED: %s\n\n", res.Path)
+		b.WriteString("No tree-sitter grammar covers this file type, so it was not parsed.\n")
+		b.WriteString("This is not a passing result — nothing was verified. Check it another\nway (run the file's own compiler, linter, or test) before relying on it.\n")
+		return b.String()
+	}
+
+	if len(res.Diagnostics) == 0 {
+		fmt.Fprintf(&b, "OK: %s parses cleanly as %s.\n\n", res.Path, res.Lang)
+		b.WriteString("No syntax errors. Note this checks grammar only — it says nothing about\nundefined names, types, or whether the code does what you intended.\n")
+		return b.String()
+	}
+
+	fmt.Fprintf(&b, "SYNTAX ERRORS: %d in %s (%s)\n\n", len(res.Diagnostics), res.Path, res.Lang)
+	b.WriteString(FormatDiagnostics(res.Diagnostics))
+	if res.Truncated {
+		fmt.Fprintf(&b, "\n(stopped after %d — fix these first, then check again)\n", MaxDiagnostics)
+	}
+	b.WriteString("\nThe parser recovers and keeps going after an error, so a single mistake can\nproduce several of these, and the reported position is where the parser gave\nup rather than always where the mistake is. Start at the first one.\n")
+	return b.String()
+}
+
+// FormatDiagnostics renders diagnostic lines on their own, for a caller that
+// supplies its own heading — the write and edit tools append a short version of
+// this to their result rather than the whole RenderCheck report.
+func FormatDiagnostics(diags []Diagnostic) string {
+	var b strings.Builder
+	for _, d := range diags {
+		fmt.Fprintf(&b, "  %d:%d  %s\n", d.Line, d.Column, d.Message)
+		if d.Source != "" {
+			// Compiler-style gutter. The line number repeats what the position
+			// above already said, but it keeps the offending line unambiguous
+			// once several diagnostics are stacked, and it survives the log
+			// being read out of order.
+			fmt.Fprintf(&b, "  %5d | %s\n", d.Line, d.Source)
+		}
+	}
+	return b.String()
+}

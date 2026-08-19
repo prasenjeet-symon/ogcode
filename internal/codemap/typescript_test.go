@@ -108,6 +108,24 @@ func TestOutlineTypeScriptDocThroughExport(t *testing.T) {
 	}
 }
 
+// JSDoc closes on a line holding only "*/", which must not survive into the doc
+// text. Every block comment ends that way, so getting it wrong marks every
+// documented symbol in the file.
+func TestOutlineTypeScriptJSDocDropsClosingMarker(t *testing.T) {
+	fm := outlineTS(t, "doc.ts", `/**
+ * Resolves the display name.
+ * Falls back to the id.
+ */
+export function getName(id: string): string {
+	return id;
+}
+`)
+
+	if got := find(t, fm, "getName").Doc; got != "Resolves the display name. Falls back to the id." {
+		t.Errorf("getName doc = %q", got)
+	}
+}
+
 // A component is one top-level arrow function holding the whole module, so its
 // inner functions are the only structure worth having. Locals are not: listing
 // them is the noise an outline exists to avoid.

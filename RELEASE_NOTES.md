@@ -1,3 +1,156 @@
+# Release Notes — v0.25.0
+
+## Minor: check_syntax Tool, Five New Tree-Sitter Grammars, and Edit-Time Syntax Checking
+
+This minor release extends the tree-sitter foundation laid in v0.24.0 in two
+directions: it adds a **`check_syntax`** tool that parses a file and reports its
+syntax errors the moment they are introduced, and it grows language support from
+three grammars across nine extensions to **eight grammars across seventeen
+extensions** by adding PHP, Python, Rust, Swift, and Java. Together they close
+the loop that `file_map` opened: a file can now be mapped, edited, and validated
+without ever leaving tree-sitter, so a dropped brace or a broken indent surfaces
+immediately instead of several edits later, in a build the agent may not run.
+
+A replaced block that drops a brace, an indentation slip in Python, or a merge
+of two fragments that leaves a stray token — none of these announce themselves.
+The file writes fine, and the damage surfaces later, by which point the agent
+has stacked more edits on a broken parse. `write` and `edit` now parse the file
+on both sides of every change and append a syntax note to their result when the
+change broke what had been clean, so the agent is told while the change is still
+the last thing that happened. The standalone `check_syntax` tool covers the cases
+those two cannot — a file changed by a shell command, a formatter, a patch, or a
+generator — and confirms a fix landed.
+
+1. **`check_syntax` tool** — Parses a source file with tree-sitter and reports
+   any syntax errors with the line and column of each, returning **OK** when the
+   file parses, the error locations when it does not, and **NOT CHECKED** when no
+   grammar covers the file type. The three outcomes are worded to be
+   unmistakable from each other: a clean parse says move on, a diagnostic says
+   stop and fix, and an unchecked file says this proved nothing — an agent that
+   reads "no grammar" as "no errors" has bought false confidence. Diagnostics
+   carry a 1-based line/column (matching `file_map` numbering and `read` ranges),
+   an end line for multi-line damage, the source line as a compiler-style
+   gutter, and a cap of 20 (tree-sitter recovers and keeps parsing, so a file
+   damaged near the top can cascade into dozens of complaints that all describe
+   the same mistake). Checks grammar only — it is a cheap guard against having
+   broken the file, not a substitute for the compiler. (`internal/tool/check_syntax.go`,
+   `internal/codemap/syntax.go`, `internal/codemap/render.go`)
+
+2. **Edit-time syntax checking in `write` and `edit`** — Both mutating tools now
+   parse the file before and after the change and append a **SYNTAX ERROR** note
+   to their result when the change introduced errors into a file that parsed
+   cleanly, or a softer **SYNTAX NOTE** when the file was already broken (so an
+   edit is not blamed for damage it did not cause — an agent that learns the
+   warning fires on edits it did not break stops reading it). The before/after
+   comparison is the whole point: the baseline parse only runs once the result
+   is known to be broken, so the overwhelmingly common case — a change that
+   leaves the file fine — costs one parse, not two. The verdict is also recorded
+   in the result metadata (`syntaxOK`, `syntaxErrors`) so the UI can flag a
+   damaging write without parsing the output text. Up to 5 errors are listed
+   inline; `check_syntax` gives the full list. (`internal/tool/write.go`,
+   `internal/tool/edit.go`, `internal/tool/check_syntax.go`)
+
+3. **Five new tree-sitter grammars** — PHP, Python, Rust, Swift, and Java join
+   Go and TypeScript, taking full parsing from 3 grammars / 9 extensions to
+   **8 grammars / 17 extensions**:
+   - **PHP** (`.php` `.phtml`) via `tree-sitter-php`. Registers the `php` parser
+     that reads a file as text opening into code at `<?php`, so templates that
+     return to HTML between blocks map the same way a plain `.php` file does.
+     Classes, interfaces, traits, and enums are outlined with their methods
+     nested underneath, including the `public`/`protected`/`private` forms.
+   - **Python** (`.py` `.pyi` `.pyw`) via `tree-sitter-python`. Python documents
+     a declaration from the inside — a docstring at the top of the body rather
+     than a comment above it — so docstrings are read directly and collapsed to
+     their summary sentence. Decorators hang above the declaration they modify,
+     so a symbol's range is widened back up over them (`@property` changes what a
+     method is; a route decorator is the only place a URL appears). Module-level
+     bindings earn a line of their own.
+   - **Rust** (`.rs`) via `tree-sitter-rust`. Rust states an attribute beside
+     the item rather than around it, so a `#[derive(...)]` line is a sibling
+     that sits between the doc comment and the declaration. Ranges are widened
+     back up over the attributes and the doc is read from above them; `///` and
+     `//!` markers are stripped. `impl` blocks are listed with their methods
+     nested underneath and are named for the type they are written for. A
+     trait's required methods carry no body, and that signature is the point of
+     the trait, so they earn a line beside the defaulted ones.
+   - **Swift** (`.swift`) via a **vendored** `tree-sitter-swift`. Swift needs no
+     accommodation — it parses `@objc public final` into a `modifiers` node
+     inside the declaration, so ranges and signatures cover attributes for free.
+     `class`, `struct`, `enum`, `actor`, and `extension` are matched
+     structurally so each keeps its own kind; extensions list as their own
+     entry with methods nested underneath; a protocol's requirements — methods,
+     property requirements, and `associatedtype` alike — are all listed. The
+     grammar is vendored because upstream generates its parser at build time and
+     gitignores it, publishes no tagged versions, and ships a Go binding that
+     `#include`s a file no commit contains. See
+     `internal/codemap/grammars/swift/README.md`.
+   - **Java** (`.java`) via `tree-sitter-java`. The same shape as Swift and
+     needs nothing beyond the two comment kinds — its annotations also sit in a
+     `modifiers` node inside the declaration, so `@Entity public final class`
+     renders whole. Classes, interfaces, enums, records, and annotation types
+     are all outlined, with nested types kept because Java leans on the shape so
+     heavily that a Builder is the canonical case. An enum states its methods
+     inside a nested `enum_body_declarations` rather than directly in its body,
+     so those need a pattern of their own.
+   (`internal/codemap/languages.go`, `internal/codemap/queries/{php,python,rust,swift,java}.scm`,
+   `internal/codemap/grammars/swift/`)
+
+4. **Codemap generalisations** — The new grammars needed more than a grammar and
+   a query, so the symbol builder gained three language-level knobs:
+   - **`commentKinds`** replaces the single `commentKind` — Rust and Java split
+     line and block comments into two node kinds, and the doc-comment walk now
+     checks both. The `firstDocLine` marker-stripper handles `//`, `///`, `//!`
+     (Rust outer/inner doc), `#` (Python), and `/*`/`*`/`*/` block forms, with
+     the closing `*/` trimmed before the leading `*` so a lone-`*/` line does
+     not leave a stray slash.
+   - **`wrapperKind`** (Python's `decorated_definition`) widens a declaration's
+     range back up over the decorators that wrap it.
+   - **`attrKind`** (Rust's `attribute_item`) walks preceding sibling attributes
+     into the range so the doc-comment walk can start from the topmost attribute.
+   - **`docstrings`** (Python) reads the string literal at the top of the body
+     as the doc, where a comment above the declaration does not exist.
+   - **`lastContentRow`** normalises a node's end row for grammars whose
+     comments consume their trailing newline (Rust's `line_comment`), without
+     which every Rust doc would sit one row below the adjacency check and be
+     dropped. **`startsItsLine`** rejects trailing comments that document the
+     code beside them rather than the declaration that follows.
+   - **`namesByKind`** is a fallback for grammars that hang a spec's identifier
+     off an unnamed-field child (PHP's `const_element`), so a top-level
+     `const VERSION = '1.2.0'` is named. Rust `impl` blocks are named for the
+     type they are written for, resolved before the field walk would descend
+     into the trait path of `impl fmt::Display for Widget`.
+   (`internal/codemap/codemap.go`, `internal/codemap/signature.go`)
+
+5. **Workflow & index hygiene** — `check_syntax` is added to the coding-agent
+   toolset and the system prompt's "Verify your work" step now tells the agent
+   to read what `write` and `edit` reported and to run `check_syntax` on files
+   changed by a shell command, formatter, or patch. The indexer and doc-index
+   now skip a `grammars` directory by name, so a vendored generated parser
+   (`parser.c` runs to tens of megabytes of table data — ogcode's own Swift
+   grammar is one 19.7 MB file) does not dominate the index while carrying
+   nothing anyone would search for. A `.gitattributes` marks the vendored Swift
+   parser as linguist-generated/vendored so it stays out of language stats and
+   collapses in diffs. (`internal/agent/agent.go`, `internal/server/server.go`,
+   `internal/indexer/indexer.go`, `internal/docindex/excludes.go`,
+   `.gitattributes`)
+
+### Dependencies
+
+Adds tree-sitter bindings for Java (`tree-sitter-java`), PHP
+(`tree-sitter-php`), Python (`tree-sitter-python`), and Rust (`tree-sitter-rust`)
+via `go.mod`. The Swift grammar is vendored under `internal/codemap/grammars/swift/`
+because upstream publishes no buildable Go package. The binary remains CGO-free.
+
+### Tests
+
+New test files cover each new grammar's outline behaviour:
+`internal/codemap/{python,rust,swift,java,php}_test.go`, plus
+`internal/codemap/syntax_test.go` for the syntax checker and
+`internal/tool/check_syntax_test.go` and `internal/tool/mutation_syntax_test.go`
+for the edit-time checks. `go build`/`go vet` clean; `go test ./...` green.
+
+---
+
 # Release Notes — v0.24.0
 
 ## Minor: File Map — Tree-Sitter Outlines and Ranged Reads

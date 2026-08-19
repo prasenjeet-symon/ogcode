@@ -15,7 +15,7 @@ import (
 // and getting it subtly wrong on generics, variadics and multiple returns; the
 // source already says exactly what the declaration is, so the work is choosing
 // where to stop reading.
-func signatureFor(node *ts.Node, src []byte, kind string, names []string) string {
+func signatureFor(node *ts.Node, src []byte, kind string, names []string, lang *language) string {
 	switch kind {
 	case "import":
 		return "import block"
@@ -32,7 +32,7 @@ func signatureFor(node *ts.Node, src []byte, kind string, names []string) string
 		return capSig(trimOpenBrace(collapse(firstLine(sliceOf(node, src, node.EndByte())))))
 
 	default:
-		if end, ok := bodyStart(node); ok {
+		if end, ok := bodyStart(node, lang); ok {
 			// The body is where the slice stops, so the whole signature is safe
 			// to collapse — that keeps a parameter list broken across lines
 			// readable instead of cutting it at the first line break.
@@ -52,9 +52,24 @@ func signatureFor(node *ts.Node, src []byte, kind string, names []string) string
 // do not: in `const F = () => {...}` the body belongs to the arrow function
 // nested inside the declarator, and without this second lookup the signature
 // would swallow the entire function.
-func bodyStart(n *ts.Node) (uint, bool) {
+//
+// A comment can sit between the two. Python puts `def f():  # note` on one line
+// with the block starting on the next, and parses the comment as a child of the
+// definition rather than of the block — so stopping at the body would pull the
+// note into the signature and spend the length cap on it. Braced languages keep
+// such a comment inside the body, where this never fires.
+func bodyStart(n *ts.Node, lang *language) (uint, bool) {
 	if body := n.ChildByFieldName("body"); body != nil {
-		return body.StartByte(), true
+		end := body.StartByte()
+		if len(lang.commentKinds) > 0 {
+			for i := uint(0); i < n.NamedChildCount(); i++ {
+				c := n.NamedChild(i)
+				if c != nil && lang.isComment(c.Kind()) && c.StartByte() < end {
+					end = c.StartByte()
+				}
+			}
+		}
+		return end, true
 	}
 	for i := uint(0); i < n.NamedChildCount(); i++ {
 		declarator := n.NamedChild(i)

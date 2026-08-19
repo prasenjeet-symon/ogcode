@@ -10,8 +10,10 @@ import (
 
 type WriteTool struct{}
 
-func (WriteTool) ID() string          { return "write" }
-func (WriteTool) Description() string { return "Write content to a file, creating it if it doesn't exist" }
+func (WriteTool) ID() string { return "write" }
+func (WriteTool) Description() string {
+	return "Write content to a file, creating it if it doesn't exist. The result reports any syntax error the written content contains, so a truncated or malformed file surfaces immediately rather than at the next build."
+}
 func (WriteTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
@@ -47,10 +49,16 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	// Cap the captured size so huge files don't bloat the persisted message.
 	const maxDiffBytes = 256 * 1024
 	var oldContent string
+	// prior holds the bytes as they were, uncapped, for the syntax comparison
+	// below. oldContent is the same content subject to the diff cap: the UI can
+	// afford to skip a diff on a huge file, but the check that decides whether
+	// this write broke the file cannot afford to skip its baseline.
+	var prior []byte
 	created := true
 	diffOmitted := false
 	if existing, err := os.ReadFile(path); err == nil {
 		created = false
+		prior = existing
 		if len(existing) <= maxDiffBytes && len(input.Content) <= maxDiffBytes {
 			oldContent = string(existing)
 		} else {
@@ -76,13 +84,19 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 		metadata["oldContent"] = oldContent
 	}
 
+	// Rewriting a whole file is the mutation most likely to leave it unparseable
+	// — a truncated write or a body assembled from two fragments produces a file
+	// that saves without complaint. prior is nil for a file that did not exist,
+	// which is the right baseline: in a new file every error is this call's.
+	note, check := syntaxNote(path, prior, []byte(input.Content))
+
 	verb := "Wrote"
 	if created {
 		verb = "Created"
 	}
-	return Result{
+	return applySyntaxNote(Result{
 		Title:    filepath.Base(path),
 		Output:   fmt.Sprintf("%s %d bytes to %s", verb, len(input.Content), path),
 		Metadata: metadata,
-	}, nil
+	}, note, check), nil
 }

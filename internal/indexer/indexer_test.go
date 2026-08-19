@@ -341,3 +341,17 @@ func TestPurgeDeletedDocs_NilStore(t *testing.T) {
 		t.Errorf("expected nil error with nil store, got %v", err)
 	}
 }
+
+// A vendored tree-sitter grammar is a generated parser.c running to tens of
+// megabytes, and .c is an indexed extension — so the directory skip is the only
+// thing keeping it out of an index. These two facts are what make each other
+// matter, so they are asserted together: drop either and a single generated
+// file dominates the workspace index.
+func TestSkipDirsCoversVendoredGrammars(t *testing.T) {
+	if !IsTextFile(".c") {
+		t.Fatal("IsTextFile(\".c\") = false; the grammars skip below is guarding nothing")
+	}
+	if _, ok := skipDirs["grammars"]; !ok {
+		t.Error(`skipDirs is missing "grammars"; a vendored generated parser.c would be indexed`)
+	}
+}

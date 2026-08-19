@@ -9,6 +9,12 @@ import (
 
 	ts "github.com/tree-sitter/go-tree-sitter"
 	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
+	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
+	tsphp "github.com/tree-sitter/tree-sitter-php/bindings/go"
+	tspy "github.com/tree-sitter/tree-sitter-python/bindings/go"
+	tsrs "github.com/tree-sitter/tree-sitter-rust/bindings/go"
+
+	tssw "github.com/prasenjeet-symon/ogcode/internal/codemap/grammars/swift"
 	tsts "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
@@ -32,10 +38,27 @@ type language struct {
 	newLang func() *ts.Language
 	// queryFile names the .scm under queries/.
 	queryFile string
-	// commentKind is the node kind used for doc comments in this grammar.
-	// docStart() walks preceding siblings of this kind to pull a declaration's
-	// doc comment into its line range.
-	commentKind string
+	// commentKinds lists the node kinds that hold a doc comment. docStart()
+	// walks preceding siblings of these kinds to pull a declaration's doc
+	// comment into its line range. Most grammars name one kind; Rust splits
+	// line and block comments into two.
+	commentKinds []string
+	// attrKind names a node that precedes a declaration as a sibling and
+	// belongs to it — Rust's attribute_item. It sits between the doc comment
+	// and the declaration it annotates, so without skipping over it the comment
+	// walk stops at the attribute and every annotated item loses its doc.
+	// Python's decorators nest instead, and use wrapperKind.
+	attrKind string
+	// wrapperKind names a node that wraps a declaration and carries part of its
+	// range — Python's decorated_definition. The queries capture the inner
+	// definition, because that is what holds the name and the signature, so
+	// without this a decorated declaration would start below its decorators.
+	// Empty for grammars where no such wrapper exists.
+	wrapperKind string
+	// docstrings marks a language that documents a declaration from the inside,
+	// with a string literal at the top of its body, rather than with a comment
+	// above it. docStart finds nothing in such a language; docstringOf does.
+	docstrings bool
 
 	once  sync.Once
 	lang  *ts.Language
@@ -59,12 +82,34 @@ type language struct {
 // grammar. TypeScript is a syntactic superset of JavaScript and TSX adds JSX on
 // top, so every .js and .jsx file is valid input — and .js files carrying JSX,
 // which a bare TypeScript parser would reject, parse correctly.
+//
+// PHP likewise ships two parsers, and here only one is registered: `php` reads
+// a file as text that opens into code at `<?php`, which is what a file on disk
+// is, while `php_only` expects a bare fragment with no tags. Templates (.phtml)
+// return to HTML between blocks, and `php` handles that in the same parser.
+//
+// Python is the first entry to need more than a grammar and a query: it hangs
+// decorators above the declaration they modify and its doc lives inside the
+// body, so it sets wrapperKind and docstrings as well.
+//
+// Rust needs the third such accommodation. It splits comments into two node
+// kinds, marks a doc comment with a third slash, and puts attributes between
+// the doc comment and the item — as siblings rather than as a wrapper.
+//
+// Swift needs none of them. It splits comments in two the way Rust does, but
+// parses its attributes into a (modifiers) node inside the declaration, so the
+// range and the signature cover them without help. Its grammar is the one
+// entry that is vendored rather than required — see grammars/swift.
+//
+// Java is the same shape as Swift and needs nothing beyond the two comment
+// kinds: its annotations also live in a (modifiers) node inside the
+// declaration.
 var registry = map[string]*language{
 	".go": {
-		name:        "go",
-		newLang:     func() *ts.Language { return ts.NewLanguage(tsgo.Language()) },
-		queryFile:   "queries/go.scm",
-		commentKind: "comment",
+		name:         "go",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tsgo.Language()) },
+		queryFile:    "queries/go.scm",
+		commentKinds: []string{"comment"},
 	},
 
 	".ts":  typescript(),
@@ -76,6 +121,19 @@ var registry = map[string]*language{
 	".jsx": tsx(),
 	".mjs": tsx(),
 	".cjs": tsx(),
+
+	".php":   php(),
+	".phtml": php(),
+
+	".py":  python(),
+	".pyi": python(),
+	".pyw": python(),
+
+	".rs": rust(),
+
+	".swift": swift(),
+
+	".java": java(),
 }
 
 // typescript and tsx each build a fresh language value per extension so that
@@ -83,20 +141,101 @@ var registry = map[string]*language{
 // be safe but makes the zero-value-per-entry invariant easy to break later.
 func typescript() *language {
 	return &language{
-		name:        "typescript",
-		newLang:     func() *ts.Language { return ts.NewLanguage(tsts.LanguageTypescript()) },
-		queryFile:   "queries/typescript.scm",
-		commentKind: "comment",
+		name:         "typescript",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tsts.LanguageTypescript()) },
+		queryFile:    "queries/typescript.scm",
+		commentKinds: []string{"comment"},
 	}
 }
 
 func tsx() *language {
 	return &language{
-		name:        "tsx",
-		newLang:     func() *ts.Language { return ts.NewLanguage(tsts.LanguageTSX()) },
-		queryFile:   "queries/typescript.scm",
-		commentKind: "comment",
+		name:         "tsx",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tsts.LanguageTSX()) },
+		queryFile:    "queries/typescript.scm",
+		commentKinds: []string{"comment"},
 	}
+}
+
+// php builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+func php() *language {
+	return &language{
+		name:         "php",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tsphp.LanguagePHP()) },
+		queryFile:    "queries/php.scm",
+		commentKinds: []string{"comment"},
+	}
+}
+
+// python builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+//
+// commentKind is still set: a `#` comment above a declaration is the only doc a
+// module-level constant can carry, since a binding has no body to hold a
+// docstring.
+func python() *language {
+	return &language{
+		name:         "python",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tspy.Language()) },
+		queryFile:    "queries/python.scm",
+		commentKinds: []string{"comment"},
+		wrapperKind:  "decorated_definition",
+		docstrings:   true,
+	}
+}
+
+// rust builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+//
+// No wrapperKind: Rust hangs its attributes beside the item rather than around
+// it, which is what attrKind is for.
+func rust() *language {
+	return &language{
+		name:         "rust",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tsrs.Language()) },
+		queryFile:    "queries/rust.scm",
+		commentKinds: []string{"line_comment", "block_comment"},
+		attrKind:     "attribute_item",
+	}
+}
+
+// swift builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+//
+// Neither wrapperKind nor attrKind: Swift keeps its attributes inside the
+// declaration node, so nothing has to be walked to find them.
+func swift() *language {
+	return &language{
+		name:         "swift",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tssw.Language()) },
+		queryFile:    "queries/swift.scm",
+		commentKinds: []string{"comment", "multiline_comment"},
+	}
+}
+
+// java builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+//
+// Neither wrapperKind nor attrKind: like Swift, Java keeps its annotations
+// inside the declaration node, so nothing has to be walked to find them.
+func java() *language {
+	return &language{
+		name:         "java",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tsjava.Language()) },
+		queryFile:    "queries/java.scm",
+		commentKinds: []string{"line_comment", "block_comment"},
+	}
+}
+
+// isComment reports whether kind is one of the comment kinds this grammar uses.
+func (l *language) isComment(kind string) bool {
+	for _, k := range l.commentKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // lookup returns the language for a path, or nil when no grammar covers it.

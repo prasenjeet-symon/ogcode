@@ -268,3 +268,19 @@ func asTooLarge(err error, target **TooLargeError) bool {
 	}
 	return ok
 }
+
+// A trailing comment belongs to the line it sits on, not to the declaration
+// below it — yet it ends on the row directly above that declaration, so the
+// adjacency check would hand it over on its own. The shape is
+// language-independent: Python meets it most often, but Go admits it too.
+func TestOutlineTrailingCommentNotAdopted(t *testing.T) {
+	fm, err := Outline(write(t, "m.go", "package p\n\nvar a = 1 // shorthand\nvar b = 2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b"} {
+		if got := find(t, fm, name).Doc; got != "" {
+			t.Errorf("%s doc = %q, want empty — a trailing comment documents its own line", name, got)
+		}
+	}
+}

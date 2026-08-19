@@ -21,7 +21,7 @@ func codeFacingAgents() []Agent {
 // list names, so a tool can be fully built, registered and documented and still
 // be unreachable — the model is never offered it, and the failure is silent:
 // no error, just an agent that never calls it.
-var mandatoryPromptTools = []string{"codebase_map", "file_map"}
+var mandatoryPromptTools = []string{"codebase_map", "file_map", "check_syntax"}
 
 func TestAgents_PromptMandatedToolsAreReachable(t *testing.T) {
 	for _, a := range codeFacingAgents() {
@@ -74,6 +74,23 @@ func TestProjectIndexPrompt_ExplainsFileMapRanges(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("project index prompt missing %q", want)
+		}
+	}
+}
+
+// An agent that can change a file can break it, and check_syntax is how it
+// finds that out before it stacks more edits on the damage. Pinned as an
+// invariant so a future write-capable agent cannot be added without it: the
+// prompt tells the build agents to verify every edit, and an agent that was
+// never offered the tool would silently skip that step.
+func TestAgents_WriteCapableHaveCheckSyntax(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		if !slices.Contains(a.Tools, "write") && !slices.Contains(a.Tools, "edit") {
+			continue
+		}
+		if !slices.Contains(a.Tools, "check_syntax") {
+			t.Errorf("%s: can write or edit files but has no check_syntax, "+
+				"so it cannot tell whether an edit left the file parseable", a.Name)
 		}
 	}
 }

@@ -1,0 +1,5 @@
+# The vendored Swift grammar is generated output, not source. Marking it keeps
+# it out of language stats, collapses it in diffs, and stops it being offered up
+# as a search hit. See internal/codemap/grammars/swift/README.md.
+internal/codemap/grammars/swift/parser.c linguist-generated=true linguist-vendored=true -diff
+internal/codemap/grammars/swift/scanner.c linguist-vendored=true

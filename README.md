@@ -248,6 +248,7 @@ As the cost of using frontier AI climbs with every intelligence leap, tokens are
 | **Context compaction** | Summarizes stale history instead of replaying it verbatim, with truncation as a fallback. | Caps prompt size on long sessions |
 | **Targeted `memory_recall`** | The agent retrieves precise historical facts (config values, past decisions) rather than re-deriving them by re-reading code. | Fewer exploration turns |
 | **`file_map` ranged reads** | Tree-sitter outlines a file so the agent reads one declaration's line range instead of the entire file. Reading a file over 200 lines without a range returns the map instead. | A map costs 5–11% of the file it describes |
+| **`check_syntax` after edits** | The same tree-sitter parse validates a file the moment it is written, so a dropped brace surfaces immediately instead of after several more edits land on top of it. | Removes a whole broken-build recovery loop |
 | **Compact tool output** | Structural results render as indented text rather than JSON, which spends ~1.4x its own content on braces, quotes and one-label-per-line arrays. | 53% on every `codebase_map` call |
 
 ### Real session results
@@ -298,17 +299,34 @@ The map is parsed fresh on every call and never indexed, so its line numbers alw
 
 #### Language support
 
-Three tree-sitter grammars give full parsing across nine file extensions:
+Eight tree-sitter grammars give full parsing across seventeen file extensions:
 
 | Language | Extensions | Grammar |
 | -------- | ---------- | ------- |
 | Go | `.go` | `tree-sitter-go` |
 | TypeScript | `.ts` `.mts` `.cts` | `tree-sitter-typescript` |
 | TSX · JSX · JavaScript | `.tsx` `.jsx` `.js` `.mjs` `.cjs` | `tree-sitter-typescript` (TSX parser) |
+| PHP | `.php` `.phtml` | `tree-sitter-php` |
+| Python | `.py` `.pyi` `.pyw` | `tree-sitter-python` |
+| Rust | `.rs` | `tree-sitter-rust` |
+| Swift | `.swift` | `tree-sitter-swift` (vendored) |
+| Java | `.java` | `tree-sitter-java` |
 
-TypeScript is a syntactic superset of JavaScript and the TSX parser adds JSX on top, so plain `.js` and `.jsx` files — including `.js` files that carry JSX — parse correctly without a fourth grammar.
+TypeScript is a syntactic superset of JavaScript and the TSX parser adds JSX on top, so plain `.js` and `.jsx` files — including `.js` files that carry JSX — parse correctly without a grammar of their own.
 
-Every other file type falls back to a heuristic scanner that recognises declarations in Python, Rust, shell, and the JavaScript/TypeScript family, plus Markdown headings. Its ranges are approximate — each declaration ends where the next one begins — but no file is left unmapped.
+PHP ships two parsers and ogcode registers the one that reads a file as text opening into code at `<?php`, so templates that return to HTML between blocks map the same way a plain `.php` file does. Classes, interfaces, traits and enums are outlined with their methods nested underneath — including the `public` / `protected` / `private` forms that make up most of a real PHP codebase.
+
+Python needs more than a grammar and a query. It documents a declaration from the inside, with a docstring at the top of the body rather than a comment above it, so docstrings are read directly and collapsed to their summary sentence. It also hangs decorators above the declaration they modify, so a symbol's range is widened back up over them — `@property` changes what a method is, and a route decorator is the only place a URL appears. Module-level bindings earn a line of their own, because a settings or constants module is nothing else.
+
+Rust states an attribute beside the item rather than around it, so a `#[derive(...)]` line is a sibling that sits between the doc comment and the declaration. Ranges are widened back up over the attributes and the doc is read from above them; `///` and `//!` markers are stripped. `impl` blocks are listed with their methods nested underneath and are named for the type they are written for, so a trait impl and an inherent impl on the same type answer to the same name. A trait's required methods carry no body, and that signature is the point of the trait, so they earn a line beside the defaulted ones.
+
+Swift needs no such accommodation — it parses `@objc public final` into a `modifiers` node inside the declaration, so ranges and signatures cover attributes for free. `class`, `struct`, `enum`, `actor` and `extension` are one grammar node told apart by a `declaration_kind` token, matched structurally so each keeps its own kind. Extensions are listed as their own entry with their methods nested underneath, and a protocol's requirements — methods, property requirements and `associatedtype` alike — are all listed, because a Swift protocol is often mostly `var x: T { get }`.
+
+Swift's grammar is the one entry vendored into the tree rather than required through `go.mod`: upstream generates its parser at build time and gitignores it, publishes no tagged versions, and ships a Go binding that `#include`s a file no commit contains. See [internal/codemap/grammars/swift](internal/codemap/grammars/swift/README.md).
+
+Java is the same shape as Swift and needs nothing beyond the two comment kinds — its annotations also sit in a `modifiers` node inside the declaration, so `@Entity public final class` renders whole. Classes, interfaces, enums, records and annotation types are all outlined, with nested types kept because Java leans on the shape so heavily that a Builder is the canonical case. An enum states its methods inside a nested `enum_body_declarations` rather than directly in its body, so those need a pattern of their own.
+
+Every other file type falls back to a heuristic scanner that recognises the declaration forms common across languages — `function`, `def` and `fn`, `class` and `struct`, shell functions — plus Markdown headings. Its ranges are approximate — each declaration ends where the next one begins — but no file is left unmapped.
 
 ---
 

@@ -25,6 +25,8 @@ var defaultExcludePatterns = []string{
 	"dist", "build", "out", "target", ".next", ".nuxt", ".cache",
 	// VCS / tooling dirs
 	".git", "__pycache__", ".venv", "venv", "env", "coverage", ".ogcode",
+	// Vendored generated parsers — see skipDirs in internal/indexer.
+	"grammars",
 	// Misc temp dirs
 	"tmp", "temp", "logs",
 	// Generated / lock files
