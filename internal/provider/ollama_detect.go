@@ -6,11 +6,26 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
 // DefaultOllamaBaseURL is the default local Ollama OpenAI-compatible endpoint.
 const DefaultOllamaBaseURL = "http://localhost:11434/v1"
+
+// defaultOllamaFallbackURLs are probed, in priority order, when no base URL is
+// configured and the default local endpoint is not answering. They cover the
+// deployment where Ollama is not installed on this machine at all and requests
+// are served by a proxy in front of remote instances.
+var defaultOllamaFallbackURLs = []string{
+	"http://localhost:8090/v1", // quota-aware multi-account router
+	"http://localhost/llm/v1",  // path-routed reverse proxy pool
+}
+
+// PrimaryOllamaBaseURL is the first candidate probed. A package-level var
+// rather than a constant so tests can point it at a dead address and exercise
+// the fallback path deterministically.
+var PrimaryOllamaBaseURL = DefaultOllamaBaseURL
 
 // defaultOllamaHealthURL is the root Ollama endpoint used for the liveness probe.
 // We probe the root (not /v1/models) because it is the cheapest 200 the server
@@ -78,21 +93,100 @@ func OllamaRunning(baseURL string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// DetectOllama performs a combined detection: binary presence + liveness
-// probe. The base URL honours OLLAMA_BASE_URL when provided, otherwise the
-// default localhost endpoint is used. This is the single source of truth used
-// by both the server (loadProviderMap / provider config endpoint) and the CLI
-// (index command) so detection logic is never duplicated.
-func DetectOllama() OllamaStatus {
-	baseURL := DefaultOllamaBaseURL
-	if env := strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL")); env != "" {
-		baseURL = env
+// ollamaFallbackURLs returns the fallback candidates to probe after the
+// primary endpoint. OLLAMA_FALLBACK_URLS overrides the built-in list
+// (comma-separated); setting it to an empty value disables fallback probing.
+func ollamaFallbackURLs() []string {
+	raw, ok := os.LookupEnv("OLLAMA_FALLBACK_URLS")
+	if !ok {
+		return defaultOllamaFallbackURLs
 	}
+	var out []string
+	for _, u := range strings.Split(raw, ",") {
+		if u = strings.TrimSpace(u); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// probeCandidates probes every candidate concurrently and returns the first
+// one in priority order that responded. Concurrency is the point: probing
+// serially would add a full timeout per dead candidate to every startup, and
+// the common case (nothing running) is exactly the all-dead case.
+func probeCandidates(urls []string) (string, bool) {
+	live := make([]bool, len(urls))
+	var wg sync.WaitGroup
+	for i, u := range urls {
+		wg.Add(1)
+		go func(i int, u string) {
+			defer wg.Done()
+			live[i] = OllamaRunning(u)
+		}(i, u)
+	}
+	wg.Wait()
+	for i, ok := range live {
+		if ok {
+			return urls[i], true
+		}
+	}
+	return "", false
+}
+
+// DetectOllama performs a combined detection: binary presence + liveness
+// probe. This is the single source of truth used by both the server
+// (loadProviderMap / provider config endpoint) and the CLI (index command) so
+// detection logic is never duplicated.
+//
+// Resolution order:
+//  1. OLLAMA_BASE_URL, when set, is authoritative — we never probe elsewhere
+//     when the user has named a target.
+//  2. The default local endpoint (localhost:11434).
+//  3. The fallback candidates, so a machine with no local Ollama install still
+//     finds a router or proxy serving remote instances.
+func DetectOllama() OllamaStatus {
 	installed := OllamaBinaryInstalled()
-	running := OllamaRunning(baseURL)
+
+	if env := strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL")); env != "" {
+		return OllamaStatus{
+			Installed: installed,
+			Running:   OllamaRunning(env),
+			BaseURL:   env,
+		}
+	}
+
+	candidates := append([]string{PrimaryOllamaBaseURL}, ollamaFallbackURLs()...)
+	if url, ok := probeCandidates(candidates); ok {
+		return OllamaStatus{Installed: installed, Running: true, BaseURL: url}
+	}
+
 	return OllamaStatus{
 		Installed: installed,
-		Running:   running,
-		BaseURL:   baseURL,
+		Running:   false,
+		BaseURL:   PrimaryOllamaBaseURL,
 	}
+}
+
+// PreferLiveOllamaEndpoint resolves which endpoint to actually use when a base
+// URL was configured (a persisted config row) and detection found a different
+// live one.
+//
+// A configured endpoint wins while it is still answering. A configured
+// endpoint that has gone dead yields to whatever detection found, so a row
+// persisted from an earlier launch cannot permanently shadow a working
+// endpoint — the "local Ollama was uninstalled, but a router is up" case.
+//
+// An explicit OLLAMA_BASE_URL must never be passed here: it is authoritative
+// by definition and callers should use it directly.
+func PreferLiveOllamaEndpoint(configured string, st OllamaStatus) string {
+	if configured == "" {
+		return st.BaseURL
+	}
+	if !st.Running || st.BaseURL == configured {
+		return configured
+	}
+	if OllamaRunning(configured) {
+		return configured
+	}
+	return st.BaseURL
 }

@@ -1,3 +1,214 @@
+# Release Notes — v0.26.0
+
+## Minor: Git Diff Viewer, Session Resume & Interruption Recovery, Gitignore-Aware Indexing, and C#/Dart Outlines
+
+This minor release brings source control into the workspace, makes sessions
+recover from being cut short, respects `.gitignore` during indexing, and grows
+tree-sitter outline support to ten grammars. It also fixes two latent bugs — a
+monotonic-ID ordering issue that intermittently mis-sorted messages, and a
+memory-recall nil-panic — and hardens the Ollama detector so a machine with no
+local install but a router or proxy still finds it.
+
+The headline feature is a **VS Code-style Source Control panel** built into the
+index explorer: browse changed files, read per-file unified diffs, stage and
+unstage individual files, commit with a message, and walk recent commits with
+their full diffs — all without leaving the workspace. The diff renderer parses
+raw unified-diff text directly, the way GitHub and VS Code do, so untracked files
+render as all-addition hunks instead of empty diffs. Stage, unstage, and commit
+operations are serialized with the agent's own git operations through a shared
+mutex, so the UI and the agent never race on the index.
+
+### Session resume & interruption recovery
+
+When an agent turn is cut short — a crash, a rate limit, a network drop, the
+server restarting mid-stream — the session is now repaired and offered a
+**Resume** button instead of being stranded. The failure is classified (rate
+limit, auth, network, context overflow, server error, crash, stalled, fatal),
+whether retrying is worthwhile is recorded, and the session history is repaired
+so the next provider request is valid: completed tool work is preserved,
+half-finished tool calls are paired with error results, and a text-only fragment
+is deleted so the step replays cleanly. On server startup, every interrupted
+interactive session is reconciled automatically — a restart no longer leaves
+sessions in a half-finished state. A `POST /api/session/{id}/resume` endpoint
+restarts the loop without the user having to retype anything.
+
+1. **Interruption classification** — Provider stream errors are mapped to
+   `session.Interruption` records with a resumability verdict and a
+   human-facing detail string, so the Resume button can say what went wrong and
+   whether retrying will help. (`internal/agent/interruption.go`)
+
+2. **Session reconciliation** — Dangling `tool_use` blocks are paired with error
+   results, half-written JSON is coerced to a closed state, and the interrupted
+   turn is kept or deleted based on whether it completed any tool work. Keeping
+   a turn with finished tool calls preserves the work; deleting a text-only
+   fragment lets the step replay. (`internal/agent/resume.go`)
+
+3. **Startup recovery** — On boot, the server reconciles every interrupted
+   interactive session so a restart mid-turn is not a dead end.
+   (`internal/server/resume_routes.go`, `internal/server/server.go`)
+
+4. **Resume endpoint & UI** — `POST /api/session/{id}/resume` restarts the loop;
+   the frontend surfaces a Resume button with the failure explanation.
+   (`internal/server/resume_routes.go`, `internal/server/routes.go`)
+
+### Git diff viewer (source control panel)
+
+1. **Working-tree changes** — Lists modified, staged, and untracked files with
+   per-file unified diffs. Untracked files render as all-addition hunks via a
+   `--no-index` diff, not as empty diffs. (`internal/git/git.go`,
+   `internal/server/git_routes.go`, `web/src/components/git-diff.tsx`)
+
+2. **Stage / unstage / commit** — Individual files can be staged or unstaged and
+   the staged set committed with a message. All mutating git operations are
+   serialized with the agent's own git operations through `s.gitMu` so the UI
+   and the agent never race on the index. (`internal/server/git_routes.go`)
+
+3. **Commit browser** — Recent commits (default 20) are listed with their full
+   diffs, browseable the same way as working-tree changes.
+   (`internal/git/git.go`, `internal/server/git_routes.go`)
+
+4. **Unified-diff renderer** — The `GitDiff` component parses raw unified-diff
+   text directly into hunks and renders GitHub-style add/del/context line
+   coloring, the same approach GitHub and VS Code take.
+   (`web/src/components/git-diff.tsx`)
+
+### Gitignore-aware indexing
+
+Indexing now respects the project's own `.gitignore` instead of a hardcoded
+default exclude list that was invisibly seeded into the user's store. A new
+`internal/gitignore` package implements full pattern matching — negation,
+directory-only patterns, nested `.gitignore` files, wildcards, and character
+classes — and the indexer prunes gitignored directories and skips gitignored
+files during workspace walks. The old default excludes (`node_modules`,
+`vendor`, `dist`, …) are gone; only the project's `.gitignore` and user-added
+patterns apply. An **Index scope** dialog in the UI shows the workspace's
+`.gitignore` rules, lists nested `.gitignore` files, and lets users add extra
+exclude patterns — and offers a starter template when no `.gitignore` exists.
+(`internal/gitignore/`, `internal/indexer/indexer.go`,
+`internal/docindex/excludes.go`, `internal/server/docindex_routes.go`,
+`web/src/components/index-scope-dialog.tsx`)
+
+### C# and Dart tree-sitter outlines
+
+Two new grammars join the outline system, taking it from 8 grammars / 17
+extensions to **10 grammars / 21 extensions**.
+
+1. **C#** (`.cs` `.csx`) via `tree-sitter-c-sharp`. Outlines namespaces (both
+   block and file-scoped forms), classes, structs, interfaces, enums, records,
+   delegates, methods, constructors, destructors, operators, indexers, and
+   properties. XML documentation comments (`/// <summary>`) are parsed into
+   readable prose, not raw markup. (`internal/codemap/queries/csharp.scm`,
+   `internal/codemap/codemap.go`)
+
+2. **Dart** (`.dart`) via `tree-sitter-dart` (community-maintained,
+   commit-pinned). Outlines classes, mixins, extensions, enums, type aliases,
+   methods, getters/setters, and constructors (plain, named, const, factory).
+   Required new machinery: `trailingBodyKind` extends a declaration's range over
+   its body (which sits as a sibling, not a child, in the Dart grammar) and
+   `attrKind` handles annotations. (`internal/codemap/queries/dart.scm`,
+   `internal/codemap/codemap.go`, `internal/codemap/languages.go`)
+
+### Ollama cloud catalog & detection improvements
+
+1. **Cloud catalog** — Models hosted on Ollama Cloud are fetched and merged into
+   the local model list so the picker shows what's actually usable (cloud models
+   don't need to be pulled). When nothing is pulled locally, the 3 cheapest
+   cloud models are auto-enabled so a fresh install isn't greeted by an empty
+   picker. (`internal/provider/ollama_catalog.go`,
+   `internal/provider/openai.go`)
+
+2. **Fallback detection** — A machine with no local Ollama install but a router
+   or proxy in front of remote instances now finds it. The detector probes the
+   default endpoint, then a priority-ordered list of fallbacks
+   (`OLLAMA_FALLBACK_URLS` overrides), concurrently so a dead candidate adds no
+   latency. An explicit `OLLAMA_BASE_URL` is always authoritative and never
+   silently swapped for a live one; a configured endpoint that has gone dead
+   yields to whatever detection found. (`internal/provider/ollama_detect.go`)
+
+### Index run dialog & index plan preview
+
+Before an index run starts, a dialog shows exactly what it would do: how many
+files will be indexed, how many are stale, a breakdown by file type
+(text/pdf/docx), and which models are enabled. It distinguishes a rebuild
+(re-reads everything) from an incremental run (only new + stale files), and
+reports a no-op when there's nothing to do. (`web/src/components/index-run-dialog.tsx`,
+`internal/indexer/indexer.go`)
+
+### Code viewer, file tree, and subagent indicator
+
+1. **Code viewer** — Source files in the index explorer now render with
+   syntax highlighting (highlight.js) and a line-number gutter. Highlighting
+   caps at 150 KB or when very-long lines are present (minified bundles),
+   falling back to plain escaped text so the tab never stalls.
+   (`web/src/components/code-viewer.tsx`)
+
+2. **File tree** — The index explorer's file tree is now a standalone component
+   with language-colored file icons (26 languages, including C# and Dart),
+   filter highlighting, and breadth-first default expansion.
+   (`web/src/components/file-tree.tsx`)
+
+3. **Subagent indicator** — Animated "bot-head" pills appear in the session
+   header whenever the main agent has delegated work to read-only sub-agents via
+   the `task` tool, each showing the sub-agent's title with a hover tooltip.
+   Stale loops (where the last turn ended in error/abort) are filtered out so
+   the indicator doesn't show phantom active tasks.
+   (`web/src/components/subagent-indicator.tsx`)
+
+### Bug fixes
+
+1. **Monotonic ULID generation** — ID generation now uses a monotonic entropy
+   source so IDs minted within the same millisecond are strictly increasing.
+   Previously, fresh random entropy was drawn each time, making sub-millisecond
+   ordering a coin flip — ~50% of consecutive pairs sorted backwards. Since IDs
+   are the message sort key, this intermittently placed tool-result messages
+   before the assistant turn they answered, breaking any code that read position
+   as causality (including the new resume reconciliation). The stateful monotonic
+   reader is mutex-guarded with an overflow fallback to plain random.
+   (`internal/id/id.go`)
+
+2. **Memory graph enrichment nil-panic** — `enrichTreeWithFollowUp` no longer
+   panics when `BuildLightweightTree` returns a nil map (no facts cleared the
+   cosine threshold). The follow-up merge round now handles nil on either side.
+   (`internal/memory/graph.go`)
+
+3. **Ollama status test isolation** — `TestOllamaStatusEndpoint` no longer reads
+   the host's real Ollama instance. The test pins the primary probe to a dead
+   address and disables fallbacks so the "nothing running" path is exercised
+   deterministically, regardless of what's running on the dev machine. The
+   `primaryOllamaBaseURL` var is exported as `PrimaryOllamaBaseURL` so the server
+   package's test can override it. (`internal/provider/ollama_detect.go`,
+   `internal/server/provider_routes_test.go`)
+
+### Dependencies
+
+Adds `tree-sitter-c-sharp` and `tree-sitter-dart` (community-maintained,
+commit-pinned) via `go.mod` for the two new outline grammars.
+
+### Tests
+
+New test files cover each feature area: `internal/agent/{resume,interruption}_test.go`,
+`internal/git/git_test.go`, `internal/server/{git_routes,resume_routes,gitignore_info}_test.go`,
+`internal/codemap/{csharp,dart}_test.go`, `internal/gitignore/gitignore_test.go`,
+`internal/docindex/excludes_test.go`, `internal/id/id_test.go`,
+`internal/memory/graph_enrich_test.go`, `internal/provider/{ollama_catalog,ollama_detect}_test.go`.
+`CGO_ENABLED=1 go build ./...` clean; `CGO_ENABLED=1 go test ./...` green.
+
+### New HTTP API endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/git/status` | Working-tree file status |
+| GET | `/api/git/diff?path=&staged=` | Per-file unified diff |
+| GET | `/api/git/commits?n=20` | Recent commits list |
+| GET | `/api/git/commit/{sha}` | Full diff for a commit |
+| POST | `/api/git/stage` | Stage files |
+| POST | `/api/git/unstage` | Unstage files |
+| POST | `/api/git/commit` | Commit staged changes |
+| POST | `/api/session/{id}/resume` | Resume an interrupted session |
+| GET | `/api/docindex/gitignore` | Workspace .gitignore rules + nested files |
+
+---
+
 # Release Notes — v0.25.0
 
 ## Minor: check_syntax Tool, Five New Tree-Sitter Grammars, and Edit-Time Syntax Checking

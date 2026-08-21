@@ -212,3 +212,73 @@ func truncate(s string) string {
 	}
 	return s[:600] + "…"
 }
+
+// A bare limit says how much to read, never which part, so it cannot serve as a
+// range on a file the caller has never mapped. Before this, read(path,
+// limit=5000) walked straight past the interception and returned the file — the
+// same whole-file read the threshold exists to stop, reached through a
+// different argument. The sibling case above pins the other half: a limit small
+// enough to be a peek is still honoured.
+func TestReadTool_LargeBareLimitStillReturnsMap(t *testing.T) {
+	path := longGoFile(t, 60)
+
+	out := readWith(t, path, map[string]any{"limit": 5000})
+
+	if !strings.Contains(out, "too long to read in full") {
+		t.Errorf("a bare limit past the threshold bypassed the map guard:\n%s", truncate(out))
+	}
+}
+
+// The boundary itself, both sides. At or under the threshold a bare limit is a
+// peek that costs no more context than a short file — which is read whole
+// already — so refusing it would contradict the threshold it is measured
+// against. Past it, the caller has to say which part.
+func TestReadTool_BareLimitBoundary(t *testing.T) {
+	path := longGoFile(t, 60)
+
+	cases := []struct {
+		name   string
+		limit  int
+		mapped bool
+	}{
+		{"one under", rangedReadThreshold - 1, false},
+		{"exactly at", rangedReadThreshold, false},
+		{"one over", rangedReadThreshold + 1, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := readWith(t, path, map[string]any{"limit": c.limit})
+			got := strings.Contains(out, "too long to read in full")
+			if got != c.mapped {
+				t.Errorf("limit=%d: mapped=%v, want %v:\n%s", c.limit, got, c.mapped, truncate(out))
+			}
+		})
+	}
+}
+
+// Paging is placed, not merely sized, so an offset keeps working on its own: a
+// caller who passes one has already seen enough of the file to know where to
+// resume. Narrowing the limit hatch must not close this.
+func TestReadTool_OffsetStillPagesWithoutARange(t *testing.T) {
+	path := longGoFile(t, 60)
+
+	out := readWith(t, path, map[string]any{"offset": 100})
+
+	if strings.Contains(out, "too long to read in full") {
+		t.Errorf("offset paging was intercepted:\n%s", truncate(out))
+	}
+	if !strings.Contains(out, "func Fn") {
+		t.Errorf("offset paging returned no contents:\n%s", truncate(out))
+	}
+}
+
+// The description has to state the cap, or a caller passing limit=5000 gets the
+// map back with no way to tell whether that was the rule or a malfunction.
+func TestReadDescription_StatesTheBareLimitCap(t *testing.T) {
+	desc := ReadTool{}.Description()
+	for _, want := range []string{"200 lines", "which part"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("read description missing %q; the bare-limit cap is unstated", want)
+		}
+	}
+}

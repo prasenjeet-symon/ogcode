@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -333,12 +332,12 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	sessionID := session.SessionID(chi.URLParam(r, "sessionID"))
 
 	var input struct {
-		Content        string           `json:"content"`
+		Content        string                  `json:"content"`
 		Images         []session.ImagePartData `json:"images,omitempty"`
-		Agent          string           `json:"agent,omitempty"`
-		Model          string           `json:"model,omitempty"`
-		ViewportWidth  int              `json:"viewportWidth,omitempty"`
-		ViewportHeight int              `json:"viewportHeight,omitempty"`
+		Agent          string                  `json:"agent,omitempty"`
+		Model          string                  `json:"model,omitempty"`
+		ViewportWidth  int                     `json:"viewportWidth,omitempty"`
+		ViewportHeight int                     `json:"viewportHeight,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -433,45 +432,11 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Start agent loop in background with cancellable context
-	ctx, cancel := context.WithCancel(context.Background())
-	// Create a LoopControl for this loop so the user can inject mid-loop
-	// guidance and cancel in-flight tools without killing the loop.
-	lc := agent.NewLoopControl()
-	ctx = agent.WithLoopControl(ctx, lc)
-	// This is an interactive session with a UI that can answer permission
-	// prompts, so mark it gated: mutating tools (bash/write/edit) will pause for
-	// approval. Headless loops (task/breakdown/note/search) never set this flag.
-	ctx = agent.WithPermissionGating(ctx)
-	// Cancel any already-running loop for this session before starting a new one.
-	s.mu.Lock()
-	if old, ok := s.running[sessionID]; ok {
-		old()
-		slog.Info("cancelled previous running loop", "session", sessionID)
-	}
-	s.nextToken++
-	token := s.nextToken
-	s.running[sessionID] = cancel
-	s.runningToken[sessionID] = token
-	s.loopControls[sessionID] = lc
-	s.mu.Unlock()
-
-	go func() {
-		defer func() {
-			// Only delete our own cancel func - a newer prompt may have
-			// replaced it while we were running. Check the token to verify.
-			s.mu.Lock()
-			if s.runningToken[sessionID] == token {
-				delete(s.running, sessionID)
-				delete(s.runningToken, sessionID)
-				delete(s.loopControls, sessionID)
-			}
-			s.mu.Unlock()
-		}()
-		if err := s.loopRunner.RunLoop(ctx, sessionID, input.Agent, input.ViewportWidth, input.ViewportHeight); err != nil {
-			slog.Error("agent loop error", "session", sessionID, "err", err)
-		}
-	}()
+	// Start the agent loop in the background. Resume starts it the same way, so
+	// the two share one path — a resumed loop that skipped permission gating, or
+	// that failed to register its cancel func, would be a loop the user could
+	// neither approve tools in nor stop.
+	s.startSessionLoop(sessionID, input.Agent, input.ViewportWidth, input.ViewportHeight)
 
 	w.WriteHeader(http.StatusNoContent)
 }

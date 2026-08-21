@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
+	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
 
 func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing.T) {
@@ -19,8 +21,11 @@ func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing
 	if !strings.Contains(prompt, "## MEMORY.md — Project Long-Term Memory") {
 		t.Error("expected MEMORY.md section to appear even when memoryMDContent is empty")
 	}
-	if !strings.Contains(prompt, "No MEMORY.md file was found") {
-		t.Error("expected 'No MEMORY.md file was found' message when memoryMDContent is empty")
+	if !strings.Contains(prompt, "This project has no MEMORY.md file") {
+		t.Error("expected the absent-file wording when memoryMDContent is empty")
+	}
+	if strings.Contains(prompt, "The content above in the <memory-md> tag") {
+		t.Error("must not point at a <memory-md> tag when none was prepended")
 	}
 
 	// Case 2: With MEMORY.md content — section should appear with file content indicator
@@ -35,8 +40,8 @@ func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing
 	if !strings.Contains(prompt, memContent) {
 		t.Error("expected memoryMDContent to be included in prompt")
 	}
-	if strings.Contains(prompt, "No MEMORY.md file was found") {
-		t.Error("did not expect 'No MEMORY.md file was found' when memoryMDContent is present")
+	if strings.Contains(prompt, "This project has no MEMORY.md file") {
+		t.Error("did not expect the absent-file wording when memoryMDContent is present")
 	}
 }
 
@@ -71,7 +76,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	if !strings.Contains(buildPrompt, "Use the edit tool for targeted updates") {
 		t.Error("expected 'Use the edit tool' instruction for BuildAgent")
 	}
-	if !strings.Contains(buildPrompt, "create one in the project root directory") {
+	if !strings.Contains(buildPrompt, "create one in the project root with the write tool") {
 		t.Error("expected creation prompt when memoryMDContent is empty and agent can write")
 	}
 
@@ -83,7 +88,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	if strings.Contains(planPrompt, "Use the edit tool") {
 		t.Error("did not expect 'Use the edit tool' for read-only PlanAgent")
 	}
-	if strings.Contains(planPrompt, "create one in the project root directory") {
+	if strings.Contains(planPrompt, "create one in the project root with the write tool") {
 		t.Error("did not expect creation prompt for read-only PlanAgent")
 	}
 
@@ -109,7 +114,7 @@ func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
 	if strings.Contains(buildPrompt, "No MEMORY.md file was found") {
 		t.Error("did not expect 'No MEMORY.md file was found' when memoryMDContent is present for BuildAgent")
 	}
-	if strings.Contains(buildPrompt, "create one in the project root directory") {
+	if strings.Contains(buildPrompt, "create one in the project root with the write tool") {
 		t.Error("did not expect creation prompt when memoryMDContent is present for BuildAgent")
 	}
 
@@ -118,7 +123,7 @@ func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
 	if !strings.Contains(planPrompt, "The content above in the <memory-md> tag") {
 		t.Error("expected content indicator when memoryMDContent is present for PlanAgent")
 	}
-	if strings.Contains(planPrompt, "create one in the project root directory") {
+	if strings.Contains(planPrompt, "create one in the project root with the write tool") {
 		t.Error("did not expect creation prompt for read-only PlanAgent even with content")
 	}
 }
@@ -658,5 +663,50 @@ func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
 		if strings.Contains(p, scopeSentinel) {
 			t.Errorf("%s lacks project_memory_recall but its prompt advertises it", a.ID)
 		}
+	}
+}
+
+// panicTool exists only to blow up. A tool that panics used to take the whole
+// server process with it — the goroutine that runs tools had no recover, and an
+// unrecovered panic in any goroutine kills the process, so one bad tool call
+// ended every session the server was serving.
+type panicTool struct{}
+
+func (panicTool) ID() string          { return "panic_tool" }
+func (panicTool) Description() string { return "panics" }
+func (panicTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (panicTool) Execute(context.Context, json.RawMessage, tool.Context) (tool.Result, error) {
+	var m map[string]string
+	m["boom"] = "boom" // assignment to entry in nil map
+	return tool.Result{}, nil
+}
+
+func TestExecuteTool_PanicBecomesToolErrorNotProcessDeath(t *testing.T) {
+	// Run the tool the way the loop's goroutine does, including its recover.
+	// If the recover is removed this test does not fail — it takes the test
+	// binary down, which is exactly the production symptom.
+	var result tool.Result
+	var err error
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result = tool.Result{}
+				err = fmt.Errorf("tool %s panicked: %v", panicTool{}.ID(), r)
+			}
+		}()
+		result, err = panicTool{}.Execute(context.Background(), nil, tool.Context{})
+	}()
+
+	if err == nil {
+		t.Fatal("expected the panic to surface as an error")
+	}
+	if !strings.Contains(err.Error(), "panicked") {
+		t.Errorf("error should name the panic, got %v", err)
+	}
+	if result.Output != "" {
+		t.Errorf("expected an empty result alongside the error, got %q", result.Output)
 	}
 }

@@ -73,9 +73,32 @@ export interface MessageInfo {
   parentId?: string;
   finish?: string;
   error?: string;
+  interrupted?: Interruption;
   cost?: number;
   tokens?: TokenCounts;
   createdAt: number;
+}
+
+export type InterruptReason =
+  | 'rate_limit'
+  | 'server_error'
+  | 'network'
+  | 'auth'
+  | 'context'
+  | 'crashed'
+  | 'stalled'
+  | 'fatal';
+
+/** Why a turn stopped short, and whether picking it up again is worth trying. */
+export interface Interruption {
+  reason: InterruptReason;
+  resumable: boolean;
+  /** One sentence naming what to do about it. The raw provider error is in `error`. */
+  detail?: string;
+  /** Unix seconds the provider asked us to come back at; absent when it said nothing. */
+  retryAfter?: number;
+  /** The loop step the turn died on. */
+  step?: number;
 }
 
 export interface Part {
@@ -159,6 +182,19 @@ export function abortSession(sessionId: string): Promise<void> {
   return fetchAPI(`/session/${sessionId}/abort`, { method: 'POST' });
 }
 
+export interface ResumeResult {
+  resumed: boolean;
+  message?: string;
+}
+
+/**
+ * Restart the agent loop on a session whose last turn was cut short, without
+ * sending a new prompt. The conversation up to the break is kept.
+ */
+export function resumeSession(sessionId: string): Promise<ResumeResult> {
+  return fetchAPI(`/session/${sessionId}/resume`, { method: 'POST' });
+}
+
 // Mid-loop guidance: inject a new instruction into a running agent loop without
 // starting a new user turn. The guidance is delivered to the loop at the top of
 // its next iteration. When cancelTool is true, the currently-running tool call
@@ -207,7 +243,8 @@ export function setMemoryConfig(cfg: Omit<MemoryConfig, 'updatedAt'>): Promise<M
 export interface ProviderConfig {
   providerId: string;
   apiKey: string;       // "__SET__" if stored in DB, "" otherwise
-  baseUrl: string;
+  baseUrl: string;        // the persisted value — what the edit form shows
+  effectiveBaseUrl: string; // the endpoint the provider is actually calling
   updatedAt: number;
   envKeySet: boolean;     // env var (e.g. ANTHROPIC_API_KEY) is present
   envBaseURLSet: boolean; // env var (e.g. OPENAI_BASE_URL) is present
@@ -217,7 +254,7 @@ export function getProviderConfigs(): Promise<ProviderConfig[]> {
   return fetchAPI('/providers/config');
 }
 
-export function setProviderConfig(id: string, cfg: Omit<ProviderConfig, 'providerId' | 'updatedAt' | 'envKeySet' | 'envBaseURLSet'>): Promise<ProviderConfig> {
+export function setProviderConfig(id: string, cfg: Omit<ProviderConfig, 'providerId' | 'updatedAt' | 'envKeySet' | 'envBaseURLSet' | 'effectiveBaseUrl'>): Promise<ProviderConfig> {
   return fetchAPI(`/providers/config/${id}`, {
     method: 'POST',
     body: JSON.stringify(cfg),
@@ -385,6 +422,71 @@ export interface GitSyncStatus {
 
 export function getGitSync(): Promise<GitSyncStatus> {
   return fetchAPI('/git/sync');
+}
+
+// Git working-tree & commit diff API.
+export interface GitFileStatus {
+  path: string;
+  x: string;
+  y: string;
+  staged: boolean;
+}
+
+export interface GitCommit {
+  sha: string;
+  short: string;
+  message: string;
+  author: string;
+  time: string;
+}
+
+export function getGitStatus(directory?: string): Promise<{ isRepo: boolean; files: GitFileStatus[] }> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/git/status${params}`);
+}
+
+export function getGitCommits(directory?: string, n?: number): Promise<GitCommit[]> {
+  const parts: string[] = [];
+  if (directory) parts.push(`directory=${encodeURIComponent(directory)}`);
+  if (n) parts.push(`n=${n}`);
+  const params = parts.length ? `?${parts.join('&')}` : '';
+  return fetchAPI(`/git/commits${params}`);
+}
+
+export function getGitCommitDiff(sha: string, directory?: string): Promise<{ diff: string }> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/git/commit/${encodeURIComponent(sha)}${params}`);
+}
+
+export function getGitFileDiff(path: string, staged: boolean, directory?: string): Promise<{ diff: string }> {
+  const parts: string[] = [`path=${encodeURIComponent(path)}`];
+  if (staged) parts.push('staged=true');
+  if (directory) parts.push(`directory=${encodeURIComponent(directory)}`);
+  return fetchAPI(`/git/diff?${parts.join('&')}`);
+}
+
+export function stageGitFiles(paths: string[], directory?: string): Promise<{ ok: boolean }> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/git/stage${params}`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  });
+}
+
+export function unstageGitFiles(paths: string[], directory?: string): Promise<{ ok: boolean }> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/git/unstage${params}`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  });
+}
+
+export function commitGitChanges(message: string, directory?: string): Promise<{ ok: boolean }> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/git/commit${params}`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
 }
 
 // Plan API
@@ -724,6 +826,68 @@ export function buildDocIndex(directory?: string, rebuild = false, model?: strin
 export function getIndexedDocs(directory?: string): Promise<DocSummary[]> {
   const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
   return fetchAPI(`/docindex/docs${params}`);
+}
+
+export interface IndexFile {
+  path: string;
+  indexed: boolean;
+  pageCount: number;
+  indexedAt: number;
+}
+
+export function getIndexFiles(directory?: string): Promise<IndexFile[]> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/docindex/files${params}`);
+}
+
+export interface DocContent {
+  path: string;
+  content: string;
+  size: number;
+  truncated: boolean;
+  binary: boolean;
+}
+
+export function getDocContent(docPath: string, directory?: string): Promise<DocContent> {
+  const dir = directory ? `&directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/docindex/docs/content?path=${encodeURIComponent(docPath)}${dir}`);
+}
+
+export interface IndexPlan {
+  total: number;
+  pending: number;
+  indexed: number;
+  stale: number;
+  pdf: number;
+  docx: number;
+  text: number;
+  pendingPdf: number;
+  pendingDocx: number;
+  pendingText: number;
+}
+
+export function getIndexPlan(directory?: string): Promise<IndexPlan> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/docindex/preview${params}`);
+}
+
+export interface GitignoreRule {
+  line: number;
+  pattern: string;
+  negated: boolean;
+}
+
+export interface GitignoreInfo {
+  path: string;
+  exists: boolean;
+  rules: GitignoreRule[];
+  nested: string[];
+  truncated: boolean;
+}
+
+export function getGitignoreInfo(directory?: string): Promise<GitignoreInfo> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/docindex/gitignore${params}`);
 }
 
 export interface ExcludeEntry {

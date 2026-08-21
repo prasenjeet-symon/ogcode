@@ -21,7 +21,13 @@ func codeFacingAgents() []Agent {
 // list names, so a tool can be fully built, registered and documented and still
 // be unreachable — the model is never offered it, and the failure is silent:
 // no error, just an agent that never calls it.
-var mandatoryPromptTools = []string{"codebase_map", "file_map", "check_syntax"}
+// The document tools and latex_to_pdf are here for the same reason: the shared
+// sections name them by tool id, so any agent that receives those sections must
+// hold them or the instruction is unfollowable.
+var mandatoryPromptTools = []string{
+	"codebase_map", "file_map", "check_syntax",
+	"pdf_index", "read_pdf_page", "docx_index", "read_docx_page", "latex_to_pdf",
+}
 
 func TestAgents_PromptMandatedToolsAreReachable(t *testing.T) {
 	for _, a := range codeFacingAgents() {
@@ -63,7 +69,7 @@ func TestSearchAgent_ExcludedFromFileMap(t *testing.T) {
 // The prompt has to tell the agent how to spend the ranges file_map returns,
 // including the one detail that silently corrupts a read when got wrong.
 func TestProjectIndexPrompt_ExplainsFileMapRanges(t *testing.T) {
-	prompt := projectIndexPrompt("build")
+	prompt := projectIndexPrompt("build", true, true)
 
 	for _, want := range []string{
 		"file_map",
@@ -92,5 +98,265 @@ func TestAgents_WriteCapableHaveCheckSyntax(t *testing.T) {
 			t.Errorf("%s: can write or edit files but has no check_syntax, "+
 				"so it cannot tell whether an edit left the file parseable", a.Name)
 		}
+	}
+}
+
+// The system prompt has to describe the tools the way they actually behave.
+// codebase_map aggregates a capped set of labels over a whole document; it does
+// not print per-page labels, and a prompt that says it does sends the agent
+// straight to read_pdf_page with a page number it had no way to know.
+func TestProjectIndexPrompt_DescribesDocumentIndexingAccurately(t *testing.T) {
+	prompt := projectIndexPrompt("build", true, true)
+
+	if strings.Contains(prompt, "per-page labels so you can pick the right page") {
+		t.Error("prompt claims codebase_map shows per-page labels; it aggregates across pages")
+	}
+	for _, want := range []string{"not a per-page breakdown", "pdf_index", "docx_index"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("project index prompt missing %q — the agent needs the per-page step", want)
+		}
+	}
+}
+
+// latex_to_pdf is a tool, not a render target: the ```latex fence is compiled by
+// the chat interface for every agent, but naming the tool to an agent that was
+// never offered it is an instruction it cannot follow.
+func TestMarkdownCapabilitiesPrompt_GatesLatexTool(t *testing.T) {
+	if !strings.Contains(markdownCapabilitiesPrompt(true), "latex_to_pdf") {
+		t.Error("expected latex_to_pdf mention when the agent holds the tool")
+	}
+	if strings.Contains(markdownCapabilitiesPrompt(false), "latex_to_pdf") {
+		t.Error("must not name latex_to_pdf to an agent that does not hold it")
+	}
+	// The render target itself stays available to both.
+	if !strings.Contains(markdownCapabilitiesPrompt(false), "LaTeX documents") {
+		t.Error("the ```latex render target should survive when the tool is gated off")
+	}
+}
+
+// An agent with no bash tool must not be told how its shell commands are run —
+// SubagentAgent's own Hard rules say it has no shell, and the two statements
+// cannot both sit in one prompt.
+func TestBuildSystemPrompt_ShellLineOnlyForShellAgents(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0)
+		hasShellLine := strings.Contains(prompt, "\nShell: ")
+		wantShellLine := slices.Contains(a.Tools, "bash")
+		if hasShellLine != wantShellLine {
+			t.Errorf("%s: shell line present=%v, has bash=%v", a.Name, hasShellLine, wantShellLine)
+		}
+		// The OS line is host-derived and applies to every project-scoped agent.
+		if !strings.Contains(prompt, "\nOS: ") {
+			t.Errorf("%s: expected an OS line regardless of shell access", a.Name)
+		}
+	}
+}
+
+// The MEMORY.md section opens by pointing at the block above it. When no
+// MEMORY.md exists there is no block, and every agent — not just the
+// write-capable ones — needs the section to say so.
+func TestBuildSystemPrompt_NoDanglingMemoryMDReference(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0)
+		if strings.Contains(prompt, "The content above in the <memory-md> tag") {
+			t.Errorf("%s: points at a <memory-md> tag that is not in the prompt", a.Name)
+		}
+		if !strings.Contains(prompt, "This project has no MEMORY.md file") {
+			t.Errorf("%s: does not say the file is absent", a.Name)
+		}
+	}
+}
+
+// Every agent reads content it did not author — source files, fetched pages,
+// supplied documents, sub-agent answers — so every agent needs the line between
+// what instructs it and what is merely input, including the utility agents that
+// are not project-scoped.
+func TestBuildSystemPrompt_InstructionSourceBoundaryReachesEveryAgent(t *testing.T) {
+	all := append(codeFacingAgents(), IndexAgent, SearchAgent)
+	for _, a := range all {
+		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0)
+		if !strings.Contains(prompt, "## Where your instructions come from") {
+			t.Errorf("%s: no instruction-source boundary in the prompt", a.Name)
+			continue
+		}
+		if !strings.Contains(prompt, "data, not instructions") {
+			t.Errorf("%s: boundary does not state that tool output is data", a.Name)
+		}
+
+		// The concrete rules differ by what the agent can actually do: an agent
+		// that can run commands or write files needs the execution rules; a
+		// read-only one needs the corrupted-findings rule instead.
+		canAct := slices.Contains(a.Tools, "bash") || slices.Contains(a.Tools, "write") || slices.Contains(a.Tools, "edit")
+		hasActRules := strings.Contains(prompt, "a command you run")
+		if hasActRules != canAct {
+			t.Errorf("%s: execution rules present=%v, can act=%v", a.Name, hasActRules, canAct)
+		}
+		if !canAct && !strings.Contains(prompt, "corrupted answer") {
+			t.Errorf("%s: read-only agent missing the corrupted-findings rule", a.Name)
+		}
+	}
+}
+
+// The boundary is the rule most likely to be tested by the next thing the agent
+// reads, so nothing in the cacheable block may sit after it and dilute it.
+func TestBuildSystemPrompt_BoundaryClosesTheStaticBlock(t *testing.T) {
+	// BuildAgent holds latex_to_pdf, so its prompt also carries the LaTeX
+	// environment section — the one block that previously came last.
+	prompt := staticSystemPrompt(BuildAgent, "/tmp/test", true, "", "", "anthropic")
+	idx := strings.Index(prompt, "## Where your instructions come from")
+	if idx < 0 {
+		t.Fatal("boundary section missing from the static block")
+	}
+	if rest := prompt[idx:]; strings.Contains(rest, "\n## ") {
+		t.Errorf("a section follows the instruction-source boundary: %q",
+			rest[strings.Index(rest[1:], "\n## "):][:60])
+	}
+}
+
+// Holding the tools is only half of it — the agent has to be told the rule.
+// BreakdownAgent carried file_map and codebase_map for a while without ever
+// receiving the workflow section, so it issued whole-file reads and learned the
+// range discipline only from read's interception, one wasted round trip per
+// file.
+//
+// TestAgents_PromptMandatedToolsAreReachable checks the opposite direction —
+// prompt names a tool, agent holds it — and cannot catch this: the toolset was
+// complete and the instruction was the missing half. Worse, parallelToolCallsPrompt
+// mentions file_map in passing, so a bare substring check on the tool id passes
+// for an agent that was never given the rule. Pin the section headings instead.
+func TestAgents_CarryTheMapBeforeReadWorkflow(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		for _, want := range []string{
+			"Mandatory: Use Project Index Before Exploration",
+			"Mandatory: Map a File Before Reading It",
+		} {
+			if !strings.Contains(a.System, want) {
+				t.Errorf("%s: system prompt missing %q — it has the tools but was never given the rule", a.Name, want)
+			}
+		}
+	}
+}
+
+// read enforces map-before-read at the tool boundary; the shell does not. An
+// agent with bash can cat a 3000-line file and neither the 200-line
+// interception nor file_map ever fires, which is the one bypass that undoes
+// both mandatory sections above. Models reach for cat by reflex, so every agent
+// that holds bash has to be told not to.
+func TestAgents_WithBashAreToldNotToReadWithIt(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		if !slices.Contains(a.Tools, "bash") {
+			continue
+		}
+		if !strings.Contains(a.System, `"cat"`) {
+			t.Errorf("%s: has bash but its prompt never rules out reading files with it, "+
+				"so it can pull whole files past both read guards", a.Name)
+		}
+	}
+}
+
+// The mirror of the above: the shell rule is gated on hasBash, so a shell-less
+// agent must not receive it. Naming cat to an agent with no bash tool spends
+// prompt ruling out a call it will never be offered. Pinned so the gate stays a
+// decision rather than drifting into an unconditional section.
+func TestSubagent_OmitsShellReadRule(t *testing.T) {
+	if slices.Contains(SubagentAgent.Tools, "bash") {
+		t.Fatal("SubagentAgent gained bash; it now needs the shell read rule, and this test's premise is gone")
+	}
+	if strings.Contains(SubagentAgent.System, `"cat"`) {
+		t.Error("SubagentAgent has no bash but its prompt rules out reading with it")
+	}
+}
+
+// The mirror of TestAgents_PromptMandatedToolsAreReachable for the document
+// tools, which are now gated: that test catches a prompt naming a tool the
+// agent lacks, and this one catches an agent holding the tools while the prompt
+// stays silent — the gate stuck off. Same failure as the breakdown agent's
+// missing workflow section: capability present, instruction absent, nothing to
+// tell you the model simply never makes the call.
+func TestAgents_WithDocToolsAreToldThePerPageFlow(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		if !slices.Contains(a.Tools, "pdf_index") {
+			continue
+		}
+		if !strings.Contains(a.System, "per-page labels") {
+			t.Errorf("%s: holds pdf_index but its prompt never explains the per-page flow, "+
+				"so it has no way to turn a document leaf into a page number", a.Name)
+		}
+	}
+}
+
+// The workflow section tells the agent to read only the range it needs. A
+// process step a few paragraphs later told it to read every file the request
+// mentions, which pushed the opposite way on the same action — and the vaguer,
+// more familiar instruction is the one a model tends to follow. Explore-before-
+// you-write has to survive, but stated so it agrees with the rule above it.
+func TestCodingAgents_ExploreStepDoesNotContradictRangedReads(t *testing.T) {
+	for _, a := range []Agent{BuildAgent, TaskAgent} {
+		if strings.Contains(a.System, "Read every file the request mentions") {
+			t.Errorf("%s: explore step still asks for whole files, contradicting "+
+				"the ranged-read rule in the same prompt", a.Name)
+		}
+		if !strings.Contains(a.System, "Explore before you write") {
+			t.Errorf("%s: lost the explore-before-you-write step entirely", a.Name)
+		}
+	}
+}
+
+// An unindexed project used to cost one codebase_map call per session whose
+// only finding was that there was nothing to find. The server knows the answer
+// before the turn starts.
+func TestIndexStatusPrompt(t *testing.T) {
+	if got := indexStatusPrompt(-1); got != "" {
+		t.Errorf("an unreported count must stay silent and leave the agent probing, got %q", got)
+	}
+
+	empty := indexStatusPrompt(0)
+	if !strings.Contains(empty, "Do not call codebase_map") {
+		t.Errorf("empty index must tell the agent to skip the probe, got %q", empty)
+	}
+	if !strings.Contains(empty, "file_map") {
+		t.Error("empty index must say file_map still works; it consults no index " +
+			"and an agent that reads 'not indexed' may drop the whole workflow")
+	}
+
+	live := indexStatusPrompt(42)
+	if !strings.Contains(live, "42") {
+		t.Errorf("a live index should report its size, got %q", live)
+	}
+	if strings.Contains(live, "Do not call") {
+		t.Errorf("a live index must not wave the agent off codebase_map, got %q", live)
+	}
+}
+
+// The index status is per-turn, not per-session: a user can build the index
+// while a session is open. Entry [0] carries the provider's cache breakpoint
+// and must stay byte-identical across turns, so the status line has to land
+// outside it — otherwise indexing mid-session silently invalidates the cached
+// tools+system prefix for every remaining turn.
+func TestBuildSystemPromptEntries_IndexStatusStaysOutOfCachedPrefix(t *testing.T) {
+	unindexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 0)
+	indexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900)
+
+	if unindexed[0] != indexed[0] {
+		t.Error("index status leaked into entry [0]; building the index mid-session " +
+			"would now invalidate the cached prefix")
+	}
+	if !strings.Contains(strings.Join(indexed, "\n"), "900 files indexed") {
+		t.Error("index status never reached the prompt at all")
+	}
+}
+
+// Only agents holding codebase_map can act on the status line; for the rest it
+// reports on a tool they were never offered.
+func TestBuildSystemPromptEntries_IndexStatusOnlyForIndexAwareAgents(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		joined := strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 0, 0, "", 7), "\n")
+		if !strings.Contains(joined, "7 files indexed") {
+			t.Errorf("%s: has codebase_map but never hears the index status", a.Name)
+		}
+	}
+	joined := strings.Join(buildSystemPromptEntries(SearchAgent, "/tmp/proj", false, "", "", 0, 0, "", 7), "\n")
+	if strings.Contains(joined, "files indexed") {
+		t.Error("SearchAgent has no codebase_map but was told the index status")
 	}
 }

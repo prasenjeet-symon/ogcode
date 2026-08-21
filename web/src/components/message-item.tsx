@@ -1,5 +1,5 @@
 import { Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData } from '../api/client';
+import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData, Interruption, InterruptReason } from '../api/client';
 import MarkdownContent from './markdown-content';
 import FileDiff, { diffStat } from './file-diff';
 import { useNote } from '../context/note';
@@ -637,6 +637,10 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
           </div>
         </Show>
 
+        <Show when={props.msg.info.interrupted}>
+          {(interrupted) => <ResumeBanner interruption={interrupted()} />}
+        </Show>
+
         <Show when={props.msg.info.finish === 'aborted'}>
           <div class="mt-2 text-[12px] text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-1.5 flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -674,6 +678,93 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
             </button>
           </div>
         </Show>
+      </div>
+    </div>
+  );
+}
+
+// INTERRUPT_LABEL names each failure in the words a user would use, so the
+// banner leads with what happened rather than with a status code.
+const INTERRUPT_LABEL: Record<InterruptReason, string> = {
+  rate_limit: 'Rate limit or quota reached',
+  server_error: 'The provider failed',
+  network: 'The connection dropped',
+  auth: 'The provider rejected the credentials',
+  context: 'The conversation outgrew the context window',
+  crashed: 'The server stopped mid-turn',
+  stalled: 'This turn never finished',
+  fatal: 'The request was rejected',
+};
+
+// formatWait renders the gap to a unix second as a short phrase, or '' once the
+// moment has passed — at which point saying "resume in -3s" would be worse than
+// saying nothing.
+function formatWait(retryAfter?: number): string {
+  if (!retryAfter) return '';
+  const sec = Math.round(retryAfter - Date.now() / 1000);
+  if (sec <= 0) return '';
+  if (sec < 60) return `${sec}s`;
+  return `${Math.ceil(sec / 60)}m`;
+}
+
+// ResumeBanner offers to pick a broken turn back up.
+//
+// It is shown for every interruption, not only the resumable ones. A turn that
+// cannot be resumed still needs to say so — otherwise the user is left with a
+// bare error and no idea whether waiting would have helped, which is the exact
+// confusion this feature exists to remove.
+function ResumeBanner(props: { interruption: Interruption }) {
+  const session = useSession();
+  const [busy, setBusy] = createSignal(false);
+  const [note, setNote] = createSignal('');
+  // Ticks once a second so a countdown does not sit frozen at its initial value.
+  const [now, setNow] = createSignal(Date.now());
+  const timer = setInterval(() => setNow(Date.now()), 1000);
+  onCleanup(() => clearInterval(timer));
+
+  const wait = () => {
+    now();
+    return formatWait(props.interruption.retryAfter);
+  };
+
+  async function onResume() {
+    setBusy(true);
+    setNote('');
+    const result = await session.resume();
+    if (!result.resumed) setNote(result.message || 'Nothing to resume.');
+    setBusy(false);
+  }
+
+  return (
+    <div class="mt-2 text-[12px] text-amber-200 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-2">
+      <div class="flex items-start gap-2">
+        <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        </svg>
+        <div class="min-w-0 flex-1">
+          <div class="font-medium">{INTERRUPT_LABEL[props.interruption.reason] || 'The turn was interrupted'}</div>
+          <Show when={props.interruption.detail}>
+            <div class="mt-0.5 text-amber-200/70">{props.interruption.detail}</div>
+          </Show>
+          <Show when={props.interruption.resumable}>
+            <div class="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                class="px-2 py-1 rounded border border-amber-600/50 bg-amber-900/30 hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={busy()}
+                onClick={onResume}
+              >
+                {busy() ? 'Resuming…' : 'Resume'}
+              </button>
+              <Show when={wait()}>
+                <span class="text-amber-200/60">provider asked to wait {wait()}</span>
+              </Show>
+            </div>
+          </Show>
+          <Show when={note()}>
+            <div class="mt-1.5 text-amber-200/70">{note()}</div>
+          </Show>
+        </div>
       </div>
     </div>
   );

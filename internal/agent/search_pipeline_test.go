@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/prasenjeet-symon/ogcode/internal/search"
@@ -164,4 +165,27 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+// TestSearchFetch_SurvivesAPanickingFetch pins the recover in searchFetch.
+//
+// The fetches run on their own goroutines, where an unrecovered panic is not
+// this function's problem but the whole process's: it would take down every
+// session the server is serving, not just this search. A nil SearchBridge gives
+// a fetch that panics for real (FetchPage dereferences its receiver), so
+// without the recover this test does not fail — it kills the test binary.
+//
+// The contract is that a panicking fetch is dropped like a failing one.
+func TestSearchFetch_SurvivesAPanickingFetch(t *testing.T) {
+	lr := &LoopRunner{} // nil SearchBridge → FetchPage panics on b.baseURL
+	picks := []search.SearchResult{
+		{URL: "https://example.com/one"},
+		{URL: "https://example.com/two"},
+	}
+
+	pages := lr.searchFetch(context.Background(), picks)
+
+	if len(pages) != 0 {
+		t.Fatalf("panicking fetches should be dropped, got %d pages", len(pages))
+	}
 }

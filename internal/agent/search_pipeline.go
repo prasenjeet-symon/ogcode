@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -275,6 +276,19 @@ func (lr *LoopRunner) searchFetch(ctx context.Context, picks []search.SearchResu
 		wg.Add(1)
 		go func(idx int, u string) {
 			defer wg.Done()
+			// A panic here runs on this goroutine, where nothing above it can
+			// recover, and an unrecovered panic in any goroutine takes the whole
+			// process down — so one malformed page would kill every session the
+			// server is serving, not just this search. A panicking fetch is
+			// dropped exactly like a failing one: ok[idx] stays false and the
+			// caller synthesises from the remaining pages, or from snippets if
+			// none survived. The stack is logged so the bug stays diagnosable.
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("deep search: fetch panicked",
+						"url", u, "panic", r, "stack", string(debug.Stack()))
+				}
+			}()
 			page, err := lr.SearchBridge.FetchPage(ctx, u)
 			if err != nil {
 				slog.Warn("deep search: fetch failed", "url", u, "err", err)

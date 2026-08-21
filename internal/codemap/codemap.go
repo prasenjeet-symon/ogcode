@@ -198,16 +198,27 @@ func buildSymbol(node *ts.Node, src []byte, kind string, lang *language) *Symbol
 	// #[derive(...)] lines are preceding siblings. They annotate the item and
 	// belong to its range, and the doc comment sits above them — so the comment
 	// walk has to start from the topmost attribute, not from the item.
+	//
+	// The walk starts from the declaration's outermost same-line ancestor, not
+	// from the captured node. For Rust the two are the same, but a Dart method
+	// is captured at the function_signature inside a method_signature, and it is
+	// the outer node that @override is a sibling of — walking from the inner one
+	// finds no siblings at all and every annotated Dart member loses both its
+	// annotation and the doc comment above it.
 	if lang.attrKind != "" {
+		attrAnchor := docAnchor(node)
 		for {
-			prev := anchor.PrevNamedSibling()
+			prev := attrAnchor.PrevNamedSibling()
 			if prev == nil || prev.Kind() != lang.attrKind {
 				break
 			}
-			if lastContentRow(prev) != int(anchor.StartPosition().Row)-1 {
+			if lastContentRow(prev) != int(attrAnchor.StartPosition().Row)-1 {
 				break
 			}
-			anchor = prev
+			attrAnchor = prev
+		}
+		if attrAnchor.StartPosition().Row < anchor.StartPosition().Row {
+			anchor = attrAnchor
 		}
 	}
 
@@ -217,6 +228,17 @@ func buildSymbol(node *ts.Node, src []byte, kind string, lang *language) *Symbol
 	// line, so its last line of content is the one before.
 	if node.EndPosition().Column == 0 && endLine > startLine {
 		endLine--
+	}
+
+	// Dart states a function's body beside its signature rather than inside it,
+	// so the captured declaration ends at the closing parenthesis and the code
+	// is the sibling that follows. Left alone, every Dart range would stop at
+	// the signature line — and a range that omits the body is the one thing a
+	// reader cannot use it for.
+	if body := trailingBody(node, lang); body != nil {
+		if end := lastContentRow(body) + 1; end > endLine {
+			endLine = end
+		}
 	}
 
 	// A docstring is inside the body, so it never moves the start line the way
@@ -245,6 +267,29 @@ func buildSymbol(node *ts.Node, src []byte, kind string, lang *language) *Symbol
 		sym.Name = names[0]
 	}
 	return sym
+}
+
+// trailingBody returns the body node a declaration states beside itself, or nil
+// where the language does not do that or this declaration has none.
+//
+// The lookup starts from the declaration's outermost same-line ancestor rather
+// than from the captured node, because the two are not always the same one. A
+// Dart method is captured at the function_signature that carries its name,
+// which sits inside a method_signature — and the body is a sibling of the
+// outer node, not the inner. docAnchor is the climb that already reconciles
+// them for doc comments; the body needs the identical one.
+//
+// An abstract method has no body, and the sibling after it is the next
+// declaration. Checking the kind is what tells those apart.
+func trailingBody(node *ts.Node, lang *language) *ts.Node {
+	if lang.trailingBodyKind == "" {
+		return nil
+	}
+	next := docAnchor(node).NextNamedSibling()
+	if next == nil || next.Kind() != lang.trailingBodyKind {
+		return nil
+	}
+	return next
 }
 
 // docstringOf returns the string literal a declaration opens its body with.
@@ -327,7 +372,108 @@ func docStart(node *ts.Node, src []byte, lang *language) (int, string) {
 	}
 
 	topLine := int(block[len(block)-1].StartPosition().Row) + 1
-	return topLine, strings.Join(parts, " ")
+	doc := strings.Join(parts, " ")
+	if lang.xmlDocs {
+		doc = summaryFromXMLDoc(doc)
+	}
+	return topLine, doc
+}
+
+// summaryFromXMLDoc reduces a C# XML documentation comment to the prose a
+// reader wants.
+//
+// Left alone, the convention defeats the doc excerpt entirely. The one-line
+// form spends a quarter of the budget on <summary></summary>, and the far more
+// common block form
+//
+//	/// <summary>
+//	/// Charges a card.
+//	/// </summary>
+//	/// <param name="card">The card to charge.</param>
+//
+// joins to a string whose first eighty characters are mostly markup. The
+// summary is the sentence that describes the declaration — the rest documents
+// its parameters, which the signature beside it already shows — so the summary
+// is taken when present and everything after it dropped.
+//
+// Inline elements are unwrapped rather than deleted. <see cref="Card"/> and
+// <paramref name="amount"/> stand in for nouns mid-sentence, and removing them
+// outright leaves prose with holes in it, so the referenced name is kept as the
+// text it stood for.
+func summaryFromXMLDoc(doc string) string {
+	if !strings.Contains(doc, "<") {
+		return doc
+	}
+	if _, after, ok := strings.Cut(doc, "<summary>"); ok {
+		if before, _, closed := strings.Cut(after, "</summary>"); closed {
+			doc = before
+		} else {
+			doc = after
+		}
+	}
+
+	var b strings.Builder
+	for {
+		before, rest, ok := strings.Cut(doc, "<")
+		b.WriteString(before)
+		if !ok {
+			break
+		}
+		tag, after, closed := strings.Cut(rest, ">")
+		if !closed {
+			// An unterminated "<" is ordinary prose — a generic written out, or
+			// a comparison — not a tag. Keep it.
+			b.WriteString("<")
+			b.WriteString(rest)
+			break
+		}
+		b.WriteString(xmlDocRef(tag))
+		doc = after
+	}
+	return tidyXMLDocText(collapse(b.String()))
+}
+
+// xmlDocEntities decodes the escapes the format requires. A doc that describes
+// a comparison has to write &lt; for the < it means, and leaving the escape in
+// puts markup back into the prose this function exists to recover.
+var xmlDocEntities = strings.NewReplacer(
+	"&lt;", "<", "&gt;", ">", "&quot;", `"`, "&apos;", "'",
+	// Ampersand last: decoding it first would turn "&amp;lt;" — an escaped
+	// escape — into a live "<".
+	"&amp;", "&",
+)
+
+// tidyXMLDocText repairs the spacing left by unwrapping inline elements.
+//
+// An element standing in for a noun is replaced by the word plus a space on
+// each side, because it usually sits mid-sentence and needs them. At the end of
+// a clause it does not, and "charges the Card ." reads as a typo — so the space
+// before closing punctuation is taken back out.
+func tidyXMLDocText(s string) string {
+	s = xmlDocEntities.Replace(s)
+	for _, p := range []string{" .", " ,", " ;", " :", " !", " ?", " )"} {
+		s = strings.ReplaceAll(s, p, p[1:])
+	}
+	return strings.TrimSpace(s)
+}
+
+// xmlDocRef returns the name an inline doc element stands for, or "" for an
+// element that is pure markup. cref names a type or member and name names a
+// parameter; both read as the word the sentence meant.
+func xmlDocRef(tag string) string {
+	for _, attr := range []string{`cref="`, `name="`} {
+		if _, after, ok := strings.Cut(tag, attr); ok {
+			if val, _, closed := strings.Cut(after, `"`); closed {
+				// A cref carries a prefix for its kind — T: for a type, M: for
+				// a method — which is compiler bookkeeping, not prose.
+				if _, stripped, ok := strings.Cut(val, ":"); ok && len(val) > 2 && val[1] == ':' {
+					val = stripped
+				}
+				return " " + val + " "
+			}
+		}
+	}
+	return " "
 }
 
 // docAnchor climbs to the outermost ancestor starting on the same line as node.
@@ -462,6 +608,21 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 		}
 	}
 
+	// Dart leaves several declarations without a name field, naming them with a
+	// bare identifier instead. Each kind here is unique to that grammar, so
+	// matching on the kind alone is unambiguous — the same call the impl_item
+	// case above makes.
+	//
+	// A constructor is named for its class rather than for the part after the
+	// dot: `CounterPage.named` answers to CounterPage, which is what the
+	// grammar's own name field reports for the plain constructor_signature, and
+	// splitting the two would make the same declaration answer to two names.
+	if kinds, ok := dartNameChild[node.Kind()]; ok {
+		if n := firstChildOfKind(node, kinds); n != nil {
+			return []string{n.Utf8Text(src)}
+		}
+	}
+
 	// The rest bind their names one level down, through specs or declarators —
 	// Go's `const ( A = 1; B = 2 )`, TypeScript's `const a = 1, b = 2`. Listing
 	// them is what makes a grouped declaration worth a line, since its own
@@ -485,6 +646,28 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 		names = namesByKind(node, src)
 	}
 	return names
+}
+
+// dartNameChild maps a Dart declaration kind to the child kinds that can carry
+// its identifier, in the order they should be tried.
+var dartNameChild = map[string][]string{
+	"mixin_declaration":              {"identifier"},
+	"type_alias":                     {"type_identifier"},
+	"constant_constructor_signature": {"identifier"},
+	"factory_constructor_signature":  {"identifier"},
+}
+
+// firstChildOfKind returns the first named child matching any of kinds, trying
+// each kind in turn before moving on to the next.
+func firstChildOfKind(node *ts.Node, kinds []string) *ts.Node {
+	for _, want := range kinds {
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			if child := node.NamedChild(i); child != nil && child.Kind() == want {
+				return child
+			}
+		}
+	}
+	return nil
 }
 
 // namesByKind is the fallback for grammars that hang a spec's identifier off an

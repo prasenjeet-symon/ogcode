@@ -7,6 +7,7 @@ import PromptInput from '../components/prompt-input';
 import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
 import MemoryDialog from '../components/memory-dialog';
+import SubagentIndicator from '../components/subagent-indicator';
 import { getProviderPricing } from '../api/client';
 
 function getModelLabel(model: string | undefined): string {
@@ -14,15 +15,6 @@ function getModelLabel(model: string | undefined): string {
   const parts = model.split('/');
   const name = parts[parts.length - 1];
   return name.replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-preview$/, '');
-}
-
-function shortenPath(path: string): string {
-  if (!path) return '';
-  const home = path.match(/^\/(Users|home)\/[^/]+/);
-  const collapsed = home ? path.replace(home[0], '~') : path;
-  const segments = collapsed.split('/').filter(Boolean);
-  if (segments.length <= 3) return collapsed;
-  return `${collapsed.startsWith('~') ? '~' : ''}/…/${segments.slice(-2).join('/')}`;
 }
 
 export default function Chat() {
@@ -93,18 +85,8 @@ function ChatContent() {
           </div>
 
           <div class="flex items-center gap-2 shrink-0">
+            <SubagentIndicator />
             <TokenPill />
-            <Show when={server.directory()}>
-              <span
-                title={server.directory()}
-                class="hidden sm:flex items-center gap-1.5 text-[11px] text-zinc-500 px-2 py-1 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] font-mono"
-              >
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                </svg>
-                {shortenPath(server.directory())}
-              </span>
-            </Show>
             <Show when={session.activeSession()?.model}>
               <span class="text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium">
                 {getModelLabel(session.activeSession()?.model)}

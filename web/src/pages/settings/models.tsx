@@ -660,12 +660,21 @@ function ProviderCredRow(props: {
   // Key is "active" when set in DB or in the environment. Env takes priority at runtime.
   const dbKeySet  = () => props.config?.apiKey === '__SET__';
   const envKeySet = () => !!(props.config?.envKeySet);
-  const isSet     = () => dbKeySet() || envKeySet();
+  // Ollama needs no key — it signs in on the host — so an endpoint alone is a
+  // complete configuration for it.
+  const endpointSet = () => props.def.keyOptional && !!(props.config?.effectiveBaseUrl || props.config?.baseUrl);
+  const isSet     = () => dbKeySet() || envKeySet() || endpointSet();
+
+  // The endpoint actually in use, shown whenever it differs from the persisted
+  // value — otherwise an env override silently contradicts what the form says.
+  const effectiveURL = () => props.config?.effectiveBaseUrl || '';
+  const endpointOverridden = () => !!effectiveURL() && effectiveURL() !== (props.config?.baseUrl || '');
 
   const statusLabel = () => {
     if (envKeySet() && dbKeySet()) return 'Key set (env + app)';
     if (envKeySet()) return 'Key set via env';
     if (dbKeySet()) return 'Key set';
+    if (endpointSet()) return props.config?.envBaseURLSet ? 'Endpoint set via env' : 'Endpoint set';
     return 'Not configured';
   };
 
@@ -740,6 +749,12 @@ function ProviderCredRow(props: {
                   <span class="ml-1.5 text-sky-400">● set via env</span>
                 </Show>
               </label>
+              <Show when={endpointOverridden()}>
+                <p class="mb-1.5 text-[11px] text-zinc-500">
+                  Currently calling <span class="font-mono text-sky-400">{effectiveURL()}</span>
+                  {props.config?.envBaseURLSet ? ' (env var takes priority over the saved value below)' : ' (saved endpoint was unreachable)'}
+                </p>
+              </Show>
               <input
                 type="text"
                 value={baseURL()}

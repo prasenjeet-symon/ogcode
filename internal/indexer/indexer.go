@@ -12,37 +12,28 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
+	"github.com/prasenjeet-symon/ogcode/internal/gitignore"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"golang.org/x/sync/errgroup"
 )
 
-// skipDirs are directories never worth scanning for documents.
-//
-// "grammars" is here for vendored tree-sitter output. A generated parser.c runs
-// to tens of megabytes of table data — ogcode's own Swift grammar is one 19.7 MB
-// file — and .c is an indexed extension, so a single such directory would
-// dominate an index while carrying nothing anyone would search for. Matching is
-// by directory name, so a project that keeps hand-written grammars under that
-// name loses them from the index too; that trade is worth it against indexing a
-// generated parser by default.
-var skipDirs = map[string]struct{}{
-	"node_modules": {}, "vendor": {}, ".git": {}, "dist": {}, "build": {},
-	"out": {}, "target": {}, "__pycache__": {}, ".venv": {}, "venv": {},
-	"env": {}, "coverage": {}, ".next": {}, ".nuxt": {}, ".cache": {}, ".ogcode": {},
-	"grammars": {},
-}
-
 // Indexer scans a workspace directory for PDF and text/code files and runs the
 // IndexAgent on batches of documents to produce semantic labels per page.
 type Indexer struct {
-	dir             string
-	model           string // optional model override for the IndexAgent
-	excludes        []string
-	docStore        *docindex.Store
-	loopRunner      *agent.LoopRunner
-	maxConcurrent   int // number of parallel indexing sessions (Solution 2)
+	dir      string
+	model    string // optional model override for the IndexAgent
+	excludes []string
+	// gitignore skips whatever the repository already declares as noise. It is
+	// always consulted, not opt-in: a .gitignore is the one place a project has
+	// already written down which files are generated, vendored or private, and
+	// indexing them anyway spends real time and tokens producing labels for a
+	// build directory nobody will search.
+	gitignore        *gitignore.Matcher
+	docStore         *docindex.Store
+	loopRunner       *agent.LoopRunner
+	maxConcurrent    int // number of parallel indexing sessions (Solution 2)
 	maxKeywordsBatch int // max keyword count per LLM batch (Solution 1)
-	progress        *ProgressTracker
+	progress         *ProgressTracker
 }
 
 // ProgressTracker tracks indexing progress and publishes events via the bus.
@@ -57,6 +48,7 @@ type ProgressTracker struct {
 func New(dir string, docStore *docindex.Store, lr *agent.LoopRunner) *Indexer {
 	return &Indexer{
 		dir:              dir,
+		gitignore:        gitignore.New(dir),
 		docStore:         docStore,
 		loopRunner:       lr,
 		maxConcurrent:    5,    // default: 5 parallel workers
@@ -112,6 +104,54 @@ func (idx *Indexer) isExcluded(name string) bool {
 	return false
 }
 
+// collectFiles walks the workspace and returns every file worth indexing.
+//
+// What is excluded is decided by the repository, not by this package. There is
+// no built-in list of directories to skip: a hardcoded one is a second, unwritten
+// exclusion policy that a project cannot see, cannot change, and does not agree
+// with — it hides files a project chose to track and, being invisible, gives no
+// hint about why they never turn up in a search. .gitignore is where a project
+// has already written this down, so .gitignore is what decides, alongside the
+// excludes the user configures directly.
+//
+// An ignored directory is pruned rather than walked into — which is faster, and
+// is what git does, since a directory excluded from above cannot have its
+// contents re-included from below.
+func (idx *Indexer) collectFiles() ([]string, error) {
+	var allFiles []string
+	err := filepath.WalkDir(idx.dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries, keep walking
+		}
+		if d.IsDir() {
+			if path != idx.dir {
+				if idx.isExcluded(d.Name()) {
+					return filepath.SkipDir
+				}
+				if idx.gitignore.Match(path, true) {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if idx.isExcluded(filepath.Base(path)) {
+			return nil
+		}
+		if idx.gitignore.Match(path, false) {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".pdf" || ext == ".docx" || IsTextFile(ext) {
+			allFiles = append(allFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return allFiles, nil
+}
+
 // docItem holds a file path and its extracted page corpora, ready for batching.
 type docItem struct {
 	path         string
@@ -126,31 +166,7 @@ type docItem struct {
 // (Solution 2), and publishes progress events (Solution 5).
 func (idx *Indexer) Run(ctx context.Context) error {
 	// Phase 1: Walk, filter, dedup, and extract text.
-	var allFiles []string
-	walkErr := filepath.WalkDir(idx.dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries, keep walking
-		}
-		if d.IsDir() {
-			if path != idx.dir {
-				if _, skip := skipDirs[d.Name()]; skip {
-					return filepath.SkipDir
-				}
-				if idx.isExcluded(d.Name()) {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if idx.isExcluded(filepath.Base(path)) {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext == ".pdf" || ext == ".docx" || IsTextFile(ext) {
-			allFiles = append(allFiles, path)
-		}
-		return nil
-	})
+	allFiles, walkErr := idx.collectFiles()
 	if walkErr != nil {
 		return fmt.Errorf("walk files: %w", walkErr)
 	}
@@ -519,10 +535,10 @@ func (idx *Indexer) publishProgress(ctx context.Context, phase string) {
 	}
 	idx.loopRunner.Bus.Publish("docindex.progress", map[string]any{
 		"directory": idx.dir,
-		"phase":    phase,
-		"total":    idx.progress.Total.Load(),
+		"phase":     phase,
+		"total":     idx.progress.Total.Load(),
 		"completed": idx.progress.Completed.Load(),
-		"failed":   idx.progress.Failed.Load(),
+		"failed":    idx.progress.Failed.Load(),
 	})
 }
 
@@ -581,4 +597,137 @@ func (idx *Indexer) IndexDocument(ctx context.Context, filePath string) error {
 
 	slog.Info("document indexed", "path", filePath)
 	return nil
+}
+
+// Plan is what a run would do, worked out without doing any of it.
+type Plan struct {
+	Total   int `json:"total"`   // indexable files currently on disk
+	Pending int `json:"pending"` // not yet indexed — what an incremental run would work through
+	Indexed int `json:"indexed"` // already in the index, skipped by an incremental run
+	Stale   int `json:"stale"`   // indexed but gone from disk — purged by the next run
+
+	// Two breakdowns, because the two runs work on different sets: a rebuild
+	// reads every file, an incremental run only the pending ones. A single
+	// breakdown would be shown next to whichever count the dialog is leading
+	// with and describe the other one.
+	PDF  int `json:"pdf"`
+	Docx int `json:"docx"`
+	Text int `json:"text"`
+
+	PendingPDF  int `json:"pendingPdf"`
+	PendingDocx int `json:"pendingDocx"`
+	PendingText int `json:"pendingText"`
+}
+
+// Preview reports what Run would do, without extracting a page or calling a model.
+//
+// Indexing costs money and minutes, and a button that cannot say how much of
+// either before it starts is one people press blindly or avoid entirely. The
+// walk here is the same walk Run does, filtered by the same excludes and the
+// same .gitignore, so these are the run's own numbers rather than a guess at
+// them — including the count of entries it will drop for files that no longer
+// exist, which is otherwise invisible until it has already happened.
+func (idx *Indexer) Preview() (*Plan, error) {
+	files, err := idx.collectFiles()
+	if err != nil {
+		return nil, fmt.Errorf("walk files: %w", err)
+	}
+
+	plan := &Plan{Total: len(files)}
+	onDisk := make(map[string]struct{}, len(files))
+
+	for _, path := range files {
+		onDisk[path] = struct{}{}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".pdf":
+			plan.PDF++
+		case ".docx":
+			plan.Docx++
+		default:
+			plan.Text++
+		}
+	}
+
+	if idx.docStore == nil {
+		plan.Pending = plan.Total
+		plan.PendingPDF, plan.PendingDocx, plan.PendingText = plan.PDF, plan.Docx, plan.Text
+		return plan, nil
+	}
+
+	indexed, err := idx.docStore.ListDocPaths(idx.dir)
+	if err != nil {
+		return nil, fmt.Errorf("list indexed doc paths: %w", err)
+	}
+
+	// One pass over what the index holds answers both questions: an indexed
+	// path still on disk is one the run skips, and one that is not is an entry
+	// the run purges.
+	inIndex := make(map[string]struct{}, len(indexed))
+	for _, path := range indexed {
+		inIndex[path] = struct{}{}
+		if _, exists := onDisk[path]; !exists {
+			plan.Stale++
+		}
+	}
+	for path := range onDisk {
+		if _, exists := inIndex[path]; exists {
+			plan.Indexed++
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".pdf":
+			plan.PendingPDF++
+		case ".docx":
+			plan.PendingDocx++
+		default:
+			plan.PendingText++
+		}
+	}
+	plan.Pending = plan.Total - plan.Indexed
+	return plan, nil
+}
+
+// FileEntry is one file in the workspace tree, with its index status.
+type FileEntry struct {
+	Path      string `json:"path"`
+	Indexed   bool   `json:"indexed"`
+	PageCount int    `json:"pageCount"`
+	IndexedAt int64  `json:"indexedAt"`
+}
+
+// FileList reports every indexable file in the workspace alongside which of
+// them the index already holds. The walk is the same one Run uses — the same
+// excludes, the same .gitignore — so the list matches what a run would touch.
+// Indexed entries that no longer exist on disk are not included; they are
+// purged by the next run, not shown as files.
+func (idx *Indexer) FileList() ([]FileEntry, error) {
+	files, err := idx.collectFiles()
+	if err != nil {
+		return nil, fmt.Errorf("walk files: %w", err)
+	}
+
+	// Build a lookup of indexed doc paths → summary so each on-disk file can be
+	// annotated in one pass. ListDocsSummary already deduplicates by doc_path.
+	indexed := make(map[string]*docindex.DocSummary)
+	if idx.docStore != nil {
+		docs, err := idx.docStore.ListDocsSummary(idx.dir)
+		if err != nil {
+			return nil, fmt.Errorf("list indexed docs: %w", err)
+		}
+		for _, d := range docs {
+			indexed[d.DocPath] = d
+		}
+	}
+
+	out := make([]FileEntry, 0, len(files))
+	for _, path := range files {
+		entry := FileEntry{Path: path}
+		if d, ok := indexed[path]; ok {
+			entry.Indexed = true
+			entry.PageCount = d.PageCount
+			entry.IndexedAt = d.IndexedAt
+		}
+		out = append(out, entry)
+	}
+	return out, nil
 }

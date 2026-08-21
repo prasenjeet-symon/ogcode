@@ -1,8 +1,8 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
 import { createSignal, createEffect, on } from 'solid-js';
 import {
-  type DocSummary, type ModelInfo, type ExcludeEntry,
-  getDocIndexBuildStatus, buildDocIndex, getIndexedDocs, getModels,
+  type DocSummary, type ModelInfo, type ExcludeEntry, type IndexFile,
+  getDocIndexBuildStatus, buildDocIndex, getIndexedDocs, getIndexFiles, getModels,
   getExcludes, addExclude, deleteExclude,
 } from '../api/client';
 import { useServer } from './server';
@@ -16,6 +16,7 @@ interface IndexProgress {
 
 interface DocIndexContextValue {
   docs: () => DocSummary[];
+  files: () => IndexFile[];
   loading: () => boolean;
   building: () => boolean;
   models: () => ModelInfo[];
@@ -35,6 +36,7 @@ const DocIndexContext = createContext<DocIndexContextValue>();
 export const DocIndexProvider: ParentComponent = (props) => {
   const server = useServer();
   const [docs, setDocs] = createSignal<DocSummary[]>([]);
+  const [files, setFiles] = createSignal<IndexFile[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [building, setBuilding] = createSignal(false);
   const [models, setModels] = createSignal<ModelInfo[]>([]);
@@ -64,8 +66,12 @@ export const DocIndexProvider: ParentComponent = (props) => {
     if (!dir) return;
     setLoading(true);
     try {
-      const d = await getIndexedDocs(dir);
+      const [d, f] = await Promise.all([
+        getIndexedDocs(dir),
+        getIndexFiles(dir),
+      ]);
       setDocs(d || []);
+      setFiles(f || []);
     } catch (e) {
       console.error('docindex refresh failed:', e);
     } finally {
@@ -210,6 +216,7 @@ export const DocIndexProvider: ParentComponent = (props) => {
 
   const value: DocIndexContextValue = {
     docs,
+    files,
     loading,
     building,
     models,

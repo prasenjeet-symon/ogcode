@@ -4,10 +4,13 @@ import (
 	"embed"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
+	tsdart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
 	ts "github.com/tree-sitter/go-tree-sitter"
+	tscs "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
 	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
 	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
 	tsphp "github.com/tree-sitter/tree-sitter-php/bindings/go"
@@ -55,6 +58,19 @@ type language struct {
 	// without this a decorated declaration would start below its decorators.
 	// Empty for grammars where no such wrapper exists.
 	wrapperKind string
+	// trailingBodyKind names a node that follows a declaration as a sibling and
+	// holds the body belonging to it — Dart's function_body. It is the mirror of
+	// attrKind: where an attribute sits above the declaration and widens its
+	// range upward, this sits below and widens it downward.
+	//
+	// Without it a Dart symbol's range covers its signature line and stops. The
+	// range is what a reader hands to read(), so a method would come back
+	// without the code inside it — the one thing the range exists to deliver.
+	trailingBodyKind string
+	// xmlDocs marks a language whose doc comments are XML rather than prose —
+	// C# and the /// <summary> convention. Without it the excerpt spends its
+	// budget on markup instead of on the sentence the markup wraps.
+	xmlDocs bool
 	// docstrings marks a language that documents a declaration from the inside,
 	// with a string literal at the top of its body, rather than with a comment
 	// above it. docStart finds nothing in such a language; docstringOf does.
@@ -131,9 +147,32 @@ var registry = map[string]*language{
 
 	".rs": rust(),
 
+	".cs":  csharp(),
+	".csx": csharp(),
+
+	".dart": dart(),
+
 	".swift": swift(),
 
 	".java": java(),
+}
+
+// LanguageNames returns the name of every language a real grammar covers, sorted
+// and de-duplicated. It exists so callers that describe that coverage to a model
+// — FileMapTool.Description — can be pinned against the registry instead of
+// against a list someone remembered to update. Adding a grammar without saying
+// so leaves the agent treating an approximate scan as exact, and vice versa.
+func LanguageNames() []string {
+	seen := make(map[string]bool, len(registry))
+	for _, l := range registry {
+		seen[l.name] = true
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // typescript and tsx each build a fresh language value per extension so that
@@ -211,6 +250,55 @@ func swift() *language {
 		newLang:      func() *ts.Language { return ts.NewLanguage(tssw.Language()) },
 		queryFile:    "queries/swift.scm",
 		commentKinds: []string{"comment", "multiline_comment"},
+	}
+}
+
+// csharp builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+//
+// Neither wrapperKind nor attrKind: C# keeps its attributes inside the
+// declaration node, as Java and Swift do with annotations and attributes, so
+// nothing has to be walked to find them.
+//
+// One commentKind covers all three spellings — //, /* */ and the /// that
+// carries XML documentation all parse as (comment).
+func csharp() *language {
+	return &language{
+		// The display name is the language's own spelling. It reaches the
+		// model twice — in the outline header and in the file_map description's
+		// list of exactly-parsed languages — and those two have to agree, which
+		// a test pins against this registry. "csharp" survives only in the
+		// query filename, where the "#" would be awkward.
+		name:         "c#",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tscs.Language()) },
+		queryFile:    "queries/csharp.scm",
+		commentKinds: []string{"comment"},
+		xmlDocs:      true,
+	}
+}
+
+// dart builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+//
+// Dart is the only grammar so far that needs both halves of the range widened.
+// An annotation on a class member is a preceding sibling, as in Rust, so
+// attrKind carries the start up over @override; and a function's body is a
+// following sibling rather than a child, so trailingBodyKind carries the end
+// down over it.
+//
+// Two comment kinds, for a reason unlike Rust's: Dart does not split line from
+// block, it splits documentation from ordinary comment. /// and /** */ parse as
+// documentation_comment and everything else as comment, and a declaration
+// documented with a plain // — which the analyzer does not treat as a doc, but
+// which real code is full of — would lose it if only the first were listed.
+func dart() *language {
+	return &language{
+		name:             "dart",
+		newLang:          func() *ts.Language { return ts.NewLanguage(tsdart.Language()) },
+		queryFile:        "queries/dart.scm",
+		commentKinds:     []string{"documentation_comment", "comment"},
+		attrKind:         "annotation",
+		trailingBodyKind: "function_body",
 	}
 }
 

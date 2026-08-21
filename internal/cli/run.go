@@ -137,6 +137,11 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	}
 	ollamaKey := resolveKey(os.Getenv("OLLAMA_API_KEY"), "ollama")
 	ollamaBaseURL := resolveBaseURL(os.Getenv("OLLAMA_BASE_URL"), "ollama")
+	// Same fallback the server applies: a stale persisted endpoint yields to a
+	// live one, and a machine with no local Ollama still finds a router.
+	if os.Getenv("OLLAMA_BASE_URL") == "" {
+		ollamaBaseURL = provider.PreferLiveOllamaEndpoint(ollamaBaseURL, provider.DetectOllama())
+	}
 	if ollamaKey != "" || ollamaBaseURL != "" {
 		if p, e := provider.NewProviderWithConfig("ollama", ollamaKey, ollamaBaseURL); e == nil {
 			registry.Register(p)

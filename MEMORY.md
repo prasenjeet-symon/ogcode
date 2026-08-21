@@ -66,12 +66,30 @@ HTTP 204 = success (no content response from Discord).
 
 End-to-end workflow: **build locally → bump version → commit → push tag → pipelines auto-release**. The CI pipelines on GitHub Actions handle cross-platform binaries (GoReleaser) and the Docker image automatically once a tag is pushed — you do not build release binaries locally.
 
-### Build (local)
+### Build (local) — the canonical flow
 
-1. **Web UI** — `npm run build` (Vite bundles ~2,308 modules; required before the Go compile because the Go binary embeds the built assets).
-2. **Go binary** — `go build -o ./ogcode`.
-3. **Install** — `go install` or copy the binary to `~/.local/bin/ogcode`.
-4. **Search bridge** — Playwright + Chromium installs to `~/.local/share/ogcode/search-bridge/`.
+Everything is driven from the `Makefile`. There is no `go install` shortcut for a dev build because the Web UI must be bundled first (the Go binary `//go:embed`s `web/dist` via `web/embed.go`), and `CGO_ENABLED=1` is mandatory.
+
+**Prerequisites** (verified on this machine): Go 1.26.5, Node 22, npm 10.9, `codesign` present on macOS.
+
+1. **`make build`** — the one-shot dev build. Runs `build-web` then `build-server`:
+   - `build-web`: `cd web && npm install --legacy-peer-deps --cache /tmp/npm-cache && npm run build` → produces `web/dist/` (Vite bundles ~2,300 modules; the `--legacy-peer-deps` flag is **required**, not optional).
+   - `build-server`: `CGO_ENABLED=1 go build` with `-ldflags` injecting `internal/version.Version` and `internal/cli.version` (resolved from `git describe --tags --always --dirty`, falling back to `web/package.json` version, else `dev`) → produces `./ogcode`.
+   - **Why CGO**: the Swift tree-sitter binding in `internal/codemap/grammars/swift` is cgo; without `CGO_ENABLED=1` the build fails with `build constraints exclude all Go files in .../grammars/swift` (which reads like a missing package, not a cgo problem). Same flag also lets `github.com/gen2brain/go-fitz` link libmupdf statically.
+   - Output: `./ogcode` (a ~73 MB binary in the repo root). Verified working: `make build` completes cleanly on this machine.
+2. **`make install`** — installs the freshly built `./ogcode` to `~/.local/bin/ogcode` **and** sets up the search bridge. Depends on `build`, so it rebuilds first. Steps:
+   - `mkdir -p ~/.local/bin`, `rm -f ~/.local/bin/ogcode` (fresh inode — see gotcha below), `cp ogcode ~/.local/bin/ogcode`.
+   - **macOS ad-hoc re-sign**: on Darwin, runs `codesign --force --sign - ~/.local/bin/ogcode`. Without this, replacing the binary in place leaves the kernel with a stale cached code signature for the path and the new process is `Killed: 9`. Removing the old file first (fresh inode) + re-signing avoids it.
+   - Installs the **search bridge**: copies `tools/search-bridge/{package.json,server.js}` to `~/.local/share/ogcode/search-bridge/`, runs `npm install --legacy-peer-deps`, then `npx playwright install chromium` (headless browser for the web-search agent).
+3. **Verify**: `ogcode version` should print the version (dev build prints the `git describe` result, e.g. `v0.25.0-dirty`). `~/.local/bin` must be on `PATH` (it is on this machine).
+4. **Run**: `ogcode` (Build Mode) or `ogcode plan` (Plan Mode); `make dev` runs the Go server on `:9595` via `go run . serve`; `make dev-web` runs the Vite dev server on `:5173` for front-end work.
+5. **Test**: `CGO_ENABLED=1 go test ./...` (the Makefile's `test` target omits the CGO flag — use it explicitly). `gofmt -w` only the files you touched (no project linter is configured; several files are already drifted).
+
+**End-user install (not dev build)** — four channels, none rebuild from source:
+   - macOS/Linux one-liner: `curl -fsSL http://ogcode.xyz/install.sh | sh` (downloads latest GitHub release tarball → `/usr/local/bin`).
+   - Homebrew: `brew tap prasenjeet-symon/tap && brew install ogcode`.
+   - Windows: `irm http://ogcode.xyz/install.ps1 | iex` or `winget install prasenjeet-symon.ogcode`.
+   - `go install github.com/prasenjeet-symon/ogcode@latest` (no CGO control — may not suit the go-fitz/swift cgo build; the curl/brew paths are the recommended ones).
 
 ### Bump version
 
@@ -106,7 +124,7 @@ Steps:
 4. **Docker pipeline auto-triggers** — `.github/workflows/docker.yml` builds and pushes the Docker image.
 5. **Post-release** — update the "Current release" line below to the new version so future sessions know it without git inspection.
 
-**Current release**: `v0.23.0`
+**Current release**: `v0.25.0`
 
 ## ogcode — Rich Output Architecture
 

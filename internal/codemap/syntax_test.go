@@ -163,6 +163,8 @@ func TestCheckAcrossLanguages(t *testing.T) {
 		{"a.ts", "export function f(): number {\n  return 1\n}\n", "export function f(: number {\n  return 1\n}\n"},
 		{"a.tsx", "export const A = () => <div />\n", "export const A = () => <div\n"},
 		{"a.php", "<?php\nfunction f() { return 1; }\n", "<?php\nfunction f( { return 1; }\n"},
+		{"a.cs", "public class C { public int F() { return 1; } }\n", "public class C { public int F( { return 1; } }\n"},
+		{"a.dart", "class C {\n  int f() => 1;\n}\n", "class C {\n  int f( => 1;\n}\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

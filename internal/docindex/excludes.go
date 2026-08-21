@@ -17,22 +17,21 @@ type ExcludeEntry struct {
 	CreatedAt int64  `json:"createdAt"`
 }
 
-// defaultExcludePatterns are seeded the first time a directory is indexed.
-var defaultExcludePatterns = []string{
-	// Package manager dirs
-	"node_modules", "vendor",
-	// Build output dirs
-	"dist", "build", "out", "target", ".next", ".nuxt", ".cache",
-	// VCS / tooling dirs
-	".git", "__pycache__", ".venv", "venv", "env", "coverage", ".ogcode",
-	// Vendored generated parsers — see skipDirs in internal/indexer.
-	"grammars",
-	// Misc temp dirs
-	"tmp", "temp", "logs",
-	// Generated / lock files
-	"*.min.js", "*.min.css", "*.map", "*.lock", "*.sum",
-	"package-lock.json", "yarn.lock",
-}
+// defaultExcludePatterns is deliberately empty.
+//
+// It used to seed a directory with the usual suspects — node_modules, vendor,
+// dist, build, .venv and so on — which reads as helpful and is not. Those names
+// are a guess about a project made without looking at it, and the guess is
+// invisible: a project that tracks its vendor directory found it silently
+// missing from every search, with nothing anywhere to say why or where to undo
+// it. Worse, the guess was seeded into the user's own store, so it became
+// indistinguishable from a rule they had written themselves.
+//
+// A project has already recorded which of its files are noise, in .gitignore,
+// under review, in one place. That is what the indexer reads. This list stays
+// as the mechanism for excludes the user adds deliberately, and adds nothing on
+// their behalf.
+var defaultExcludePatterns = []string{}
 
 // ListExcludes returns all exclude patterns stored for the given directory.
 func (s *Store) ListExcludes(dir string) ([]*ExcludeEntry, error) {

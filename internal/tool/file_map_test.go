@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/prasenjeet-symon/ogcode/internal/codemap"
 )
 
 func fileMap(t *testing.T, dir, rel string) Result {
@@ -71,5 +73,31 @@ func TestFileMapTool_ReportsUnmappableFilesAsOutput(t *testing.T) {
 				t.Errorf("output = %q, want it to mention %q", res.Output, c.want)
 			}
 		})
+	}
+}
+
+// The description tells the model which file types get an exact range and which
+// get an approximate one. That claim is only true while it matches the grammar
+// registry, and a hand-maintained list silently stops matching the moment a
+// grammar is added — which is exactly how the same list in AGENT.md came to
+// claim Go and TypeScript were the only parsed languages long after Python,
+// Rust, Java, PHP and Swift had landed.
+func TestFileMapDescription_NamesEveryParsedLanguage(t *testing.T) {
+	desc := strings.ToLower(FileMapTool{}.Description())
+	for _, name := range codemap.LanguageNames() {
+		if !strings.Contains(desc, strings.ToLower(name)) {
+			t.Errorf("file_map description does not mention %q, a language with a real grammar; "+
+				"the model will treat its exact ranges as heuristic", name)
+		}
+	}
+}
+
+// The map cannot show what it never captures, so the omission has to be stated.
+func TestFileMapDescription_StatesWhatIsNotListed(t *testing.T) {
+	desc := FileMapTool{}.Description()
+	for _, want := range []string{"struct fields", "class properties", "local variables"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("file_map description does not say %q are omitted", want)
+		}
 	}
 }

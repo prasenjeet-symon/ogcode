@@ -438,6 +438,13 @@ textarea.auto-resize {
   border-radius: 0;
 }
 
+/* File viewer: the pane owns background and padding, not highlight.js. */
+.code-view code.hljs {
+  background: none;
+  padding: 0;
+  white-space: pre;
+}
+
 .prose-chat ul,
 .prose-chat ol {
   margin: 0.5em 0 0.75em;

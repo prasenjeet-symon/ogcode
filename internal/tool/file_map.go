@@ -23,8 +23,20 @@ type FileMapTool struct{}
 
 func (FileMapTool) ID() string { return "file_map" }
 
+// Description carries the two limits an agent cannot recover from the output.
+//
+// What the map omits is invisible by construction: a name that was never
+// captured leaves no trace, so an agent hunting a struct field finds nothing and
+// has no way to tell "not in this file" from "not the kind of thing this lists".
+// And grammar coverage decides whether a range is exact or approximate, which
+// changes how much slack to allow around it.
+//
+// The runtime notes Render already emits — the symbol cap, a recovered parse
+// error, the heuristic-scan warning — are deliberately not repeated here. They
+// arrive attached to the map they describe, which beats a static sentence the
+// agent has to remember applies.
 func (FileMapTool) Description() string {
-	return "Return the structural map of a single file: every top-level declaration with its 1-based line range, and its doc comment where it has one. Use this before reading an unfamiliar file, then pass a range straight to read(path, start_line, end_line) to pull in only the part you need instead of the entire file. Ranges include each declaration's doc comment. Call this again after editing a file — the line numbers of everything below an edit will have moved."
+	return "Return the structural map of a single file: every declaration with its 1-based line range and its doc comment where it has one, nested entries indented under whatever contains them (a class's methods, a component's handlers). Use this before reading an unfamiliar file, then pass a range straight to read(path, start_line, end_line) to pull in only the part you need instead of the entire file. Ranges include each declaration's doc comment. Call this again after editing a file — the line numbers of everything below an edit will have moved. It lists declarations only: struct fields, class properties, and non-function local variables never appear, so a name missing from the map is not missing from the file. Go, TypeScript, TSX/JavaScript, Python, Rust, Java, C#, Dart, PHP and Swift are parsed with a real grammar; any other file type falls back to an approximate heuristic scan, which the map flags when it happens."
 }
 
 func (FileMapTool) Parameters() json.RawMessage {

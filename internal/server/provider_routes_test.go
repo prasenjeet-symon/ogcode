@@ -142,8 +142,20 @@ func TestValidateProviderConfigStructure(t *testing.T) {
 
 // TestOllamaStatusEndpoint verifies the /api/providers/ollama/status endpoint
 // returns a well-formed {installed,running,baseUrl} payload and that, with no
-// OLLAMA_BASE_URL set, baseUrl defaults to the localhost endpoint.
+// OLLAMA_BASE_URL set and nothing live on the host, baseUrl defaults to the
+// localhost endpoint.
+//
+// The test must not depend on whatever Ollama (or proxy) happens to be running
+// on the dev machine: the fallback detector would find it and report its URL
+// instead of the default. We pin the primary probe to a dead address and
+// disable fallbacks so the "nothing running" path is exercised deterministically.
 func TestOllamaStatusEndpoint(t *testing.T) {
+	orig := provider.PrimaryOllamaBaseURL
+	provider.PrimaryOllamaBaseURL = "http://127.0.0.1:1/v1"
+	t.Cleanup(func() { provider.PrimaryOllamaBaseURL = orig })
+	t.Setenv("OLLAMA_BASE_URL", "")
+	t.Setenv("OLLAMA_FALLBACK_URLS", "")
+
 	srv := newTestServer(t)
 	h := srv.routes()
 
@@ -160,9 +172,13 @@ func TestOllamaStatusEndpoint(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
 		t.Fatalf("decode ollama status: %v (body: %s)", err, rec.Body.String())
 	}
-	// With no OLLAMA_BASE_URL set, the base URL must default to localhost.
-	if st.BaseURL != "http://localhost:11434/v1" {
-		t.Fatalf("expected default baseUrl http://localhost:11434/v1, got %q", st.BaseURL)
+	// With no OLLAMA_BASE_URL set and nothing live, the base URL must default
+	// to the (dead) primary endpoint we pinned — which equals the real default.
+	if st.BaseURL != "http://127.0.0.1:1/v1" {
+		t.Fatalf("expected pinned primary baseUrl http://127.0.0.1:1/v1, got %q", st.BaseURL)
+	}
+	if st.Running {
+		t.Fatalf("expected running=false with a dead primary and no fallbacks, got true")
 	}
 }
 
@@ -243,7 +259,7 @@ type stubProvider struct {
 	models []provider.ModelInfo
 }
 
-func (s stubProvider) ID() string                  { return s.id }
+func (s stubProvider) ID() string                   { return s.id }
 func (s stubProvider) Models() []provider.ModelInfo { return s.models }
 func (s stubProvider) StreamChat(ctx context.Context, req provider.StreamRequest) (<-chan provider.StreamEvent, error) {
 	return nil, nil

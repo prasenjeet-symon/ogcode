@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,14 @@ type LoopRunner struct {
 	// from the global config DB, so settings-screen changes take effect on the next
 	// deep_search without a restart. nil → built-in defaults.
 	SearchParams func() session.SearchConfig
+	// IndexedFileCount, when set, reports how many files the project index holds
+	// for a directory. It lets the system prompt state up front whether
+	// codebase_map has anything to return, instead of making every session in an
+	// unindexed project spend a call discovering that it does not. A closure
+	// rather than the store itself so this package keeps no dependency on
+	// docindex. nil (CLI, tests) leaves the prompt silent and the agent probing,
+	// which is the behaviour that predates this field.
+	IndexedFileCount func(dir string) int
 	// Permissions gates mutating tool calls (bash/write/edit) behind user
 	// approval. nil disables gating entirely (CLI, tests). Even when set, a loop
 	// only prompts when its context carries WithPermissionGating — so headless
@@ -96,6 +105,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	}
 	agentMDContent := LoadAgentMD(workDir)
 	memoryMDContent := LoadMemoryMD(workDir)
+
+	// Resolved once per turn rather than per step: the prompt is rebuilt on every
+	// step, and the index only changes when the user deliberately rebuilds it, so
+	// a query per step would buy accuracy nobody can observe. -1 means unreported.
+	indexedFiles := -1
+	if lr.IndexedFileCount != nil {
+		indexedFiles = lr.IndexedFileCount(workDir)
+	}
 
 	// For note sessions: save the final assistant message as note content when the loop exits.
 	// This defer runs before the loop.done publish (LIFO) so the note is persisted before
@@ -383,7 +400,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// entries. This separation is critical for Anthropic prompt caching: the
 		// provider puts the cache_control breakpoint on the first system block
 		// only, so anything that changes mid-session must stay out of it.
-		systemPrompts := buildSystemPromptEntries(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID))
+		systemPrompts := buildSystemPromptEntries(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles)
 		var modelMessages []provider.ModelMessage
 
 		if memoryEnabled {
@@ -570,13 +587,23 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				}
 				continue
 			}
-			// Non-transient or exhausted retries
+			// Non-transient or exhausted retries. Record what kind of failure
+			// this was alongside the provider's own words: the message is what
+			// the user reads, and the classification is what a later resume
+			// decides from.
 			errStr := streamErr.Error()
 			assistantMsg.Error = &errStr
 			finish := "error"
 			assistantMsg.Finish = &finish
+			assistantMsg.Interrupted = classifyInterruption(streamErr, step)
 			lr.Store.UpdateMessage(assistantMsg)
 			lr.Bus.Publish("message.updated", assistantMsg)
+			// Close any tool call this turn left unanswered before leaving. A
+			// dangling tool_use makes the *next* request invalid, whether that
+			// request comes from a resume or from the user simply typing again.
+			if _, rerr := lr.ReconcileSession(sessionID); rerr != nil {
+				slog.Warn("reconcile after stream failure", "session", sessionID, "err", rerr)
+			}
 			return fmt.Errorf("stream chat: %w", streamErr)
 		}
 		// Guard: loop exhausted all attempts via continue without returning (edge case)
@@ -585,8 +612,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			assistantMsg.Error = &errStr
 			finish := "error"
 			assistantMsg.Finish = &finish
+			assistantMsg.Interrupted = classifyInterruption(streamErr, step)
 			lr.Store.UpdateMessage(assistantMsg)
 			lr.Bus.Publish("message.updated", assistantMsg)
+			if _, rerr := lr.ReconcileSession(sessionID); rerr != nil {
+				slog.Warn("reconcile after exhausted retries", "session", sessionID, "err", rerr)
+			}
 			return fmt.Errorf("stream chat: %w", streamErr)
 		}
 
@@ -934,12 +965,24 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				finishReason = "error"
 				errStr := "stream interrupted: LLM connection closed without finish signal"
 				assistantMsg.Error = &errStr
+				assistantMsg.Interrupted = &session.Interruption{
+					Reason:    session.InterruptNetwork,
+					Resumable: true,
+					Detail:    "The provider closed the connection before finishing this turn. Resuming picks up from here.",
+					Step:      step,
+				}
 			} else {
 				// No content and no finish — likely a connection failure
 				slog.Warn("stream ended without content or finish_reason", "session", sessionID)
 				finishReason = "error"
 				errStr := "stream interrupted: no content received"
 				assistantMsg.Error = &errStr
+				assistantMsg.Interrupted = &session.Interruption{
+					Reason:    session.InterruptNetwork,
+					Resumable: true,
+					Detail:    "The connection produced nothing before closing. Resuming retries the step.",
+					Step:      step,
+				}
 			}
 		}
 		assistantMsg.Finish = &finishReason
@@ -1567,6 +1610,21 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		go func(idx int) {
 			defer wg.Done()
 			tc := readyCalls[idx]
+			// A panic in a tool runs on this goroutine, where nothing above it
+			// can recover: an unrecovered panic in any goroutine takes the whole
+			// process down, so one bad tool call kills every session the server
+			// is serving, not just this turn. Convert it into a failed tool call
+			// — the loop already knows how to report one to the model and to the
+			// user — and log the stack so the bug is still diagnosable.
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("tool panicked",
+						"session", sessionID, "tool", tc.Name, "panic", r,
+						"stack", string(debug.Stack()))
+					execInfos[idx].result = tool.Result{}
+					execInfos[idx].err = fmt.Errorf("tool %s panicked: %v", tc.Name, r)
+				}
+			}()
 			result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID)
 			execInfos[idx].result = result
 			execInfos[idx].err = err
@@ -2262,7 +2320,7 @@ func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent s
 // buildSystemPromptEntries) so the cacheable prefix can be isolated; this
 // convenience form is for callers and tests that just want the whole text.
 func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string) string {
-	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, family), "\n\n")
+	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, family, -1), "\n\n")
 }
 
 // buildSystemPromptEntries returns the system-prompt entries in wire order:
@@ -2271,17 +2329,29 @@ func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMD
 //	     Providers attach the cache breakpoint here, so it MUST NOT contain
 //	     anything that varies within a session.
 //	[1:] per-turn dynamic content: the rendering viewport (the browser resends
-//	     its window size with every prompt) and the current date.
+//	     its window size with every prompt), the project index status, and the
+//	     current date.
 //	last the agent's FinalInstruction, kept adjacent to the model's response.
 //
 // Putting the viewport in [0] would invalidate the cached tools+system prefix
 // every time the user resized their window — the same reason the date lives out
-// here rather than in the base.
-func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string) []string {
+// here rather than in the base. The index status is out here for the same
+// reason: a user can build the index while the session is open.
+//
+// indexedFiles < 0 means no count was reported and the status line is omitted.
+func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string, indexedFiles int) []string {
 	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, agentMDContent, memoryMDContent, family)}
 
 	if vp := viewportPrompt(viewportWidth, viewportHeight); vp != "" {
 		entries = append(entries, strings.TrimSpace(vp))
+	}
+
+	// Only agents that hold codebase_map can act on this; for the rest it
+	// describes a tool they were never offered.
+	if a.projectScoped() {
+		if st := indexStatusPrompt(indexedFiles); st != "" {
+			entries = append(entries, st)
+		}
 	}
 	entries = append(entries, systemReminderPrompt())
 
@@ -2309,7 +2379,7 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		if style := modelFamilyStylePrompt(family); style != "" {
 			prompt += "\n\n" + style
 		}
-		prompt += fmt.Sprintf("\n\nWorking directory: %s\nPlatform: %s/%s%s", dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt())
+		prompt += fmt.Sprintf("\n\nWorking directory: %s\nPlatform: %s/%s%s", dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt(a.HasTool("bash")))
 
 		if agentMDContent != "" {
 			prompt += agentMDContent
@@ -2320,15 +2390,14 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		}
 
 		// MEMORY.md section: role-aware instructions based on whether the agent
-		// can write files. BuildAgent gets full read/write maintenance instructions;
-		// read-only agents (Plan, Note) get read-only guidance.
+		// can write files, and on whether a <memory-md> block was actually
+		// prepended above. BuildAgent gets full read/write maintenance
+		// instructions; read-only agents (Plan, Note) get read-only guidance.
+		// The absent-file case (including the nudge to create one) is handled
+		// inside memoryMDPrompt so the section never points at a tag that the
+		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
-		prompt += "\n\n" + memoryMDPrompt(canWriteFiles)
-
-		// When no MEMORY.md exists and the agent can create one, prompt it to do so.
-		if memoryMDContent == "" && canWriteFiles {
-			prompt += "\n\nNo MEMORY.md file was found in this project. You should create one in the project root directory using the write tool if the project has any meaningful knowledge to record."
-		}
+		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
 	}
 
 	// Only advertise agentic memory to agents that actually have the memory_recall
@@ -2358,6 +2427,13 @@ project_memory_recall also accepts scope: "session", which runs that same dated,
 	if a.HasTool("latex_to_pdf") {
 		prompt += latexInfoPrompt()
 	}
+
+	// The instruction-source boundary closes the cacheable block. It applies to
+	// every agent — the utility ones read supplied documents and fetched pages
+	// too — and it sits last because it is the rule most likely to be tested by
+	// the very next thing the agent reads.
+	canAct := a.HasTool("bash") || a.HasTool("write") || a.HasTool("edit")
+	prompt += "\n\n" + untrustedContentPrompt(canAct)
 
 	return prompt
 }

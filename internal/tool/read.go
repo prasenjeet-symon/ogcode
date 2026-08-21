@@ -29,7 +29,7 @@ const rangedReadThreshold = 200
 
 func (ReadTool) ID() string { return "read" }
 func (ReadTool) Description() string {
-	return "Read file contents or list directory contents. To read one region of a file, pass start_line/end_line — 1-based, inclusive, and taking the ranges printed by file_map directly. IMPORTANT: reading a file longer than 200 lines without a range returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with start_line=1 and end_line set past its length. Use offset/limit to page through a file instead."
+	return "Read file contents or list directory contents. To read one region of a file, pass start_line/end_line — 1-based, inclusive, and taking the ranges printed by file_map directly. IMPORTANT: reading a file longer than 200 lines without a range returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with start_line=1 and end_line set past its length. Use offset/limit to page through a file once you know its shape — a limit on its own is honoured only up to 200 lines, because it says how much to read but not which part."
 }
 func (ReadTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -60,7 +60,17 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// Capture whether the caller asked for any window at all, before start_line
 	// is folded into offset below — after that, start_line=1 and "no range" both
 	// look like offset=0.
-	rangeRequested := input.StartLine > 0 || input.EndLine > 0 || input.Offset > 0 || input.Limit > 0
+	//
+	// A bare limit is sized, not placed: it says how much to take and never
+	// which part, so it cannot stand in for a range on a file the caller has
+	// not mapped. Honoured up to rangedReadThreshold — a window that small
+	// costs no more context than a short file already does, and it keeps a
+	// peek at a file's head working — but past that it is a whole-file read
+	// wearing a different argument, and the map is what the caller needs
+	// first. An offset is placed, so it stays a window on its own: paging
+	// presupposes you already know the file's shape.
+	rangeRequested := input.StartLine > 0 || input.EndLine > 0 || input.Offset > 0 ||
+		(input.Limit > 0 && input.Limit <= rangedReadThreshold)
 
 	// start_line/end_line are 1-based and inclusive: the same numbering the
 	// file_map tool prints and that this tool's own output carries. offset is a

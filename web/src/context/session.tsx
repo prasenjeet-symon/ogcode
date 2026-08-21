@@ -16,6 +16,7 @@ import {
   getModels,
   updateSession,
   abortSession,
+  resumeSession,
   setModelPreference,
   deleteModelPreference,
 } from '../api/client';
@@ -73,6 +74,8 @@ interface SessionContextValue {
   prompt: (content: string, images?: ImagePartData[]) => Promise<void>;
   guidance: (content: string, cancelTool?: boolean) => Promise<boolean>;
   abort: () => Promise<void>;
+  /** Restart the loop on a session whose last turn was interrupted. */
+  resume: () => Promise<{ resumed: boolean; message?: string }>;
   refreshModels: () => Promise<void>;
   toggleModel: (model: ModelInfo, enabled: boolean) => Promise<void>;
   addCustomModel: (id: string, providerId: string, displayName: string, collection?: string) => Promise<void>;
@@ -161,7 +164,10 @@ export const SessionProvider: ParentComponent = (props) => {
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].info.role === 'assistant') {
         const finish = msgs[i].info.finish;
-        if (finish === 'error' || finish === 'aborted') {
+        // An interruption record means the server claimed this turn as abandoned:
+        // no loop is running behind it, so a tool left mid-flight is a leftover
+        // rather than work in progress.
+        if (finish === 'error' || finish === 'aborted' || msgs[i].info.interrupted) {
           toolsAreStale = true;
         }
         break;
@@ -570,6 +576,14 @@ export const SessionProvider: ParentComponent = (props) => {
     // Scan from the end for the last assistant message
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].info.role === 'assistant') {
+        // An interruption record means the server already found this turn
+        // abandoned and claimed it: no loop is running, and Resume is the way
+        // forward. This has to be tested before the finish reason, because the
+        // commonest interrupted shape keeps finish="tool_calls" — the turn the
+        // model never got to carry on — which the check below would otherwise
+        // read as a live loop, leaving the composer stuck in guidance mode on a
+        // session nothing is working on.
+        if (msgs[i].info.interrupted) return false;
         // Unfinished assistant = still streaming
         if (!msgs[i].info.finish && !msgs[i].info.error) return true;
         // Finished with "stop" or "error" = loop is done
@@ -592,7 +606,9 @@ export const SessionProvider: ParentComponent = (props) => {
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].info.role === 'assistant') {
         const finish = msgs[i].info.finish;
-        if (finish === 'error' || finish === 'aborted') {
+        // A claimed turn (see isAgentLoopActive) has no loop behind it either,
+        // so its half-finished tools are stale for the same reason.
+        if (finish === 'error' || finish === 'aborted' || msgs[i].info.interrupted) {
           toolsAreStale = true;
         }
         break;
@@ -701,6 +717,33 @@ export const SessionProvider: ParentComponent = (props) => {
     } catch (e) {
       console.error('send prompt failed:', e);
       setLoadingSessionId('');
+    }
+  }
+
+  // Resume a session whose last turn was cut short — a rate limit, a dropped
+  // connection, a server restart. No new user message is sent: the server picks
+  // the conversation up where it broke, so the turn is retried rather than
+  // re-described. Returns the server's word on whether anything was resumed.
+  async function resume(): Promise<{ resumed: boolean; message?: string }> {
+    const session = activeSession();
+    if (!session) return { resumed: false };
+    setLoadingSessionId(session.id);
+    try {
+      const result = await resumeSession(session.id);
+      if (!result?.resumed) {
+        setLoadingSessionId('');
+        return result ?? { resumed: false };
+      }
+      const msgs = await getMessages(session.id);
+      setMessages(msgs);
+      startBgPoll(session.id);
+      startPolling(session.id);
+      return result;
+    } catch (e) {
+      console.error('resume failed:', e);
+      setLoadingSessionId('');
+      const message = e instanceof Error ? e.message : String(e);
+      return { resumed: false, message };
     }
   }
 
@@ -972,6 +1015,7 @@ export const SessionProvider: ParentComponent = (props) => {
     prompt,
     guidance,
     abort,
+    resume,
     refreshModels,
     toggleModel,
     addCustomModel,

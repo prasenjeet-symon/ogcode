@@ -299,7 +299,7 @@ The map is parsed fresh on every call and never indexed, so its line numbers alw
 
 #### Language support
 
-Eight tree-sitter grammars give full parsing across seventeen file extensions:
+Ten tree-sitter grammars give full parsing across twenty file extensions:
 
 | Language | Extensions | Grammar |
 | -------- | ---------- | ------- |
@@ -311,6 +311,8 @@ Eight tree-sitter grammars give full parsing across seventeen file extensions:
 | Rust | `.rs` | `tree-sitter-rust` |
 | Swift | `.swift` | `tree-sitter-swift` (vendored) |
 | Java | `.java` | `tree-sitter-java` |
+| C# | `.cs` `.csx` | `tree-sitter-c-sharp` |
+| Dart | `.dart` | `tree-sitter-dart` (community) |
 
 TypeScript is a syntactic superset of JavaScript and the TSX parser adds JSX on top, so plain `.js` and `.jsx` files — including `.js` files that carry JSX — parse correctly without a grammar of their own.
 
@@ -325,6 +327,16 @@ Swift needs no such accommodation — it parses `@objc public final` into a `mod
 Swift's grammar is the one entry vendored into the tree rather than required through `go.mod`: upstream generates its parser at build time and gitignores it, publishes no tagged versions, and ships a Go binding that `#include`s a file no commit contains. See [internal/codemap/grammars/swift](internal/codemap/grammars/swift/README.md).
 
 Java is the same shape as Swift and needs nothing beyond the two comment kinds — its annotations also sit in a `modifiers` node inside the declaration, so `@Entity public final class` renders whole. Classes, interfaces, enums, records and annotation types are all outlined, with nested types kept because Java leans on the shape so heavily that a Builder is the canonical case. An enum states its methods inside a nested `enum_body_declarations` rather than directly in its body, so those need a pattern of their own.
+
+C# is the same shape again — `[Serializable] public` parses into an `attribute_list` inside the declaration — but it needs two calls the others do not. Its types sit at either of two depths depending on which namespace form the file uses: `namespace X { }` nests them in a `declaration_list`, while the file-scoped `namespace X;` leaves them as siblings at the top of the compilation unit. Both are matched, through the same patterns rather than through anchored copies, which is what keeps a block-namespace file from listing every type twice. And properties are listed where Java's fields are not: C# deliberately replaced the public field with the property, so a type's properties are its public surface, and dropping them would cost the outline most of the API. Top-level statements are outlined too, so a modern `Program.cs` with no enclosing class maps to more than its `using` directives.
+
+C# is also the first grammar whose doc comments are markup rather than prose. `/// <summary>` would otherwise spend the excerpt budget on tags — the common block form leads with a bare `<summary>` that says nothing — so the summary element is taken, the `<param>` and `<returns>` blocks that duplicate the signature are dropped, inline `<see cref="T:Acme.Card"/>` and `<paramref name="amount"/>` are unwrapped to the names they stand for, and XML entities are decoded.
+
+Dart is the one grammar that needed machinery none of the others did. It states a function's body *beside* its signature rather than inside it — a top-level function parses as a `function_signature` followed by a sibling `function_body`, and a method as a `method_signature` followed by that same sibling — so a range built from the captured node alone would stop at the closing parenthesis and hand a reader a signature with no code under it. A `trailingBodyKind` on the language carries the end of the range down over the body, mirroring the `attrKind` that carries the start up over Rust's attributes; every other grammar leaves it empty, which a test pins. Dart needs both halves: `@override` on a class member is a preceding sibling too.
+
+Dart also splits its comments by role rather than by shape — `///` and `/** */` parse as `documentation_comment` and everything else as `comment` — so both kinds are listed, or a declaration documented with a plain `//` would lose it. Getters and setters keep distinct kinds, because `get` and `set` on one name are two declarations and calling both "method" would read as a duplicate. Mixins, extensions, enhanced enums and all three constructor spellings are outlined; fields, enum constants and top-level `const`/`final` are not — the last of those because the grammar gives them no node to capture, parsing `const int max = 3;` into three loose siblings of the program rather than one declaration.
+
+Dart's grammar is the one dependency without tagged releases: it is community-maintained outside the tree-sitter organisation and is pinned to a commit pseudo-version.
 
 Every other file type falls back to a heuristic scanner that recognises the declaration forms common across languages — `function`, `def` and `fn`, `class` and `struct`, shell functions — plus Markdown headings. Its ranges are approximate — each declaration ends where the next one begins — but no file is left unmapped.
 

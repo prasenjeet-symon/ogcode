@@ -26,12 +26,41 @@ var providerEnvVars = map[string]struct{ key, baseURL string }{
 
 // providerConfigResponse extends ProviderConfig with env-sourced status flags.
 type providerConfigResponse struct {
-	ProviderID    string `json:"providerId"`
-	APIKey        string `json:"apiKey"`        // "__SET__" if stored in DB, "" otherwise
-	BaseURL       string `json:"baseUrl"`
-	UpdatedAt     int64  `json:"updatedAt"`
-	EnvKeySet     bool   `json:"envKeySet"`     // PROVIDER_API_KEY env var is present
-	EnvBaseURLSet bool   `json:"envBaseURLSet"` // PROVIDER_BASE_URL env var is present
+	ProviderID string `json:"providerId"`
+	APIKey     string `json:"apiKey"`  // "__SET__" if stored in DB, "" otherwise
+	BaseURL    string `json:"baseUrl"` // the persisted value — what the edit form shows
+	// EffectiveBaseURL is the endpoint the registered provider is actually
+	// talking to right now. It differs from BaseURL whenever an env var
+	// overrides the stored config, or when detection resolved a live endpoint
+	// in place of a stale one — cases where showing only the persisted value
+	// tells the user the app is calling somewhere it is not.
+	EffectiveBaseURL string `json:"effectiveBaseUrl"`
+	UpdatedAt        int64  `json:"updatedAt"`
+	EnvKeySet        bool   `json:"envKeySet"`     // PROVIDER_API_KEY env var is present
+	EnvBaseURLSet    bool   `json:"envBaseURLSet"` // PROVIDER_BASE_URL env var is present
+}
+
+// baseURLReporter is implemented by providers that talk to a configurable
+// endpoint (the OpenAI-compatible ones). Used to report the live endpoint
+// without the route needing to know concrete provider types.
+type baseURLReporter interface {
+	BaseURL() string
+}
+
+// effectiveBaseURL returns the endpoint the registered provider is using, or
+// "" when the provider is not registered or does not expose one.
+func (s *Server) effectiveBaseURL(providerID string) string {
+	if s.registry == nil {
+		return ""
+	}
+	p := s.registry.Get(providerID)
+	if p == nil {
+		return ""
+	}
+	if r, ok := p.(baseURLReporter); ok {
+		return r.BaseURL()
+	}
+	return ""
 }
 
 // ollamaStatusResponse is the lightweight Ollama runtime status surfaced to the
@@ -57,12 +86,13 @@ func (s *Server) handleGetProviderConfigs(w http.ResponseWriter, r *http.Request
 
 		envVars := providerEnvVars[id]
 		resp := providerConfigResponse{
-			ProviderID:    masked.ProviderID,
-			APIKey:        masked.APIKey,
-			BaseURL:       masked.BaseURL,
-			UpdatedAt:     masked.UpdatedAt,
-			EnvKeySet:     os.Getenv(envVars.key) != "",
-			EnvBaseURLSet: envVars.baseURL != "" && os.Getenv(envVars.baseURL) != "",
+			ProviderID:       masked.ProviderID,
+			APIKey:           masked.APIKey,
+			BaseURL:          masked.BaseURL,
+			EffectiveBaseURL: s.effectiveBaseURL(id),
+			UpdatedAt:        masked.UpdatedAt,
+			EnvKeySet:        os.Getenv(envVars.key) != "",
+			EnvBaseURLSet:    envVars.baseURL != "" && os.Getenv(envVars.baseURL) != "",
 		}
 		out = append(out, resp)
 	}

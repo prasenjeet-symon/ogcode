@@ -34,6 +34,46 @@ type OpenAIProvider struct {
 	cachedModels []ModelInfo
 	modelsOnce   sync.Once
 	modelsMu     sync.Mutex
+
+	// modelExplicit records that `model` came from configuration rather than a
+	// guess, so it is never overridden by what the endpoint turns out to serve.
+	modelExplicit bool
+	// resolvedModel holds a default inferred from the fetched model list
+	// (string). Kept separate from `model`, which stays immutable after
+	// construction so concurrent readers need no lock.
+	resolvedModel atomic.Value
+}
+
+// resolveDefaultModel picks the model to use when a request names none, unless
+// one was configured explicitly. Preference order: keep the configured value if
+// the endpoint actually serves it, else the first enabled model, else the first
+// model at all. This is what stops a proxied endpoint — which looks local but
+// serves cloud models — from defaulting to a model that does not exist there.
+func (p *OpenAIProvider) resolveDefaultModel(list []ModelInfo) {
+	if p.modelExplicit || len(list) == 0 {
+		return
+	}
+	for _, m := range list {
+		if m.ID == p.model {
+			return
+		}
+	}
+	for _, m := range list {
+		if m.ActiveByDefault {
+			p.resolvedModel.Store(m.ID)
+			return
+		}
+	}
+	p.resolvedModel.Store(list[0].ID)
+}
+
+// defaultModel returns the model to use when a request does not name one: the
+// configured value, or one inferred from the endpoint's actual model list.
+func (p *OpenAIProvider) defaultModel() string {
+	if v, ok := p.resolvedModel.Load().(string); ok && v != "" {
+		return v
+	}
+	return p.model
 }
 
 func (p *OpenAIProvider) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
@@ -200,7 +240,11 @@ func NewOllamaProvider() *OpenAIProvider {
 	}
 	apiKey := os.Getenv("OLLAMA_API_KEY")
 	model := os.Getenv("OLLAMA_MODEL")
+	explicit := model != ""
 	if model == "" {
+		// A placeholder only. This guess is frequently wrong — a proxied
+		// endpoint looks local but serves cloud models — so Models() replaces
+		// it with something the endpoint actually reports.
 		if isCloudURL(baseURL) {
 			model = "qwen3-coder-next"
 		} else {
@@ -208,10 +252,11 @@ func NewOllamaProvider() *OpenAIProvider {
 		}
 	}
 	return &OpenAIProvider{
-		id:      "ollama",
-		apiKey:  apiKey,
-		model:   model,
-		baseURL: baseURL,
+		id:            "ollama",
+		apiKey:        apiKey,
+		model:         model,
+		baseURL:       baseURL,
+		modelExplicit: explicit,
 	}
 }
 
@@ -252,7 +297,7 @@ type oaiModelsResponse struct {
 
 type oaiModelEntry struct {
 	ID      string `json:"id"`
-	Name    string `json:"name"`    // populated by OpenRouter, empty for Ollama
+	Name    string `json:"name"` // populated by OpenRouter, empty for Ollama
 	Object  string `json:"object"`
 	OwnedBy string `json:"owned_by"`
 }
@@ -322,13 +367,13 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 // openRouterActiveDefaults is the curated subset that starts enabled.
 // All other live-fetched OpenRouter models are fetched but disabled until the user enables them.
 var openRouterActiveDefaults = map[string]bool{
-	"anthropic/claude-sonnet-4.6":      true,
-	"anthropic/claude-opus-4.6":        true,
-	"anthropic/claude-haiku-4.5":       true,
-	"openai/gpt-4o":                    true,
-	"openai/o4-mini":                   true,
-	"google/gemini-2.5-pro":            true,
-	"deepseek/deepseek-r1":             true,
+	"anthropic/claude-sonnet-4.6":       true,
+	"anthropic/claude-opus-4.6":         true,
+	"anthropic/claude-haiku-4.5":        true,
+	"openai/gpt-4o":                     true,
+	"openai/o4-mini":                    true,
+	"google/gemini-2.5-pro":             true,
+	"deepseek/deepseek-r1":              true,
 	"meta-llama/llama-3.3-70b-instruct": true,
 }
 
@@ -410,28 +455,55 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 		p.modelsMu.Unlock()
 
 	case "ollama":
-		// Always fetch live from /v1/models (works for both local and cloud endpoints).
-		// Local: reflects what the user has actually pulled; all enabled.
-		// Cloud: mark curated subset active; rest disabled.
+		// The instance's own /v1/models reports only what has been pulled. The
+		// cloud catalog adds every hosted model, and a signed-in instance
+		// resolves those remotely without a pull — so the picker ends up showing
+		// what is actually usable, not just what happens to be on disk.
 		p.modelsOnce.Do(func() {
 			fetched := p.fetchDynamicModels(context.Background())
-			p.modelsMu.Lock()
-			if len(fetched) > 0 {
-				for i := range fetched {
-					if isCloudURL(p.baseURL) {
-						// For cloud Ollama keep only a few active by default
-						fetched[i].ActiveByDefault = false
-					} else {
-						// Local: user explicitly pulled these — all active
-						fetched[i].ActiveByDefault = true
-					}
+			for i := range fetched {
+				// Local: the user pulled these deliberately, so enable them.
+				// A cloud endpoint returns a long list — curate instead.
+				fetched[i].ActiveByDefault = !isCloudURL(p.baseURL)
+			}
+
+			var catalog []ModelInfo
+			if ollamaCatalogEnabled() {
+				c, err := FetchOllamaCloudCatalog(context.Background(), p.baseURL)
+				if err != nil {
+					// Undocumented endpoint — a failure here is routine, not
+					// something to surface. The static fallbacks still apply.
+					slog.Debug("ollama cloud catalog unavailable", "err", err)
+				} else {
+					catalog = c
 				}
-				p.cachedModels = fetched
-			} else if isCloudURL(p.baseURL) {
+			}
+
+			// With nothing pulled locally, every model would arrive disabled and
+			// the user would land on an empty picker. Enable the cheapest few —
+			// the catalog is sorted smallest-first — so the endpoint works out
+			// of the box.
+			if len(fetched) == 0 {
+				for i := range catalog {
+					if i >= ollamaCatalogDefaultActive {
+						break
+					}
+					catalog[i].ActiveByDefault = true
+				}
+			}
+
+			merged := mergeOllamaModels(fetched, catalog)
+
+			p.modelsMu.Lock()
+			switch {
+			case len(merged) > 0:
+				p.cachedModels = merged
+			case isCloudURL(p.baseURL):
 				p.cachedModels = ollamaCloudFallback
-			} else {
+			default:
 				p.cachedModels = ollamaLocalFallback
 			}
+			p.resolveDefaultModel(p.cachedModels)
 			p.modelsMu.Unlock()
 		})
 		p.modelsMu.Lock()
@@ -484,8 +556,9 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 	if p.freePool {
 		list = curateFreePoolModels(list, p.baseURL)
 	}
+	def := p.defaultModel()
 	for i := range list {
-		if list[i].ID == p.model {
+		if list[i].ID == def {
 			list[i].Default = true
 		}
 	}
@@ -560,7 +633,7 @@ func CollectionFromBaseURL(baseURL string) string {
 func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error) {
 	model := req.Model
 	if model == "" {
-		model = p.model
+		model = p.defaultModel()
 	}
 
 	messages := make([]oaiMessage, 0, len(req.Messages)+len(req.System))
@@ -1024,13 +1097,13 @@ func normalizeToolArgs(raw json.RawMessage) json.RawMessage {
 // OpenAI API types
 
 type oaiRequest struct {
-	Model         string             `json:"model"`
-	Messages      []oaiMessage       `json:"messages"`
-	Tools         []oaiTool          `json:"tools,omitempty"`
-	Stream        bool               `json:"stream"`
-	StreamOptions *oaiStreamOptions  `json:"stream_options,omitempty"`
-	Temperature   float64            `json:"temperature,omitempty"`
-	MaxTokens     int                `json:"max_tokens,omitempty"`
+	Model         string            `json:"model"`
+	Messages      []oaiMessage      `json:"messages"`
+	Tools         []oaiTool         `json:"tools,omitempty"`
+	Stream        bool              `json:"stream"`
+	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
+	Temperature   float64           `json:"temperature,omitempty"`
+	MaxTokens     int               `json:"max_tokens,omitempty"`
 }
 
 type oaiStreamOptions struct {
@@ -1063,10 +1136,10 @@ type oaiStreamResponse struct {
 }
 
 type oaiUsage struct {
-	PromptTokens            int                       `json:"prompt_tokens"`
-	CompletionTokens        int                       `json:"completion_tokens"`
-	TotalTokens             int                       `json:"total_tokens"`
-	PromptTokensDetails     *oaiPromptTokensDetails   `json:"prompt_tokens_details,omitempty"`
+	PromptTokens            int                        `json:"prompt_tokens"`
+	CompletionTokens        int                        `json:"completion_tokens"`
+	TotalTokens             int                        `json:"total_tokens"`
+	PromptTokensDetails     *oaiPromptTokensDetails    `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *oaiCompletionTokenDetails `json:"completion_tokens_details,omitempty"`
 }
 
@@ -1079,17 +1152,17 @@ type oaiCompletionTokenDetails struct {
 }
 
 type oaiChoice struct {
-	Index        int           `json:"index"`
-	Delta        *oaiDelta     `json:"delta,omitempty"`
-	FinishReason *string       `json:"finish_reason,omitempty"`
+	Index        int       `json:"index"`
+	Delta        *oaiDelta `json:"delta,omitempty"`
+	FinishReason *string   `json:"finish_reason,omitempty"`
 }
 
 type oaiDelta struct {
-	Role             string           `json:"role,omitempty"`
-	Content          string           `json:"content,omitempty"`
+	Role             string             `json:"role,omitempty"`
+	Content          string             `json:"content,omitempty"`
 	ToolCalls        []oaiToolCallDelta `json:"tool_calls,omitempty"`
-	ReasoningContent string           `json:"reasoning_content,omitempty"`
-	Reasoning        string           `json:"reasoning,omitempty"`
+	ReasoningContent string             `json:"reasoning_content,omitempty"`
+	Reasoning        string             `json:"reasoning,omitempty"`
 }
 
 type oaiToolCallDelta struct {

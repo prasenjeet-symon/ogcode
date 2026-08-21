@@ -2,7 +2,11 @@ package indexer
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/prasenjeet-symon/ogcode/internal/db"
@@ -342,16 +346,435 @@ func TestPurgeDeletedDocs_NilStore(t *testing.T) {
 	}
 }
 
-// A vendored tree-sitter grammar is a generated parser.c running to tens of
-// megabytes, and .c is an indexed extension — so the directory skip is the only
-// thing keeping it out of an index. These two facts are what make each other
-// matter, so they are asserted together: drop either and a single generated
-// file dominates the workspace index.
-func TestSkipDirsCoversVendoredGrammars(t *testing.T) {
-	if !IsTextFile(".c") {
-		t.Fatal("IsTextFile(\".c\") = false; the grammars skip below is guarding nothing")
+// The contract that replaced the hardcoded skip list: a directory is excluded
+// because the project says so, never because of what it is called.
+//
+// These names — node_modules, vendor, build, grammars — were all skipped by
+// name once. A project that tracks one of them was silently missing it from its
+// index with nothing to explain why. Now the same names are indexed unless
+// .gitignore excludes them, and the second half of this test shows the same
+// tree going quiet the moment it does.
+func TestCollectFiles_NoDirectoryIsExcludedByName(t *testing.T) {
+	files := map[string]string{
+		"node_modules/pkg/index.js": "module.exports = {}",
+		"vendor/lib/helper.go":      "package lib",
+		"build/generated.go":        "package generated",
+		"grammars/swift/parser.c":   "int main(void){}",
+		"src/main.go":               "package main",
 	}
-	if _, ok := skipDirs["grammars"]; !ok {
-		t.Error(`skipDirs is missing "grammars"; a vendored generated parser.c would be indexed`)
+	root := indexTree(t, files)
+
+	got := collected(t, New(root, nil, nil), root)
+	for want := range files {
+		if !slicesContains(got, want) {
+			t.Errorf("%s was excluded with no .gitignore saying so; collected %v", want, got)
+		}
+	}
+
+	// Now the project says so, and every one of them goes.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"),
+		[]byte("node_modules/\nvendor/\nbuild/\ngrammars/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = collected(t, New(root, nil, nil), root)
+	want := []string{"src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want %v", got, want)
+	}
+}
+
+// The repository's own metadata is the one thing still excluded, and not as a
+// policy of the indexer's: git does not treat .git as part of the working tree,
+// so a matcher that let a walk descend into it would be modelling git wrongly.
+// It holds no indexable file on any real repository — this one has 549 files in
+// .git and zero of them index — so the exclusion costs nothing but the walk.
+func TestCollectFiles_ExcludesTheGitDirectory(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		".git/config":            "[core]",
+		".git/hooks/pre-push.sh": "#!/bin/sh",
+		"src/main.go":            "package main",
+	})
+
+	got := collected(t, New(root, nil, nil), root)
+	want := []string{"src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want %v", got, want)
+	}
+}
+
+// indexTree materialises files under a temp dir and returns the root.
+func indexTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for name, content := range files {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// collected returns the indexable files under root as slash-separated paths
+// relative to it, so a test can state its expectations the way a person would.
+//
+// Every fixture below uses an extension the indexer actually indexes. Files
+// like .gitignore, .log or .env are absent from textExtensions, so a fixture
+// built from those would pass whether or not the ignore rules worked at all.
+func collected(t *testing.T, idx *Indexer, root string) []string {
+	t.Helper()
+	files, err := idx.collectFiles()
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		rel, err := filepath.Rel(root, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, filepath.ToSlash(rel))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The feature: whatever the repository already declares as noise stays out of
+// the index. Nobody should have to maintain the same exclusion list twice.
+func TestCollectFiles_RespectsGitignore(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		".gitignore":         "*.json\nbuild/\nsecret.txt\n!keep.json\n",
+		"src/main.go":        "package main",
+		"src/data.json":      "{}",
+		"keep.json":          "{}",
+		"build/generated.go": "package generated",
+		"build/deep/more.go": "package more",
+		"secret.txt":         "TOKEN=x",
+		"docs/readme.md":     "# docs",
+	})
+
+	got := collected(t, New(root, nil, nil), root)
+	want := []string{"docs/readme.md", "keep.json", "src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want %v", got, want)
+	}
+}
+
+// A .gitignore inside a subdirectory governs that subtree, and can re-include
+// what the root excluded.
+func TestCollectFiles_RespectsNestedGitignore(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		".gitignore":             "*.json\n",
+		"service/.gitignore":     "!important.json\nlocal/\n",
+		"service/important.json": "{}",
+		"service/scratch.json":   "{}",
+		"service/local/x.go":     "package x",
+		"service/main.go":        "package main",
+		"other/scratch.json":     "{}",
+	})
+
+	got := collected(t, New(root, nil, nil), root)
+	for _, want := range []string{"service/important.json", "service/main.go"} {
+		if !slicesContains(got, want) {
+			t.Errorf("%s should have been indexed; got %v", want, got)
+		}
+	}
+	for _, unwanted := range []string{"service/scratch.json", "other/scratch.json", "service/local/x.go"} {
+		if slicesContains(got, unwanted) {
+			t.Errorf("%s should have been ignored; got %v", unwanted, got)
+		}
+	}
+}
+
+// The user's configured excludes and .gitignore are independent filters, and a
+// file need only be caught by one of them.
+func TestCollectFiles_GitignoreAndExcludesBothApply(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		".gitignore":  "*.json\n",
+		"app.json":    "caught by gitignore",
+		"notes.txt":   "caught by the configured excludes",
+		"src/main.go": "package main",
+	})
+
+	got := collected(t, New(root, nil, nil).WithExcludes([]string{"notes.txt"}), root)
+	want := []string{"src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want %v", got, want)
+	}
+}
+
+// A workspace with no .gitignore must index exactly what it did before.
+func TestCollectFiles_NoGitignoreIndexesEverything(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		"src/main.go": "package main",
+		"README.md":   "# hi",
+	})
+
+	got := collected(t, New(root, nil, nil), root)
+	want := []string{"README.md", "src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want %v", got, want)
+	}
+}
+
+// An ignored directory is pruned, not walked. On a real repository the ignored
+// directories are the enormous ones — node_modules, build output, virtualenvs —
+// so descending into them to reject each file individually would cost most of
+// the walk.
+func TestCollectFiles_PrunesIgnoredDirectories(t *testing.T) {
+	files := map[string]string{".gitignore": "heavy/\n", "src/main.go": "package main"}
+	for i := 0; i < 200; i++ {
+		files["heavy/pkg"+strconv.Itoa(i)+"/index.go"] = "package x"
+	}
+
+	root := indexTree(t, files)
+	got := collected(t, New(root, nil, nil), root)
+	want := []string{"src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %d files (%v), want just %v", len(got), got, want)
+	}
+}
+
+func slicesContains(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if h == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// The round trip the feature is judged on: the index has to track .gitignore in
+// both directions, not just filter new work.
+//
+// Adding a path to .gitignore has to remove what was already indexed under it,
+// or the index keeps answering questions about a directory the project has
+// since declared noise — and nothing in a later run would ever revisit it,
+// because already-indexed files are skipped.
+func TestReindex_PurgesFilesNewlyAddedToGitignore(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		"src/main.go":     "package main",
+		"generated/db.go": "package generated",
+	})
+	store := newTestDocStore(t)
+
+	// First run: no .gitignore, so both files are collected and indexed.
+	first := New(root, store, nil)
+	files := collected(t, first, root)
+	if len(files) != 2 {
+		t.Fatalf("first pass collected %v, want both files", files)
+	}
+	for _, rel := range files {
+		if err := store.Upsert(&docindex.PageEntry{
+			DocPath: filepath.Join(root, filepath.FromSlash(rel)), PageNum: 1,
+			Keywords: []string{"kw"}, Labels: []string{"L"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The project now declares generated/ as noise.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("generated/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second run: a fresh Indexer, as the server builds one per index request.
+	second := New(root, store, nil)
+	allFiles, err := second.collectFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.purgeDeletedDocs(context.Background(), allFiles); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+
+	if indexed, _ := store.IsDocIndexed(filepath.Join(root, "generated", "db.go")); indexed {
+		t.Error("a file added to .gitignore is still in the index after re-indexing")
+	}
+	if indexed, _ := store.IsDocIndexed(filepath.Join(root, "src", "main.go")); !indexed {
+		t.Error("a file that is still allowed was purged")
+	}
+}
+
+// The other direction. Taking a path out of .gitignore has to bring it back:
+// the file was never indexed while ignored, so the re-run has to collect it.
+func TestReindex_PicksUpFilesRemovedFromGitignore(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		".gitignore":      "generated/\n",
+		"src/main.go":     "package main",
+		"generated/db.go": "package generated",
+	})
+
+	if got := collected(t, New(root, nil, nil), root); strings.Join(got, ",") != "src/main.go" {
+		t.Fatalf("while ignored, collected %v, want just src/main.go", got)
+	}
+
+	// The project changes its mind.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collected(t, New(root, nil, nil), root)
+	if !slicesContains(got, "generated/db.go") {
+		t.Errorf("a file removed from .gitignore was not picked back up; collected %v", got)
+	}
+}
+
+// Parsed .gitignore files are cached for the life of a Matcher, which is the
+// life of its Indexer. That is only safe because a run builds its own — editing
+// .gitignore and re-indexing through a reused Indexer would consult the rules
+// as they were. Pinned so the ownership does not quietly change.
+func TestIndexer_ReadsGitignoreFreshPerRun(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		".gitignore":  "*.json\n",
+		"config.json": "{}",
+		"src/main.go": "package main",
+	})
+
+	stale := New(root, nil, nil)
+	if got := collected(t, stale, root); slicesContains(got, "config.json") {
+		t.Fatalf("config.json should start out ignored; got %v", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same Indexer keeps its cached rules — that is the documented contract,
+	// and the reason a run must not reuse one.
+	if got := collected(t, stale, root); slicesContains(got, "config.json") {
+		t.Error("the cached matcher re-read .gitignore mid-run, which makes a run's filtering non-deterministic")
+	}
+	// A fresh one sees the new rules, which is what every real run gets.
+	if got := collected(t, New(root, nil, nil), root); !slicesContains(got, "config.json") {
+		t.Errorf("a fresh Indexer did not see the updated .gitignore; collected %v", got)
+	}
+}
+
+func TestPreviewCountsWork(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel string) string {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("skipped/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := write("a.go")
+	write("b.go")
+	write("c.go")
+	write("skipped/d.go") // excluded by .gitignore, so absent from every count
+
+	store := newTestDocStore(t)
+	// One file already in the index, and one entry whose file is gone: the two
+	// cases a run treats differently and a preview has to tell apart.
+	for _, path := range []string{a, filepath.Join(dir, "deleted.go")} {
+		if err := store.Upsert(&docindex.PageEntry{
+			DocPath: path, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+		}); err != nil {
+			t.Fatalf("upsert %s: %v", path, err)
+		}
+	}
+
+	plan, err := New(dir, store, nil).Preview()
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+
+	// .gitignore itself has no extension the indexer treats as text, so the
+	// three .go files are the whole indexable set.
+	if plan.Total != 3 {
+		t.Errorf("Total = %d, want 3 (skipped/ is gitignored)", plan.Total)
+	}
+	if plan.Indexed != 1 {
+		t.Errorf("Indexed = %d, want 1", plan.Indexed)
+	}
+	if plan.Pending != 2 {
+		t.Errorf("Pending = %d, want 2", plan.Pending)
+	}
+	if plan.Stale != 1 {
+		t.Errorf("Stale = %d, want 1 — the entry for a file no longer on disk", plan.Stale)
+	}
+	// The pending breakdown must describe the pending set, not the whole tree:
+	// the dialog prints it next to the pending count.
+	if plan.PendingText != 2 {
+		t.Errorf("PendingText = %d, want 2", plan.PendingText)
+	}
+	if plan.Text != 3 {
+		t.Errorf("Text = %d, want 3", plan.Text)
+	}
+}
+
+func TestFileList_MarksIndexedAndSkipsGitignored(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel string) string {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("skipped/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := write("a.go")
+	write("b.go")
+	write("skipped/d.go") // excluded by .gitignore — must not appear in the list
+
+	store := newTestDocStore(t)
+	// One file already in the index, plus a stale entry for a file no longer on disk.
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: a, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+	}); err != nil {
+		t.Fatalf("upsert %s: %v", a, err)
+	}
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: filepath.Join(dir, "deleted.go"), PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+	}); err != nil {
+		t.Fatalf("upsert stale: %v", err)
+	}
+
+	files, err := New(dir, store, nil).FileList()
+	if err != nil {
+		t.Fatalf("FileList: %v", err)
+	}
+
+	// The gitignored file must be absent; the stale entry must not appear (it is
+	// not on disk). Both on-disk files show up, with exactly one marked indexed.
+	if len(files) != 2 {
+		t.Fatalf("got %d files, want 2: %+v", len(files), files)
+	}
+	indexed := 0
+	seenA := false
+	for _, f := range files {
+		if f.Indexed {
+			indexed++
+		}
+		if f.Path == a {
+			seenA = true
+			if !f.Indexed {
+				t.Errorf("a.go should be marked indexed")
+			}
+		}
+	}
+	if indexed != 1 {
+		t.Errorf("indexed count = %d, want 1", indexed)
+	}
+	if !seenA {
+		t.Errorf("a.go missing from the list")
 	}
 }

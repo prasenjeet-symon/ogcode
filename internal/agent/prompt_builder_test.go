@@ -7,7 +7,7 @@ import (
 )
 
 func TestMemoryMDPrompt_CanWrite(t *testing.T) {
-	prompt := memoryMDPrompt(true)
+	prompt := memoryMDPrompt(true, true)
 
 	if !strings.Contains(prompt, "### How to maintain MEMORY.md") {
 		t.Error("expected 'How to maintain' heading when canWriteFiles=true")
@@ -24,7 +24,7 @@ func TestMemoryMDPrompt_CanWrite(t *testing.T) {
 }
 
 func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
-	prompt := memoryMDPrompt(false)
+	prompt := memoryMDPrompt(false, true)
 
 	if !strings.Contains(prompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading when canWriteFiles=false")
@@ -43,7 +43,7 @@ func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
 func TestMemoryMDPrompt_CommonSections(t *testing.T) {
 	// Both variants should include these common sections
 	for _, canWrite := range []bool{true, false} {
-		prompt := memoryMDPrompt(canWrite)
+		prompt := memoryMDPrompt(canWrite, true)
 		for _, sub := range []string{
 			"### Purpose",
 			"### What belongs in MEMORY.md",
@@ -58,7 +58,7 @@ func TestMemoryMDPrompt_CommonSections(t *testing.T) {
 }
 
 func TestMarkdownCapabilitiesPrompt(t *testing.T) {
-	prompt := markdownCapabilitiesPrompt()
+	prompt := markdownCapabilitiesPrompt(true)
 	if !strings.Contains(prompt, "Mermaid diagrams") {
 		t.Error("expected Mermaid mention in markdown capabilities prompt")
 	}
@@ -97,7 +97,7 @@ func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
 	// cache_control — must NOT contain the current date. It is injected as a
 	// separate system-reminder entry so the cached prefix stays byte-for-byte
 	// identical across turns.
-	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", 1920, 1080, "")[0]
+	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", 1920, 1080, "", -1)[0]
 	if strings.Contains(prompt, "Current date:") {
 		t.Error("did not expect 'Current date:' in the base system prompt (it should be in a separate system-reminder entry)")
 	}
@@ -158,7 +158,7 @@ func TestOSEnvPrompt_CachedAndNonEmpty(t *testing.T) {
 		t.Error("expected non-empty OSVersion from getOSEnv")
 	}
 	// The prompt must mention POSIX sh so the agent avoids bashisms.
-	p := osEnvPrompt()
+	p := osEnvPrompt(true)
 	if !strings.Contains(p, "POSIX-compatible shell") {
 		t.Error("expected POSIX-compatible shell guidance in osEnvPrompt")
 	}
@@ -220,12 +220,81 @@ func TestViewportPrompt(t *testing.T) {
 }
 
 func TestParallelToolCallsPrompt(t *testing.T) {
-	prompt := parallelToolCallsPrompt()
+	prompt := parallelToolCallsPrompt(true)
 	if !strings.Contains(prompt, "Parallel tool calls") {
 		t.Error("expected 'Parallel tool calls' heading")
 	}
 	if !strings.Contains(prompt, "independent") {
 		t.Error("expected 'independent' mention in parallel tool calls prompt")
+	}
+}
+
+// The section has to do more than permit batching — permission was what the
+// earlier wording gave, and a model reading it still explored one file per
+// turn. It has to say batching is the default, give a test the model can apply
+// before it has decided anything, and name the case where batching corrupts
+// work rather than merely wasting a round trip.
+func TestParallelToolCallsPrompt_PushesBatchingAsTheDefault(t *testing.T) {
+	prompt := parallelToolCallsPrompt(true)
+
+	for _, want := range []string{
+		"Batching is the default", // the framing, not a permission
+		"round trip",              // what a sequential call actually costs
+		"same block",              // the concrete instruction
+		"anti-pattern",            // the habit being corrected
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("parallel tool calls prompt missing %q", want)
+		}
+	}
+}
+
+// Tool calls in one block run concurrently in an unspecified order, so two
+// edits to the same file are not slow-but-safe — the second edit's old_string
+// may no longer match, or may match somewhere it should not. That is the one
+// place this advice can cause damage rather than save time, so the prompt has
+// to carve it out explicitly.
+func TestParallelToolCallsPrompt_WarnsAboutSameFileEdits(t *testing.T) {
+	prompt := parallelToolCallsPrompt(true)
+
+	if !strings.Contains(prompt, "Never batch two edits to the same file") {
+		t.Error("prompt does not warn against batching edits to one file")
+	}
+	if !strings.Contains(prompt, "old_string") {
+		t.Error("prompt does not say what actually breaks when same-file edits are batched")
+	}
+}
+
+// The half about edits is offered only to agents that can edit. A read-only
+// agent told to sequence its edits carefully has been handed an instruction it
+// cannot act on, and the examples in the shared body have to name tools every
+// code-facing agent actually holds — otherwise the guidance points at something
+// ForAgent never offers, which fails silently.
+func TestParallelToolCallsPrompt_ReadOnlyVariantOmitsEditAdvice(t *testing.T) {
+	readOnly := parallelToolCallsPrompt(false)
+
+	for _, unwanted := range []string{"old_string", "check_syntax", "edits to the same file"} {
+		if strings.Contains(readOnly, unwanted) {
+			t.Errorf("read-only variant mentions %q, which those agents cannot use", unwanted)
+		}
+	}
+	// It still has to carry the part that applies to everyone.
+	if !strings.Contains(readOnly, "Batching is the default") {
+		t.Error("read-only variant lost the batching guidance itself")
+	}
+}
+
+// The advice is only true because the loop really does run a block's calls
+// concurrently. If that ever changed, the prompt would be telling every agent
+// something false — so the two are pinned together.
+func TestParallelToolCallsPrompt_MatchesWhatTheLoopDoes(t *testing.T) {
+	// executeReadyToolCalls spawns one goroutine per ready call and waits for
+	// all of them; there is no serialization by tool type. This test asserts the
+	// prompt is offered to every agent that can act on it.
+	for _, a := range codeFacingAgents() {
+		if !strings.Contains(a.System, "Parallel tool calls") {
+			t.Errorf("%s: prompt does not carry the parallel tool calls section", a.Name)
+		}
 	}
 }
 
@@ -496,15 +565,14 @@ func TestBuildVsTaskAgent_Framing(t *testing.T) {
 
 func TestProjectIndexPrompt(t *testing.T) {
 	// Build role — ends with "make changes"
-	prompt := projectIndexPrompt("build")
+	prompt := projectIndexPrompt("build", true, true)
 
 	for _, sub := range []string{
 		"Mandatory: Use Project Index Before Exploration",
 		"codebase_map",
 		"MANDATORY FIRST STEP",
-		"Faster navigation",
-		"Better context",
-		"Fewer mistakes",
+		"has not been indexed", // the empty-index escape hatch
+		"glob and grep",        // ...and what to do instead
 		"subdir",
 		"Then make changes",
 	} {
@@ -514,7 +582,7 @@ func TestProjectIndexPrompt(t *testing.T) {
 	}
 
 	// Plan role — read-only, ends with "produce your plan" instead of "make changes"
-	planPrompt := projectIndexPrompt("plan")
+	planPrompt := projectIndexPrompt("plan", true, true)
 	if !strings.Contains(planPrompt, "Then produce your plan") {
 		t.Error("expected plan role workflow to end with 'Then produce your plan'")
 	}
@@ -523,7 +591,7 @@ func TestProjectIndexPrompt(t *testing.T) {
 	}
 
 	// Note role — read-only, ends with "produce your note"
-	notePrompt := projectIndexPrompt("note")
+	notePrompt := projectIndexPrompt("note", true, true)
 	if !strings.Contains(notePrompt, "Then produce your note") {
 		t.Error("expected note role workflow to end with 'Then produce your note'")
 	}
@@ -645,9 +713,9 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 // entry [0] is the only block providers mark cacheable, and the browser resends
 // its window size with every prompt, so a resize must not change [0] by one byte.
 func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.T) {
-	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "")
-	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1280, 720, "")
-	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 0, 0, "")
+	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1)
+	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1280, 720, "", -1)
+	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 0, 0, "", -1)
 
 	if desktop[0] != laptop[0] {
 		t.Error("resizing the window changed the cacheable prefix — the tools+system cache is invalidated on every resize")
@@ -676,14 +744,39 @@ func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.
 // that moving the viewport could have broken: an output-only agent's format
 // constraint must stay the last thing the model reads.
 func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
-	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", 1920, 1080, "")
+	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1)
 	if got := entries[len(entries)-1]; got != NoteAgent.FinalInstruction {
 		t.Errorf("last entry = %q, want the agent's FinalInstruction", got)
 	}
 	// An agent without one must not gain an empty trailing entry.
-	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "") {
+	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1) {
 		if strings.TrimSpace(e) == "" {
 			t.Error("assembled entries contain an empty block")
+		}
+	}
+}
+
+// The same-file edit rule is stated twice on purpose: once where batching is
+// explained, and once in Hard rules. It is the only piece of batching advice
+// whose cost is a corrupted file rather than a wasted round trip, and Hard
+// rules is where an agent looks for what it must not do — 60% into a prompt,
+// inside a section about efficiency, is not.
+//
+// Only the write-capable agents carry it, because only they can commit the
+// mistake.
+func TestCodingAgentHardRules_ForbidSameFileEditBatching(t *testing.T) {
+	for _, a := range []Agent{BuildAgent, TaskAgent} {
+		hard := a.System[strings.Index(a.System, "## Hard rules"):]
+		if !strings.Contains(hard, "two edits to the same file in one response block") {
+			t.Errorf("%s: Hard rules does not forbid batching edits to one file", a.Name)
+		}
+		if !strings.Contains(hard, "old_string") {
+			t.Errorf("%s: Hard rules does not say what breaks", a.Name)
+		}
+	}
+	for _, a := range []Agent{PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent} {
+		if strings.Contains(a.System, "two edits to the same file in one response block") {
+			t.Errorf("%s: cannot edit, so the rule is noise in its prompt", a.Name)
 		}
 	}
 }

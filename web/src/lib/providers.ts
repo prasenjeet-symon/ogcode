@@ -6,6 +6,10 @@ export interface ProviderDef {
   ring: string;
   hasBaseURL: boolean;
   supportsEmbed: boolean;
+  // keyOptional providers authenticate some other way (Ollama signs in on the
+  // host, or runs unauthenticated locally), so an endpoint alone is a complete
+  // configuration — reporting "Not configured" for them is simply wrong.
+  keyOptional: boolean;
   // first-party providers have their own native API/SDK and a dedicated
   // onboarding credential step; OpenAI-compatible providers (Gemini, DeepSeek,
   // Groq, …) are added through the OpenAI provider with a custom base URL and
@@ -14,10 +18,10 @@ export interface ProviderDef {
 }
 
 export const PROVIDER_DEFS: ProviderDef[] = [
-  { id: 'anthropic',  label: 'Anthropic',  dot: 'bg-orange-400',  bg: 'bg-orange-500/10',  ring: 'ring-orange-400/20', hasBaseURL: true,  supportsEmbed: false, firstParty: true  },
-  { id: 'openai',     label: 'OpenAI',     dot: 'bg-emerald-400', bg: 'bg-emerald-500/10', ring: 'ring-emerald-400/20', hasBaseURL: true,  supportsEmbed: true,  firstParty: true  },
-  { id: 'openrouter', label: 'OpenRouter', dot: 'bg-violet-400',  bg: 'bg-violet-500/10',  ring: 'ring-violet-400/20', hasBaseURL: false, supportsEmbed: true,  firstParty: false },
-  { id: 'ollama',     label: 'Ollama',     dot: 'bg-sky-400',     bg: 'bg-sky-500/10',     ring: 'ring-sky-400/20',    hasBaseURL: true,  supportsEmbed: true,  firstParty: false },
+  { id: 'anthropic',  label: 'Anthropic',  dot: 'bg-orange-400',  bg: 'bg-orange-500/10',  ring: 'ring-orange-400/20', hasBaseURL: true,  supportsEmbed: false, firstParty: true,  keyOptional: false },
+  { id: 'openai',     label: 'OpenAI',     dot: 'bg-emerald-400', bg: 'bg-emerald-500/10', ring: 'ring-emerald-400/20', hasBaseURL: true,  supportsEmbed: true,  firstParty: true,  keyOptional: false },
+  { id: 'openrouter', label: 'OpenRouter', dot: 'bg-violet-400',  bg: 'bg-violet-500/10',  ring: 'ring-violet-400/20', hasBaseURL: false, supportsEmbed: true,  firstParty: false, keyOptional: false },
+  { id: 'ollama',     label: 'Ollama',     dot: 'bg-sky-400',     bg: 'bg-sky-500/10',     ring: 'ring-sky-400/20',    hasBaseURL: true,  supportsEmbed: true,  firstParty: false, keyOptional: true  },
 ];
 
 // Known OpenAI-compatible endpoints that can be used through the OpenAI

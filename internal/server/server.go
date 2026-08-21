@@ -306,6 +306,21 @@ func (s *Server) Start() error {
 			}
 			return *cfg
 		},
+		// Lets the system prompt say up front whether codebase_map has anything
+		// to return, so a session in an unindexed project does not spend a call
+		// finding out. Queried per turn, so building the index mid-session is
+		// reflected on the next one.
+		IndexedFileCount: func(dir string) int {
+			paths, err := s.docindexStore.ListDocPaths(dir)
+			if err != nil {
+				// Unknown beats wrong: -1 omits the line and leaves the agent on
+				// the probe-and-recover path rather than asserting "not indexed"
+				// about a project that may well be.
+				slog.Warn("index status lookup failed, omitting from prompt", "dir", dir, "err", err)
+				return -1
+			}
+			return len(paths)
+		},
 		Permissions: s.permissions,
 	}
 
@@ -319,6 +334,15 @@ func (s *Server) Start() error {
 	// regardless of the search bridge — the sub-agent is a read-only codebase
 	// investigator that only optionally uses deep_search.
 	toolRegistry.Register(tool.TaskTool{Run: s.loopRunner.RunTaskSession})
+
+	// Repair any interactive session whose last turn was cut short by a process
+	// that is no longer running. A crash records nothing on the way out, and
+	// what it leaves behind — a turn with no finish reason, a tool call nothing
+	// answered — can make the session's next request invalid, whether that
+	// request comes from a resume or from the user simply typing again. This
+	// needs loopRunner, so it runs here rather than beside the task recovery
+	// above, and before the HTTP server can accept anything.
+	s.recoverInterruptedSessions()
 
 	// Initialize version manager
 	s.versionManager = version.New()
@@ -492,6 +516,18 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 	// The provider is registered when any of: an explicit key/base URL is set,
 	// the binary is on $PATH, or the Ollama server responds to a health probe.
 	ollamaStatus := provider.DetectOllama()
+	// A base URL persisted from an earlier launch must not permanently shadow a
+	// live endpoint that detection just found. Without this, a row written when
+	// local Ollama was installed keeps pointing at a dead localhost:11434 even
+	// after the user has moved to a router. An explicit OLLAMA_BASE_URL stays
+	// authoritative and is never second-guessed.
+	if os.Getenv("OLLAMA_BASE_URL") == "" {
+		if live := provider.PreferLiveOllamaEndpoint(ollamaBaseURL, ollamaStatus); live != ollamaBaseURL {
+			slog.Info("persisted ollama endpoint is not responding; using detected endpoint",
+				"stale", ollamaBaseURL, "detected", live)
+			ollamaBaseURL = live
+		}
+	}
 	ollamaDetected := ollamaKey != "" || ollamaBaseURL != "" || ollamaStatus.Installed || ollamaStatus.Running
 	if ollamaDetected {
 		if ollamaBaseURL == "" {

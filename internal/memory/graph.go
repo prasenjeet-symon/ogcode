@@ -806,7 +806,21 @@ func buildRecallPrompt(question string, skeletonTree map[string]TopicTree, seman
 	return sb.String()
 }
 
+// enrichTreeWithFollowUp merges a follow-up round's topics into the running
+// tree and returns the result.
+//
+// main is routinely nil. BuildLightweightTree returns a nil map for "nothing
+// matched" — not only for an empty session, but also when the session has facts
+// and none of them clear the cosine threshold, which is the common case for a
+// question about something not discussed yet. Recall keeps that nil in
+// semanticTree, and the follow-up round then merges into it: the follow-up's
+// own fallback query drops the semantic filter entirely, so it reliably returns
+// recent facts and reliably reached this write. A nil map reads fine and panics
+// only when written, so the failure surfaced here rather than at the source.
 func enrichTreeWithFollowUp(main, extra map[string]TopicTree) map[string]TopicTree {
+	if main == nil {
+		main = make(map[string]TopicTree, len(extra))
+	}
 	for topic, tt := range extra {
 		if existing, ok := main[topic]; ok {
 			main[topic] = TopicTree{

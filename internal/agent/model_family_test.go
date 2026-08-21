@@ -30,14 +30,46 @@ func TestModelFamily(t *testing.T) {
 }
 
 func TestModelFamilyStylePrompt(t *testing.T) {
-	for _, fam := range []string{"openai", "gemini", "local"} {
+	// "generic" is included deliberately: it is where every unrecognised model
+	// lands, and the base prompt is written for Claude, not for them.
+	for _, fam := range []string{"openai", "gemini", "local", "generic"} {
 		if modelFamilyStylePrompt(fam) == "" {
 			t.Errorf("expected a non-empty style block for family %q", fam)
 		}
 	}
-	for _, fam := range []string{"anthropic", "generic", ""} {
+	// Claude is what the base prompt is tuned for; the empty family means no
+	// model is in hand at all.
+	for _, fam := range []string{"anthropic", ""} {
 		if got := modelFamilyStylePrompt(fam); got != "" {
 			t.Errorf("expected no style block for family %q, got %q", fam, got)
+		}
+	}
+	// The generic block must not contradict the parallel tool-call section.
+	if strings.Contains(modelFamilyStylePrompt("generic"), "ONE tool at a time") {
+		t.Error("generic block serialises tool calls; that rule belongs to small local models only")
+	}
+}
+
+// The catalogue an aggregator serves is mostly models modelFamily has no name
+// for. Landing in "generic" has to mean they get steering, not that they are
+// treated as Claude.
+func TestModelFamily_UnrecognisedModelsGetSteering(t *testing.T) {
+	for _, model := range []string{
+		"x-ai/grok-4",
+		"deepseek/deepseek-r1",
+		"qwen/qwen3-coder",
+		"moonshotai/kimi-k2",
+		"mistralai/mistral-large",
+		"meta-llama/llama-4-maverick",
+		"z-ai/glm-4.6",
+		"cohere/command-a",
+	} {
+		fam := modelFamily("openrouter", model)
+		if fam != "generic" {
+			t.Errorf("modelFamily(%q) = %q, want generic", model, fam)
+		}
+		if modelFamilyStylePrompt(fam) == "" {
+			t.Errorf("%s: unrecognised model got no working-style guidance", model)
 		}
 	}
 }

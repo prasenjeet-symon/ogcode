@@ -15,7 +15,7 @@ import (
 
 // Build info set via ldflags during build.
 var (
-	Version = "v0.25.0"
+	Version = "v0.26.0"
 	Commit  = "none"
 	Date    = "unknown"
 )
@@ -189,7 +189,7 @@ func compareVersions(a, b string) int {
 	// Strip 'v' prefix first
 	a = strings.TrimPrefix(a, "v")
 	b = strings.TrimPrefix(b, "v")
-	
+
 	aParts := strings.Split(a, ".")
 	bParts := strings.Split(b, ".")
 
