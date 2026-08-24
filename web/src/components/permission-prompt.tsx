@@ -67,13 +67,13 @@ export default function PermissionPrompt() {
                 </Show>
               </span>
               <code
-                class="min-w-0 flex-1 truncate font-mono text-[12px] text-[color:var(--text-secondary)]"
+                class="min-w-0 flex-1 truncate font-mono text-meta text-[color:var(--text-secondary)]"
                 title={req().pattern}
               >
                 {req().pattern && req().pattern !== '*' ? req().pattern : `Use ${req().tool}`}
               </code>
               <Show when={queue().length > 1}>
-                <span class="shrink-0 text-[10.5px] text-[color:var(--text-tertiary)]">+{queue().length - 1}</span>
+                <span class="shrink-0 text-micro text-[color:var(--text-tertiary)]">+{queue().length - 1}</span>
               </Show>
             </div>
 
@@ -83,7 +83,7 @@ export default function PermissionPrompt() {
                 ref={allowBtn}
                 type="button"
                 onClick={() => session.respondPermission(req().permissionId, 'once')}
-                class="inline-flex h-7 items-center gap-1.5 rounded-md bg-[color:var(--accent)] px-2.5 text-[11.5px] font-medium text-[color:var(--on-primary)] transition-all var(--spring-sm) hover:bg-[color:var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] active:scale-[0.97]"
+                class="inline-flex h-7 items-center gap-1.5 rounded-md bg-[color:var(--accent)] px-2.5 text-meta font-medium text-[color:var(--on-primary)] transition-all hover:bg-[color:var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] active:scale-[0.97]"
               >
                 Allow
                 <kbd class="rounded border border-white/30 px-1 font-mono text-[9.5px] leading-[14px] opacity-80">↵</kbd>
@@ -91,7 +91,7 @@ export default function PermissionPrompt() {
               <button
                 type="button"
                 onClick={() => session.respondPermission(req().permissionId, 'always')}
-                class="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[11.5px] font-medium text-[color:var(--text-secondary)] transition-all var(--spring-sm) hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)] active:scale-[0.97]"
+                class="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-meta font-medium text-[color:var(--text-secondary)] transition-all hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)] active:scale-[0.97]"
                 title={`Always allow ${req().tool} for this session`}
               >
                 Always
@@ -101,7 +101,7 @@ export default function PermissionPrompt() {
               <button
                 type="button"
                 onClick={() => session.respondPermission(req().permissionId, 'reject')}
-                class="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[11.5px] font-medium text-[color:var(--text-tertiary)] transition-all var(--spring-sm) hover:bg-red-500/10 hover:text-red-300 active:scale-[0.97]"
+                class="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-meta font-medium text-[color:var(--text-tertiary)] transition-all hover:bg-red-500/10 hover:text-red-300 active:scale-[0.97]"
               >
                 Reject
                 <kbd class="rounded border border-current px-1 font-mono text-[9.5px] leading-[14px] opacity-55">esc</kbd>

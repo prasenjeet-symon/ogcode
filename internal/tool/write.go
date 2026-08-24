@@ -56,16 +56,35 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	var prior []byte
 	created := true
 	diffOmitted := false
-	if existing, err := os.ReadFile(path); err == nil {
+
+	// Existence is decided by Stat, not by whether the read below succeeds: a
+	// file that exists but can't be read (permissions, a transient I/O error)
+	// is still an overwrite, not a creation. Keying "created" off ReadFile's
+	// error used to conflate the two — a write-only file got silently
+	// overwritten while being reported as newly "Created", hiding that content
+	// existed and was lost, and dropping the syntax baseline so a pre-existing
+	// error would be blamed on this write.
+	switch _, statErr := os.Stat(path); {
+	case statErr == nil:
 		created = false
-		prior = existing
-		if len(existing) <= maxDiffBytes && len(input.Content) <= maxDiffBytes {
-			oldContent = string(existing)
+		if existing, err := os.ReadFile(path); err == nil {
+			prior = existing
+			if len(existing) <= maxDiffBytes && len(input.Content) <= maxDiffBytes {
+				oldContent = string(existing)
+			} else {
+				diffOmitted = true
+			}
 		} else {
+			// Exists but unreadable: there is no baseline to diff or check
+			// syntax against, but it must still not be reported as created.
 			diffOmitted = true
 		}
-	} else if len(input.Content) > maxDiffBytes {
-		diffOmitted = true
+	case os.IsNotExist(statErr):
+		if len(input.Content) > maxDiffBytes {
+			diffOmitted = true
+		}
+	default:
+		return Result{}, fmt.Errorf("stat %s: %w", path, statErr)
 	}
 
 	dir := filepath.Dir(path)
@@ -73,7 +92,9 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 		return Result{}, fmt.Errorf("create dirs: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(input.Content), 0o644); err != nil {
+	// Atomic: a failure here leaves the previous file intact rather than a
+	// truncated one. See writeFileAtomic.
+	if err := writeFileAtomic(path, []byte(input.Content)); err != nil {
 		return Result{}, fmt.Errorf("write file: %w", err)
 	}
 

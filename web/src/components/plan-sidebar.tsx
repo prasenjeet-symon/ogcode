@@ -49,9 +49,13 @@ export default function PlanSidebar() {
   const handleDelete = async (e: MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm('Delete this plan?')) return;
+    // Capture this before the delete — deletePlan clears activePlan when the
+    // deleted plan was the active one, so checking afterwards always misses and
+    // leaves the user stranded on /plan/<deleted-id>.
+    const wasActive = plan.activePlan()?.id === id;
     await plan.deletePlan(id);
-    if (plan.activePlan()?.id === id) {
-      navigate('/plan');
+    if (wasActive) {
+      navigate('/plan', { replace: true });
     }
   };
 

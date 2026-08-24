@@ -56,7 +56,7 @@ export default function FileDiff(props: {
 
   return (
     <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] overflow-hidden">
-      <div class="flex items-center gap-2 px-3 h-7 border-b border-[color:var(--border-subtle)] text-[11px]">
+      <div class="flex items-center gap-2 px-3 h-7 border-b border-[color:var(--border-subtle)] text-micro">
         <span class="uppercase tracking-wide font-medium" style={{ color: 'var(--text-muted)' }}>
           {modeLabel()}
         </span>
@@ -70,15 +70,15 @@ export default function FileDiff(props: {
       <Show
         when={!props.omitted}
         fallback={
-          <div class="px-3 py-3 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+          <div class="px-3 py-3 text-meta" style={{ color: 'var(--text-muted)' }}>
             File too large to show a diff.
           </div>
         }
       >
-        <div class="overflow-x-auto font-mono text-[12px] leading-[1.5] py-1">
+        <div class="overflow-x-auto font-mono text-meta leading-[1.5] py-1">
           <For each={shown()}>{(row) => <DiffRow row={row} />}</For>
           <Show when={truncated() > 0}>
-            <div class="px-3 py-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            <div class="px-3 py-1 text-micro" style={{ color: 'var(--text-muted)' }}>
               … {truncated()} more lines
             </div>
           </Show>

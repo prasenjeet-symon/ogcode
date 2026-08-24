@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 )
 
 // AnthropicProvider implements Provider for the Anthropic Messages API.
@@ -49,6 +48,7 @@ func (p *AnthropicProvider) Models() []ModelInfo {
 			OutputPricePerM: m.OutputPricePerM,
 			SupportsImages:  m.SupportsImages,
 			ContextWindow:   m.ContextWindow,
+			MaxOutputTokens: m.MaxOutputTokens,
 		})
 	}
 	return all
@@ -316,8 +316,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	httpReq.Header.Set("x-api-key", p.apiKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
-	client := &http.Client{Timeout: 600 * time.Second}
-	resp, err := client.Do(httpReq)
+	resp, err := streamHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
@@ -341,13 +340,16 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 	defer cancel()
 
 	// Idle watchdog: if the stream goes silent for streamIdleTimeout, cancel the
-	// request context so the blocked read unblocks and the stream ends, instead
-	// of hanging until the 600s HTTP client timeout. Reset on every line received.
-	idle := time.AfterFunc(streamIdleTimeout, cancel)
+	// request context so the blocked read unblocks and the stream ends instead of
+	// hanging. It wraps the body so it resets on bytes read off the wire, not on
+	// lines handed downstream — see idleWatchdog.
+	// Anthropic emits tool-call arguments as a run of input_json_delta events, so
+	// a working stream is never quiet for long: the tight budget applies.
+	idle := newIdleWatchdog(body, cancel, streamIdleTimeout)
 	defer idle.Stop()
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner := bufio.NewScanner(idle)
+	scanner.Buffer(make([]byte, 0, 64*1024), streamMaxLineBytes)
 
 	var currentToolID string
 	var currentToolName string
@@ -355,7 +357,6 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 	usageDirty := false
 
 	for scanner.Scan() {
-		idle.Reset(streamIdleTimeout)
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -457,6 +458,16 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 		case "error":
 			ch <- StreamEvent{Type: EventError, Error: evt.Error}
 		}
+	}
+
+	// The scan can stop for reasons other than end-of-stream: a read error, a
+	// cancelled request, an over-long line. Report it — returning silently would
+	// close the channel with no finish event and no error, leaving the agent loop
+	// to guess at what went wrong.
+	if err := scanner.Err(); err != nil {
+		msg := describeStreamReadError(err, idle.Fired(), idle.Timeout())
+		slog.Warn("anthropic stream read failed", "err", err, "idleTimeout", idle.Fired())
+		ch <- StreamEvent{Type: EventError, Error: msg}
 	}
 }
 

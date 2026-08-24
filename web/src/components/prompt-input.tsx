@@ -59,13 +59,29 @@ export default function PromptInput() {
     if (guidanceSentTimer) { clearTimeout(guidanceSentTimer); guidanceSentTimer = null; }
   });
 
-  // Auto-resize textarea
+  // Auto-resize the textarea.
+  //
+  // Measuring `scrollHeight` after setting height to `auto` is the usual
+  // recipe and it is wrong here: on a fresh load this effect runs before the
+  // first layout, and an auto-height textarea in a flex column reports the
+  // whole free column as its scrollHeight — so the composer opened at its
+  // 240px maximum and ate half the screen. Pinning to the CSS min-height while
+  // empty, and measuring from `0px` otherwise, always yields the true content
+  // height.
+  const MAX_COMPOSER_HEIGHT = 220;
+  const resize = () => {
+    const el = textareaRef;
+    if (!el) return;
+    if (!text()) {
+      el.style.height = '';   // fall back to the min-height in the class list
+      return;
+    }
+    el.style.height = '0px';
+    el.style.height = Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT) + 'px';
+  };
   createEffect(() => {
     text();
-    if (textareaRef) {
-      textareaRef.style.height = 'auto';
-      textareaRef.style.height = Math.min(textareaRef.scrollHeight, 240) + 'px';
-    }
+    resize();
   });
 
   // The agent loop is "running" if we're loading (LLM streaming) OR tools are executing
@@ -176,18 +192,18 @@ export default function PromptInput() {
       // "Guidance sent" badge on the destination session.
       if (accepted && session.activeSession()?.id === targetSessionId) {
         setText('');
-        if (textareaRef) textareaRef.style.height = 'auto';
+        if (textareaRef) textareaRef.style.height = '';
         setGuidanceSent(true);
         if (guidanceSentTimer) clearTimeout(guidanceSentTimer);
         guidanceSentTimer = setTimeout(() => setGuidanceSent(false), 2500);
       } else if (accepted) {
         // Session changed after guidance was accepted — still clear the input.
         setText('');
-        if (textareaRef) textareaRef.style.height = 'auto';
+        if (textareaRef) textareaRef.style.height = '';
       } else {
         // No running loop — fall back to a normal prompt
         setText('');
-        if (textareaRef) textareaRef.style.height = 'auto';
+        if (textareaRef) textareaRef.style.height = '';
         session.prompt(content);
       }
       return;
@@ -207,7 +223,7 @@ export default function PromptInput() {
     images.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     setPendingImages([]);
     setText('');
-    if (textareaRef) textareaRef.style.height = 'auto';
+    if (textareaRef) textareaRef.style.height = '';
     session.prompt(content, apiImages);
   };
 
@@ -225,13 +241,66 @@ export default function PromptInput() {
 
   const isDisabled = () => isRunning();
 
-  // Global Escape key handler to cancel the running agent loop
+  // ── Drag & drop ──
+  // dragDepth counts enter/leave pairs: dragging across a child element fires
+  // dragleave on the parent, so a plain boolean flickers the overlay off and on
+  // as the pointer crosses the toolbar or the textarea.
+  const [dragging, setDragging] = createSignal(false);
+  let dragDepth = 0;
+
+  // Images ride along with a new prompt, and mid-loop guidance is text-only —
+  // so while the agent is running a drop would silently queue an attachment the
+  // user could never send. Ignore drags entirely in that state.
+  const hasFiles = (e: DragEvent) =>
+    !isRunning() && Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
+  const handleDragEnter = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    dragDepth++;
+    setDragging(true);
+  };
+  const handleDragOver = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();               // required for drop to fire at all
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  };
+  const handleDragLeave = () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) setDragging(false);
+  };
+  const handleDrop = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    setDragging(false);
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) addFiles(files);
+  };
+
+  // Global keys:
+  //   Escape  — cancel the running agent loop
+  //   any printable character — start typing anywhere and the composer takes
+  //     it, the way a terminal or a chat client does. The keystroke is not
+  //     swallowed: focus moves during keydown, so the character itself lands
+  //     in the textarea and nothing is lost.
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && isRunning()) {
       e.preventDefault();
       e.stopPropagation();
       session.abort();
+      return;
     }
+
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key.length !== 1) return;                 // arrows, F-keys, Tab, …
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    // Never steal from another field — the sidebar search, a rename box, the
+    // command menu — or from the composer itself.
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
+    if (window.getSelection()?.toString()) return;  // let a copy of selected text proceed
+    textareaRef?.focus();
   };
 
   onMount(() => {
@@ -242,15 +311,29 @@ export default function PromptInput() {
   });
 
   return (
-    <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-4">
-      <form onSubmit={handleSubmit} class="max-w-3xl mx-auto px-4 md:px-6 pb-4">
+    <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-3">
+      <form onSubmit={handleSubmit} class="chat-col px-4 md:px-8 pb-3">
         <div
-          class={`rounded-2xl border bg-[color:var(--bg-surface)] transition-all var(--spring-md)
-            ${focused()
-              ? 'border-[color:var(--accent)]/40 shadow-lg shadow-black/30 shadow-[color:var(--accent)]/5'
-              : 'border-[color:var(--border-default)] shadow-md shadow-black/20'
-            }`}
+          class="composer relative rounded-[1.25rem] border bg-[color:var(--bg-surface)] transition-[border-color,box-shadow] duration-200"
+          classList={{ 'is-focused': focused(), 'is-dragging': dragging() }}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         >
+          {/* Drop target overlay — only while a file is actually over the box */}
+          <Show when={dragging()}>
+            <div class="absolute inset-0 z-10 rounded-[1.25rem] flex items-center justify-center gap-2
+                        pointer-events-none animate-fade-in
+                        border-2 border-dashed border-[color:var(--accent)]
+                        bg-[color:var(--bg-surface)]/92 text-[color:var(--accent)] text-ui font-medium">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9m0 0L8.25 12.75M12 9l3.75 3.75M3 16.5v.75A2.25 2.25 0 005.25 19.5h13.5A2.25 2.25 0 0021 17.25v-.75" />
+              </svg>
+              Drop images to attach
+            </div>
+          </Show>
+
           {/* Tool-permission request — surfaces at the very top of the composer */}
           <PermissionPrompt />
 
@@ -265,7 +348,7 @@ export default function PromptInput() {
                       type="button"
                       onClick={(e) => { e.stopPropagation(); removeImage(index()); }}
                       class="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 hover:bg-black/80
-                             flex items-center justify-center text-white/80 hover:text-white transition var(--spring-sm)"
+                             flex items-center justify-center text-white/80 hover:text-white transition"
                       title="Remove image"
                     >
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
@@ -283,12 +366,12 @@ export default function PromptInput() {
 
           {/* Error message */}
           <Show when={imageError()}>
-            <div class="px-4 pt-2 text-[11px] text-amber-400/80">{imageError()}</div>
+            <div class="px-4 pt-2 text-micro text-amber-400/80">{imageError()}</div>
           </Show>
 
           {/* Guidance-in-flight indicator */}
           <Show when={session.guidanceActive()}>
-            <div class="px-4 pt-2 flex items-center gap-1.5 text-[11px] text-[color:var(--accent)]/80">
+            <div class="px-4 pt-2 flex items-center gap-1.5 text-micro text-[color:var(--accent)]">
               <span class="inline-block w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse" />
               Guidance queued — will be applied on the next loop iteration
             </div>
@@ -305,13 +388,13 @@ export default function PromptInput() {
             onBlur={() => setFocused(false)}
             placeholder={isRunning() ? "Agent is working… type to send mid-loop guidance" : "Ask anything, paste an error, or describe a task…"}
             rows={1}
-            class="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] text-zinc-100
-                   placeholder-zinc-500 focus:outline-none
-                   min-h-[44px] max-h-[240px] leading-relaxed"
+            class="block w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-chat text-[color:var(--text-primary)]
+                   placeholder:text-[color:var(--text-muted)] focus:outline-none
+                   min-h-[2.25rem] max-h-[13.75rem] leading-[1.6]"
           />
 
           {/* Toolbar */}
-          <div class="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
+          <div class="flex items-center gap-1.5 px-2 pb-2 pt-0.5">
             <ModelSelector />
 
             {/* Approval mode: Ask (default) vs Auto (risk-gated) */}
@@ -322,12 +405,11 @@ export default function PromptInput() {
               type="button"
               onClick={() => fileInputRef?.click()}
               disabled={isDisabled()}
-              title="Attach images"
-              class="h-8 w-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm)
-                     text-zinc-400 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]
-                     disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.95]"
+              title="Attach images — or drop them anywhere on the composer"
+              aria-label="Attach images"
+              class="icon-btn h-8 min-w-8 transition-colors"
             >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
               </svg>
             </button>
@@ -344,7 +426,7 @@ export default function PromptInput() {
 
             {/* Guidance-sent confirmation badge */}
             <Show when={guidanceSent()}>
-              <span class="text-[11px] font-medium text-[color:var(--accent)]/80 select-none animate-pulse">
+              <span class="text-micro font-medium text-[color:var(--accent)] select-none animate-fade-in">
                 Guidance sent
               </span>
             </Show>
@@ -356,7 +438,7 @@ export default function PromptInput() {
                   the current generation/tool finish naturally — the guidance still
                   applies on the next iteration. */}
               <label
-                class="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-300 cursor-pointer select-none transition-colors var(--spring-sm) h-8 px-1.5 rounded-lg hover:bg-[color:var(--bg-hover)]"
+                class="flex items-center gap-1.5 text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] cursor-pointer select-none transition-colors h-8 px-1.5 rounded-lg hover:bg-[color:var(--bg-hover)]"
                 title={cancelTool() ? 'The running LLM stream and tools will be cancelled when you send guidance' : 'The current generation/tool will be allowed to finish before guidance is applied'}
               >
                 <input
@@ -370,27 +452,25 @@ export default function PromptInput() {
               <button
                 type="button"
                 onClick={() => session.abort()}
-                class="h-8 px-3 rounded-lg flex items-center gap-1.5 text-[12px] font-medium
-                       text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/30
-                       transition-all var(--spring-sm) active:scale-[0.97]"
+                class="h-8 px-2.5 rounded-lg flex items-center gap-1.5 text-meta font-medium
+                       text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/25
+                       transition-colors"
                 title="Cancel agent (Esc)"
               >
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
-                Cancel
+                Stop
               </button>
               {/* Send-as-guidance button: visible while running so the user has
                   an explicit affordance that submitting injects mid-loop guidance. */}
               <button
                 type="submit"
                 disabled={!canSend()}
+                aria-label="Send guidance"
                 title={canSend() ? `Send mid-loop guidance (Enter)${cancelTool() ? ' — cancels current tool' : ''}` : 'Type guidance to send'}
-                class={`h-8 w-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm)
-                  ${canSend()
-                    ? 'bg-[color:var(--accent)]/80 hover:bg-[color:var(--accent)] text-[color:var(--on-primary)] shadow-sm hover:scale-[1.06] active:scale-[0.95]'
-                    : 'bg-[color:var(--bg-elevated)] text-zinc-600 cursor-not-allowed scale-95'
-                  }`}
+                class="send-btn"
+                classList={{ 'is-ready': canSend() }}
               >
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6" />
@@ -402,12 +482,10 @@ export default function PromptInput() {
               <button
                 type="submit"
                 disabled={!canSend()}
+                aria-label="Send message"
                 title={canSend() ? 'Send (Enter)' : 'Type a message or attach an image'}
-                class={`h-8 w-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm)
-                  ${canSend()
-                    ? 'bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)] text-[color:var(--on-primary)] shadow-sm hover:shadow-md hover:scale-[1.06] active:scale-[0.95]'
-                    : 'bg-[color:var(--bg-elevated)] text-zinc-600 cursor-not-allowed scale-95'
-                  }`}
+                class="send-btn"
+                classList={{ 'is-ready': canSend() }}
               >
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6" />
@@ -417,23 +495,24 @@ export default function PromptInput() {
           </div>
         </div>
 
-        {/* Footer hint */}
-        <div class="mt-2 flex items-center justify-center gap-4 text-[10.5px] text-zinc-600">
-          <span class="flex items-center gap-1">
-            <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">↵</kbd>
-            send
-          </span>
-          <span class="flex items-center gap-1">
-            <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">⇧ ↵</kbd>
-            newline
-          </span>
-          <Show when={isRunning()}>
-            <span class="flex items-center gap-1">
-              <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">Esc</kbd>
-              cancel
-            </span>
+        {/* Footer hint.
+            One fixed-height row that swaps content instead of two stacked
+            rows: the keyboard hints are only useful while you are typing, and
+            the caveat is only worth reading when you are not. Reserving the
+            height keeps the composer from shifting on focus. */}
+        <div class="mt-1.5 h-4 flex items-center justify-center text-micro text-[color:var(--text-muted)]">
+          <Show
+            when={focused() || isRunning()}
+            fallback={<span>ogcode may make mistakes — verify important output.</span>}
+          >
+            <div class="flex items-center gap-3.5 animate-fade-in">
+              <span class="flex items-center gap-1"><kbd class="kbd">↵</kbd>send</span>
+              <span class="flex items-center gap-1"><kbd class="kbd">⇧↵</kbd>newline</span>
+              <Show when={isRunning()}>
+                <span class="flex items-center gap-1"><kbd class="kbd">esc</kbd>stop</span>
+              </Show>
+            </div>
           </Show>
-          <span class="text-zinc-700">ogcode may make mistakes — verify important output.</span>
         </div>
       </form>
     </div>

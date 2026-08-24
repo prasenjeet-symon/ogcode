@@ -22,7 +22,7 @@ export default function JumpToLatest(props: { count: number; onClick: () => void
       onClick={props.onClick}
       title={description()}
       aria-label={description()}
-      class="pointer-events-auto inline-flex items-center gap-1.5 h-7 pl-1.5 pr-2.5 rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-overlay)]/90 backdrop-blur-sm text-[11px] font-medium text-zinc-300 shadow-lg shadow-black/30 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] anim-enter"
+      class="pointer-events-auto inline-flex items-center gap-1.5 h-7 pl-1.5 pr-2.5 rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-overlay)]/90 backdrop-blur-sm text-micro font-medium text-zinc-300 shadow-lg shadow-black/30 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] anim-enter"
     >
       <span class="w-4 h-4 rounded-full bg-[color:var(--accent)] text-[color:var(--on-primary)] flex items-center justify-center shrink-0">
         <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">

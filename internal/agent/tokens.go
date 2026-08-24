@@ -17,6 +17,15 @@ const (
 	// window is unknown (e.g. dynamically-fetched Ollama models). ~128k keeps the
 	// prior behaviour (the old 500KB byte cap ÷ 4) for those models.
 	fallbackMaxRequestTokens = 128000
+	// minOutputTokens is the floor for a request's output budget. It matches the
+	// Anthropic provider's own floor, so clamping for a nearly-full context window
+	// can never leave the model less room than it had before budgeting existed.
+	minOutputTokens = 4096
+	// outputBudgetMargin is held back when sizing the output budget against the
+	// context window. Providers reject a request whose input plus max_tokens
+	// exceeds the window, and our input figure is an estimate, so the budget has
+	// to leave slack for that estimate being low.
+	outputBudgetMargin = 8000
 	// imageTokenEstimate is a flat per-image token cost. Images are billed by
 	// pixel area, not base64 length, so counting the (often megabyte-scale) base64
 	// string as text massively over-counts. A large Anthropic image tops out around
@@ -134,4 +143,30 @@ func compactionThresholdTokens(contextWindow int) int {
 		reserve = contextWindow / 2
 	}
 	return contextWindow - reserve
+}
+
+// outputTokenBudget sizes a request's max_tokens. Without one, a provider that
+// applies a small default (Anthropic floors at 4096) truncates any long response
+// mid-way — a large file written in a single tool call comes back cut off, with
+// its arguments no longer valid JSON.
+//
+// The budget is the model's own ceiling, reduced to what the context window has
+// left: input tokens and max_tokens are charged against the same window, so a
+// nearly-full request must ask for less output or be rejected outright. A model
+// with no known ceiling gets 0, meaning "send no limit and let the provider
+// decide" — guessing one upward would break every request to that model.
+func outputTokenBudget(modelMaxOutput, contextWindow, requestTokens int) int {
+	if modelMaxOutput <= 0 {
+		return 0
+	}
+	budget := modelMaxOutput
+	if contextWindow > 0 {
+		if room := contextWindow - requestTokens - outputBudgetMargin; room < budget {
+			budget = room
+		}
+	}
+	if budget < minOutputTokens {
+		budget = minOutputTokens
+	}
+	return budget
 }

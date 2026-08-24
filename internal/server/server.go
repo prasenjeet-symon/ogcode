@@ -181,6 +181,7 @@ func (s *Server) Start() error {
 	toolRegistry.Register(tool.NewProjectIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.LatexToPdfTool{})
 	toolRegistry.Register(tool.ViewImageTool{})
+	toolRegistry.Register(tool.NewCompactContextTool())
 
 	// Search bridge — opt-in via OGCODE_SEARCH_ENABLED=true env var OR the settings UI.
 	// Must be started before loopRunner is built so RunSearchSession can be wired in.

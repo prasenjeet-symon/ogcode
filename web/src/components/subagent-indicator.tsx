@@ -72,7 +72,7 @@ export default function SubagentIndicator() {
                 {/* mouth */}
                 <path stroke-linecap="round" d="M9.5 14.5h5" />
               </svg>
-              <span class="text-[11px] font-medium text-[color:var(--accent)] max-w-[140px] truncate">
+              <span class="text-micro font-medium text-[color:var(--accent)] max-w-[140px] truncate">
                 {task.title}
               </span>
 
@@ -82,8 +82,8 @@ export default function SubagentIndicator() {
                        opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition whitespace-nowrap"
                 style={{ 'z-index': 9999 }}
               >
-                <span class="text-[11px] text-zinc-300">{task.title}</span>
-                <span class="text-[10px] text-[color:var(--accent)] ml-1.5">sub-agent running</span>
+                <span class="text-micro text-zinc-300">{task.title}</span>
+                <span class="text-micro text-[color:var(--accent)] ml-1.5">sub-agent running</span>
               </div>
             </div>
           )}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
+	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -69,6 +70,9 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
+	}
+	if path := config.EnsureProjectFile(dir); path != "" {
+		slog.Info("created project config file", "path", path)
 	}
 
 	// Open project DB
@@ -163,6 +167,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	toolRegistry := tool.NewRegistry()
 	toolRegistry.Register(tool.BashTool{})
 	toolRegistry.Register(tool.ReadTool{})
+	toolRegistry.Register(tool.NewCompactContextTool())
 	toolRegistry.Register(tool.WriteTool{})
 	toolRegistry.Register(tool.EditTool{})
 	toolRegistry.Register(tool.GlobTool{})

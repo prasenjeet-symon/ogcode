@@ -149,16 +149,20 @@ export default function MessageList() {
   return (
     <div class="flex-1 min-h-0 relative flex flex-col">
       <div ref={scrollRef} class="flex-1 overflow-y-auto">
-        <div class="max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        {/* Spacing is rhythmic rather than uniform (see .chat-flow): a wide gap
+            opens before each new user prompt, a medium one under it, and the
+            agent's own run of tool calls and replies stays tightly packed —
+            so the transcript reads as turns, not as an evenly spaced list. */}
+        <div class="chat-col chat-flow px-4 md:px-8 pt-6 pb-4">
           <Show when={visibleMessages().length === 0 && !session.loading()}>
-            <div class="flex flex-col items-center justify-center py-24 text-center">
-              <div class="w-14 h-14 rounded-2xl bg-[color:var(--accent-soft)] border border-[color:var(--border-subtle)] flex items-center justify-center mb-4">
-                <svg class="w-6 h-6 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            <div class="flex flex-col items-center justify-center py-24 text-center animate-fade-in-up">
+              <div class="w-11 h-11 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--border-subtle)] flex items-center justify-center mb-3.5">
+                <svg class="w-5 h-5 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
-              <p class="text-[14px] font-medium text-zinc-300 mb-1">Ready when you are</p>
-              <p class="text-[12px] text-zinc-500">Describe a task, ask a question, or paste an error.</p>
+              <p class="text-ui font-medium text-[color:var(--text-primary)] mb-1">Ready when you are</p>
+              <p class="text-meta text-[color:var(--text-tertiary)]">Describe a task, ask a question, or paste an error.</p>
             </div>
           </Show>
 
@@ -166,21 +170,19 @@ export default function MessageList() {
             {(msg) => <MessageItem msg={msg()} />}
           </Index>
 
-          {/* Thinking indicator */}
+          {/* Working indicator — a swept label rather than a spinner or avatar,
+              so it sits in the flow of the transcript at the exact spot the
+              answer will appear, and says which of the two states we're in. */}
           <Show when={session.loading() || session.hasRunningTools()}>
-            <div class="flex gap-3 animate-fade-in">
-              <div class="w-7 h-7 shrink-0 rounded-lg bg-[color:var(--accent)] flex items-center justify-center shadow-sm">
-                <svg class="w-3.5 h-3.5 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+            <div class="flex items-center gap-2 h-7 animate-fade-in" aria-live="polite">
+              <div class="thinking-dots">
+                <span></span>
+                <span></span>
+                <span></span>
               </div>
-              <div class="flex items-center py-1.5">
-                <div class="thinking-dots">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-              </div>
+              <span class="sweep-text text-meta font-medium">
+                {session.hasRunningTools() ? 'Running tools' : 'Thinking'}
+              </span>
             </div>
           </Show>
 

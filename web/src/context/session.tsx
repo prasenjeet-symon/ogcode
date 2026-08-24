@@ -19,6 +19,7 @@ import {
   resumeSession,
   setModelPreference,
   deleteModelPreference,
+  isNotFoundError,
 } from '../api/client';
 import { useServer } from './server';
 
@@ -56,6 +57,9 @@ export interface PendingPermission {
 interface SessionContextValue {
   sessions: () => Session[];
   activeSession: () => Session | null;
+  // True when the selected session id doesn't exist on the server, so pages can
+  // show a not-found screen instead of an endlessly "Loading..." live composer.
+  sessionMissing: () => boolean;
   messages: () => MessageWithParts[];
   loading: () => boolean;
   hasRunningTools: () => boolean;
@@ -94,6 +98,7 @@ export const SessionProvider: ParentComponent = (props) => {
   const server = useServer();
   const [sessions, setSessions] = createSignal<Session[]>([]);
   const [activeSession, setActiveSession] = createSignal<Session | null>(null);
+  const [sessionMissing, setSessionMissing] = createSignal(false);
   const [memorySavedTokens, setMemorySavedTokens] = createSignal(0);
   const [messagesRaw, setMessagesRaw] = createSignal<MessageWithParts[]>([]);
   const messages = messagesRaw;
@@ -422,6 +427,7 @@ export const SessionProvider: ParentComponent = (props) => {
   async function selectSession(id: string) {
     const current = activeSession();
     const sameSession = current?.id === id;
+    setSessionMissing(false);
 
     // Cancel any pending SSE refresh from previous session
     if (sseRefreshDebounce) {
@@ -476,7 +482,17 @@ export const SessionProvider: ParentComponent = (props) => {
       if (!fresh) {
         try {
           fresh = await getSession(id);
-        } catch (_e) { /* session may not exist yet — ignore */ }
+        } catch (e) {
+          // getMessages returns an empty list rather than 404 for an unknown id,
+          // so this direct fetch is where a genuinely missing session surfaces.
+          // Without it the UI sits on the "Loading..." stub forever with a live
+          // composer pointed at a session that doesn't exist.
+          if (isNotFoundError(e) && activeSession()?.id === id) {
+            setSessionMissing(true);
+            return;
+          }
+          /* transient failure — leave the cached record in place */
+        }
       }
       if (fresh) {
         setActiveSession(fresh);
@@ -997,6 +1013,7 @@ export const SessionProvider: ParentComponent = (props) => {
   const value: SessionContextValue = {
     sessions,
     activeSession,
+    sessionMissing,
     messages,
     loading,
     hasRunningTools,

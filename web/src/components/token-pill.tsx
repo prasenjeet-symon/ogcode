@@ -48,24 +48,24 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
         <svg class="w-3 h-3 text-zinc-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6a2 2 0 012-2h2a2 2 0 012 2v6m-6 0h6m-9 0h12M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
         </svg>
-        <span class="text-[11px] font-medium text-zinc-300 tabular-nums">
+        <span class="text-micro font-medium text-zinc-300 tabular-nums">
           {formatTokens(totals().total)}
         </span>
-        <span class="text-[10px] text-zinc-500">tokens</span>
+        <span class="text-micro text-zinc-500">tokens</span>
 
         {/* Hover breakdown */}
         <div class="absolute top-full right-0 mt-1.5 w-56 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl
                     opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition"
              style={{ 'z-index': 9999 }}>
-          <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mb-2">Session usage</div>
+          <div class="text-micro uppercase tracking-wider text-zinc-500 font-semibold mb-2">Session usage</div>
           <Row label="Input" value={totals().input} dot="bg-[color:var(--accent)]" />
           <Row label="Output" value={totals().output} dot="bg-emerald-400" />
           <Row label="Reasoning" value={totals().reasoning} dot="bg-violet-400" dim={totals().reasoning === 0} />
           <Row label="Cache read" value={totals().cacheRead} dot="bg-amber-400" dim={totals().cacheRead === 0} />
           <Row label="Cache write" value={totals().cacheWrite} dot="bg-orange-400" dim={totals().cacheWrite === 0} />
           <div class="mt-2 pt-2 border-t border-[color:var(--border-subtle)] flex items-center justify-between">
-            <span class="text-[11px] font-semibold text-zinc-200">Total</span>
-            <span class="text-[12px] font-mono tabular-nums text-zinc-100">
+            <span class="text-micro font-semibold text-zinc-200">Total</span>
+            <span class="text-meta font-mono tabular-nums text-zinc-100">
               {totals().total.toLocaleString()}
             </span>
           </div>
@@ -80,9 +80,9 @@ function Row(props: { label: string; value: number; dot: string; dim?: boolean }
     <div class="flex items-center justify-between py-0.5" classList={{ 'opacity-30': props.dim }}>
       <div class="flex items-center gap-1.5">
         <span class={`w-1.5 h-1.5 rounded-full ${props.dot}`} />
-        <span class="text-[11.5px] text-zinc-400">{props.label}</span>
+        <span class="text-meta text-zinc-400">{props.label}</span>
       </div>
-      <span class="text-[11.5px] font-mono tabular-nums text-zinc-200">{props.value.toLocaleString()}</span>
+      <span class="text-meta font-mono tabular-nums text-zinc-200">{props.value.toLocaleString()}</span>
     </div>
   );
 }

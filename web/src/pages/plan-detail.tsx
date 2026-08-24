@@ -11,6 +11,7 @@ import Breadcrumb from '../components/breadcrumb';
 import NotificationBell from '../components/notification-bell';
 import TokenPill from '../components/token-pill';
 import MemoryDialog from '../components/memory-dialog';
+import { NotFoundPanel } from './not-found';
 
 function getModelLabel(model: string | undefined): string {
   if (!model) return '';
@@ -83,6 +84,17 @@ function PlanDetailContent() {
     <div class="flex h-screen w-full">
       <PlanSidebar />
 
+      <Show
+        when={!plan.planMissing()}
+        fallback={
+          <NotFoundPanel
+            title="Plan not found"
+            message="This plan no longer exists. It may have been deleted from another window."
+            actionLabel="Back to plans"
+            actionHref="/plan"
+          />
+        }
+      >
       <div class="flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
         {/* Header */}
         <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-4 backdrop-blur-sm" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(17,17,20,0.8)', 'z-index': 100 }}>
@@ -221,6 +233,7 @@ function PlanDetailContent() {
           </div>
         </div>
       </div>
+      </Show>
     </div>
   );
 }

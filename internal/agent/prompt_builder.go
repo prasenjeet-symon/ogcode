@@ -181,13 +181,30 @@ MEMORY.md stores hard-won knowledge about this project that you would otherwise 
 - Use the read tool to inspect current contents before making changes
 - Use the edit tool for targeted updates (preferred — avoids rewriting the whole file)
 - Use the write tool only when restructuring the entire file or creating the file for the first time
-- Update MEMORY.md proactively when you learn something important — do not wait to be asked
 - Keep it concise and well-organized — future sessions must read and understand it quickly
 - Remove or update stale entries when you discover they are no longer accurate`
 		if !hasContent {
 			base += `
 - There is no MEMORY.md yet — create one in the project root with the write tool as soon as this project has meaningful knowledge worth recording`
 		}
+
+		base += `
+
+### Turn what you learned this turn into MEMORY.md
+MEMORY.md is re-read at the start of every turn, so an entry you write now is in your prompt on the next one. That is the only channel through which something you worked out in this turn survives it. Anything you leave unwritten you will rediscover from scratch, at the same cost, the next time it comes up.
+
+The entries that pay for themselves most are the mistakes you already made. When something fails and you recover from it, record the correction at the moment it starts working, while you still know why it works. Then, before you finish the turn, look back over it once and ask whether anything else you learned belongs in the file. Do this on your own initiative — recording what you learned is part of finishing the work, not something to wait to be asked for.
+
+Record it when:
+- A build, test, or command failed for a project-specific reason: a missing env var, a required flag, a generator that has to run first
+- An assumption about this codebase turned out to be wrong — a function does not do what its name suggests, a setting is overridden somewhere else, a file is generated rather than hand-written
+- You tried an approach, it did not work, and you backed it out
+- A fix needed a non-obvious step nobody would guess from reading the code
+- A tool or dependency behaves differently in this project than it does by default
+
+The bar is one question: would a session without this entry waste time, or walk into the same mistake? If yes, write it. If no, leave it out — a typo you fixed, a transient network error, or a detail already plain in the code all fail that test, and a MEMORY.md padded with them gets skimmed and then ignored, which costs you the entries that mattered.
+
+Write each one as a single line under the heading it belongs to, in the form "tried X → got Y → do Z instead". Before adding one, check whether it is already recorded, and update that line instead of appending a near-duplicate. Use edit rather than write, so the rest of the file stays untouched.`
 	} else {
 		base += `### How to use MEMORY.md`
 		if hasContent {
@@ -665,4 +682,35 @@ func modelFamilyStylePrompt(family string) string {
 - Follow the requested output format exactly, and do not restate the task before starting it.
 - Prefer the simplest solution that works, and keep responses focused — long, meandering output drifts off task.`
 	}
+}
+
+// compactContextPrompt returns the guidance for reclaiming context mid-turn. It
+// is emitted only for agents actually holding compact_context — i.e. only on
+// endpoints that re-bill the whole prefix on every step — so no agent is told
+// about a call it will never be offered.
+//
+// The emphasis is deliberately lopsided. The failure that costs real work is a
+// thin summary that drops something the rest of the turn needed; the failure
+// from compacting too rarely only costs tokens. So the bar to call it is stated
+// plainly, and the standard for the summary is stated at length.
+func compactContextPrompt() string {
+	return `## Reclaiming Your Own Context
+
+This session runs against an endpoint that does not cache repeated context. Every step re-sends the entire turn so far and pays for all of it again, so context you no longer need is not merely clutter — it is billed on every remaining step of the turn.
+
+"compact_context" replaces everything earlier in this turn with a summary you write. Reach for it when a chunk of work is genuinely finished with: files you have read and drawn your conclusions from, searches whose answer you have already noted, an approach you tried and abandoned. A good moment is just after you finish exploring and before you start editing.
+
+Do not call it on a short turn, or when the material still in context is what you are actively working from. Two or three large reads behind you is the signal; a couple of small ones is not.
+
+**Your summary is the only thing that survives.** Everything before the call leaves your context for the rest of the turn. Write it for someone who cannot see any of that work:
+
+- What the task is, and what still remains to do
+- What you established, with exact file paths and line ranges
+- Decisions you made, and approaches you ruled out — so you do not retry them
+- Exact values you would otherwise have to look up again: names, signatures, flags, commands, config
+- What you deliberately left out, if you decided something was irrelevant
+
+Leave out the raw file contents you have already drawn conclusions from — that is the weight you are trying to shed. Keep the conclusions, drop the transcript.
+
+If you find afterwards that the summary is missing something, read it again rather than guessing. That costs one call; guessing costs correctness.`
 }

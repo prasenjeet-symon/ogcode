@@ -2,6 +2,28 @@
 @import "highlight.js/styles/github-dark-dimmed.css";
 
 /* ============================================================
+   Typefaces — self-hosted variable fonts
+   Inter powers the UI, JetBrains Mono every code/path/number run.
+   Both ship with the binary (web/public/fonts), so the app keeps its
+   promise of never phoning home: no Google Fonts request, no FOUT on
+   an offline machine. `font-display: swap` keeps first paint instant.
+   ============================================================ */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/jetbrains-mono-var.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
    Global motion defaults
    Make every Tailwind transition-* utility use Linear's spring curve
    by default. Much of the app wrote `transition-all var(--spring-sm)`,
@@ -13,6 +35,28 @@
 @theme {
   --default-transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   --default-transition-duration: 160ms;
+
+  /* ----------------------------------------------------------
+     Type scale — semantic, rem-based, four steps.
+     The chat UI previously mixed hard-coded pixel sizes
+     (text-[13px], text-[11.5px], text-[9.5px], …) with rem-based
+     prose, so chrome stayed frozen while content scaled with the
+     fluid root — the two drifted apart on large displays. These
+     tokens give every surface one ladder to stand on:
+
+       text-micro  11px  timestamps, counters, kbd hints
+       text-meta   12px  tool rows, chips, secondary labels
+       text-ui     13px  buttons, titles, list rows
+       text-chat   15px  message content — the one thing you read
+     ---------------------------------------------------------- */
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1.45;
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.5;
+  --text-ui: 0.8125rem;
+  --text-ui--line-height: 1.5;
+  --text-chat: 0.9375rem;
+  --text-chat--line-height: 1.65;
 }
 
 /* ============================================================
@@ -73,7 +117,11 @@
   --shadow-glow: 0 0 16px -4px rgba(94, 106, 210, 0.25);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Reading column for the conversation. One token so the message list,
+     the composer and the empty state can never drift out of alignment. */
+  --chat-col: 46rem;
 
   /* Spring-based transition presets (CSS approximations of Linear's spring physics) */
   --spring-sm:  150ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -93,16 +141,19 @@ html, body, #root {
    The root font-size scales smoothly with the viewport via clamp(),
    so every rem-based size in the app — all Tailwind text-* utilities,
    the chat prose, and any rem spacing — adapts to the screen with no
-   hard breakpoints: readable on small phones, comfortably larger on
-   big desktop / 4K displays. Bounded so it never gets uncomfortably
-   small or oversized. text-size-adjust stops mobile browsers from
-   re-inflating text on rotate/zoom.
+   hard breakpoints. It is deliberately anchored at 16px for the whole
+   laptop/desktop range: the previous scale reached ~17.6px at 1440px,
+   which inflated every rem in the app by 10% and read as the soft,
+   oversized "marketing" look rather than the dense workbench the app
+   is meant to be. It still eases down on narrow phones and up a little
+   on 4K, where the extra distance earns it. text-size-adjust stops
+   mobile browsers from re-inflating text on rotate/zoom.
 
    Reference for the scale (viewport → root px):
-     375px → ~15.4   768px → ~16.6   1440px → ~17.6   ≥1920px → 18
+     ≤900px → 14.5   1280px → ~15.5   1440px → 16   ≥1770px → 17
    ============================================================ */
 html {
-  font-size: clamp(15px, 0.9rem + 0.22vw, 18px);
+  font-size: clamp(14.5px, 0.72rem + 0.31vw, 17px);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
@@ -283,6 +334,38 @@ input:focus-visible {
   100% { opacity: 0; transform: scale(0.98) translateY(-4px); }
 }
 
+/* ------------------------------------------------------------
+   Conversation motion
+   Turns rise into place instead of sliding in from the sides. The
+   old left/right slide drew the eye horizontally on every token
+   flush during streaming, which made a long answer feel jittery;
+   a short vertical rise reads as "settling" and stays calm while
+   text streams in underneath it.
+   ------------------------------------------------------------ */
+@keyframes msgRise {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+/* The streaming caret: a soft block that trails the last token so it is
+   obvious the answer is still being written, not finished and short. */
+@keyframes caretBlink {
+  0%, 45%  { opacity: 1; }
+  55%, 100% { opacity: 0.15; }
+}
+/* Sweeping highlight for the "working" label — a moving band of light
+   across muted text. Communicates ongoing work without a spinner. */
+@keyframes textSweep {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+/* Tool disclosure — height animates via grid-template-rows 0fr → 1fr,
+   which (unlike max-height) needs no magic number and lands exactly on
+   the content's real height. */
+@keyframes toolReveal {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to   { grid-template-rows: 1fr; opacity: 1; }
+}
+
 /* Spring-based animation classes using Linear's timing curves */
 .animate-fade-in       { animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 .animate-fade-in-right { animation: slideInFromRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
@@ -297,6 +380,70 @@ input:focus-visible {
 
 /* Linear-style subtle message/list entrance */
 .anim-enter { animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* ------------------------------------------------------------
+   Conversation motion — utility classes
+   ------------------------------------------------------------ */
+/* `forwards`, never `both`: with `backwards` fill the row would sit at the
+   keyframe's starting opacity (0) until the animation actually begins, so a
+   throttled or suspended renderer — a background tab, a hidden pane — can
+   leave a message invisible. Starting from the settled state and animating
+   forward degrades to "no animation" instead of "no content". */
+.animate-msg-in { animation: msgRise 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* Caret riding the tail of the message currently being streamed.
+   Attached as ::after on the last block of the last rendered part, so it
+   follows the text through every re-render instead of being a separate
+   element that markdown re-parsing would knock onto its own line. */
+.msg-streaming > .prose-chat:last-child > :last-child:not(.code-block)::after {
+  content: '';
+  display: inline-block;
+  width: 0.42em;
+  height: 1em;
+  margin-left: 0.12em;
+  border-radius: 1px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: caretBlink 1.05s steps(1, end) infinite;
+}
+
+/* Muted label with a highlight sweeping through it — used while the
+   agent is generating or a tool is running. */
+.sweep-text {
+  background: linear-gradient(
+    100deg,
+    var(--text-tertiary) 0%,
+    var(--text-tertiary) 38%,
+    var(--text-primary) 50%,
+    var(--text-tertiary) 62%,
+    var(--text-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: textSweep 2.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sweep-text {
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--text-secondary);
+  }
+  .msg-streaming > .prose-chat:last-child > :last-child:not(.code-block)::after { animation: none; }
+}
+
+/* Disclosure wrapper: the child must be the only element and carry
+   `min-height: 0` so the collapsed row can actually reach zero. */
+.reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  /* forwards, not both — see .animate-msg-in: the open row must never depend
+     on an animation having run, or a throttled renderer hides the output. */
+  animation: toolReveal 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.reveal > * { min-height: 0; overflow: hidden; }
 
 /* Page-level entrance — a top-level route surface cross-fades in as it mounts,
    so navigating between the landing screen, a session, notes, and settings feels
@@ -355,13 +502,13 @@ input:focus-visible {
    ============================================================ */
 .thinking-dots {
   display: flex;
-  gap: 5px;
+  gap: 4px;
   align-items: center;
   padding: 2px 0;
 }
 .thinking-dots span {
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background-color: var(--accent);
   animation: bounceDot 1.4s infinite ease-in-out both;
@@ -383,17 +530,26 @@ textarea.auto-resize {
    Prose / markdown styling — Linear's tight, scannable type
    ============================================================ */
 .prose-chat {
-  line-height: 1.6;
-  font-size: 0.875rem;   /* 14px — Linear's body text size */
+  /* The answer is the one thing in this app you actually *read*, so it
+     gets a genuine reading size and leading while the surrounding chrome
+     stays at 12–13px. That contrast is what makes a dense UI legible
+     rather than merely small. */
+  line-height: 1.65;
+  font-size: var(--text-chat);
   color: var(--text-primary);
+  letter-spacing: -0.003em;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 .prose-chat > :first-child { margin-top: 0; }
 .prose-chat > :last-child  { margin-bottom: 0; }
+/* A code block is wrapped in .code-block (see markdown-content.tsx), so the
+   edge rules above land on the wrapper while the margin lives on the <pre>. */
+.prose-chat > .code-block:first-child > pre { margin-top: 0; }
+.prose-chat > .code-block:last-child  > pre { margin-bottom: 0; }
 
 .prose-chat p {
-  margin: 0 0 0.75em;
+  margin: 0 0 0.85em;
 }
 
 .prose-chat code {
@@ -413,11 +569,11 @@ textarea.auto-resize {
   background: #0d0d10;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  padding: 14px 16px;
+  padding: 12px 14px;
   overflow-x: auto;
-  margin: 0.75em 0;
-  font-size: 0.8125rem;
-  line-height: 1.55;
+  margin: 0.9em 0;
+  font-size: var(--text-meta);
+  line-height: 1.6;
   box-shadow: var(--shadow-sm);
   max-width: 100%;
 }
@@ -428,6 +584,59 @@ textarea.auto-resize {
   font-size: inherit;
   color: #e4e4e7;
   white-space: pre;
+}
+
+/* ------------------------------------------------------------
+   Fenced code blocks — language chip + copy button
+   The controls float over the block's top-right corner and only
+   appear on hover (or keyboard focus), so a page of code reads as
+   code rather than as a stack of toolbars.
+   ------------------------------------------------------------ */
+.code-block {
+  position: relative;
+}
+.code-block-bar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  opacity: 0;
+  transition: opacity 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.code-block:hover .code-block-bar,
+.code-block:focus-within .code-block-bar {
+  opacity: 1;
+}
+.code-block-lang {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  text-transform: lowercase;
+  user-select: none;
+}
+.code-block-copy {
+  display: inline-flex;
+  align-items: center;
+  height: 1.375rem;
+  padding-inline: 0.5rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.code-block-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.code-block-copy.is-copied {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
 }
 
 /* highlight.js token colors are fine; override its block-level overrides so
@@ -471,15 +680,18 @@ textarea.auto-resize {
 .prose-chat h2,
 .prose-chat h3,
 .prose-chat h4 {
-  font-weight: 650;
-  margin: 1.1em 0 0.4em;
-  letter-spacing: -0.01em;
+  font-weight: 620;
+  /* Generous space above a heading, tight below it, so a heading binds
+     to the paragraph it introduces instead of floating between both. */
+  margin: 1.5em 0 0.45em;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
   color: var(--text-primary);
 }
-.prose-chat h1 { font-size: 1.35em; }
-.prose-chat h2 { font-size: 1.18em; }
-.prose-chat h3 { font-size: 1.05em; }
-.prose-chat h4 { font-size: 0.95em; color: var(--text-secondary); }
+.prose-chat h1 { font-size: 1.3em; }
+.prose-chat h2 { font-size: 1.14em; }
+.prose-chat h3 { font-size: 1.02em; }
+.prose-chat h4 { font-size: 0.94em; color: var(--text-secondary); }
 
 .prose-chat hr {
   border: 0;
@@ -747,6 +959,133 @@ textarea.auto-resize {
    ============================================================ */
 .hide-scrollbar::-webkit-scrollbar { display: none; }
 .hide-scrollbar { scrollbar-width: none; }
+
+/* ------------------------------------------------------------
+   Transcript rhythm
+   A single space-y value spaces every message the same, which makes a
+   run of six tool calls look as significant as a change of speaker.
+   These rules key off the role of each row instead: a wide break before
+   a new user prompt, a medium one under it, and tight packing inside
+   the agent's own run of tool calls and replies.
+   ------------------------------------------------------------ */
+.chat-flow > * + * { margin-top: 0.625rem; }
+.chat-flow > * + [data-role="user"] { margin-top: 1.875rem; }
+.chat-flow > [data-role="user"] + * { margin-top: 1.125rem; }
+
+/* The conversation's reading column — shared by the transcript, the
+   composer and the empty state so all three share one centre line. */
+.chat-col {
+  width: 100%;
+  max-width: var(--chat-col);
+  margin-inline: auto;
+}
+
+/* Ghost icon button — the quiet, square hover action used under
+   messages and in the composer toolbar. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.75rem;
+  min-width: 1.75rem;
+  padding-inline: 0.375rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.icon-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn:disabled:hover {
+  color: var(--text-tertiary);
+  background: transparent;
+}
+
+/* Reasoning ("Thought") disclosure — tinted with the --reasoning token so a
+   custom accent never desyncs it. Written in CSS rather than as Tailwind
+   opacity modifiers because those cannot resolve a var() colour at build time. */
+.reasoning-toggle {
+  color: color-mix(in srgb, var(--reasoning) 82%, transparent);
+}
+.reasoning-toggle:hover {
+  color: var(--reasoning);
+  background: color-mix(in srgb, var(--reasoning) 9%, transparent);
+}
+.reasoning-count {
+  color: color-mix(in srgb, var(--reasoning) 55%, transparent);
+}
+.reasoning-body {
+  border-left: 2px solid color-mix(in srgb, var(--reasoning) 22%, transparent);
+}
+
+/* ------------------------------------------------------------
+   Composer
+   The box lifts on focus rather than changing colour: a ring in the
+   accent plus a slightly deeper shadow, so the eye lands on it without
+   the border turning into a hard, saturated outline.
+   ------------------------------------------------------------ */
+.composer {
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-md);
+}
+.composer.is-focused {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-default));
+  box-shadow: var(--shadow-lg), 0 0 0 3px var(--accent-soft);
+}
+.composer.is-dragging {
+  border-color: transparent;
+}
+
+/* Send button — square-ish pill that fills with the accent the moment the
+   message is actually sendable, so "ready to send" is visible at a glance. */
+.send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: scale(0.94);
+  transition: background-color var(--spring-sm), color var(--spring-sm),
+              transform var(--spring-sm), box-shadow var(--spring-sm);
+}
+.send-btn.is-ready {
+  background: var(--accent);
+  color: var(--on-primary);
+  cursor: pointer;
+  transform: scale(1);
+  box-shadow: var(--shadow-sm);
+}
+.send-btn.is-ready:hover {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-glow);
+}
+
+/* Keycap used in the composer hint row. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  padding: 0 0.25rem;
+  border: 1px solid var(--border-default);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  line-height: 1.15rem;
+  color: var(--text-tertiary);
+}
 
 /* Grid background pattern (subtle) — Linear-inspired dot grid */
 .bg-grid {

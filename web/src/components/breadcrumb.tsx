@@ -1,4 +1,4 @@
-import { useNavigate } from '@solidjs/router';
+import { A } from '@solidjs/router';
 import { For, Show } from 'solid-js';
 
 interface BreadcrumbItem {
@@ -11,8 +11,6 @@ interface BreadcrumbProps {
 }
 
 export default function Breadcrumb(props: BreadcrumbProps) {
-  const navigate = useNavigate();
-
   return (
     <nav class="flex items-center gap-1 text-[12px] min-w-0">
       <For each={props.items}>
@@ -27,13 +25,15 @@ export default function Breadcrumb(props: BreadcrumbProps) {
               when={item.href}
               fallback={<span class="text-zinc-400 truncate max-w-[200px]">{item.label}</span>}
             >
-              <a
-                href={item.href}
-                onClick={(e) => { e.preventDefault(); navigate(item.href!); }}
+              {/* <A> rather than an <a> with a blanket preventDefault: the old
+                  handler swallowed cmd/ctrl/middle-click too, so a breadcrumb
+                  could never be opened in a new tab. */}
+              <A
+                href={item.href!}
                 class="text-zinc-500 hover:text-zinc-200 transition truncate max-w-[200px]"
               >
                 {item.label}
-              </a>
+              </A>
             </Show>
           </>
         )}

@@ -36,8 +36,8 @@ func (ReadTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File or directory path"},
-			"start_line": {"type": "number", "description": "First line to read, 1-based and inclusive. Pass a range printed by file_map here as-is."},
-			"end_line": {"type": "number", "description": "Last line to read, 1-based and inclusive. Requires start_line; defaults to start_line plus 2000 lines."},
+			"start_line": {"type": "number", "description": "First line to read, 1-based and inclusive. Pass a range printed by file_map here as-is. Defaults to 1 when only end_line is given."},
+			"end_line": {"type": "number", "description": "Last line to read, 1-based and inclusive. If given without start_line, reads from line 1 through end_line. If start_line is given without end_line, defaults to start_line plus 2000 lines."},
 			"offset": {"type": "number", "description": "Line offset to start reading from (0-based). For paging; ignored when start_line is set."},
 			"limit": {"type": "number", "description": "Maximum number of lines to read (default 2000)"}
 		},
@@ -78,10 +78,20 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// getting that wrong returns a window shifted by a line rather than an
 	// error — it quietly drops the declaration's first line and picks up a
 	// stray one at the end. Accepting the 1-based form removes the step.
-	if input.StartLine > 0 {
-		input.Offset = input.StartLine - 1
-		if input.EndLine >= input.StartLine {
-			input.Limit = input.EndLine - input.StartLine + 1
+	//
+	// end_line alone (no start_line) still names a range — "from the top
+	// through here" — so it defaults start_line to 1 instead of being dropped.
+	// Silently falling back to the unranged default window would hand back
+	// different lines than asked for with nothing to say the argument was
+	// ignored.
+	if input.StartLine > 0 || input.EndLine > 0 {
+		start := input.StartLine
+		if start <= 0 {
+			start = 1
+		}
+		input.Offset = start - 1
+		if input.EndLine >= start {
+			input.Limit = input.EndLine - start + 1
 		}
 	}
 
@@ -119,7 +129,34 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		return Result{}, fmt.Errorf("read file: %w", err)
 	}
 
-	lines := strings.Split(string(data), "\n")
+	// A binary file has no line structure: splitting it on '\n' bytes that
+	// occur incidentally in the data produces a flood of garbage "lines" with
+	// fabricated line numbers instead of an error, and that garbage still
+	// reaches the model. Catch it with the same heuristic file_map uses and
+	// say so instead.
+	if codemap.LooksBinary(data) {
+		return Result{
+			Title: filepath.Base(path),
+			Output: fmt.Sprintf(
+				"%s is a binary file — it has no line structure to read as text. "+
+					"For an image use view_image; for a PDF use pdf_index/read_pdf_page; for a DOCX use docx_index/read_docx_page.",
+				filepath.Base(path),
+			),
+		}, nil
+	}
+
+	// Split into lines without counting a phantom trailing line for a file
+	// that ends with a newline (the common case): strings.Split appends an
+	// empty final element for that trailing newline, which would otherwise
+	// inflate the reported total by one and disagree with codemap's line
+	// count for the same file.
+	var lines []string
+	if len(data) > 0 {
+		lines = strings.Split(string(data), "\n")
+		if data[len(data)-1] == '\n' {
+			lines = lines[:len(lines)-1]
+		}
+	}
 	totalLines := len(lines)
 
 	if out, ok := mapInsteadOfWholeFile(path, totalLines, rangeRequested); ok {

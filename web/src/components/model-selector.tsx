@@ -154,7 +154,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
         ref={triggerRef}
         type="button"
         onClick={toggleOpen}
-        class="flex items-center gap-1.5 px-2 py-1 h-8 text-[12px] font-medium text-zinc-300
+        class="flex items-center gap-1.5 px-2 py-1 h-8 text-meta font-medium text-zinc-300
                hover:bg-[color:var(--bg-hover)] rounded-md
                transition-colors whitespace-nowrap max-w-[200px]"
       >
@@ -180,7 +180,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
           <For each={[...grouped().entries()]}>
             {([group, models]) => (
               <div>
-                <div class={`px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
+                <div class={`px-3 pt-2 pb-1 text-micro font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
                   groupText(group)
                 }`}>
                   <span class={`w-1.5 h-1.5 rounded-full ${groupDot(group)}`} />
@@ -193,7 +193,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
                       <button
                         type="button"
                         onClick={() => handleSelect(model.id)}
-                        class={`w-full text-left px-3 py-1.5 text-[13px] transition-colors
+                        class={`w-full text-left px-3 py-1.5 text-ui transition-colors
                                 flex items-center justify-between gap-2
                                 ${isSelected()
                                   ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
@@ -243,7 +243,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
             )}
           </For>
           <Show when={enabledModels().length === 0}>
-            <div class="px-3 py-4 text-[12px] text-zinc-500 text-center">
+            <div class="px-3 py-4 text-meta text-zinc-500 text-center">
               No models available
             </div>
           </Show>

@@ -22,6 +22,20 @@ func TestIsDangerousCommand_Blocks(t *testing.T) {
 		"dd if=/dev/zero of=/dev/sda",
 		"chmod -R 000 /",
 		"cat foo > /dev/sda",
+
+		// Regression: a newline separates commands like any other operator, and
+		// splitShellSegments used to ignore it. The dangerous line then never
+		// became its own segment — strings.Fields flattened the whole command and
+		// the check only ever looked at the first line's verb, so anything after
+		// the first newline was invisible to this denylist. Multi-line commands
+		// are ordinary (heredocs, short scripts), so this was not exotic.
+		"echo hi\nrm -rf /",
+		"cd /tmp\nrm -rf ~",
+		"go build ./...\nsudo rm -rf /",
+		"ls\r\nrm -rf /",
+		"echo one\n\nrm -rf $HOME",
+		"ls\nchmod -R 000 /",
+		"echo x\nmkfs.ext4 /dev/sda1",
 	}
 	for _, c := range dangerous {
 		if bad, reason := isDangerousCommand(c); !bad {
@@ -54,6 +68,11 @@ func TestIsDangerousCommand_AllowsNormalDevCommands(t *testing.T) {
 		"grep -rf pattern .",
 		"find . -name '*.go' | xargs rm",
 		"echo '> /dev/null cleanup'",
+
+		// Splitting on newlines must not start blocking ordinary multi-line work.
+		"go build ./...\ngo test ./...",
+		"cd web\nnpm install\nnpm run build",
+		"rm -rf node_modules\nnpm install",
 	}
 	for _, c := range safe {
 		if bad, reason := isDangerousCommand(c); bad {

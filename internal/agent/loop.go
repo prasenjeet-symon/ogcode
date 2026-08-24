@@ -155,7 +155,21 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 	// Resolve the provider/model and the two fixed per-run model attributes.
 	p, modelID, modelSupportsImages, modelContextWindow := lr.resolveRunModel(ctx, sess, sessionID)
+
+	// Whether this endpoint serves a repeated prefix from a cache. Seeded from
+	// whatever is already known about it, so only the first turn against a new
+	// endpoint pays the observation window; the verdict is handed back when the
+	// turn ends, however it ends.
+	cacheObs := newCacheObserver(lr.Store.DB(), p, modelID)
+	defer func() { rememberCacheVerdict(lr.Store.DB(), p, modelID, cacheObs.Verdict()) }()
 	compactionThreshold := compactionThresholdTokens(modelContextWindow)
+	// The model's output ceiling (0 = unknown). Sent as the per-request output
+	// budget so long responses aren't truncated by a provider's conservative
+	// default — see outputTokenBudget.
+	modelMaxOutput := 0
+	if lr.Registry != nil {
+		modelMaxOutput = lr.Registry.MaxOutputTokens(modelID)
+	}
 
 	// lastInputTokens is the provider-reported input-side token count from the
 	// previous step's response (Input + CacheRead + CacheWrite) — the exact size
@@ -167,6 +181,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// Restore compaction summary from a previous turn (persisted in the session row).
 	// Applied on every step so all future LLM calls stay within the context window.
 	compactionSummary := ""
+
+	// In-turn compaction: what the agent has summarized away of its own work
+	// this turn. Only ever set on endpoints that do not cache a repeated prefix,
+	// where re-sending the history costs full price on every step.
+	var watermark compactionWatermark
 	if sess != nil {
 		compactionSummary = sess.CompactionSummary
 	}
@@ -377,7 +396,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		newMessageIDs = append(newMessageIDs, assistantID)
 
 		// Resolve tools for this agent
-		agentTools := lr.Tools.ForAgent(agent.Tools)
+		toolIDs := agent.Tools
+		// compact_context earns its round trip only when a repeated prefix is
+		// re-billed in full. On a caching endpoint compacting is a net loss: it
+		// invalidates the cached prefix, so the next request re-establishes the
+		// whole thing at full price. Withheld while the verdict is still unknown.
+		compactContextOffered := cacheObs.Verdict() == provider.CacheAbsent && canCompactContext(agent)
+		if compactContextOffered {
+			toolIDs = append(append([]string{}, toolIDs...), "compact_context")
+		}
+		// The agent as this step actually sees it. executeTool checks its Tools
+		// as an allowlist, so it must match what was offered on the wire.
+		effectiveAgent := agent
+		effectiveAgent.Tools = toolIDs
+		agentTools := lr.Tools.ForAgent(toolIDs)
 		providerTools := make([]provider.ToolDefinition, 0, len(agentTools))
 		for _, t := range agentTools {
 			providerTools = append(providerTools, provider.ToolDefinition{
@@ -406,23 +438,39 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		if memoryEnabled {
 			// Agentic memory path: memory handles context compression by filtering
 			// history to the last user message and injecting <prior_context>.
-			// Compaction is completely bypassed when memory is active.
-			modelMessages = toProviderMessages(messages, memoryText)
+			// Compaction is completely bypassed when memory is active — but
+			// <prior_context> compresses across turns, not within one, so the
+			// in-turn watermark still applies here.
+			visible := messages
+			if start := watermark.sliceStart(messages, 0); start > 0 {
+				visible = messages[start:]
+			}
+			modelMessages = toProviderMessages(visible, memoryText)
 		} else {
-			// Compaction path (memory disabled): compaction operates on user-turn
-			// boundaries, not individual tool steps. The full current user turn (from
-			// the last text-user message forward) is always sent intact. Previous
-			// turns are represented by the compactionSummary injected into the
-			// system prompt so the model never loses the thread of the session.
+			// Compaction path (memory disabled): automatic compaction operates on
+			// user-turn boundaries, not individual tool steps, so the current user
+			// turn (from the last text-user message forward) is sent intact unless
+			// the agent has narrowed it itself via compact_context. Previous turns
+			// are represented by the compactionSummary injected into the system
+			// prompt so the model never loses the thread of the session.
 			turnStartIdx := findLastTextUserMessageIndex(messages)
 			if turnStartIdx >= 0 && turnStartIdx < len(messages) {
-				modelMessages = toProviderMessages(messages[turnStartIdx:], "")
+				modelMessages = toProviderMessages(messages[watermark.sliceStart(messages, turnStartIdx):], "")
 			} else {
 				modelMessages = toProviderMessages(messages, "")
 			}
 			if compactionSummary != "" {
 				systemPrompts = append(systemPrompts, compactionSummary)
 			}
+		}
+		if watermark.active() {
+			modelMessages = prependCompactionSummary(modelMessages, watermark.summary)
+		}
+		// Kept out of the cacheable base: whether this agent holds compact_context
+		// is resolved mid-turn by observation, so it can flip between steps.
+		// Anything that changes mid-session must stay out of entry [0].
+		if compactContextOffered {
+			systemPrompts = append(systemPrompts, compactContextPrompt())
 		}
 
 		// Mid-loop guidance: appended to the user's turn message content (not the
@@ -516,9 +564,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
 			compactionCount++
 			slog.Info("proactive compaction completed", "session", sessionID, "before", before, "after", len(streamReq.Messages), "newEstimatedTokens", estimateRequestTokens(streamReq))
+			requestTokens = effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
 		}
 
-		slog.Info("calling LLM", "session", sessionID, "step", step, "model", modelID, "messages", len(streamReq.Messages))
+		// Ask for as much output as the model and the remaining window allow.
+		// Compaction inside the retry loop below only shrinks the request further,
+		// which leaves this budget valid (more room, not less).
+		streamReq.MaxTokens = outputTokenBudget(modelMaxOutput, modelContextWindow, requestTokens)
+
+		slog.Info("calling LLM", "session", sessionID, "step", step, "model", modelID, "messages", len(streamReq.Messages), "maxTokens", streamReq.MaxTokens)
 
 		var streamCh <-chan provider.StreamEvent
 		var streamErr error
@@ -876,6 +930,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				assistantMsg.Error = &errStr
 				finish := "error"
 				assistantMsg.Finish = &finish
+				// Record how the turn died and close any tool call it left open,
+				// exactly as the pre-stream failure paths do. Providers report a
+				// dropped connection here rather than by closing the channel in
+				// silence, so this is the path a mid-stream network failure takes —
+				// without the record the turn is not resumable, and without the
+				// reconcile a dangling tool_use invalidates the next request.
+				assistantMsg.Interrupted = classifyInterruption(errors.New(evt.Error), step)
 				lr.Store.UpdateMessage(assistantMsg)
 				lr.Bus.Publish("message.updated", assistantMsg)
 				// Drain the remaining events in the background (as the abort and
@@ -883,6 +944,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				// finish and release the HTTP connection, instead of leaking it if
 				// it was mid-send on a full channel buffer.
 				go drainStreamEvents(streamCh)
+				if _, rerr := lr.ReconcileSession(sessionID); rerr != nil {
+					slog.Warn("reconcile after stream error event", "session", sessionID, "err", rerr)
+				}
 				return fmt.Errorf("stream error: %s", evt.Error)
 			}
 		}
@@ -1003,6 +1067,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// proactive-compaction check can use the exact size the model saw
 			// instead of the byte estimate.
 			lastInputTokens = streamUsage.InputTokens + streamUsage.CacheReadTokens + streamUsage.CacheWriteTokens
+			// Only a step that re-sent the previous step's prefix is evidence.
+			// Step 1 establishes the prefix rather than reusing it, and a step
+			// that compacted rewrote it — both legitimately report no cache read
+			// on an endpoint that does cache.
+			cacheObs.Observe(streamUsage.CacheReadTokens, streamUsage.CacheWriteTokens, step > 1 && compactionCount == 0)
 		}
 		if err := lr.Store.UpdateMessage(assistantMsg); err != nil {
 			slog.Error("update message finish", "err", err)
@@ -1067,9 +1136,41 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		toolCallsExecuted := len(readyCalls) > 0
 
 		if toolCallsExecuted {
-			if lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, agent, workDir, modelSupportsImages, modelID) {
+			// Execute against the tools this step actually offered, not the
+			// agent's static list: executeTool's allowlist is the guard against a
+			// model calling something it was never given, and compact_context is
+			// added per step by cache verdict. Passing the static agent here would
+			// reject every compaction as a disallowed tool.
+			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, workDir, modelSupportsImages, modelID)
+			if aborted {
 				exitReason = "aborted"
 				return ctx.Err()
+			}
+			// The watermark points at the assistant message that asked for the
+			// compaction, so that message and the tool_result answering it stay
+			// in context together. Everything before it stops being sent from the
+			// next step on.
+			//
+			// Keyed off the tool's own success marker, never off the call having
+			// been made: a summary the tool rejected leaves the context untouched,
+			// and dropping history for it would truncate the agent mid-turn while
+			// it believes nothing happened.
+			for _, tc := range readyCalls {
+				if tc.Name != "compact_context" {
+					continue
+				}
+				if ok, _ := toolResults[tc.CallID].Metadata["compacted"].(bool); !ok {
+					slog.Info("compact_context did not take effect", "session", sessionID, "step", step)
+					continue
+				}
+				summary, perr := tool.ParseCompactContextArgs(tc.Input)
+				if perr != nil {
+					continue
+				}
+				if watermark.set(assistantID, summary, messages) {
+					slog.Info("in-turn context compacted", "session", sessionID, "step", step,
+						"messagesInWorkingSet", len(messages), "summaryChars", len(summary))
+				}
 			}
 		}
 
@@ -1547,14 +1648,17 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 // cancelled) is handled internally and returns false, so the loop continues and
 // pairs the cancelled results with a tool-result message (keeping tool_use /
 // tool_result pairing valid).
-func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID string) (loopAborted bool) {
+// executeReadyToolCalls runs every ready call and returns each one's result
+// keyed by call ID, so the caller can act on what a tool actually did rather
+// than on the fact that it was invoked.
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID string) (results map[string]tool.Result, loopAborted bool) {
 	if len(readyCalls) > 1 {
 		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
 	}
 	// Check for context cancellation before starting any execution
 	if ctx.Err() != nil {
 		slog.Info("agent loop cancelled before tool execution", "session", sessionID)
-		return true
+		return nil, true
 	}
 
 	type toolExecInfo struct {
@@ -1631,6 +1735,13 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		}(i)
 	}
 	wg.Wait()
+
+	results = make(map[string]tool.Result, len(execInfos))
+	for _, info := range execInfos {
+		if info.err == nil {
+			results[info.tc.CallID] = info.result
+		}
+	}
 
 	// Detect mid-loop tool cancellation BEFORE calling toolCancel() ourself. The
 	// child context was cancelled (by CancelTool via the guidance endpoint) but
@@ -1722,9 +1833,9 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 	// the API expects stays valid.
 	if ctx.Err() != nil {
 		slog.Info("agent loop cancelled after tool execution", "session", sessionID)
-		return true
+		return results, true
 	}
-	return false
+	return results, false
 }
 
 // requestPermission evaluates the session ruleset for a tool call and, when the

@@ -1,6 +1,22 @@
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 const API = `${BASE_URL}/api`;
 
+// Error carrying the HTTP status, so callers can tell "this resource does not
+// exist" apart from "the request failed" and react accordingly (e.g. render a
+// not-found screen instead of spinning forever).
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export function isNotFoundError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
 export async function fetchAPI<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', ...opts?.headers },
@@ -9,7 +25,7 @@ export async function fetchAPI<T>(path: string, opts?: RequestInit): Promise<T> 
   if (res.status === 204) return undefined as T;
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text}`);
+    throw new ApiError(res.status, `API error ${res.status}: ${text}`);
   }
   return res.json();
 }

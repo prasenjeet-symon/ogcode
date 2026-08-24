@@ -546,6 +546,7 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 				OutputPricePerM: m.OutputPricePerM,
 				SupportsImages:  m.SupportsImages,
 				ContextWindow:   m.ContextWindow,
+				MaxOutputTokens: m.MaxOutputTokens,
 			})
 		}
 	}
@@ -793,7 +794,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		httpReq.Header.Set("X-Title", "ogcode")
 	}
 
-	client := &http.Client{Timeout: 600 * time.Second}
+	client := streamHTTPClient
 
 	var resp *http.Response
 	retryDelays := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
@@ -864,19 +865,33 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	return ch, nil
 }
 
+// idleTimeout is how long this endpoint may go silent before its stream is
+// treated as dead. This one Provider type fronts OpenAI, OpenRouter, Ollama and
+// any custom OpenAI-compatible endpoint, and they do not behave alike: OpenAI
+// streams tool-call arguments incrementally, while Ollama sends the finished
+// call in a single frame and says nothing at all until the model stops writing.
+// Holding both to the same budget aborts healthy long-file turns on the latter.
+func (p *OpenAIProvider) idleTimeout() time.Duration {
+	if p.id == "ollama" || isLocalEndpoint(p.baseURL) {
+		return streamIdleTimeoutBuffered
+	}
+	return streamIdleTimeout
+}
+
 func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent, cancel context.CancelFunc, toolNames map[string]bool) {
 	defer body.Close()
 	defer close(ch)
 	defer cancel()
 
 	// Idle watchdog: if the stream goes silent for streamIdleTimeout, cancel the
-	// request context so the blocked read unblocks and the stream ends, instead
-	// of hanging until the 600s HTTP client timeout. Reset on every line received.
-	idle := time.AfterFunc(streamIdleTimeout, cancel)
+	// request context so the blocked read unblocks and the stream ends instead of
+	// hanging. It wraps the body so it resets on bytes read off the wire, not on
+	// lines handed downstream — see idleWatchdog.
+	idle := newIdleWatchdog(body, cancel, p.idleTimeout())
 	defer idle.Stop()
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner := bufio.NewScanner(idle)
+	scanner.Buffer(make([]byte, 0, 64*1024), streamMaxLineBytes)
 
 	// Track active tool calls by index so we can match deltas
 	activeToolCalls := make(map[int]string) // index -> callID
@@ -890,7 +905,6 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 	sawToolCall := false
 
 	for scanner.Scan() {
-		idle.Reset(streamIdleTimeout)
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -977,6 +991,19 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
 			ch <- StreamEvent{Type: EventFinish, FinishReason: choice.FinishReason}
 		}
+	}
+
+	// The scan can stop for reasons other than end-of-stream: a read error, a
+	// cancelled request, an over-long line (providers that send a whole tool call
+	// in one chunk hit this on large writes). Report it and stop — returning
+	// silently would close the channel with no finish event and no error, leaving
+	// the agent loop to guess, and the recovery below would be working from a
+	// buffer that was cut off mid-response.
+	if err := scanner.Err(); err != nil {
+		msg := describeStreamReadError(err, idle.Fired(), idle.Timeout())
+		slog.Warn("openai stream read failed", "provider", p.id, "err", err, "idleTimeout", idle.Fired())
+		ch <- StreamEvent{Type: EventError, Error: msg}
+		return
 	}
 
 	// Fallback: the model produced no structured tool call. If its text content

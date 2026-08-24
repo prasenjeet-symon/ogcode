@@ -1,19 +1,167 @@
 package provider
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // streamIdleTimeout bounds how long a streaming response may go with NO data
-// before it is aborted. The HTTP client timeout covers the whole request (600s),
-// which lets a silently-stalled stream hang for minutes; this idle watchdog —
-// reset on every received chunk — surfaces a dead connection promptly instead.
-// It is deliberately generous so a slow time-to-first-token doesn't trip it.
+// before it is aborted. Streaming requests carry no whole-request deadline (see
+// streamHTTPClient), so this idle watchdog — reset on every chunk read off the
+// wire — is what surfaces a dead connection. It is deliberately generous so a
+// slow time-to-first-token doesn't trip it.
 const streamIdleTimeout = 120 * time.Second
+
+// streamIdleTimeoutBuffered is the idle budget for endpoints that do NOT stream
+// tool-call arguments. Anthropic and OpenAI emit a tool call as a run of small
+// deltas, so a working stream is never quiet for long and a tight budget is
+// safe. Ollama composes the whole call and emits it in ONE frame when the model
+// finishes — measured against a local endpoint: 13.4 seconds of complete
+// silence for a 7 KB call, i.e. the wire stays silent for as long as the model
+// spends writing the file. Under the tight budget that aborts healthy work on
+// exactly the long-file turns that need it most, so these endpoints get a
+// budget sized to outlast a large generation rather than a network blip.
+const streamIdleTimeoutBuffered = 10 * time.Minute
+
+// isLocalEndpoint reports whether a base URL points at this machine or the
+// local network. Local model servers (Ollama, llama.cpp, LM Studio, vLLM and
+// the relays people put in front of them) commonly batch tool calls the way
+// Ollama does, and a loopback connection cannot suffer the network failures the
+// tight idle budget exists to catch.
+func isLocalEndpoint(baseURL string) bool {
+	// isCloudURL already recognises loopback and the RFC1918 LAN ranges — reuse
+	// it rather than restating that list in a second place.
+	if !isCloudURL(baseURL) {
+		return true
+	}
+	// It matches on substrings, so these host forms slip past it.
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	switch host := strings.ToLower(u.Hostname()); host {
+	case "::1", "host.docker.internal":
+		return true
+	default:
+		return strings.HasSuffix(host, ".local")
+	}
+}
+
+// streamMaxLineBytes caps a single SSE line. Providers that do not chunk
+// tool-call arguments send an entire call — a whole file's contents, for a write
+// — in one `data:` line, and JSON escaping inflates it further. Too small a cap
+// makes bufio fail with ErrTooLong part-way through a large response, which the
+// agent loop can only report as a stream that ended without finishing.
+const streamMaxLineBytes = 16 * 1024 * 1024
+
+// streamResponseHeaderTimeout bounds the wait for response headers, the one
+// phase the idle watchdog cannot cover (it only starts once the body exists).
+// It is deliberately long: free and shared endpoints queue a request for
+// minutes before answering, and that is a slow provider, not a dead connection.
+const streamResponseHeaderTimeout = 300 * time.Second
+
+// streamHTTPClient issues streaming requests. It deliberately has no
+// Client.Timeout: that deadline covers the whole request including the body
+// read, so a generation that legitimately runs long has its connection killed
+// mid-stream. Liveness is bounded where it belongs instead — at connect, TLS and
+// response-header time here, and by the per-stream idle watchdog once bytes are
+// flowing.
+var streamHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:             http.ProxyFromEnvironment,
+		DialContext:       (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2: true,
+		MaxIdleConns:      100,
+		// Below the ~60s idle-close observed on local relay endpoints (measured:
+		// connections survive 50s idle, are closed by 70s). Pooling a connection
+		// for longer than the peer keeps it alive hands dead sockets to new
+		// requests; the transport usually retries those, but not reliably enough
+		// to be worth the race. The cost is a fresh handshake for requests spaced
+		// more than 30s apart.
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: streamResponseHeaderTimeout,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
+
+// idleWatchdog aborts a stream that stops producing data. It wraps the response
+// body so the timer resets on bytes actually read off the wire, rather than once
+// per parsed SSE line: the reader goroutine also spends time blocked handing
+// events to the agent loop, and counting that as idle cancels healthy streams
+// whenever the consumer is slow — which is exactly what happens on the large
+// responses this is meant to protect.
+type idleWatchdog struct {
+	r       io.Reader
+	timer   *time.Timer
+	timeout time.Duration
+	fired   atomic.Bool
+}
+
+// newIdleWatchdog arms the watchdog with the caller's idle budget, which varies
+// by endpoint — see streamIdleTimeoutBuffered.
+func newIdleWatchdog(body io.Reader, cancel context.CancelFunc, timeout time.Duration) *idleWatchdog {
+	if timeout <= 0 {
+		timeout = streamIdleTimeout
+	}
+	w := &idleWatchdog{r: body, timeout: timeout}
+	w.timer = time.AfterFunc(timeout, func() {
+		w.fired.Store(true)
+		cancel()
+	})
+	return w
+}
+
+func (w *idleWatchdog) Read(p []byte) (int, error) {
+	n, err := w.r.Read(p)
+	if n > 0 {
+		w.timer.Reset(w.timeout)
+	}
+	return n, err
+}
+
+// Timeout is the idle budget this watchdog was armed with, so a report of the
+// abort names the budget that actually applied rather than the default.
+func (w *idleWatchdog) Timeout() time.Duration { return w.timeout }
+
+// Fired reports whether the watchdog cancelled the request. It distinguishes "the
+// connection went quiet" from "the caller aborted" — both of which surface as
+// context.Canceled on the read.
+func (w *idleWatchdog) Fired() bool { return w.fired.Load() }
+
+func (w *idleWatchdog) Stop() { w.timer.Stop() }
+
+// describeStreamReadError explains why a stream stopped part-way. Without it a
+// failed scan is indistinguishable from a clean end of stream: the reader
+// goroutine returns, the event channel closes, and the agent loop can only say
+// the connection closed without a finish signal.
+func describeStreamReadError(err error, idleFired bool, idleTimeout time.Duration) string {
+	switch {
+	case errors.Is(err, bufio.ErrTooLong):
+		return fmt.Sprintf("stream read failed: provider sent a single SSE line larger than %d MB", streamMaxLineBytes/(1024*1024))
+	case idleFired:
+		return fmt.Sprintf("stream read failed: no data received for %s, connection appears stalled", idleTimeout)
+	case errors.Is(err, context.Canceled):
+		return "stream read failed: request cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "stream read failed: request deadline exceeded"
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
+		return "stream read failed: provider closed the connection mid-response"
+	default:
+		return "stream read failed: " + err.Error()
+	}
+}
 
 type StreamEventType string
 
@@ -116,6 +264,9 @@ type ModelInfo struct {
 	// Used to size the compaction trigger; when 0 the loop falls back to a fixed
 	// byte-size heuristic.
 	ContextWindow int `json:"contextWindow,omitempty"`
+	// MaxOutputTokens is the most output the model will produce in one response
+	// (0 = unknown, leave the request's limit to the provider's own default).
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 	// Collection is an optional grouping label for dynamically-fetched models
 	// from OpenAI-compatible providers (e.g. "DeepSeek", "Gemini") so the UI can
 	// group them instead of collapsing everything under the OpenAI provider id.
@@ -226,6 +377,24 @@ func (r *Registry) ContextWindow(modelID string) int {
 		for _, m := range p.Models() {
 			if m.ID == modelID {
 				return m.ContextWindow
+			}
+		}
+	}
+	return 0
+}
+
+// MaxOutputTokens returns the model's output ceiling in tokens, or 0 when
+// unknown. Callers treat 0 as "send no explicit limit and let the provider
+// apply its own default" — overstating a ceiling makes every request fail, so
+// unknown must never be guessed upward.
+func (r *Registry) MaxOutputTokens(modelID string) int {
+	if modelID == "" {
+		return 0
+	}
+	for _, p := range r.snapshot() {
+		for _, m := range p.Models() {
+			if m.ID == modelID {
+				return m.MaxOutputTokens
 			}
 		}
 	}

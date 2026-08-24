@@ -25,6 +25,7 @@ import GeneralSettings from './pages/settings/general';
 import ModelsSettings from './pages/settings/models';
 import AboutSettings from './pages/settings/about';
 import Onboarding from './pages/onboarding';
+import NotFound from './pages/not-found';
 
 export default function App() {
   return (
@@ -44,6 +45,9 @@ export default function App() {
         <Route path="/models" component={ModelsSettings} />
         <Route path="/about" component={AboutSettings} />
       </Route>
+      {/* Catch-all: without it the router matches nothing and renders a blank
+          page, leaving no way back from a typo'd or stale URL. */}
+      <Route path="*404" component={NotFound} />
     </Router>
   );
 }

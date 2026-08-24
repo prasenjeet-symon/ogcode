@@ -2,6 +2,7 @@ import { useParams, useNavigate } from '@solidjs/router';
 import { createEffect, on, onMount, onCleanup, For, Show, createMemo, createSignal } from 'solid-js';
 import { usePlan } from '../context/plan';
 import Breadcrumb from '../components/breadcrumb';
+import { NotFoundPanel } from './not-found';
 import MarkdownContent from '../components/markdown-content';
 import StatusIcon from '../components/status-icon';
 import CommandMenu, { type CommandItem } from '../components/command-menu';
@@ -522,7 +523,10 @@ export default function PlanTasksPage() {
     const p = plan.activePlan();
     return [
       { label: 'Plans', href: '/plan' },
-      { label: p?.title || 'Plan', href: `/plan/${p?.id}` },
+      // Link via params.id, not activePlan: the plan loads asynchronously (and
+      // not at all if the fetch fails), so `p?.id` interpolates to the string
+      // "undefined" and the crumb points at /plan/undefined.
+      { label: p?.title || 'Plan', href: `/plan/${params.id}` },
       { label: 'Tasks' },
     ];
   };
@@ -668,6 +672,19 @@ export default function PlanTasksPage() {
 
   onMount(() => window.addEventListener('keydown', onKeyDown));
   onCleanup(() => window.removeEventListener('keydown', onKeyDown));
+
+  if (plan.planMissing()) {
+    return (
+      <div class="flex h-screen w-full">
+        <NotFoundPanel
+          title="Plan not found"
+          message="This plan no longer exists, so it has no tasks to show."
+          actionLabel="Back to plans"
+          actionHref="/plan"
+        />
+      </div>
+    );
+  }
 
   return (
     <div class="flex flex-col h-screen w-full min-w-0 bg-[color:var(--bg-base)]">

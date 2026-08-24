@@ -10,7 +10,7 @@ export default function PermissionModeToggle() {
   const mode = () => session.permissionMode();
 
   const pill = (active: boolean) =>
-    `inline-flex h-[26px] items-center gap-1.5 rounded-md px-2 text-[11.5px] font-medium transition-all var(--spring-sm) ${
+    `inline-flex h-[26px] items-center gap-1.5 rounded-md px-2 text-meta font-medium transition-all ${
       active
         ? 'bg-[color:var(--bg-elevated)] text-[color:var(--text-primary)] shadow-sm'
         : 'text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)]'

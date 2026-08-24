@@ -108,3 +108,44 @@ func DeleteModelCapability(database *db.DB, modelID string) error {
 	_, err := database.Exec(`DELETE FROM model_capability WHERE model_id = ?`, modelID)
 	return err
 }
+
+// GetModelCacheSupport returns the persisted cache verdict for a model on a
+// specific endpoint. The second return value is false when the pair has not
+// been resolved yet.
+func GetModelCacheSupport(database *db.DB, modelID, endpoint string) (string, bool, error) {
+	row := database.QueryRow(
+		`SELECT verdict FROM model_cache_support WHERE model_id = ? AND endpoint = ?`,
+		modelID, endpoint,
+	)
+	var verdict string
+	if err := row.Scan(&verdict); err != nil {
+		if err == sql.ErrNoRows {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return verdict, true, nil
+}
+
+// SetModelCacheSupport records a resolved cache verdict so later sessions skip
+// the observation window entirely.
+func SetModelCacheSupport(database *db.DB, modelID, endpoint, verdict string, observedAt int64) error {
+	_, err := database.Exec(
+		`INSERT OR REPLACE INTO model_cache_support (model_id, endpoint, verdict, observed_at)
+		 VALUES (?, ?, ?, ?)`,
+		modelID, endpoint, verdict, observedAt,
+	)
+	return err
+}
+
+// DeleteModelCacheSupport clears a persisted verdict so the pair is observed
+// again on next use. An empty modelID clears every verdict — the escape hatch
+// for an endpoint that changed behaviour under a stable URL.
+func DeleteModelCacheSupport(database *db.DB, modelID string) error {
+	if modelID == "" {
+		_, err := database.Exec(`DELETE FROM model_cache_support`)
+		return err
+	}
+	_, err := database.Exec(`DELETE FROM model_cache_support WHERE model_id = ?`, modelID)
+	return err
+}

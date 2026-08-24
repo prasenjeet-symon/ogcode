@@ -37,6 +37,17 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 
+	// An empty old_string matches everywhere (Go's Count treats it as
+	// occurring once between every rune), so it either falls into the
+	// "appears N times" ambiguity error with a confusing count, or — on an
+	// empty file, where that count is exactly 1 — silently "succeeds" by
+	// inserting new_string into a file whose content was never actually
+	// matched against anything. Reject it up front with a clear reason
+	// instead of either of those.
+	if input.OldString == "" {
+		return Result{}, fmt.Errorf("old_string must not be empty")
+	}
+
 	path := input.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(tctx.SessionDir, path)
@@ -55,17 +66,20 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 
 	content := string(data)
 
-	if !strings.Contains(content, input.OldString) {
-		return Result{}, fmt.Errorf("old_string not found in %s", path)
-	}
-
 	count := strings.Count(content, input.OldString)
-	if count > 1 {
+	switch {
+	case count == 0:
+		return Result{}, fmt.Errorf("old_string not found in %s", path)
+	case count > 1:
 		return Result{}, fmt.Errorf("old_string appears %d times in %s — edit requires a unique match", count, path)
 	}
 
 	newContent := strings.Replace(content, input.OldString, input.NewString, 1)
-	if err := os.WriteFile(path, []byte(newContent), 0o644); err != nil {
+	// Atomic: an edit that fails to write must not consume the file it was
+	// editing. The original is still on disk, untouched, if this returns an
+	// error — which matters more here than anywhere else, since the only other
+	// copy of it is `data`, in memory, about to go out of scope.
+	if err := writeFileAtomic(path, []byte(newContent)); err != nil {
 		return Result{}, fmt.Errorf("write file: %w", err)
 	}
 

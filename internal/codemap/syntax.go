@@ -77,7 +77,7 @@ func Check(path string) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if bytes.IndexByte(src, 0) >= 0 {
+	if LooksBinary(src) {
 		return nil, ErrBinary
 	}
 

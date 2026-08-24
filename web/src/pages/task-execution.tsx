@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from '@solidjs/router';
+import { useParams, useNavigate, useLocation } from '@solidjs/router';
 import { useSession } from '../context/session';
 import { usePlan } from '../context/plan';
 import { useServer } from '../context/server';
@@ -6,7 +6,8 @@ import { createEffect, on, createSignal, Show, onCleanup } from 'solid-js';
 import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
 import Breadcrumb from '../components/breadcrumb';
-import { getTask } from '../api/client';
+import { getTask, isNotFoundError } from '../api/client';
+import { NotFoundPanel } from './not-found';
 
 function getModelLabel(model: string | undefined): string {
   if (!model) return '';
@@ -39,8 +40,10 @@ function TaskExecutionContent() {
   const server = useServer();
   const params = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [taskData, setTaskData] = createSignal<any>(null);
   const [loading, setLoading] = createSignal(true);
+  const [notFound, setNotFound] = createSignal(false);
 
   // Merge incoming task data, preferring newer timestamps and preserving
   // non-empty values when the incoming data has empty/missing values.
@@ -88,9 +91,14 @@ function TaskExecutionContent() {
     }
   });
 
-  // Initial load: find from plan context or fetch from API
+  // Initial load: find from plan context or fetch from API.
+  // Deliberately not deferred — this has to run on mount, which is the common
+  // case (deep link, refresh, or clicking through from the task board).
+  // Deferring it meant the first fetch only happened on the 3s poll tick below,
+  // so every task page opened with a needless multi-second spinner.
   createEffect(on(() => params.id, async (id) => {
     if (!id) return;
+    setNotFound(false);
     const fromContext = plan.tasks().find((t) => t.id === id);
     if (fromContext) {
       mergeTaskData(fromContext);
@@ -109,14 +117,21 @@ function TaskExecutionContent() {
       } catch (e) {
         console.error('fetch task failed:', e);
         setLoading(false);
+        // Only a genuinely missing task counts as not-found; a transient network
+        // error should keep the spinner up so the poll below can recover.
+        if (isNotFoundError(e)) setNotFound(true);
       }
     }
-  }, { defer: true }));
+  }));
 
   // Poll for task updates when: no sessionId yet, or task is in a non-terminal state
   createEffect(() => {
     const id = params.id;
     if (!id) return;
+
+    // A task we know doesn't exist will never appear — polling it just 404s
+    // every 3 seconds forever.
+    if (notFound()) return;
 
     const task = taskData();
     const needsPoll = !task?.sessionId || (task.status !== 'completed' && task.status !== 'failed');
@@ -140,12 +155,17 @@ function TaskExecutionContent() {
 
   const breadcrumbs = () => {
     const task = taskData();
-    const p = plan.activePlan();
+    const active = plan.activePlan();
     const items: Array<{ label: string; href?: string }> = [
       { label: 'Plans', href: '/plan' },
     ];
-    if (p) {
-      items.push({ label: p.title || 'Plan', href: `/plan/${p.id}` });
+    // Prefer the task's own planId over the plan context: this page never calls
+    // selectPlan, so activePlan is null on a deep link or refresh and the link
+    // back to the parent plan would otherwise vanish exactly when it's needed.
+    const planId = task?.planId ?? active?.id;
+    if (planId) {
+      const title = active && active.id === planId ? active.title : undefined;
+      items.push({ label: title || 'Plan', href: `/plan/${planId}` });
     }
     if (task) {
       items.push({ label: task.title || 'Task' });
@@ -198,7 +218,7 @@ function TaskExecutionContent() {
             </Show>
             <button
               type="button"
-              onClick={() => navigate('/settings')}
+              onClick={() => navigate('/settings', { state: { from: location.pathname } })}
               class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition"
               title="Settings"
             >
@@ -210,6 +230,17 @@ function TaskExecutionContent() {
         </header>
 
         {/* Main content */}
+        <Show
+          when={!notFound()}
+          fallback={
+            <NotFoundPanel
+              title="Task not found"
+              message="This task no longer exists. It may have been deleted along with its plan."
+              actionLabel="Back to plans"
+              actionHref="/plan"
+            />
+          }
+        >
         <Show
           when={taskData()?.sessionId}
           fallback={
@@ -227,6 +258,7 @@ function TaskExecutionContent() {
         >
           <MessageList />
           <PromptInput />
+        </Show>
         </Show>
       </div>
     </div>

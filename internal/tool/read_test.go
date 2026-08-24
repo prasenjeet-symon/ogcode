@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -203,6 +204,67 @@ func TestReadTool_LongUnmappableFileStillReads(t *testing.T) {
 	}
 	if !strings.Contains(out, "plain prose line 3") {
 		t.Error("unmappable long file returned no contents")
+	}
+}
+
+// end_line without start_line used to be silently dropped, falling back to
+// the default unranged window (from line 1, up to defaultReadLimit) with no
+// sign the argument was ignored. It now defaults start_line to 1, so the
+// range is honoured as "from the top through end_line".
+func TestReadTool_EndLineWithoutStartLine(t *testing.T) {
+	out := readWith(t, numbered(t, 20), map[string]any{"end_line": 3})
+
+	for _, want := range []string{"\tline1", "\tline2", "\tline3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("window missing %s:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\tline4") {
+		t.Errorf("end_line was not honoured, window ran past it:\n%s", out)
+	}
+}
+
+// A file's total line count must agree with codemap's, since file_map and
+// read are meant to be used together against the same numbering. Both must
+// treat a file ending in a newline as not having a trailing phantom line.
+func TestReadTool_TrailingNewlineDoesNotInflateLineCount(t *testing.T) {
+	path := numbered(t, 20) // ends with a trailing "\n" after line20
+
+	// A small limit forces the truncation notice, which states the total.
+	paged := readWith(t, path, map[string]any{"offset": 0, "limit": 5})
+	if strings.Contains(paged, "of 21") {
+		t.Errorf("trailing newline was counted as an extra line:\n%s", paged)
+	}
+	if !strings.Contains(paged, "of 20") {
+		t.Errorf("expected a total of 20 lines:\n%s", paged)
+	}
+
+	// An unranged read of the whole (short) file must not include a phantom
+	// line 21.
+	full := readWith(t, path, map[string]any{})
+	if strings.Contains(full, fmt.Sprintf("%6d\t", 21)) {
+		t.Errorf("read returned a phantom trailing blank line 21:\n%s", full)
+	}
+}
+
+// A binary file has no line structure. Splitting it on incidental '\n' bytes
+// used to produce a flood of garbage "lines" with fabricated line numbers
+// instead of an error; it must now be reported plainly instead.
+func TestReadTool_BinaryFileReturnsNotice(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "img.bin")
+	data := []byte{0x89, 'P', 'N', 'G', 0x00, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x00}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := readWith(t, path, map[string]any{})
+
+	if !strings.Contains(out, "binary file") {
+		t.Errorf("binary file was not flagged as binary:\n%q", out)
+	}
+	if strings.Contains(out, "\x00") {
+		t.Errorf("raw binary bytes leaked into tool output:\n%q", out)
 	}
 }
 

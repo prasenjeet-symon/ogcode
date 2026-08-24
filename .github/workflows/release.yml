@@ -48,9 +48,9 @@ jobs:
         run: |
           set -euo pipefail
           LD="-s -w \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.version=${RELEASE_REF} \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.commit=$(git rev-parse HEAD) \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Version=${RELEASE_REF} \
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Commit=$(git rev-parse HEAD) \
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
             go build -trimpath -ldflags "$LD" -o prebuilt/ogcode_linux_amd64/ogcode .
           CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
@@ -83,9 +83,9 @@ jobs:
         run: |
           set -euo pipefail
           LD="-s -w \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.version=${RELEASE_REF} \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.commit=$(git rev-parse HEAD) \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Version=${RELEASE_REF} \
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Commit=$(git rev-parse HEAD) \
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           # arm64 native; amd64 via clang's built-in cross arch (Apple universal toolchain).
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
             go build -trimpath -ldflags "$LD" -o prebuilt/ogcode_darwin_arm64/ogcode .
@@ -149,9 +149,9 @@ jobs:
         run: |
           set -euo pipefail
           LD="-s -w \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.version=${RELEASE_REF} \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.commit=$(git rev-parse HEAD) \
-            -X github.com/prasenjeet-symon/ogcode/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Version=${RELEASE_REF} \
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Commit=$(git rev-parse HEAD) \
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-clang CXX=x86_64-w64-mingw32-clang++ \
             go build -trimpath -ldflags "$LD" -o prebuilt/ogcode_windows_amd64/ogcode.exe .
           CGO_ENABLED=1 GOOS=windows GOARCH=arm64 CC=aarch64-w64-mingw32-clang CXX=aarch64-w64-mingw32-clang++ \

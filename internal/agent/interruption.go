@@ -95,9 +95,22 @@ func classifyInterruption(err error, step int) *session.Interruption {
 			Detail:    "The request outgrew the model's context window. Resuming will compact again.",
 			Step:      step,
 		}
+	case strings.Contains(lower, "sse line larger than"):
+		// The response arrived intact but could not be framed: one SSE line
+		// overran the reader's cap. Retrying replays the same oversized response,
+		// so this is the provider's shape rather than a blip to wait out.
+		return &session.Interruption{
+			Reason:    session.InterruptFatal,
+			Resumable: false,
+			Detail:    "The provider sent one SSE line too large to read — it emits whole tool calls in a single chunk. Ask for a smaller response, or use a provider that streams in deltas.",
+			Step:      step,
+		}
 	case strings.Contains(lower, "connection reset") || strings.Contains(lower, "eof") ||
 		strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") ||
-		strings.Contains(lower, "refused") || strings.Contains(lower, "no such host"):
+		strings.Contains(lower, "refused") || strings.Contains(lower, "no such host") ||
+		// The provider layer's own wording for a byte stream that stopped
+		// arriving intact: stalled, cut off mid-response, cancelled underneath.
+		strings.Contains(lower, "stream read failed"):
 		return &session.Interruption{
 			Reason:    session.InterruptNetwork,
 			Resumable: true,

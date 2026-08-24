@@ -405,7 +405,7 @@ docker run -p 9595:9595 -v $(pwd):/workspace -w /workspace ghcr.io/prasenjeet-sy
 
 ## Configuration
 
-Ogcode auto-detects available AI providers from environment variables. No config files required.
+Ogcode auto-detects available AI providers from environment variables — no config file is required to get started. Env vars, a config file, and (for Ollama) a CLI flag are all optional and layer together: **CLI flag > environment variable > config file > provider auto-detect.**
 
 ### AI Provider
 
@@ -425,12 +425,37 @@ Set at least one API key (or use Ollama):
 ollama serve
 ogcode
 
-# Or explicit on any OS:
+# Or explicit on any OS, via env var:
 export OLLAMA_BASE_URL=http://localhost:11434/v1
 ogcode
+
+# Or a one-off, via flag — no env var needed:
+ogcode --ollama-url http://100.x.x.x:11434
 ```
 
+`--ollama-key` is also available, for a hosted/authenticated Ollama-compatible endpoint. Both flags work on every subcommand (`serve`, `plan`, `run`, `index`), and override `OLLAMA_BASE_URL`/`OLLAMA_API_KEY` and the config file below for that invocation.
+
 Available models: `qwen3`, `codellama`, `llama3.1`, `deepseek-coder-v2`, `mistral`, and any model you've pulled.
+
+### Config file (optional)
+
+Instead of exporting env vars every time, put provider settings in a JSON file. Ogcode reads two locations and merges them, with the project-local file winning per field:
+
+- `~/.config/ogcode/config.json` — global, applies to every project
+- `ogcode.json` at the project root — project-local (commit it, or gitignore it if it holds a key). Ogcode finds it even when you launch from a subdirectory: it searches upward from the current directory through parent directories, stopping once it has checked the repo root (the directory containing `.git`) — so an unrelated `ogcode.json` further up outside the repo is never picked up.
+
+```json
+{
+  "providers": {
+    "ollama": { "baseUrl": "http://100.x.x.x:11434" },
+    "anthropic": { "apiKey": "sk-ant-..." }
+  }
+}
+```
+
+Supported provider keys: `anthropic`, `openai`, `openrouter`, `ollama`, each with an optional `baseUrl` and `apiKey`. A real environment variable always overrides the config file.
+
+If no `ogcode.json` exists anywhere in that search when you run `ogcode` (bare, `serve`, `plan`, `run`, or `index`), one is scaffolded automatically in the current directory, blank and ready to fill in. If one already exists — here or in an ancestor directory — it's left untouched.
 
 ### Agentic Memory (optional)
 

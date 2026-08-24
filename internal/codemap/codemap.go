@@ -45,6 +45,14 @@ const (
 // ErrBinary is returned for files holding NUL bytes.
 var ErrBinary = errors.New("binary file")
 
+// LooksBinary reports whether data holds a NUL byte — the heuristic this
+// package uses to tell binary content from source text. Exported so other
+// packages (e.g. the read tool) can apply the same rule before treating a
+// file's bytes as text.
+func LooksBinary(data []byte) bool {
+	return bytes.IndexByte(data, 0) >= 0
+}
+
 // TooLargeError reports a file above MaxFileSize.
 type TooLargeError struct {
 	Size int64
@@ -106,7 +114,7 @@ func Outline(path string) (*FileMap, error) {
 	if err != nil {
 		return nil, err
 	}
-	if bytes.IndexByte(src, 0) >= 0 {
+	if LooksBinary(src) {
 		return nil, ErrBinary
 	}
 

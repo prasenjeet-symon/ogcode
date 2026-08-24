@@ -155,60 +155,70 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   };
 
   return (
-    <div class="my-2">
+    <div class="my-1.5">
       <button
         type="button"
+        aria-expanded={expanded()}
         onClick={() => setExpanded(!expanded())}
-        class="flex items-center gap-2 w-full text-left text-[12px] px-2.5 py-1.5 rounded-md
-               bg-[color:var(--bg-elevated)] hover:bg-[color:var(--bg-hover)]
-               border border-[color:var(--border-subtle)]
-               transition-all var(--spring-sm) group"
+        class={`flex items-center gap-2 w-full text-left text-meta h-7 px-2 rounded-md border
+               transition-colors
+               ${expanded()
+                 ? 'bg-[color:var(--bg-elevated)] border-[color:var(--border-default)]'
+                 : 'bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)] hover:bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-default)]'
+               }`}
       >
+        <svg
+          class={`w-2.5 h-2.5 shrink-0 text-[color:var(--text-muted)] transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
         <div class={`flex-shrink-0 ${statusColor()}`}>
           <Show when={status() === 'running'}>
-            <div class="w-3.5 h-3.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
+            <div class="w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
           </Show>
           <Show when={status() === 'completed'}>
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
               <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </Show>
           <Show when={status() === 'error' && isCancelled()}>
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
               <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
             </svg>
           </Show>
           <Show when={status() === 'error' && !isCancelled()}>
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.6">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M4.93 19h14.14c1.54 0 2.5-1.67 1.73-3L13.73 4.99c-.77-1.33-2.69-1.33-3.46 0L3.2 16c-.77 1.33.19 3 1.73 3z" />
             </svg>
           </Show>
           <Show when={status() === 'pending'}>
-            <div class="w-3.5 h-3.5 border-[1.5px] border-current rounded-full opacity-60" />
+            <div class="w-3 h-3 border-[1.5px] border-current rounded-full opacity-60" />
           </Show>
         </div>
-        <span class="text-zinc-300 font-medium shrink-0">{title()}</span>
+        <span
+          class={`shrink-0 font-medium ${status() === 'running' ? 'sweep-text' : 'text-[color:var(--text-secondary)]'}`}
+        >
+          {title()}
+        </span>
         <Show when={isCancelled()}>
-          <span class="text-[10px] text-amber-400/80 font-medium shrink-0">cancelled</span>
+          <span class="text-micro text-amber-400/80 font-medium shrink-0">cancelled</span>
         </Show>
-        <Show when={summary()}>
-          <span class="text-zinc-500 font-mono text-[11px] truncate flex-1 min-w-0">
+        <Show when={summary()} fallback={<span class="flex-1" />}>
+          <span class="text-[color:var(--text-muted)] font-mono text-micro truncate flex-1 min-w-0">
             {summary()}
           </span>
         </Show>
-        <Show when={!summary()}>
-          <span class="flex-1" />
-        </Show>
         <Show when={diffStats()}>
-          <span class="flex items-center gap-1.5 shrink-0 text-[10px] font-mono tabular-nums">
+          <span class="flex items-center gap-1.5 shrink-0 text-micro font-mono tabular-nums">
             <span style={{ color: 'var(--success)' }}>+{diffStats()!.adds}</span>
             <span style={{ color: 'var(--danger)' }}>−{diffStats()!.dels}</span>
           </span>
         </Show>
         <Show when={isDeepSearch() && durationLabel()}>
           <span
-            class={`flex items-center gap-1 shrink-0 text-[10px] font-mono tabular-nums ${
-              status() === 'running' ? 'text-[color:var(--accent)]' : 'text-zinc-500'
+            class={`flex items-center gap-1 shrink-0 text-micro font-mono tabular-nums ${
+              status() === 'running' ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)]'
             }`}
             title="Total time for this deep search"
           >
@@ -219,36 +229,36 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
           </span>
         </Show>
         <Show when={hasOutput() && !expanded() && !isFileEdit()}>
-          <span class="text-[10px] text-zinc-600 font-mono shrink-0">
+          <span class="text-micro text-[color:var(--text-muted)] font-mono shrink-0 tabular-nums">
             {outputLineCount()} {outputLineCount() === 1 ? 'line' : 'lines'}
           </span>
         </Show>
-        <svg
-          class={`w-3 h-3 text-zinc-600 transition-transform var(--spring-sm) shrink-0 ${expanded() ? 'rotate-90' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
       </button>
 
       <Show when={expanded()}>
-        <div class="mt-1.5 ml-2 space-y-1.5 min-w-0 overflow-hidden">
-          <Show when={isFileEdit() && fileDiff()}>
-            <FileDiff oldText={fileDiff()!.oldText} newText={fileDiff()!.newText} mode={fileDiff()!.mode} omitted={fileDiff()!.omitted} />
-          </Show>
-          <Show when={!isFileEdit() && state().input && Object.keys(state().input).length > 0 && !(isDeepSearch() && status() === 'completed')}>
-            <CodeBlock label="input" maxHeight={160} text={safeStringify(state().input)} />
-          </Show>
-          <Show when={state().output && !isFileEdit()}>
-            <Show when={isDeepSearch()} fallback={<CodeBlock label="output" maxHeight={280} text={state().output || ''} />}>
-              <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-3 max-h-[600px] overflow-y-auto">
-                <MarkdownContent text={state().output || ''} />
-              </div>
-            </Show>
-          </Show>
-          <Show when={state().error}>
-            <CodeBlock label="error" maxHeight={160} text={state().error || ''} />
-          </Show>
+        {/* .reveal animates the disclosure open from zero height without a
+            magic max-height, so long outputs and one-liners open alike. */}
+        <div class="reveal">
+          <div>
+            <div class="mt-1.5 ml-[1.15rem] space-y-1.5 min-w-0 overflow-hidden">
+              <Show when={isFileEdit() && fileDiff()}>
+                <FileDiff oldText={fileDiff()!.oldText} newText={fileDiff()!.newText} mode={fileDiff()!.mode} omitted={fileDiff()!.omitted} />
+              </Show>
+              <Show when={!isFileEdit() && state().input && Object.keys(state().input).length > 0 && !(isDeepSearch() && status() === 'completed')}>
+                <CodeBlock label="input" maxHeight={160} text={safeStringify(state().input)} />
+              </Show>
+              <Show when={state().output && !isFileEdit()}>
+                <Show when={isDeepSearch()} fallback={<CodeBlock label="output" maxHeight={280} text={state().output || ''} />}>
+                  <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-3 max-h-[600px] overflow-y-auto">
+                    <MarkdownContent text={state().output || ''} />
+                  </div>
+                </Show>
+              </Show>
+              <Show when={state().error}>
+                <CodeBlock label="error" maxHeight={160} text={state().error || ''} />
+              </Show>
+            </div>
+          </div>
         </div>
       </Show>
     </div>
@@ -272,17 +282,17 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
 
   return (
     <div class="relative group/code rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] overflow-hidden w-full min-w-0">
-      <div class="flex items-center justify-between px-2.5 py-1 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-base)]/40">
-        <span class="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">{props.label}</span>
+      <div class="flex items-center justify-between px-2 py-0.5 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-base)]/40">
+        <span class="text-micro uppercase tracking-[0.08em] text-[color:var(--text-muted)] font-medium">{props.label}</span>
         <div class="flex items-center gap-1">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setWrap(!wrap()); }}
             title={wrap() ? 'Disable word wrap' : 'Enable word wrap'}
-            class={`h-6 px-2 rounded text-[10.5px] font-medium transition flex items-center gap-1
+            class={`h-6 px-1.5 rounded text-micro font-medium transition flex items-center gap-1
               ${wrap()
                 ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)] hover:bg-[color:var(--accent-soft)]'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]'
+                : 'text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]'
               }`}
           >
             <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -294,10 +304,10 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
             type="button"
             onClick={handleCopy}
             title="Copy"
-            class={`h-6 px-2 rounded text-[10.5px] font-medium transition flex items-center gap-1
+            class={`h-6 px-1.5 rounded text-micro font-medium transition flex items-center gap-1
               ${copied()
                 ? 'text-emerald-300 bg-emerald-500/10'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]'
+                : 'text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]'
               }`}
           >
             <Show
@@ -317,7 +327,7 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
         </div>
       </div>
       <pre
-        class={`text-[11.5px] text-zinc-300 font-mono leading-relaxed p-2.5 overflow-y-auto
+        class={`text-micro text-[color:var(--text-secondary)] font-mono leading-[1.6] p-2.5 overflow-y-auto
           ${wrap() ? 'whitespace-pre-wrap break-words overflow-x-hidden' : 'whitespace-pre overflow-x-auto'}`}
         style={{ 'max-height': `${props.maxHeight}px` }}
       >
@@ -337,7 +347,7 @@ function ImagePartDisplay(props: { data: ImagePartData }) {
       <button
         type="button"
         onClick={() => setExpanded(!expanded())}
-        class="block rounded-lg overflow-hidden border border-[color:var(--border-subtle)] transition-all var(--spring-sm)"
+        class="block rounded-lg overflow-hidden border border-[color:var(--border-subtle)] transition-all"
       >
         <img
           src={src()}
@@ -353,36 +363,38 @@ function ReasoningPartDisplay(props: { data: ReasoningPartData }) {
   const [expanded, setExpanded] = createSignal(false);
   const charCount = () => props.data.text.length;
   const isLong = () => charCount() > 500;
-  const preview = () => isLong() ? props.data.text.slice(0, 300) + '…' : props.data.text;
 
   return (
-    <div class="my-2">
+    <div class="my-1.5">
       <button
         type="button"
+        aria-expanded={expanded()}
         onClick={() => setExpanded(!expanded())}
-        class="flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md
-               text-violet-300/90 hover:text-violet-200 hover:bg-violet-500/5
-               transition-colors duration-150"
+        class="reasoning-toggle flex items-center gap-1.5 text-meta h-7 px-2 rounded-md transition-colors"
       >
         <svg
-          class={`w-3 h-3 transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"
+          class={`w-2.5 h-2.5 transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
         >
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
         </svg>
         <span class="font-medium">Thought</span>
         <Show when={isLong()}>
-          <span class="text-[10px] text-violet-400/60 font-mono ml-1">
+          <span class="reasoning-count text-micro font-mono tabular-nums ml-0.5">
             {charCount().toLocaleString()} chars
           </span>
         </Show>
       </button>
       <Show when={expanded()}>
-        <div class="ml-5 mt-1.5 pl-3 border-l-2 border-violet-500/20 text-[13px] text-zinc-400 whitespace-pre-wrap break-words italic leading-relaxed max-h-[400px] overflow-y-auto">
-          {props.data.text}
+        <div class="reveal">
+          <div>
+            <div class="reasoning-body ml-[1.15rem] mt-1.5 pl-3 text-meta text-[color:var(--text-tertiary)] whitespace-pre-wrap break-words leading-[1.65] max-h-[400px] overflow-y-auto">
+              {props.data.text}
+            </div>
+          </div>
         </div>
       </Show>
     </div>
@@ -477,8 +489,9 @@ function UserMessage(props: { msg: MessageWithParts }) {
     }).catch(() => {});
   };
 
-  // Clamp height for ~4 lines of text (4 × 1.65 line-height × 15px ≈ 99px + padding)
-  const CLAMP_HEIGHT = 112;
+  // Clamp height for ~5 lines of chat text (5 × 1.65 line-height × 15px ≈ 124px
+  // + vertical padding). Long pastes collapse; ordinary prompts never do.
+  const CLAMP_HEIGHT = 140;
 
   function checkOverflow() {
     if (!contentRef) return;
@@ -496,16 +509,25 @@ function UserMessage(props: { msg: MessageWithParts }) {
   });
 
   return (
-    <div class="flex justify-end animate-fade-in-right group">
-      <div class="max-w-[85%] flex flex-col items-end min-w-0">
+    <div data-role="user" class="flex justify-end animate-msg-in group">
+      <div class="max-w-[82%] flex flex-col items-end min-w-0">
         <div class="relative min-w-0 max-w-full">
           <div
             ref={contentRef}
             classList={{
-              'rounded-2xl rounded-br-sm px-4 py-2.5 border-l-2 border-l-[color:var(--accent)] border border-[color:var(--border-subtle)] min-w-0 max-w-full break-words': true,
+              // border-default rather than -subtle: with a neutral custom accent
+              // the tint alone is nearly invisible, and the bubble still has to
+              // read as a bubble.
+              'rounded-2xl px-3.5 py-2 border border-[color:var(--border-default)] min-w-0 max-w-full break-words': true,
               'overflow-hidden': !expanded(),
             }}
-            style={{ background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-elevated)', ...(!expanded() ? { 'max-height': `${CLAMP_HEIGHT}px` } : {}) }}
+            style={{
+              // The accent tint is layered over the elevated surface rather than
+              // painted as a stripe, so a re-themed accent recolours the whole
+              // bubble instead of leaving a mismatched edge.
+              background: 'linear-gradient(var(--accent-soft), var(--accent-soft)) var(--bg-elevated)',
+              ...(!expanded() ? { 'max-height': `${CLAMP_HEIGHT}px` } : {}),
+            }}
           >
             <Index each={props.msg.parts}>
               {(part) => <PartDisplay part={part()} />}
@@ -513,8 +535,8 @@ function UserMessage(props: { msg: MessageWithParts }) {
           </div>
           {/* Bottom fade to indicate truncated content */}
           <Show when={!expanded() && overflow()}>
-            <div class="absolute bottom-0 left-0 right-0 h-10 pointer-events-none rounded-b-2xl"
-              style={{ background: 'linear-gradient(to top, var(--bg-elevated) 20%, transparent 100%)' }}
+            <div class="absolute bottom-0 left-0 right-0 h-9 pointer-events-none rounded-b-2xl"
+              style={{ background: 'linear-gradient(to top, var(--bg-elevated) 15%, transparent 100%)' }}
             />
           </Show>
         </div>
@@ -522,34 +544,35 @@ function UserMessage(props: { msg: MessageWithParts }) {
           <button
             type="button"
             onClick={() => { setExpanded(!expanded()); requestAnimationFrame(checkOverflow); }}
-            class="text-[11px] text-zinc-500 hover:text-zinc-300 mt-1 mr-1 transition"
+            class="text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] mt-1 mr-1 transition-colors"
           >
             {expanded() ? 'Show less' : 'Show more'}
           </button>
         </Show>
-        <div class="flex items-center justify-end gap-2 mt-1 mr-1">
+
+        {/* Hover actions — icon-only so a turn is never framed by a row of
+            buttons competing with the message itself. */}
+        <div class="flex items-center justify-end gap-0.5 mt-0.5 -mr-1 h-7
+                    opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+          <span class="text-micro text-[color:var(--text-muted)] tabular-nums mr-1">{timestamp()}</span>
           <Show when={userText()}>
             <button
               type="button"
               onClick={handleCopy}
-              title="Copy message"
-              class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md font-medium transition-all var(--spring-sm)
-                opacity-0 group-hover:opacity-100
-                ${copied()
-                  ? 'text-emerald-400 bg-emerald-500/10 opacity-100'
-                  : 'text-zinc-400 hover:text-[color:var(--accent)] hover:bg-[color:var(--accent-soft)] bg-[color:var(--bg-elevated)]'
-                }`}
+              title={copied() ? 'Copied' : 'Copy message'}
+              aria-label="Copy message"
+              class="icon-btn"
+              classList={{ 'text-emerald-400': copied() }}
             >
               <Show when={copied()} fallback={
-                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
               }>
-                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </Show>
-              {copied() ? 'Copied!' : 'Copy'}
             </button>
           </Show>
           <Show when={userText()}>
@@ -557,29 +580,22 @@ function UserMessage(props: { msg: MessageWithParts }) {
               type="button"
               onClick={handleSendToNotes}
               disabled={sendingToNote()}
-              title="Save to Notes"
-              class={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md font-medium transition-all var(--spring-sm)
-                opacity-0 group-hover:opacity-100
-                ${noteSaved()
-                  ? 'text-emerald-400 bg-emerald-500/10 opacity-100'
-                  : sendingToNote()
-                  ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)] opacity-60'
-                  : 'text-zinc-400 hover:text-[color:var(--accent)] hover:bg-[color:var(--accent-soft)] bg-[color:var(--bg-elevated)]'
-                }`}
+              title={noteSaved() ? 'Saved to Notes' : 'Save to Notes'}
+              aria-label="Save to Notes"
+              class="icon-btn"
+              classList={{ 'text-emerald-400': noteSaved(), 'opacity-60': sendingToNote() }}
             >
               <Show when={noteSaved()} fallback={
-                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                 </svg>
               }>
-                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </Show>
-              {noteSaved() ? 'Saved!' : sendingToNote() ? 'Saving…' : 'Save to Notes'}
             </button>
           </Show>
-          <span class="text-[10px] text-zinc-600 opacity-0 group-hover:opacity-100 transition">{timestamp()}</span>
         </div>
       </div>
     </div>
@@ -590,6 +606,25 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
   const timestamp = () => formatTime(props.msg.info.createdAt);
   const [copied, setCopied] = createSignal(false);
   let copyTimer: ReturnType<typeof setTimeout>;
+
+  // A turn with no finish reason and no error is still being written. When its
+  // trailing part is text we mark the container so a caret rides the end of the
+  // prose — the one signal that separates "still writing" from "answered in one
+  // short line", which a spinner somewhere else on screen cannot give.
+  const isStreaming = () => !props.msg.info.finish && !props.msg.info.error;
+  const streamingText = () => {
+    if (!isStreaming()) return false;
+    const parts = props.msg.parts;
+    return parts.length > 0 && parts[parts.length - 1].type === 'text';
+  };
+
+  // Most assistant turns in a long run are a single tool call with no prose.
+  // Reserving the hover action bar under those added ~28px of dead space per
+  // turn — the main reason a run of tool calls looked so airy — and offered a
+  // Copy button with nothing to copy.
+  const hasText = () => props.msg.parts.some(
+    (p) => p.type === 'text' && (parsePartData<TextPartData>(p.data).text || '').trim().length > 0
+  );
 
   const handleCopy = () => {
     const text = props.msg.parts
@@ -605,34 +640,24 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
   };
 
   return (
-    <div class="flex gap-3 animate-fade-in-left group">
-      {/* Avatar */}
-      <div class="w-7 h-7 shrink-0 rounded-lg bg-[color:var(--accent)] flex items-center justify-center shadow-sm shadow-[color:var(--accent)]/15 mt-0.5">
-        <svg class="w-3.5 h-3.5 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-      </div>
-
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="text-[12px] font-semibold text-[color:var(--accent)]">ogcode</span>
-          <span class="text-[10px] text-zinc-600 opacity-0 group-hover:opacity-100 transition">
-            {timestamp()}
-          </span>
-        </div>
-
-        <div class="space-y-1 min-w-0 overflow-hidden">
+    // The assistant answer runs the full width of the reading column with no
+    // avatar or name plate. Repeating a badge on every turn costs a line of
+    // vertical space and ~2rem of horizontal space per message and tells the
+    // reader nothing they cannot see from the alignment of the user's bubble.
+    <div data-role="assistant" class="animate-msg-in group">
+      <div class="min-w-0">
+        <div class="space-y-1 min-w-0 overflow-hidden" classList={{ 'msg-streaming': streamingText() }}>
           <Index each={props.msg.parts}>
             {(part) => <PartDisplay part={part()} />}
           </Index>
 
           <Show when={props.msg.parts.length === 0 && props.msg.info.finish && !props.msg.info.error}>
-            <div class="text-[13px] text-zinc-500 italic">No response</div>
+            <div class="text-ui text-[color:var(--text-tertiary)] italic">No response</div>
           </Show>
         </div>
 
         <Show when={props.msg.info.error}>
-          <div class="mt-2 text-[12px] text-red-300 bg-red-950/30 border border-red-800/40 rounded-md px-3 py-2">
+          <div class="mt-2 text-meta text-red-300 bg-red-950/30 border border-red-800/40 rounded-md px-3 py-2">
             <span class="font-medium">Error:</span> {props.msg.info.error}
           </div>
         </Show>
@@ -642,7 +667,7 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
         </Show>
 
         <Show when={props.msg.info.finish === 'aborted'}>
-          <div class="mt-2 text-[12px] text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-1.5 flex items-center gap-1.5">
+          <div class="mt-2 text-meta text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-1.5 flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
             </svg>
@@ -651,31 +676,31 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
         </Show>
 
         {/* Action bar (hover) */}
-        <Show when={props.msg.info.finish}>
-          <div class="mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity var(--spring-md)">
+        <Show when={props.msg.info.finish && hasText()}>
+          <div class="mt-1 flex items-center gap-0.5 -ml-1.5 h-7
+                      opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
             <button
+              type="button"
               onClick={handleCopy}
-              class={`text-[11px] px-2 py-1 rounded-md flex items-center gap-1.5 transition-all var(--spring-sm) ${
-                copied()
-                  ? 'text-emerald-400 bg-emerald-500/10'
-                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]'
-              }`}
-              title="Copy response"
+              class="icon-btn"
+              classList={{ 'text-emerald-400': copied() }}
+              title={copied() ? 'Copied' : 'Copy response'}
+              aria-label="Copy response"
             >
               <Show
                 when={copied()}
                 fallback={
-                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
                 }
               >
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </Show>
-              {copied() ? 'Copied!' : 'Copy'}
             </button>
+            <span class="text-micro text-[color:var(--text-muted)] tabular-nums ml-1">{timestamp()}</span>
           </div>
         </Show>
       </div>
@@ -736,7 +761,7 @@ function ResumeBanner(props: { interruption: Interruption }) {
   }
 
   return (
-    <div class="mt-2 text-[12px] text-amber-200 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-2">
+    <div class="mt-2 text-meta text-amber-200 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-2">
       <div class="flex items-start gap-2">
         <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />

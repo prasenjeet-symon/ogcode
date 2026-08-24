@@ -2,8 +2,12 @@ import { useNavigate, useLocation, type RouteSectionProps } from '@solidjs/route
 import { For, Show } from 'solid-js';
 import { useServer } from '../../context/server';
 
-// Module-level store so previous route survives SettingsShell remounts.
-let storedPreviousRoute = '/plan';
+// Module-level store so the entry route survives SettingsShell remounts as the
+// user moves between settings sub-pages. Null until someone actually navigates
+// in from elsewhere — a hard load straight onto /settings re-evaluates this
+// module, so null reliably means "no in-app page to go back to" and the back
+// button falls through to the mode-aware home route instead of guessing.
+let storedPreviousRoute: string | null = null;
 
 interface NavItem {
   id: string;
@@ -52,7 +56,10 @@ function SettingsShell(props: { children?: any }) {
     storedPreviousRoute = from;
   }
 
-  const goBack = () => navigate(storedPreviousRoute);
+  // Replace rather than push: leaving settings should pop the user back out,
+  // not stack another entry so the browser's own Back button re-enters settings.
+  const goBack = () =>
+    navigate(storedPreviousRoute ?? (server.mode() === 'plan' ? '/plan' : '/'), { replace: true });
 
   return (
     <div class="flex h-screen w-full">

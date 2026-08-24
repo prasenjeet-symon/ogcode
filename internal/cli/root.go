@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
+	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
@@ -23,10 +24,23 @@ import (
 
 var port int
 var indexModel string
+var ollamaURLFlag string
+var ollamaKeyFlag string
 
 var rootCmd = &cobra.Command{
 	Use:   "ogcode",
 	Short: "Agentic coding assistant with web UI",
+	// Runs before every command (including bare `ogcode`): explicit flags
+	// beat everything else, so apply them as env var overrides last, after
+	// the config file has already filled any gaps in Execute().
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if ollamaURLFlag != "" {
+			os.Setenv("OLLAMA_BASE_URL", ollamaURLFlag)
+		}
+		if ollamaKeyFlag != "" {
+			os.Setenv("OLLAMA_API_KEY", ollamaKeyFlag)
+		}
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return serve(cmd, args)
 	},
@@ -57,6 +71,8 @@ func init() {
 	serveCmd.Flags().IntVarP(&port, "port", "p", 9595, "Port to listen on")
 	planCmd.Flags().IntVarP(&port, "port", "p", 9595, "Port to listen on")
 	indexCmd.Flags().StringVar(&indexModel, "model", "", "Model to use for the IndexAgent (default: provider default)")
+	rootCmd.PersistentFlags().StringVar(&ollamaURLFlag, "ollama-url", "", "Ollama server address, e.g. http://100.x.x.x:11434 (overrides OLLAMA_BASE_URL and the config file)")
+	rootCmd.PersistentFlags().StringVar(&ollamaKeyFlag, "ollama-key", "", "API key for a hosted/authenticated Ollama-compatible endpoint (overrides OLLAMA_API_KEY)")
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(indexCmd)
@@ -66,6 +82,9 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
+	}
+	if path := config.EnsureProjectFile(dir); path != "" {
+		slog.Info("created project config file", "path", path)
 	}
 
 	dbPath := filepath.Join(dir, ".ogcode", "ogcode.db")
@@ -124,6 +143,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	toolRegistry := tool.NewRegistry()
 	toolRegistry.Register(tool.ReadTool{})
+	toolRegistry.Register(tool.NewCompactContextTool())
 	toolRegistry.Register(tool.GlobTool{})
 	toolRegistry.Register(tool.GrepTool{})
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(docindexStore))
@@ -188,6 +208,9 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
+	if path := config.EnsureProjectFile(dir); path != "" {
+		slog.Info("created project config file", "path", path)
+	}
 	srv := server.New(port, dir, mode)
 	return srv.Start()
 }
@@ -195,5 +218,8 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 func Execute() error {
 	_ = godotenv.Load()
 	setupLogging()
+	if dir, err := os.Getwd(); err == nil {
+		config.Load(dir).ApplyEnv()
+	}
 	return rootCmd.Execute()
 }

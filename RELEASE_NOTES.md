@@ -1,3 +1,164 @@
+# Release Notes — v0.26.1
+
+## Patch: In-Turn Context Compaction, Cache-Verdict Detection, File-Based Config, Streaming Hardening, and Tool Correctness
+
+This patch release adds the long-missing ability for an agent to reclaim its
+own context mid-turn on endpoints that do not cache a repeated prefix, and
+gates that ability behind detection so it is never offered where it would cost
+more than it saves. It also introduces file-based provider configuration with
+CLI flags, consolidates build version metadata into one package, hardens the
+streaming layer against stalled connections and oversized frames, makes file
+writes atomic, and fixes a cluster of tool-correctness bugs around binary
+files, read-only-but-existing files, and empty edit patterns.
+
+### In-turn context compaction (compact_context)
+
+On endpoints that bill the full accumulated prefix on every step — where there
+is no prompt cache — a long agent turn grows until it overflows the context
+window, even though the early steps are finished and only their conclusions
+matter. The agent can now compact its own context mid-turn by calling a new
+`compact_context` tool with a written summary of everything it has done so
+far. The tool itself only validates the summary; the agent loop does the work:
+it records a watermark at the assistant message that carried the call, and
+from the next step onward assembles the model-facing request as the summary
+plus everything after that watermark. Nothing is deleted — the session store
+keeps every message, so history and the UI are unaffected — only the
+model-facing slice narrows. (`internal/tool/compact_context.go`,
+`internal/agent/compaction_watermark.go`, `internal/agent/loop.go`)
+
+### Cache-verdict detection
+
+Compaction pays for itself only when every step re-pays full price for the
+whole prefix. On an endpoint that serves a repeated prefix from a cache
+(Anthropic, OpenAI), compacting is a net loss — it invalidates the cache and
+the next request re-establishes the prefix at full price. So the
+`compact_context` tool is gated behind a per-endpoint verdict: `caching`,
+`none`, or `unknown`. The verdict is resolved by observing what the provider
+reports back (`cache_creation_input_tokens` / `cached_tokens` in the
+response), persisted per `(model, endpoint)` in a new
+`model_cache_support` table so the observation window is spent at most once,
+and memoized in-process on top of the database. The key is composite rather
+than model alone, because the same model can be served by endpoints that
+differ in caching behaviour — `qwen3-coder:cloud` on a local Ollama reuses its
+KV cache and bills nothing, while the same model on ollama.com is billed per
+token with no prefix caching. Keying on the model alone would let one
+endpoint's verdict silently answer for the other.
+(`internal/provider/cache_support.go`, `internal/agent/cache_verdict.go`,
+`internal/db/034_model_cache_support.sql`)
+
+### File-based configuration
+
+Provider base URLs and API keys can now live in a JSON file instead of only
+environment variables. Ogcode reads two locations and merges them, with the
+project-local file winning per field:
+
+- `~/.config/ogcode/config.json` — global, applies to every project
+- `ogcode.json` at the project root — project-local (commit it, or gitignore it
+  if it holds a key). It is found even when launched from a subdirectory:
+  Ogcode searches upward from the current directory through parents, stopping
+  once it has checked the repo root (the directory containing `.git`), so an
+  unrelated `ogcode.json` further up outside the repo is never picked up.
+
+The precedence is **CLI flag > environment variable > config file > provider
+auto-detect**; a real environment variable always overrides the config file.
+`--ollama-url` and `--ollama-key` flags work on every subcommand for a one-off
+override with no env var needed. If no `ogcode.json` exists anywhere in the
+search, a blank one is scaffolded automatically in the current directory.
+(`internal/config/`, `internal/cli/root.go`, `internal/cli/run.go`)
+
+### Consolidated build version metadata
+
+Version, commit, and build date previously lived as separate `ldflags`-injected
+vars in both `internal/cli` and `internal/version`, which drifted apart and
+duplicated the injection sites. They are now consolidated into
+`internal/version` (`Version`, `Commit`, `Date`), the CLI's `version` command
+sources from the version package via `version.GetInfo()`, and both the
+Makefile and the GoReleaser release workflow inject only the single
+`internal/version` package. (`internal/version/version.go`,
+`internal/cli/version.go`, `Makefile`, `.github/workflows/release.yml`)
+
+### Streaming hardening
+
+The streaming layer no longer relies on a single whole-request HTTP timeout,
+which killed long generations mid-stream. Liveness is now bounded where it
+belongs:
+
+- **Split idle budget.** Cloud endpoints that stream tool-call arguments as a
+  run of small deltas are never quiet for long, so a tight 120 s idle watchdog
+  (reset on every chunk) safely catches a dead connection. Local and batched
+  endpoints (Ollama composes a whole tool call and emits it in one frame when
+  the model finishes — measured at 13.4 s of silence for a 7 KB call) get a
+  10-minute budget sized to outlast a large generation rather than a network
+  blip. (`internal/provider/provider.go`)
+- **Per-line byte cap.** A 16 MB SSE line cap so a provider that sends an
+  entire tool call — a whole file's contents, JSON-escaped — in one `data:`
+  frame no longer breaks `bufio` with `ErrTooLong` part-way through a large
+  response. (`internal/provider/provider.go`)
+- **Response-header timeout.** A 300 s header wait bounds the one phase the
+  idle watchdog cannot cover (it only starts once the body exists), kept long
+  so a free, queued endpoint is treated as a slow provider rather than a dead
+  connection. (`internal/provider/provider.go`)
+
+### Atomic file writes
+
+The write tool now writes atomically — content goes to a temp file and is
+renamed into place — so a crash or interruption mid-write no longer leaves a
+truncated file on disk that the next step treats as the file's real contents.
+(`internal/tool/atomic_write.go`, `internal/tool/write.go`)
+
+### Tool correctness fixes
+
+- **read — `end_line` alone.** Giving `end_line` without `start_line` now means
+  "from line 1 through `end_line`" instead of silently falling back to the
+  unranged default window and handing back different lines than asked for with
+  no indication the argument was used. (`internal/tool/read.go`)
+- **read — binary files.** A binary file has no line structure; splitting it
+  on incidental `\n` bytes produced a flood of garbage "lines" with fabricated
+  line numbers. The read tool now detects binary content with the same
+  heuristic `file_map` uses and returns a clear message pointing to
+  `view_image` / `pdf_index` / `docx_index` instead. (`internal/tool/read.go`)
+- **read — phantom trailing line.** A file ending in a newline (the common
+  case) no longer reports a count inflated by one, so the read tool and
+  codemap agree on line counts for the same file. (`internal/tool/read.go`)
+- **write — `created` vs overwritten.** File existence is now decided by
+  `Stat`, not by whether `ReadFile` succeeds. A file that exists but is
+  unreadable (permissions, a transient I/O error) is still an overwrite, not a
+  creation — so content that existed and was lost is no longer reported as
+  newly "Created", and the syntax baseline is not dropped to blame a
+  pre-existing error on this write. (`internal/tool/write.go`)
+- **edit — empty `old_string`.** An empty `old_string` matches everywhere (Go's
+  `Count` treats it as occurring between every rune), so it either fell into
+  a confusing ambiguity error or, on an empty file, silently "succeeded" by
+  inserting `new_string` into content that was never matched against anything.
+  It is now rejected up front with a clear reason. (`internal/tool/edit.go`)
+
+### Permission: mutating flags on safe commands
+
+`find` is harmless when walking a tree, which is why it sits in the safe
+command list — but `-delete` removes every match and `-exec` runs an arbitrary
+command per match. Without this change, `find . -delete` and
+`find . -exec rm {} \;` both classified as safe and ran unprompted in Auto mode.
+A per-command table of mutating flags now reclassifies these: `-delete` is
+`RiskAsk` (unambiguously destructive), and the flags that run a command the
+rules cannot see or write to a file (`-exec`, `-execdir`, `-ok`, `-okdir`,
+`-fprint`, `-fprintf`, `-fls`) are `RiskUnclear`, leaving the LLM check to
+judge the specific invocation. (`internal/permission/risk.go`)
+
+### Model catalog: max output tokens
+
+Anthropic catalog models now carry an explicit `MaxOutputTokens` value, sent
+to the API so a response is not cut short by the provider's default. The
+OpenAI-compatible path (also used for OpenRouter and Ollama) deliberately
+stays at 0: it would send the limit as `max_tokens`, which the o-series and
+GPT-5 reasoning models reject in favour of `max_completion_tokens`.
+(`internal/provider/models_catalog.go`)
+
+### Web UI
+
+A 404 / not-found page, bundled Inter and JetBrains Mono variable fonts, a
+large refactor of the models settings page, and updates across session,
+message, prompt-input, plan, and settings components.
+
 # Release Notes — v0.26.0
 
 ## Minor: Git Diff Viewer, Session Resume & Interruption Recovery, Gitignore-Aware Indexing, and C#/Dart Outlines

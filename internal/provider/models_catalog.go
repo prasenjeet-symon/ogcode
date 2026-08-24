@@ -36,6 +36,15 @@ type CatalogModel struct {
 	OutputPricePerM float64 // USD per 1M output tokens (0 = unknown)
 	SupportsImages  bool    // whether the model accepts image input
 	ContextWindow   int     // total context length in tokens (0 = unknown → byte-size fallback)
+	// MaxOutputTokens is the most output the model produces in one response.
+	// 0 means unknown: no explicit limit is sent and the provider's own default
+	// applies. NEVER guess this upward — a value above the model's real ceiling
+	// makes every request fail, so understate it when a published figure is not
+	// at hand. Only Anthropic entries carry a value today: the OpenAI-compatible
+	// path (also used for OpenRouter and Ollama) would send it as `max_tokens`,
+	// which the o-series and GPT-5 reasoning models reject in favour of
+	// `max_completion_tokens`, so those deliberately stay at 0.
+	MaxOutputTokens int
 }
 
 // AnthropicModels is the authoritative list of Anthropic models.
@@ -44,19 +53,19 @@ type CatalogModel struct {
 // All current Claude models expose a 200k-token context window by default.
 var AnthropicModels = []CatalogModel{
 	// ── Claude 4 family ──────────────────────────────────────────────────────
-	{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000},
-	{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000},
-	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ActiveByDefault: true, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000},
-	{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", ActiveByDefault: true, InputPricePerM: 0.80, OutputPricePerM: 4, SupportsImages: true, ContextWindow: 200000},
+	{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
+	{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
+	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ActiveByDefault: true, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
+	{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", ActiveByDefault: true, InputPricePerM: 0.80, OutputPricePerM: 4, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 64000},
 
 	// ── Claude 4 intermediate releases ───────────────────────────────────────
-	{ID: "claude-opus-4-5-20251101", Name: "Claude Opus 4.5", ActiveByDefault: false, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000},
-	{ID: "claude-opus-4-1-20250805", Name: "Claude Opus 4.1", ActiveByDefault: false, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000},
-	{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", ActiveByDefault: false, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000},
+	{ID: "claude-opus-4-5-20251101", Name: "Claude Opus 4.5", ActiveByDefault: false, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 64000},
+	{ID: "claude-opus-4-1-20250805", Name: "Claude Opus 4.1", ActiveByDefault: false, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
+	{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", ActiveByDefault: false, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 64000},
 
 	// ── Claude 4 (older releases) ────────────────────────────────────────────
-	{ID: "claude-opus-4-20250514", Name: "Claude Opus 4", ActiveByDefault: false, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000},
-	{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", ActiveByDefault: false, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000},
+	{ID: "claude-opus-4-20250514", Name: "Claude Opus 4", ActiveByDefault: false, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
+	{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", ActiveByDefault: false, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 64000},
 }
 
 // OpenAIModels is the authoritative list of OpenAI models.

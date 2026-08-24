@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -62,6 +63,34 @@ var dangerousCommands = map[string]bool{
 	// executing a shell almost always means "run whatever came down the pipe"
 	// (curl ... | sh), which the rules can't see — treat as dangerous.
 	"sh": true, "bash": true, "zsh": true, "ksh": true, "fish": true, "eval": true, "exec": true,
+}
+
+// mutatingFlags lists, per otherwise-safe command, the options that stop it
+// being read-only, with the verdict each one earns.
+//
+// find is the case that matters: walking a tree is harmless, which is why it
+// sits in safeCommands, but -delete removes every match and -exec runs an
+// arbitrary command per match. Without this, "find . -delete" and
+// "find . -exec rm {} ;" both classified RiskSafe and ran unprompted in Auto
+// mode. The verdicts follow the rules already applied elsewhere here: -delete is
+// unambiguously destructive, so RiskAsk; the flags that run a command the rules
+// cannot see, or write to a file, get RiskUnclear — the same answer command
+// substitution and a file redirect already get, leaving the LLM check to judge
+// whether e.g. "find . -exec grep foo {} ;" is fine.
+//
+// Other safe commands can hide a write behind a flag the same way (sort -o,
+// tee); add them here as they come up.
+var mutatingFlags = map[string]map[string]Risk{
+	"find": {
+		"-delete":  RiskAsk,
+		"-exec":    RiskUnclear,
+		"-execdir": RiskUnclear,
+		"-ok":      RiskUnclear,
+		"-okdir":   RiskUnclear,
+		"-fprint":  RiskUnclear,
+		"-fprintf": RiskUnclear,
+		"-fls":     RiskUnclear,
+	},
 }
 
 // dangerousSubcommands: tools whose specific subcommands are destructive.
@@ -134,12 +163,40 @@ func classifySegment(fields []string, seg string) Risk {
 		return RiskUnclear // known tool, unrecognized subcommand
 	}
 	if safeCommands[name] {
+		if r, ok := mutatingFlag(name, fields[1:]); ok {
+			return r // a read-only tool told to delete or exec is not read-only
+		}
 		if hasFileRedirect(seg) {
 			return RiskUnclear // a safe reader writing to a file is no longer purely safe
 		}
 		return RiskSafe
 	}
 	return RiskUnclear
+}
+
+// mutatingFlag scans args for an option that makes name non-read-only and
+// returns the most severe verdict found (RiskAsk outranks RiskUnclear), or
+// ok=false when the command carries no such flag.
+func mutatingFlag(name string, args []string) (Risk, bool) {
+	flags, ok := mutatingFlags[name]
+	if !ok {
+		return RiskSafe, false
+	}
+	found := false
+	for _, a := range args {
+		r, isMutating := flags[a]
+		if !isMutating {
+			continue
+		}
+		if r == RiskAsk {
+			return RiskAsk, true
+		}
+		found = true
+	}
+	if !found {
+		return RiskSafe, false
+	}
+	return RiskUnclear, true
 }
 
 func isEnvAssignment(tok string) bool {
@@ -180,14 +237,30 @@ func hasFileRedirect(seg string) bool {
 // dangerous segment). It deliberately does NOT split on a bare "&": that would
 // tear apart fd redirections like "2>&1" / ">&2". Background jobs written as
 // " & " (space-delimited) are still split.
+//
+// Newlines separate commands too, and leaving them out used to hand Auto mode a
+// straight bypass: "echo hi\nrm -rf /" stayed one segment, so classifySegment
+// read "echo" as the command, took "rm -rf /" for its arguments, and returned
+// RiskSafe — auto-approving the whole thing without a prompt.
 func splitSegments(cmd string) []string {
-	r := strings.NewReplacer("&&", "\x00", "||", "\x00", ";", "\x00", "|", "\x00", " & ", "\x00")
+	r := strings.NewReplacer(
+		"&&", "\x00", "||", "\x00", ";", "\x00", "|", "\x00", " & ", "\x00",
+		"\n", "\x00", "\r", "\x00",
+	)
 	return strings.Split(r.Replace(cmd), "\x00")
 }
 
 // ClassifyWrite classifies a write/edit target. In-project, non-sensitive files
 // are safe to auto-write; anything outside the project or matching a sensitive
 // pattern (secrets, VCS internals, keys) requires approval.
+//
+// Both the target and the project root are resolved through their symlinks
+// first. The write tools write with os.WriteFile, which follows symlinks, so a
+// lexical containment check was checking the wrong file: a link inside the
+// project — "innocent.txt" pointing at ~/.ssh/authorized_keys, or a symlinked
+// directory — read as in-project and auto-approved, while the bytes landed
+// outside it. Resolving also means isSensitivePath sees the real destination
+// rather than whatever the link was named.
 func ClassifyWrite(path, workDir string) Risk {
 	p := path
 	if p == "" {
@@ -196,30 +269,78 @@ func ClassifyWrite(path, workDir string) Risk {
 	if !filepath.IsAbs(p) && workDir != "" {
 		p = filepath.Join(workDir, p)
 	}
-	p = filepath.Clean(p)
+	p = resolveSymlinks(filepath.Clean(p))
 	if isSensitivePath(p) {
 		return RiskAsk
 	}
 	if workDir == "" {
 		return RiskAsk // can't confirm it's in-project — be cautious
 	}
-	wd := filepath.Clean(workDir)
+	// The project root gets the same treatment, or every path under a working
+	// directory that is itself reached through a link (/tmp on macOS resolves to
+	// /private/tmp) would compare against an unresolved root and read as an
+	// escape.
+	wd := resolveSymlinks(filepath.Clean(workDir))
 	if p == wd || strings.HasPrefix(p, wd+string(filepath.Separator)) {
 		return RiskSafe
 	}
 	return RiskAsk // outside the project directory
 }
 
+// maxSymlinkHops bounds how many links resolveSymlinks will follow by hand, so
+// a link that points at itself cannot spin.
+const maxSymlinkHops = 16
+
+// resolveSymlinks returns p with the symlinks along it resolved.
+//
+// A write target usually does not exist yet — that is the point of the write —
+// so EvalSymlinks on the whole path would simply fail. Everything above the
+// target is resolved with it, and the target itself is followed by hand when it
+// is a dangling link: writing through one creates the file at the far end, so a
+// dangling link decides where the write lands exactly as a live one does, and
+// leaving it unresolved would have left the original hole open under a
+// different name. A path with nothing resolvable on it comes back unchanged and
+// the caller's checks run on the lexical form, as they did before.
+func resolveSymlinks(p string) string {
+	return resolveSymlinksFrom(filepath.Clean(p), 0)
+}
+
+func resolveSymlinksFrom(p string, hops int) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	dir, base := filepath.Split(p)
+	if dir == "" || base == "" {
+		return p // relative to the process cwd, or already at the root
+	}
+	// The parent is resolved on the same hop budget — walking up a path follows
+	// no links, so only the Readlink below spends from it.
+	parent := resolveSymlinksFrom(filepath.Clean(dir), hops)
+	target := filepath.Join(parent, base)
+	if link, err := os.Readlink(target); err == nil && hops < maxSymlinkHops {
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(parent, link)
+		}
+		return resolveSymlinksFrom(filepath.Clean(link), hops+1)
+	}
+	return target
+}
+
 // isSensitivePath flags secrets, credentials, VCS internals, and system files
 // that should always require approval to write.
 func isSensitivePath(p string) bool {
-	lower := strings.ToLower(p)
+	lower := logicalPath(strings.ToLower(p))
 	base := strings.ToLower(filepath.Base(p))
 
-	// System locations.
-	for _, dir := range []string{"/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/var/", "/lib/", "/system/", "/library/"} {
-		if strings.HasPrefix(lower, dir) {
-			return true
+	// System locations. The OS scratch directory is exempt: it is a user work
+	// area, not a system one, but on macOS it lives under /var/folders and would
+	// match "/var/" — making every file of a project opened from a temp tree
+	// need its own approval.
+	if !underOSTempDir(lower) {
+		for _, dir := range []string{"/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/var/", "/lib/", "/system/", "/library/"} {
+			if strings.HasPrefix(lower, dir) {
+				return true
+			}
 		}
 	}
 	// Secret / credential directories anywhere in the path.
@@ -243,4 +364,47 @@ func isSensitivePath(p string) bool {
 		}
 	}
 	return false
+}
+
+// canonicalPrefixes are prefixes that symlink resolution can prepend on macOS
+// without changing what a path means: /etc, /var and /tmp are links into
+// /private, and anything reached through a firmlink (/home) lands under the data
+// volume root. The sensitive-path list is written in logical terms, so these are
+// stripped before it is matched — otherwise resolving would make "/etc/..." stop
+// matching "/etc/" while "/home/..." started matching "/system/", flagging an
+// ordinary project directory as a system location.
+var canonicalPrefixes = []string{"/system/volumes/data", "/private"}
+
+// logicalPath strips those prefixes from an already-lowercased path. They are
+// applied in order and cumulatively, since a resolved path can carry both.
+func logicalPath(lower string) string {
+	for _, prefix := range canonicalPrefixes {
+		if lower == prefix {
+			return "/"
+		}
+		lower = strings.TrimPrefix(lower, prefix+"/")
+		if !strings.HasPrefix(lower, "/") {
+			lower = "/" + lower
+		}
+	}
+	return lower
+}
+
+// osTempDir is the OS scratch directory in the same resolved, lowercased,
+// logical form isSensitivePath compares against. Computed once: it cannot change
+// during a run, and it costs a stat walk.
+var osTempDir = func() string {
+	t := logicalPath(strings.ToLower(resolveSymlinks(filepath.Clean(os.TempDir()))))
+	if t == "/" || t == "." {
+		return "" // nothing sensible to exempt
+	}
+	return strings.TrimSuffix(t, "/")
+}()
+
+// underOSTempDir reports whether a logical path is inside the OS scratch tree.
+func underOSTempDir(lower string) bool {
+	if osTempDir == "" {
+		return false
+	}
+	return lower == osTempDir || strings.HasPrefix(lower, osTempDir+"/")
 }

@@ -85,9 +85,16 @@ var (
 // splitShellSegments breaks a command line into simple segments on the common
 // shell separators. It is a heuristic (it does not honor quoting), which is fine
 // for a safety check that only needs to find a dangerous command somewhere.
+//
+// A newline is a separator like any other, and omitting it used to defeat this
+// whole check: "echo hi\nrm -rf /" stayed one segment, strings.Fields flattened
+// it, and the segment was judged by its first word ("echo") while the rest rode
+// along as that command's arguments. Multi-line commands are ordinary here —
+// heredocs and short scripts — so this was not an exotic bypass.
 func splitShellSegments(cmd string) []string {
 	replacer := strings.NewReplacer(
 		"&&", "\x00", "||", "\x00", ";", "\x00", "|", "\x00", "&", "\x00",
+		"\n", "\x00", "\r", "\x00",
 	)
 	return strings.Split(replacer.Replace(cmd), "\x00")
 }

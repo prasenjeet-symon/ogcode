@@ -67,11 +67,15 @@ export default function SessionSidebar() {
   const handleDelete = async (e: MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm('Delete this session? This cannot be undone.')) return;
+    // Capture before the awaits — reading activeSession afterwards is fragile,
+    // since anything that clears it in the meantime would silently skip the
+    // redirect and leave the user on /session/<deleted-id>.
+    const wasActive = session.activeSession()?.id === id;
     try {
       await deleteSession(id);
       await session.refresh();
-      if (session.activeSession()?.id === id) {
-        navigate('/');
+      if (wasActive) {
+        navigate('/', { replace: true });
       }
     } catch (err) {
       console.error('delete session failed:', err);
@@ -88,6 +92,34 @@ export default function SessionSidebar() {
     );
   });
 
+  // Sessions arrive newest-first, so bucketing them by age keeps that order
+  // while giving the eye somewhere to land. A flat list of 40 near-identical
+  // rows reads as a wall; "Today / Yesterday / …" turns it into a timeline you
+  // can skim for the conversation you half-remember having last week.
+  const GROUPS: { label: string; maxAgeDays: number }[] = [
+    { label: 'Today', maxAgeDays: 0 },
+    { label: 'Yesterday', maxAgeDays: 1 },
+    { label: 'Previous 7 days', maxAgeDays: 7 },
+    { label: 'Previous 30 days', maxAgeDays: 30 },
+    { label: 'Older', maxAgeDays: Infinity },
+  ];
+
+  const grouped = createMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const dayMs = 86_400_000;
+
+    const list = filtered();
+    const buckets = GROUPS.map((g) => ({ label: g.label, items: [] as typeof list }));
+    for (const s of list) {
+      // Age in calendar days, so "yesterday at 11pm" never reads as "today".
+      const days = Math.floor((startOfToday.getTime() - s.updatedAt) / dayMs) + 1;
+      const idx = GROUPS.findIndex((g) => days <= g.maxAgeDays);
+      buckets[idx === -1 ? GROUPS.length - 1 : idx].items.push(s);
+    }
+    return buckets.filter((b) => b.items.length > 0);
+  });
+
   return (
     <Show
       when={!collapsed()}
@@ -96,7 +128,7 @@ export default function SessionSidebar() {
           <button
             onClick={() => setCollapsed(false)}
             title="Expand sidebar"
-            class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+            class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92]"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
@@ -105,7 +137,7 @@ export default function SessionSidebar() {
           <button
             onClick={handleNew}
             title="New session"
-            class="w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+            class="w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92]"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
@@ -115,7 +147,7 @@ export default function SessionSidebar() {
           <button
             onClick={() => navigate('/notes')}
             title="Notes"
-            class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]
+            class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
               ${location.pathname.startsWith('/notes')
                 ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
                 : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
@@ -128,7 +160,7 @@ export default function SessionSidebar() {
           <button
             onClick={() => navigate('/docindex')}
             title="Doc Index"
-            class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]
+            class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
               ${location.pathname.startsWith('/docindex')
                 ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
                 : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
@@ -141,7 +173,7 @@ export default function SessionSidebar() {
           <button
             onClick={() => navigate('/settings', { state: { from: location.pathname } })}
             title="Settings"
-            class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+            class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92]"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
               <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -158,17 +190,18 @@ export default function SessionSidebar() {
           title="Home"
           class="flex items-center gap-2 flex-1 min-w-0 group"
         >
-          <span class="w-6 h-6 rounded-md bg-[color:var(--accent)] flex items-center justify-center shadow-sm shadow-[color:var(--accent)]/15 ring-1 ring-white/10 shrink-0 group-hover:shadow-[color:var(--accent)]/25 transition-shadow var(--spring-sm)">
+          <span class="w-6 h-6 rounded-md bg-[color:var(--accent)] flex items-center justify-center shadow-sm shadow-[color:var(--accent)]/15 ring-1 ring-white/10 shrink-0 group-hover:shadow-[color:var(--accent)]/25 transition-shadow">
             <svg class="w-3 h-3 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.6">
               <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </span>
-          <span class="text-[13px] font-semibold text-zinc-200 group-hover:text-white truncate transition-colors var(--spring-sm)">ogcode</span>
+          <span class="text-ui font-semibold text-[color:var(--text-primary)] truncate transition-colors">ogcode</span>
         </button>
         <button
           onClick={handleNew}
           title="New session"
-          class="w-7 h-7 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+          aria-label="New session"
+          class="icon-btn transition-colors"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
@@ -177,7 +210,8 @@ export default function SessionSidebar() {
         <button
           onClick={() => setCollapsed(true)}
           title="Collapse sidebar"
-          class="w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
+          aria-label="Collapse sidebar"
+          class="icon-btn transition-colors"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
@@ -188,100 +222,115 @@ export default function SessionSidebar() {
       {/* Search */}
       <div class="px-3 pb-2">
         <div class="relative">
-          <svg class="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="w-3 h-3 text-[color:var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
             type="text"
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
-            placeholder="Search"
-            class="w-full h-8 pl-8 pr-2 bg-[color:var(--bg-base)] border border-transparent
-                   rounded-md text-[12px] text-zinc-200 placeholder-zinc-600
+            placeholder="Search sessions"
+            aria-label="Search sessions"
+            class="w-full h-7 pl-7 pr-2 bg-[color:var(--bg-base)] border border-transparent
+                   rounded-md text-meta text-[color:var(--text-primary)] placeholder:text-[color:var(--text-muted)]
                    focus:outline-none focus:border-[color:var(--border-default)] focus:bg-[color:var(--bg-elevated)]
-                   transition-all var(--spring-sm)"
+                   transition-colors"
           />
         </div>
       </div>
 
       {/* Session list */}
-      <div class="flex-1 overflow-y-auto px-2 pt-1 pb-2">
-        <For each={filtered()}>
-          {(s) => {
-            const isActive = () => session.activeSession()?.id === s.id;
-            const isEditing = () => editingId() === s.id;
-            return (
-              <div
-                onClick={() => !isEditing() && handleSelect(s.id)}
-                onDblClick={(e) => { e.stopPropagation(); startRename(s); }}
-                class={`group relative cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-all var(--spring-sm)
-                  ${isActive()
-                    ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-                    : 'text-zinc-400 hover:bg-[color:var(--bg-hover)]/50 hover:text-zinc-200'
-                  }`}
-              >
-                <div class="flex items-center gap-2">
-                  <Show when={isActive() && !isEditing()}>
-                    <span class="w-1 h-1 rounded-full bg-[color:var(--accent)] shrink-0 animate-pulse-ring" />
-                  </Show>
-                  <Show
-                    when={!isEditing()}
-                    fallback={
-                      <input
-                        type="text"
-                        value={draftTitle()}
-                        onInput={(e) => setDraftTitle(e.currentTarget.value)}
-                        onBlur={() => commitRename(s.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') { e.preventDefault(); commitRename(s.id); }
-                          else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        onDblClick={(e) => e.stopPropagation()}
-                        placeholder="Untitled"
-                        autoFocus
-                        class="flex-1 min-w-0 bg-[color:var(--bg-base)] border border-[color:var(--border-default)]
-                               rounded px-1.5 py-0.5 text-[13px] text-zinc-100
-                               focus:outline-none focus:border-[color:var(--accent)]"
-                      />
-                    }
-                  >
-                    <span class="truncate flex-1 min-w-0">{s.title || 'Untitled'}</span>
-                    <span class={`text-[10.5px] tabular-nums shrink-0 transition-opacity var(--spring-sm) ${isActive() ? 'text-zinc-500' : 'text-zinc-600'} group-hover:opacity-0`}>
-                      {formatTime(s.updatedAt)}
-                    </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); startRename(s); }}
-                      title="Rename"
-                      class="absolute right-8 w-6 h-6 rounded
-                             opacity-0 group-hover:opacity-100
-                             text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]
-                             flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={(e) => handleDelete(e, s.id)}
-                      title="Delete"
-                      class="absolute right-1.5 w-6 h-6 rounded
-                             opacity-0 group-hover:opacity-100
-                             text-zinc-500 hover:text-red-400 hover:bg-red-500/10
-                             flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92]"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 7V4a1 1 0 011-1h2a1 1 0 011 1v3" />
-                      </svg>
-                    </button>
-                  </Show>
-                </div>
+      <div class="flex-1 overflow-y-auto px-2 pt-0.5 pb-2">
+        <For each={grouped()}>
+          {(group) => (
+            <div class="mb-1">
+              <div class="px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-muted)] select-none">
+                {group.label}
               </div>
-            );
-          }}
+              <For each={group.items}>
+                {(s) => {
+                  const isActive = () => session.activeSession()?.id === s.id;
+                  const isEditing = () => editingId() === s.id;
+                  return (
+                    <div
+                      onClick={() => !isEditing() && handleSelect(s.id)}
+                      onDblClick={(e) => { e.stopPropagation(); startRename(s); }}
+                      title={s.title || 'Untitled'}
+                      class={`group/row relative flex items-center gap-2 cursor-pointer rounded-md h-7 pl-2.5 pr-1.5 text-ui transition-colors
+                        ${isActive()
+                          ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)] font-medium'
+                          : 'text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)]'
+                        }`}
+                    >
+                      {/* Active marker: a rail on the row's edge rather than a
+                          dot inline with the title, so titles all start on the
+                          same x whether or not the row is selected. */}
+                      <Show when={isActive()}>
+                        <span class="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-[color:var(--accent)]" />
+                      </Show>
+                      <Show
+                        when={!isEditing()}
+                        fallback={
+                          <input
+                            type="text"
+                            value={draftTitle()}
+                            onInput={(e) => setDraftTitle(e.currentTarget.value)}
+                            onBlur={() => commitRename(s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); commitRename(s.id); }
+                              else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            onDblClick={(e) => e.stopPropagation()}
+                            placeholder="Untitled"
+                            autoFocus
+                            class="flex-1 min-w-0 bg-[color:var(--bg-base)] border border-[color:var(--border-default)]
+                                   rounded px-1.5 h-5.5 text-ui text-[color:var(--text-primary)]
+                                   focus:outline-none focus:border-[color:var(--accent)]"
+                          />
+                        }
+                      >
+                        <span class="truncate flex-1 min-w-0">{s.title || 'Untitled'}</span>
+                        {/* Timestamp and row actions occupy the same slot: the
+                            time is ambient information, the actions are what
+                            you want the instant you reach for the row. */}
+                        <span class="text-micro tabular-nums shrink-0 text-[color:var(--text-muted)] group-hover/row:hidden">
+                          {formatTime(s.updatedAt)}
+                        </span>
+                        <span class="hidden group-hover/row:flex items-center gap-0.5 shrink-0">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startRename(s); }}
+                            title="Rename"
+                            aria-label="Rename session"
+                            class="w-5 h-5 rounded flex items-center justify-center transition-colors
+                                   text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)]"
+                          >
+                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={(e) => handleDelete(e, s.id)}
+                            title="Delete"
+                            aria-label="Delete session"
+                            class="w-5 h-5 rounded flex items-center justify-center transition-colors
+                                   text-[color:var(--text-tertiary)] hover:text-red-400 hover:bg-red-500/10"
+                          >
+                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 7V4a1 1 0 011-1h2a1 1 0 011 1v3" />
+                            </svg>
+                          </button>
+                        </span>
+                      </Show>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
+          )}
         </For>
         <Show when={filtered().length === 0}>
-          <div class="px-3 py-10 text-center text-[12px] text-zinc-600">
+          <div class="px-3 py-10 text-center text-meta text-[color:var(--text-muted)]">
             {query() ? 'No matches' : 'No sessions yet'}
           </div>
         </Show>
@@ -292,7 +341,7 @@ export default function SessionSidebar() {
         <button
           type="button"
           onClick={() => navigate('/notes')}
-          class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-all var(--spring-sm)
+          class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
             ${location.pathname.startsWith('/notes')
               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
               : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
@@ -306,7 +355,7 @@ export default function SessionSidebar() {
         <button
           type="button"
           onClick={() => navigate('/docindex')}
-          class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-all var(--spring-sm)
+          class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
             ${location.pathname.startsWith('/docindex')
               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
               : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
@@ -325,13 +374,13 @@ export default function SessionSidebar() {
           type="button"
           onClick={() => navigate('/settings', { state: { from: location.pathname } })}
           title="Settings"
-          class="w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all var(--spring-sm) active:scale-[0.92] shrink-0"
+          class="w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92] shrink-0"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
-        <span class="text-[11px] text-zinc-500 truncate flex-1 font-mono" title={server.directory() || 'unknown'}>
+        <span class="text-micro text-zinc-500 truncate flex-1 font-mono" title={server.directory() || 'unknown'}>
           {shortenPath(server.directory()) || '—'}
         </span>
         <span

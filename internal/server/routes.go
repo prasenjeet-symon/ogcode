@@ -17,6 +17,21 @@ func (s *Server) routes() http.Handler {
 	r.Use(corsMiddleware)
 
 	r.Route("/api", func(r chi.Router) {
+		// Scope the not-found handler to /api so unknown endpoints return JSON
+		// 404s. Without this they fall through to the SPA fallback and answer
+		// 200 text/html, which the web client then tries to JSON.parse — turning
+		// a clear "no such endpoint" into an opaque syntax error.
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "no such API endpoint: " + req.URL.Path,
+			})
+		})
+		r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+				"error": "method " + req.Method + " not allowed for " + req.URL.Path,
+			})
+		})
+
 		r.Get("/event", s.handleEvent)
 		r.Get("/path", s.handlePath)
 		r.Get("/agent", s.handleAgents)

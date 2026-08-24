@@ -193,6 +193,56 @@ export default function MarkdownContent(props: { text: string; class?: string })
       }
     });
 
+    // Give every fenced code block a language chip and a copy button.
+    //
+    // This is a coding agent: half of what the model writes is meant to be
+    // taken away and run somewhere. Selecting a block by hand loses the last
+    // newline as often as not, so the copy affordance is not a nicety.
+    // Only `pre > code` is enhanced — mermaid, plotly, rough and latex all use
+    // a bare <pre>/<div> and must keep their own chrome.
+    containerRef.querySelectorAll('pre').forEach((pre) => {
+      const code = pre.querySelector('code');
+      if (!code || pre.parentElement?.classList.contains('code-block')) return;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'code-block';
+      pre.replaceWith(wrap);
+      wrap.appendChild(pre);
+
+      const lang = Array.from(code.classList)
+        .find((c) => c.startsWith('language-'))?.slice('language-'.length) ?? '';
+
+      const bar = document.createElement('div');
+      bar.className = 'code-block-bar';
+
+      if (lang && lang !== 'plaintext') {
+        const chip = document.createElement('span');
+        chip.className = 'code-block-lang';
+        chip.textContent = lang;
+        bar.appendChild(chip);
+      }
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'code-block-copy';
+      btn.textContent = 'Copy';
+      btn.setAttribute('aria-label', 'Copy code');
+      // The button lives in the wrapper, never inside <pre>, so a manual
+      // select-all over the block never picks up the word "Copy".
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(code.textContent ?? '').then(() => {
+          btn.textContent = 'Copied';
+          btn.classList.add('is-copied');
+          setTimeout(() => {
+            btn.textContent = 'Copy';
+            btn.classList.remove('is-copied');
+          }, 1500);
+        }).catch(() => {});
+      });
+      bar.appendChild(btn);
+      wrap.appendChild(bar);
+    });
+
     // Render HTML blocks in sandboxed iframes
     const htmlNodes = containerRef.querySelectorAll('.html-render');
     htmlNodes.forEach(el => {

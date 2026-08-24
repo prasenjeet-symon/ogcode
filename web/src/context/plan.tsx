@@ -23,6 +23,7 @@ import {
   getModels,
   getSession,
   deletePlan as deletePlanAPI,
+  isNotFoundError,
 } from '../api/client';
 import { useServer } from './server';
 import { useSession } from './session';
@@ -30,6 +31,9 @@ import { useSession } from './session';
 interface PlanContextValue {
   plans: () => Plan[];
   activePlan: () => Plan | null;
+  // True when the selected plan id doesn't exist on the server, so pages can
+  // show a not-found screen instead of a live composer for a ghost plan.
+  planMissing: () => boolean;
   memorySavedTokens: () => number;
   lockError: () => string;
   tasks: () => Task[];
@@ -69,6 +73,7 @@ export const PlanProvider: ParentComponent = (props) => {
   const server = useServer();
   const [plans, setPlans] = createSignal<Plan[]>([]);
   const [activePlan, setActivePlan] = createSignal<Plan | null>(null);
+  const [planMissing, setPlanMissing] = createSignal(false);
   const [tasks, setTasks] = createSignal<Task[]>([]);
   const [messagesRaw, setMessagesRaw] = createSignal<MessageWithParts[]>([]);
   const messages = messagesRaw;
@@ -281,6 +286,8 @@ export const PlanProvider: ParentComponent = (props) => {
       sseRefreshDebounce = null;
     }
 
+    setPlanMissing(false);
+
     let plan = plans().find((p) => p.id === id);
     if (!plan) {
       plan = activePlan()?.id === id ? activePlan()! : undefined;
@@ -322,6 +329,13 @@ export const PlanProvider: ParentComponent = (props) => {
       }
     } catch (e) {
       console.error('load plan failed:', e);
+      // A 404 means the id is dead (deleted, or a typo'd URL). Flag it so the
+      // page renders a not-found screen rather than an inviting empty composer
+      // whose prompts would silently fail against a plan that doesn't exist.
+      if (isNotFoundError(e)) {
+        if (activePlan()?.id === id) setActivePlan(null);
+        setPlanMissing(true);
+      }
     }
   }
 
@@ -792,6 +806,7 @@ export const PlanProvider: ParentComponent = (props) => {
   const value: PlanContextValue = {
     plans,
     activePlan,
+    planMissing,
     memorySavedTokens,
     lockError,
     tasks,

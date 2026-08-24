@@ -14,8 +14,7 @@ build-web:
 build-server:
 	$(eval VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || node -p "require('./web/package.json').version" 2>/dev/null || echo "dev"))
 	CGO_ENABLED=1 go build \
-		-ldflags "-X github.com/prasenjeet-symon/ogcode/internal/version.Version=$(VERSION) \
-		          -X github.com/prasenjeet-symon/ogcode/internal/cli.version=$(VERSION)" \
+		-ldflags "-X github.com/prasenjeet-symon/ogcode/internal/version.Version=$(VERSION)" \
 		-o ogcode .
 
 build: build-web build-server

@@ -1,4 +1,4 @@
-import { useNavigate } from '@solidjs/router';
+import { useNavigate, useLocation } from '@solidjs/router';
 import { createSignal, createEffect, For, Show, onMount } from 'solid-js';
 import { useSession } from '../context/session';
 import { useServer } from '../context/server';
@@ -80,6 +80,7 @@ function HomeContent() {
   const session = useSession();
   const server = useServer();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Redirect to plan mode landing page when in plan mode
   createEffect(() => {
@@ -189,7 +190,7 @@ function HomeContent() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/settings')}
+                onClick={() => navigate('/settings', { state: { from: location.pathname } })}
                 class="h-8 w-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-200
                        border border-[color:var(--border-default)] hover:border-[color:var(--border-strong)]
                        bg-[color:var(--bg-surface)]/50 transition-all var(--spring-sm)"
