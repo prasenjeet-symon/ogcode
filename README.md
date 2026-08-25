@@ -163,6 +163,7 @@ Ogcode is the only agentic coding assistant that combines a **browser-native UI*
 - **Knowledge Graph** — Semantic memory of your codebase (Topic → Concept → Fact) that persists across sessions.
 - **Multi-Provider LLM Support** — Anthropic Claude, OpenAI GPT, OpenRouter, or local Ollama models. Switch anytime from the UI.
 - **Deep Research Agent** — A built-in `deep_search` tool searches the web, fetches pages, and synthesizes cited research for your agent.
+- **Skills** — Reusable instructions in a `SKILL.md` that the agent loads on demand. Its prompt carries only names and descriptions, so ten skills cost a few lines; the one it picks is pulled into context by a tool call. Reads Claude-compatible skill directories, and skills can be shared across a team over a URL.
 - **Kanban Board** — Visual task board with S/M/L/XL effort estimates, complexity scores, and dependency chains.
 - **Permission-Based Safety** — Destructive operations (write, edit, bash) require explicit approval per tool; read-only tools auto-approve.
 - **PDF Support** — Read and index PDF documentation directly in the agent.
@@ -456,6 +457,80 @@ Instead of exporting env vars every time, put provider settings in a JSON file. 
 Supported provider keys: `anthropic`, `openai`, `openrouter`, `ollama`, each with an optional `baseUrl` and `apiKey`. A real environment variable always overrides the config file.
 
 If no `ogcode.json` exists anywhere in that search when you run `ogcode` (bare, `serve`, `plan`, `run`, or `index`), one is scaffolded automatically in the current directory, blank and ready to fill in. If one already exists — here or in an ancestor directory — it's left untouched.
+
+### Skills (optional)
+
+A **skill** is a set of instructions for one kind of task — cutting a release, reviewing a migration, writing a runbook — kept in a `SKILL.md` file instead of in the system prompt.
+
+The agent's prompt lists only each skill's name and description. When a task matches one, it calls the `skill` tool and the full body is loaded into context, along with the paths of any files that ship beside it. Ten skills cost ten lines of prompt; you pay for a body only when it is actually used.
+
+Create one as `<name>/SKILL.md`, where the directory name and the frontmatter `name` match:
+
+```markdown
+---
+name: git-release
+description: Draft release notes from merged PRs, bump the version, and push the tag. Use when asked to cut a release.
+---
+
+## Steps
+
+1. Read RELEASE_NOTES.md and the commits since the last tag.
+2. ...
+```
+
+The `description` is the entire basis on which the agent decides to load the skill, so say **when to use it**, not just what it is. `name` must be lowercase alphanumeric with single hyphens.
+
+Ogcode looks in these locations, later ones overriding earlier ones of the same name:
+
+| Scope | Locations |
+|-------|-----------|
+| Built-in | Ships with ogcode (`customize-ogcode`). Overridable by any of the below. |
+| Remote | Every URL in `skills.urls` |
+| Global | `~/.config/ogcode/skills/`, `~/.ogcode/skills/`, `~/.agents/skills/`, `~/.claude/skills/` |
+| Configured | Every path in `skills.paths` |
+| Project | `.agents/skills/` and `.claude/skills/`, in the project and each parent up to the repo root. Within one directory, `.agents/` wins over `.claude/`. |
+
+Skills written for Claude Code work unchanged — drop them in `.claude/skills/` or point `skills.paths` at them. Claude Code *plugin* skills live at `~/.claude/plugins/marketplaces/<marketplace>/plugins/<plugin>/skills/`, which is not scanned automatically; add the ones you want as `skills.paths` entries.
+
+ogcode reads only `name` and `description` from the frontmatter. Claude Code's `allowed-tools` and `disable-model-invocation` are ignored: loading a skill in ogcode injects instructions and never changes the agent's toolset, so a skill cannot gain a tool — but it is not restricted to a subset either. Use `"permissions": {"<name>": "ask"}` if you want a skill to require approval before it loads.
+
+Directories are re-scanned at the start of every turn, so a new or edited `SKILL.md` takes effect on your next message. The `skills` config block itself is read once at startup, so changing `paths`, `urls`, or `permissions` needs a restart.
+
+Files shipped beside `SKILL.md` (scripts, references) are listed to the agent when the skill loads, and relative paths in the body resolve against the skill's own directory.
+
+Configure extra sources and per-skill permissions in `ogcode.json`:
+
+```json
+{
+  "skills": {
+    "paths": ["./team-skills"],
+    "urls": ["https://example.com/skills/index.json"],
+    "permissions": {
+      "internal-*": "deny",
+      "deploy-prod": "ask"
+    }
+  }
+}
+```
+
+- `allow` (the default for any skill no pattern matches) — listed in the prompt, loads without interruption.
+- `ask` — listed, but you approve the load at call time, the same way a `bash` call is approved. In a headless run (task execution, planning breakdown) there is no one to ask, so it loads.
+- `deny` — hidden from the agent entirely, and refused if it is called anyway.
+
+The most specific matching pattern wins: an exact name beats a glob, a longer glob beats `*`.
+
+A skills URL serves an `index.json` manifest; files are resolved relative to it and cached under `~/.ogcode/cache/skills/`, keyed by version, so a version already downloaded is never fetched twice. If the URL is unreachable, the last cached copy is used.
+
+```json
+{
+  "version": "1.0.0",
+  "skills": [
+    { "name": "git-release", "files": ["SKILL.md", "scripts/release.sh"] }
+  ]
+}
+```
+
+Skills are available to the Build, Task, and Plan agents.
 
 ### Agentic Memory (optional)
 

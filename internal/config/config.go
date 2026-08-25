@@ -1,6 +1,6 @@
 // Package config loads ogcode's optional file-based configuration: provider
-// base URLs and API keys, so they can live in a committed/shared file
-// instead of only environment variables.
+// base URLs and API keys, and the skill sources and permissions, so they can
+// live in a committed/shared file instead of only environment variables.
 package config
 
 import (
@@ -15,9 +15,22 @@ type ProviderConfig struct {
 	APIKey  string `json:"apiKey,omitempty"`
 }
 
+// SkillsConfig configures where skills come from and which of them an agent
+// may use. Every field is optional: with none of them set, ogcode still scans
+// the standard project and global skill directories.
+type SkillsConfig struct {
+	// Paths are extra skill directories, relative to the project or absolute.
+	Paths []string `json:"paths,omitempty"`
+	// URLs are index.json manifests to fetch skills from.
+	URLs []string `json:"urls,omitempty"`
+	// Permissions maps a skill-name glob to "allow", "deny", or "ask".
+	Permissions map[string]string `json:"permissions,omitempty"`
+}
+
 // Config is ogcode's file-based configuration.
 type Config struct {
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
+	Skills    SkillsConfig              `json:"skills,omitempty"`
 }
 
 // envNames maps each provider ID ogcode knows about to the environment
@@ -35,6 +48,12 @@ var envNames = map[string]struct{ Key, BaseURL string }{
 // checked), merging them provider-by-provider with project-local values
 // taking precedence. Missing or unreadable files are silently skipped;
 // Load always returns a usable, non-nil Config.
+//
+// Skill sources merge differently from provider settings: paths and urls are
+// unioned rather than overridden, so a project adds its own skill directories
+// to the user's global ones instead of replacing them. Permissions merge
+// key-by-key, project-local last, so a project can override one rule without
+// restating the rest.
 func Load(dir string) *Config {
 	merged := &Config{Providers: map[string]ProviderConfig{}}
 	for _, path := range []string{globalPath(), findProjectFile(dir)} {
@@ -52,8 +71,38 @@ func Load(dir string) *Config {
 			}
 			merged.Providers[id] = existing
 		}
+		merged.Skills.Paths = appendUnique(merged.Skills.Paths, c.Skills.Paths)
+		merged.Skills.URLs = appendUnique(merged.Skills.URLs, c.Skills.URLs)
+		for pattern, action := range c.Skills.Permissions {
+			if merged.Skills.Permissions == nil {
+				merged.Skills.Permissions = map[string]string{}
+			}
+			merged.Skills.Permissions[pattern] = action
+		}
 	}
 	return merged
+}
+
+// appendUnique adds each value of add to base that is not already there,
+// preserving order. Skill directories are scanned in order, and scanning the
+// same directory twice would register every skill in it twice.
+func appendUnique(base, add []string) []string {
+	for _, v := range add {
+		if v == "" {
+			continue
+		}
+		seen := false
+		for _, existing := range base {
+			if existing == v {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			base = append(base, v)
+		}
+	}
+	return base
 }
 
 func globalPath() string {
@@ -89,15 +138,21 @@ func findProjectFile(dir string) string {
 }
 
 // projectFileTemplate is what EnsureProjectFile writes for a brand new
-// ogcode.json. Every field is blank — an unset field behaves identically to
-// an absent one everywhere this package is used — but listing all four known
-// providers up front makes the file self-documenting to open and edit.
+// ogcode.json. Every field is blank or empty — an unset field behaves
+// identically to an absent one everywhere this package is used — but listing
+// all four known providers and the skills section up front makes the file
+// self-documenting to open and edit.
 const projectFileTemplate = `{
   "providers": {
     "anthropic": { "baseUrl": "", "apiKey": "" },
     "openai": { "baseUrl": "", "apiKey": "" },
     "openrouter": { "apiKey": "" },
     "ollama": { "baseUrl": "", "apiKey": "" }
+  },
+  "skills": {
+    "paths": [],
+    "urls": [],
+    "permissions": {}
   }
 }
 `

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/prasenjeet-symon/ogcode/internal/skill"
 )
 
 // projectIndexPrompt returns the mandatory project index instructions section,
@@ -226,10 +228,20 @@ Write each one as a single line under the heading it belongs to, in the form "tr
 // compiled by the chat interface and works for every agent, but latex_to_pdf is
 // a tool, and advertising it to an agent whose toolset omits it sends the model
 // looking for a call it will never be offered.
-func markdownCapabilitiesPrompt(hasLatexTool bool) string {
+//
+// savedToFile adjusts the LaTeX-documents bullet for agents whose output is
+// written verbatim to a markdown file (NoteAgent). The chat compiles ```latex
+// fences into inline page images with a PDF download, but a saved .md file keeps
+// them as raw fences; promising the inline-rendering behaviour there describes a
+// render path the file itself can never honor.
+func markdownCapabilitiesPrompt(hasLatexTool, savedToFile bool) string {
 	latexTool := ""
 	if hasLatexTool {
 		latexTool = " The latex_to_pdf tool is also available for programmatic PDF generation."
+	}
+	latexDocs := "- **LaTeX documents** (triple-backtick latex blocks) — full LaTeX documents compiled and rendered inline as page images in the chat viewport. Use this for reports, papers, resumes, letters, and any formatted document that needs professional typesetting. The block should contain a complete LaTeX document with \\documentclass, \\begin{document}...\\end{document}, etc. The interface will automatically compile the document and display the rendered pages inline, with a PDF download button and a source code toggle."
+	if savedToFile {
+		latexDocs = "- **LaTeX documents** (triple-backtick latex blocks) — full LaTeX documents for reports, papers, resumes, letters, and any formatted document that needs professional typesetting. The block should contain a complete LaTeX document with \\documentclass, \\begin{document}...\\end{document}, etc. The saved file keeps the block as a raw fence; when the note is later viewed in the chat the fence is a recognized render target and is compiled to inline page images, but the file itself does not render or offer a PDF download."
 	}
 	return `## Markdown output capabilities
 
@@ -237,7 +249,7 @@ The chat interface natively renders the following — use them when they add gen
 
 - **Mermaid diagrams** (triple-backtick mermaid blocks) — flows, architectures, sequences, entity relationships.
 - **LaTeX math** — inline with $...$ and display block with $$...$$ — for mathematical formulas and equations.
-- **LaTeX documents** (triple-backtick latex blocks) — full LaTeX documents compiled and rendered inline as page images in the chat viewport. Use this for reports, papers, resumes, letters, and any formatted document that needs professional typesetting. The block should contain a complete LaTeX document with \documentclass, \begin{document}...\end{document}, etc. The interface will automatically compile the document and display the rendered pages inline, with a PDF download button and a source code toggle.` + latexTool + `
+` + latexDocs + latexTool + `
 - **Plotly charts** (triple-backtick plotly blocks) — bar, line, scatter, pie, heatmap, and more. The block must contain a valid JSON object with a "data" array and optional "layout" object following the Plotly.js spec.
 - **Rough diagrams** (triple-backtick rough blocks) — hand-drawn style 2D diagrams. The block must contain a valid JSON object with an "elements" array and optional "width"/"height"/"options" fields. Each element has a "type" (rectangle, circle, ellipse, line, arrow, path, linearPath, polygon, text) plus type-specific coordinates and optional RoughJS style options (stroke, fill, roughness, bowing, fillStyle, etc.).
 - **HTML/CSS/JS** (triple-backtick html blocks) — full interactive content rendered in a sandboxed iframe. Use this for rich visualizations, custom dashboards, interactive widgets, styled tables, animated content, or any presentation that goes beyond static markdown. The block should contain a complete HTML document (or fragment with inline <style> and <script>). CSS is fully supported. JavaScript runs in a sandbox with no access to the parent page. The iframe has a transparent background with no border — it blends seamlessly into the chat. **Do NOT add a background color, gradient, or card-like container to your HTML.** Design your content to feel like a natural part of the conversation. If you need visual sections, use subtle borders or spacing instead of opaque backgrounds. Use the viewport dimensions provided below to make your content responsive — design for the available width and height.`
@@ -571,6 +583,53 @@ Batch aggressively:
 	}
 
 	return prompt
+}
+
+// skillGuidancePrompt lists the skills available to the agent, by name and
+// description only.
+//
+// This is the cheap half of the skill feature. A skill's instructions can run to
+// thousands of tokens, and the prompt is re-sent on every step of every turn, so
+// bodies stay on disk and the agent pulls the one it needs through the skill
+// tool. What it needs here is the menu and the mechanics: what exists, and how
+// to get the rest.
+//
+// It is deliberately not part of the cacheable base. The set of skills changes
+// when the user writes one, and entry [0] must stay byte-identical for the whole
+// session.
+//
+// Returns "" for an empty list, so a project with no skills carries no section
+// and no mention of a tool it has nothing to use with.
+func skillGuidancePrompt(skills []skill.Skill) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`## Skills
+
+A skill is a set of instructions for one kind of task, kept outside this prompt. Below are the ones available to you, names and descriptions only. Call the "skill" tool with a name to load that skill's full instructions and the paths of the files it ships with.
+
+Load one when the work in front of you matches its description, before starting that work. The description is all you have to decide on.
+
+<available_skills>
+`)
+	for _, s := range skills {
+		b.WriteString("  <skill>\n    <name>" + escapeXML(s.Name) + "</name>\n")
+		if s.Description != "" {
+			b.WriteString("    <description>" + escapeXML(s.Description) + "</description>\n")
+		}
+		b.WriteString("  </skill>\n")
+	}
+	b.WriteString("</available_skills>")
+	return b.String()
+}
+
+// escapeXML makes a skill's name and description safe to place inside the
+// <available_skills> elements. Both come from a file the user (or whoever
+// published a remote skill) wrote, and a stray < or & would leave the model
+// reading a block whose structure no longer parses.
+func escapeXML(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
 // systemReminderPrompt returns the per-turn dynamic content (current date) as

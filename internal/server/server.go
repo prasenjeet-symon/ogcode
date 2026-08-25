@@ -17,6 +17,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
+	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/git"
@@ -29,6 +30,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
+	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/task"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 	"github.com/prasenjeet-symon/ogcode/internal/version"
@@ -183,6 +185,18 @@ func (s *Server) Start() error {
 	toolRegistry.Register(tool.ViewImageTool{})
 	toolRegistry.Register(tool.NewCompactContextTool())
 
+	// Skills: the "skills" section of ogcode.json decides which extra
+	// directories and remote manifests are consulted; the standard project and
+	// global skill directories are scanned regardless, so a project with no
+	// config still picks up the skills a user has written.
+	skillCfg := config.Load(s.dir).Skills
+	skillLoader := skill.NewLoader(skill.Config{
+		Paths:       skillCfg.Paths,
+		URLs:        skillCfg.URLs,
+		Permissions: skillCfg.Permissions,
+	})
+	toolRegistry.Register(tool.NewSkillTool(skillLoader))
+
 	// Search bridge — opt-in via OGCODE_SEARCH_ENABLED=true env var OR the settings UI.
 	// Must be started before loopRunner is built so RunSearchSession can be wired in.
 	searchEnabledEnv := strings.EqualFold(os.Getenv("OGCODE_SEARCH_ENABLED"), "true")
@@ -323,6 +337,7 @@ func (s *Server) Start() error {
 			return len(paths)
 		},
 		Permissions: s.permissions,
+		Skills:      skillLoader,
 	}
 
 	// Register deep_search after loopRunner is built (needs RunSearchSession).

@@ -58,7 +58,7 @@ func TestMemoryMDPrompt_CommonSections(t *testing.T) {
 }
 
 func TestMarkdownCapabilitiesPrompt(t *testing.T) {
-	prompt := markdownCapabilitiesPrompt(true)
+	prompt := markdownCapabilitiesPrompt(true, false)
 	if !strings.Contains(prompt, "Mermaid diagrams") {
 		t.Error("expected Mermaid mention in markdown capabilities prompt")
 	}

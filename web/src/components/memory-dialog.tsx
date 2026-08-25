@@ -1,5 +1,6 @@
 import { createSignal, Show, createMemo, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { reindexMemory, resetMemory } from '../api/client';
 
 interface MemoryDialogProps {
   savedTokens: number;
@@ -59,6 +60,42 @@ export default function MemoryDialog(props: MemoryDialogProps) {
 
   const hasSavings = () => props.savedTokens > 0;
   const hasOverhead = () => props.savedTokens < 0;
+
+  // Maintenance actions: re-embed all stored memory against the current
+  // embedding model (use after switching providers), and wipe everything.
+  const [busy, setBusy] = createSignal<null | 'reindex' | 'reset'>(null);
+  const [actionMsg, setActionMsg] = createSignal<string | null>(null);
+  const [actionErr, setActionErr] = createSignal<string | null>(null);
+  const [confirmReset, setConfirmReset] = createSignal(false);
+
+  const runReindex = async () => {
+    setBusy('reindex');
+    setActionErr(null);
+    setActionMsg(null);
+    try {
+      await reindexMemory();
+      setActionMsg('Re-embedded all memory against the current model.');
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runReset = async () => {
+    setBusy('reset');
+    setActionErr(null);
+    setActionMsg(null);
+    try {
+      await resetMemory();
+      setConfirmReset(false);
+      setActionMsg('Memory store cleared.');
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && open()) {
@@ -251,6 +288,94 @@ export default function MemoryDialog(props: MemoryDialogProps) {
                   </div>
                 </div>
               </Show>
+
+              {/* Maintenance actions */}
+              <div class="mt-4 pt-3 border-t border-[color:var(--border-subtle)]">
+                <div class="flex items-center gap-1.5 mb-2.5 text-[11px] uppercase tracking-wider text-zinc-500/70 font-semibold">
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l-2.496-3.396c-.3-.4-.7-.5-1.1-.5a3.5 3.5 0 11-5 5c0 .4.1.8.5 1.1l3.396 2.496M11.42 15.17l-3.396-2.496M3 21l3-3m6-6l6-6m-3-3l3 3" />
+                  </svg>
+                  Maintenance
+                </div>
+                <p class="text-[11px] text-zinc-500/70 mb-3 leading-relaxed">
+                  Re-embed all stored memory against the current embedding model — run this after switching embedding providers, which invalidates existing vectors. Reset wipes every memory table.
+                </p>
+
+                {/* Status messages */}
+                <Show when={actionMsg()}>
+                  <div class="mb-3 text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-md px-2.5 py-1.5">
+                    {actionMsg()}
+                  </div>
+                </Show>
+                <Show when={actionErr()}>
+                  <div class="mb-3 text-[11px] text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-2.5 py-1.5 break-words">
+                    {actionErr()}
+                  </div>
+                </Show>
+
+                <div class="flex flex-wrap items-center gap-2">
+                  {/* Re-embed all memory */}
+                  <button
+                    type="button"
+                    onClick={runReindex}
+                    disabled={busy() !== null}
+                    class="flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border border-zinc-600/40 bg-zinc-700/30 text-zinc-200 hover:bg-zinc-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  >
+                    <Show when={busy() === 'reindex'}>
+                      <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v2a6 6 0 00-6 6H4z" />
+                      </svg>
+                    </Show>
+                    <Show when={busy() !== 'reindex'}>
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992V4.356M2.985 19.644v-4.992h4.992m0 0L3 21l4.992-4.992M21 3l-4.992 4.992M21 3v4.992h-4.992" />
+                      </svg>
+                    </Show>
+                    {busy() === 'reindex' ? 'Re-embedding…' : 'Re-embed all memory'}
+                  </button>
+
+                  {/* Reset memory (two-step confirm) */}
+                  <Show when={!confirmReset()}>
+                    <button
+                      type="button"
+                      onClick={() => { setConfirmReset(true); setActionErr(null); setActionMsg(null); }}
+                      disabled={busy() !== null}
+                      class="flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border border-red-600/40 bg-red-700/20 text-red-300 hover:bg-red-700/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      Reset memory
+                    </button>
+                  </Show>
+                  <Show when={confirmReset()}>
+                    <span class="text-[11px] text-red-300">Erase everything?</span>
+                    <button
+                      type="button"
+                      onClick={runReset}
+                      disabled={busy() !== null}
+                      class="flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border border-red-500/50 bg-red-600/40 text-red-100 hover:bg-red-600/60 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                      <Show when={busy() === 'reset'}>
+                        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v2a6 6 0 00-6 6H4z" />
+                        </svg>
+                      </Show>
+                      Yes, erase
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmReset(false)}
+                      disabled={busy() !== null}
+                      class="text-[11px] px-2.5 py-1.5 rounded-md border border-zinc-600/40 bg-zinc-700/30 text-zinc-300 hover:bg-zinc-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                      Cancel
+                    </button>
+                  </Show>
+                </div>
+              </div>
             </div>
           </div>
         </div>

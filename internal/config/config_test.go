@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -206,5 +207,88 @@ func writeJSON(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Skill sources merge differently from provider settings: a project adds its
+// own skill directories to the user's global ones rather than replacing them,
+// so a global library survives a project that configures its own.
+func TestLoad_SkillPathsAndURLsAreUnioned(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	globalDir := filepath.Join(home, ".config", "ogcode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "config.json"), []byte(`{
+		"skills": {
+			"paths": ["/global/skills", "/shared"],
+			"urls": ["https://example.com/a/index.json"],
+			"permissions": {"*": "allow", "internal-*": "deny"}
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "ogcode.json"), []byte(`{
+		"skills": {
+			"paths": ["./team", "/shared"],
+			"urls": ["https://example.com/b/index.json"],
+			"permissions": {"internal-*": "ask"}
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Load(project)
+
+	wantPaths := []string{"/global/skills", "/shared", "./team"}
+	if !reflect.DeepEqual(cfg.Skills.Paths, wantPaths) {
+		t.Errorf("paths = %v, want %v (unioned, duplicates dropped)", cfg.Skills.Paths, wantPaths)
+	}
+	wantURLs := []string{"https://example.com/a/index.json", "https://example.com/b/index.json"}
+	if !reflect.DeepEqual(cfg.Skills.URLs, wantURLs) {
+		t.Errorf("urls = %v, want %v", cfg.Skills.URLs, wantURLs)
+	}
+	// Permissions merge key by key, so a project overrides one rule without
+	// having to restate the rest.
+	if cfg.Skills.Permissions["internal-*"] != "ask" {
+		t.Errorf("internal-* = %q, want the project's ask to win", cfg.Skills.Permissions["internal-*"])
+	}
+	if cfg.Skills.Permissions["*"] != "allow" {
+		t.Errorf("* = %q, want the global rule to survive", cfg.Skills.Permissions["*"])
+	}
+}
+
+// A config with no skills section must still be usable — the standard skill
+// directories are scanned regardless.
+func TestLoad_NoSkillsSectionIsUsable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "ogcode.json"), []byte(`{"providers":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(project)
+	if len(cfg.Skills.Paths) != 0 || len(cfg.Skills.URLs) != 0 || len(cfg.Skills.Permissions) != 0 {
+		t.Errorf("expected an empty skills section, got %+v", cfg.Skills)
+	}
+}
+
+// EnsureProjectFile's template is what most users will edit by hand, so it has
+// to parse back into the shape Load expects.
+func TestProjectFileTemplate_ParsesIntoAUsableConfig(t *testing.T) {
+	var c Config
+	if err := json.Unmarshal([]byte(projectFileTemplate), &c); err != nil {
+		t.Fatalf("the template ogcode writes is not valid JSON: %v", err)
+	}
+	if _, ok := c.Providers["anthropic"]; !ok {
+		t.Error("template lost its provider section")
+	}
+	if c.Skills.Paths == nil || c.Skills.URLs == nil {
+		t.Error("template should show the skills section so the file is self-documenting")
 	}
 }

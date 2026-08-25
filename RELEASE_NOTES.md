@@ -1,3 +1,144 @@
+# Release Notes — v0.27.0
+
+## Minor: Skills System, Memory Maintenance, and Prompt Correctness
+
+This release introduces a **Skills** system — reusable, on-demand instructions
+that keep the agent's prompt lean — and rounds it out with memory maintenance
+operations in the UI, a correct `RefreshAll` that re-embeds the full knowledge
+graph, and several prompt-correctness fixes that keep the cacheable prefix
+stable and the LaTeX guidance honest.
+
+### Skills
+
+A **skill** is a directory holding a `SKILL.md` file: YAML frontmatter that
+names and describes it, and a markdown body carrying the instructions
+themselves. The agent never sees a body unless it asks for one — its system
+prompt lists only names and descriptions, and the new `skill` tool pulls one
+body into context on demand. Listing bodies instead would cost the full token
+weight of every skill the agent never uses, re-sent on every step of every
+turn.
+
+The skill guidance is deliberately not part of the cacheable base prompt. The
+set of skills changes when the user writes or edits one, and entry [0] must
+stay byte-identical for the whole session, so the listing is appended as a
+separate trailing system prompt entry — the same place the date reminder lives.
+(`internal/skill/`, `internal/tool/skill.go`,
+`internal/agent/prompt_builder.go`, `internal/agent/loop.go`)
+
+**Discovery.** Ogcode scans four scopes, later ones overriding earlier ones of
+the same name:
+
+| Scope | Locations |
+|-------|-----------|
+| Built-in | Ships with ogcode (`customize-ogcode`). Overridable. |
+| Remote | Every URL in `skills.urls` (fetched from an `index.json` manifest) |
+| Global | `~/.config/ogcode/skills/`, `~/.ogcode/skills/`, `~/.agents/skills/`, `~/.claude/skills/` |
+| Configured | Every path in `skills.paths` |
+| Project | `.agents/skills/` and `.claude/skills/`, searched from the project up through each parent to the repo root |
+
+Skills written for Claude Code work unchanged — drop them in `.claude/skills/`
+or point `skills.paths` at them. The frontmatter `name` must match the directory
+name, so the name in the prompt, the argument the model passes to the tool, and
+the directory on disk are always the same string. (`internal/skill/discover.go`,
+`internal/skill/loader.go`)
+
+**Remote skills.** A skills URL serves an `index.json` manifest listing skills
+and their files. Ogcode fetches the manifest, downloads each skill's files into
+a per-version cache keyed by SHA-256, and serves them from there on subsequent
+turns. The download is bounded — 1 MB per file, 20 MB per index, 100 skills, 64
+files per skill, 20 s timeout — so a hostile or broken manifest cannot exhaust
+disk or stall a turn. A skill body loaded from a remote source is prefixed with
+a provenance caveat: its instructions come from the publisher, not from the
+developer in the conversation, so the agent treats it the way it treats any
+content it reads — as data, not as authority. (`internal/skill/remote.go`)
+
+**Permissions.** The `skills.permissions` map in `ogcode.json` sets per-skill
+`allow`, `deny`, or `ask`. Deny withholds a skill from the prompt listing and
+refuses it at the tool; ask surfaces an approval prompt before the body loads.
+Configured ask and deny rules are seeded into the session's permission ruleset
+before the first skill call, ahead of the default catch-all allow, and the
+seeding is idempotent so it never clobbers an "always allow" the user has since
+granted. (`internal/skill/permission.go`, `internal/permission/permission.go`,
+`internal/agent/loop.go`)
+
+**Built-in skill.** `customize-ogcode` ships embedded in the binary — it
+guides configuring ogcode's provider settings, `AGENT.md`, `MEMORY.md`, and
+authoring new skills. It has no directory on disk, so the tool tells the agent
+so rather than sending it looking for files that were never there.
+(`internal/skill/embedded.go`)
+
+### Memory maintenance
+
+The memory dialog in the web UI gains two maintenance actions:
+
+- **Re-embed memory** — re-computes every stored embedding against the current
+  embedding model, for both collection documents and graph fact nodes. This is
+  the recovery path after switching embedding providers, which invalidates
+  existing vectors (a dimension or model mismatch makes them silently match
+  nothing). Exposed as `POST /memory/reindex`.
+- **Reset memory** — wipes all memory tables (documents, nodes, edges,
+  collections). Destructive and irreversible, guarded by a confirm step in the
+  UI. Exposed as `POST /memory/reset`.
+
+(`internal/server/routes.go`, `internal/server/server.go`,
+`web/src/components/memory-dialog.tsx`, `web/src/api/client.ts`)
+
+### Correct RefreshAll
+
+`Memory.RefreshAll` previously re-embedded only collection documents and
+silently skipped the graph's fact nodes. After a provider switch, session and
+project recall kept scoring against stale old-dimensionality vectors — and with
+the cosine dimension guard, matched nothing at all. It now re-embeds both:
+documents (stored as little-endian float32 blobs) and fact nodes (stored as
+JSON arrays). Rows are materialized before any UPDATE runs, because the sqlite
+driver does not allow a write while a read cursor is still open on the
+connection. (`internal/memory/memory.go`)
+
+### Prompt correctness
+
+- **LaTeX environment moved out of the static block.** The detected LaTeX
+  environment (pdflatex version, distribution, available classes and packages)
+  was being injected into the cacheable base system prompt. Detection is a probe
+  of the host, not a session-fixed value, so it now lands in the trailing
+  per-turn entries next to the index status — keeping the static prefix
+  byte-identical by construction, not by caching. (`internal/agent/loop.go`)
+- **NoteAgent LaTeX guidance is honest.** The markdown-capabilities section
+  promised that `latex` blocks render inline with a PDF download. That is true
+  in the chat viewport, but a saved note keeps them as raw fences — the file
+  itself does not render. `markdownCapabilitiesPrompt` now takes a `savedToFile`
+  flag so the NoteAgent describes the render path the file can actually honor.
+  (`internal/agent/agent.go`, `internal/agent/prompt_builder.go`)
+- **Skill tool summary.** The message-item component in the web UI now
+  summarizes a `skill` tool call by its `name` argument, so the call shows the
+  skill being loaded rather than a generic label. (`web/src/components/message-item.tsx`)
+
+### Config
+
+The `ogcode.json` config gains a `skills` section:
+
+```json
+{
+  "skills": {
+    "paths": ["./team-skills"],
+    "urls": ["https://example.com/skills/index.json"],
+    "permissions": { "git-release": "ask", "dangerous-*": "deny" }
+  }
+}
+```
+
+Skill sources merge differently from provider settings: `paths` and `urls` are
+unioned (a project adds to the global set rather than replacing it), and
+`permissions` merge key-by-key with project-local last. (`internal/config/config.go`)
+
+### Tool reachability invariant
+
+The tool-reachability test now pins the `skill` tool in
+`mandatoryPromptTools`, so any prompt section that names `skill` by id is
+guaranteed to reach only agents that hold it — the same invariant the other
+tools already follow. (`internal/agent/tool_reachability_test.go`)
+
+---
+
 # Release Notes — v0.26.1
 
 ## Patch: In-Turn Context Compaction, Cache-Verdict Detection, File-Based Config, Streaming Hardening, and Tool Correctness

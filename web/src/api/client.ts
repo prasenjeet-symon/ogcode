@@ -255,6 +255,19 @@ export function setMemoryConfig(cfg: Omit<MemoryConfig, 'updatedAt'>): Promise<M
   });
 }
 
+// Re-embed every stored memory document and graph node against the current
+// embedding model. Use after switching embedding providers, which invalidates
+// existing vectors (dimension or model mismatch).
+export function reindexMemory(): Promise<{ status: string }> {
+  return fetchAPI('/memory/reindex', { method: 'POST' });
+}
+
+// Wipe all memory tables (documents, nodes, edges, collections). Destructive,
+// irreversible — confirm before calling.
+export function resetMemory(): Promise<{ status: string }> {
+  return fetchAPI('/memory/reset', { method: 'POST' });
+}
+
 // Provider config API
 export interface ProviderConfig {
   providerId: string;

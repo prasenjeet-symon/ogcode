@@ -40,6 +40,9 @@ function summarizeInput(tool: string, input: any): string | null {
   if (input.pattern) return String(input.pattern);
   if (input.query) return String(input.query);
   if (input.url) return String(input.url);
+  // The skill tool's only argument. Checked last so a tool with both a name and
+  // a more specific field still summarizes by the specific one.
+  if (input.name) return String(input.name);
   return null;
 }
 

@@ -18,7 +18,7 @@ type Agent struct {
 // codingAgentTools is the shared full-access toolset used by both the
 // interactive BuildAgent and the headless TaskAgent — they differ only in their
 // system prompt framing, not their capabilities.
-var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task"}
+var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task", "skill"}
 
 // codingAgentSystem builds the full-access coding-agent system prompt. The two
 // modes share the same body but differ in framing:
@@ -101,7 +101,7 @@ When a build, test, or lint step fails, do not immediately retry the same comman
 
 ` + projectNotesPrompt(true) + `
 
-` + markdownCapabilitiesPrompt(true)
+` + markdownCapabilitiesPrompt(true, false)
 }
 
 // BuildAgent is the default full-access coding agent for interactive Build Mode.
@@ -130,7 +130,7 @@ var PlanAgent = Agent{
 	ID:          "plan",
 	Name:        "Plan",
 	Description: "Planning agent — reads and understands code, plans changes but never writes",
-	Tools:       []string{"bash", "read", "file_map", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image", "task"},
+	Tools:       []string{"bash", "read", "file_map", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image", "task", "skill"},
 	System: `You are a planning agent. Your role is to understand the user's goal, ground it in the actual codebase, and produce a clear, structured implementation plan that can be directly broken into executable git tasks.
 
 ` + projectIndexPrompt("plan", true, true) + `
@@ -174,7 +174,7 @@ When your plan is complete, tell the user explicitly: "This plan is ready to loc
 - The plan you produce will be broken into git tasks by a downstream agent — write it with that in mind. Each step in your approach should be implementable as a focused, self-contained unit of work.
 ` + "\n" + noPackageManagerDirsPrompt() + `
 
-` + markdownCapabilitiesPrompt(false),
+` + markdownCapabilitiesPrompt(false, false),
 }
 
 // BreakdownAgent produces structured task definitions from a locked plan conversation.
@@ -269,7 +269,7 @@ var NoteAgent = Agent{
 ` + "\n" + noPackageManagerDirsPrompt() + `
 - Your output is saved verbatim as a markdown file. Make it self-contained — readable without access to this conversation.
 
-` + markdownCapabilitiesPrompt(false),
+` + markdownCapabilitiesPrompt(false, true),
 }
 
 // IndexAgent analyzes page keyword corpora and produces semantic topic labels.

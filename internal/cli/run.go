@@ -16,6 +16,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
+	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 	"github.com/spf13/cobra"
 )
@@ -174,6 +175,16 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	toolRegistry.Register(tool.GrepTool{})
 	toolRegistry.Register(tool.ViewImageTool{})
 
+	// Skills, from the same ogcode.json this command already loads for
+	// provider settings.
+	skillCfg := config.Load(dir).Skills
+	skillLoader := skill.NewLoader(skill.Config{
+		Paths:       skillCfg.Paths,
+		URLs:        skillCfg.URLs,
+		Permissions: skillCfg.Permissions,
+	})
+	toolRegistry.Register(tool.NewSkillTool(skillLoader))
+
 	b := bus.New(1024)
 	store := session.NewStore(database)
 
@@ -232,6 +243,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		Tools:           toolRegistry,
 		Dir:             dir,
 		MaxSteps:        runMaxTurns,
+		Skills:          skillLoader,
 	}
 
 	// Register the task sub-agent tool now that the runner exists (the build

@@ -62,6 +62,30 @@ func DefaultRuleset() Ruleset {
 	}
 }
 
+// EnsureRules seeds a session's ruleset with rules that come from
+// configuration rather than from a user's reply — today, the per-skill
+// allow/deny/ask rules in ogcode.json.
+//
+// It applies only to a session that has no ruleset yet. That makes it
+// idempotent, so the agent loop can call it at the start of every turn, and it
+// means an "always allow" grant the user gave earlier in the session is never
+// overwritten by a config rule on the next turn.
+//
+// Rules are placed ahead of DefaultRuleset so they are reached before its
+// trailing catch-all Allow, which would otherwise make every configured "ask"
+// rule unreachable.
+func (m *Manager) EnsureRules(sessionID string, rules Ruleset) {
+	if len(rules) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.rulesets[sessionID]; ok {
+		return
+	}
+	m.rulesets[sessionID] = append(append(Ruleset{}, rules...), DefaultRuleset()...)
+}
+
 // PendingRequest holds a permission request awaiting user reply.
 type PendingRequest struct {
 	Request Request

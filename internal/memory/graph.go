@@ -11,9 +11,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
-	"golang.org/x/sync/errgroup"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"golang.org/x/sync/errgroup"
 )
 
 // ChatClient is the minimal interface the Graph needs to call an LLM.
@@ -47,9 +48,9 @@ type GraphOptions struct {
 	ProjectID   string
 	SessionType string
 	SessionName string
-	Question  string
-	Response  string
-	UserTopic string
+	Question    string
+	Response    string
+	UserTopic   string
 	// Chat is the synthesis LLM client used for topic/concept inference and
 	// enrichment on this call. It should be built from the session's selected
 	// provider+model. When nil, placement and enrichment fall back to
@@ -113,13 +114,13 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 	}
 
 	topicNode := &Node{
-		SessionID: opts.SessionID,
-		ProjectID: opts.ProjectID,
+		SessionID:   opts.SessionID,
+		ProjectID:   opts.ProjectID,
 		SessionType: opts.SessionType,
-		Type:      TypeTopic,
-		Key:       placement.Topic,
-		Content:   "",
-		TopicName: placement.Topic,
+		Type:        TypeTopic,
+		Key:         placement.Topic,
+		Content:     "",
+		TopicName:   placement.Topic,
 	}
 	topicNode, err = g.Store.AddNode(*topicNode)
 	if err != nil {
@@ -127,13 +128,13 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 	}
 
 	conceptNode := &Node{
-		SessionID: opts.SessionID,
-		ProjectID: opts.ProjectID,
+		SessionID:   opts.SessionID,
+		ProjectID:   opts.ProjectID,
 		SessionType: opts.SessionType,
-		Type:      TypeConcept,
-		Key:       placement.Concept,
-		Content:   "",
-		TopicName: placement.Topic,
+		Type:        TypeConcept,
+		Key:         placement.Concept,
+		Content:     "",
+		TopicName:   placement.Topic,
 	}
 	if placement.Concept == placement.Topic {
 		conceptNode = nil
@@ -149,15 +150,15 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 	factKey := makeKey(content) + "-" + hex.EncodeToString(h[:4])
 
 	factNode := &Node{
-		SessionID: opts.SessionID,
-		ProjectID: opts.ProjectID,
+		SessionID:   opts.SessionID,
+		ProjectID:   opts.ProjectID,
 		SessionType: opts.SessionType,
-		Type:      TypeFact,
-		Key:       factKey,
-		Content:   content,
-		Question:  opts.Question,
-		Response:  opts.Response,
-		TopicName: placement.Topic,
+		Type:        TypeFact,
+		Key:         factKey,
+		Content:     content,
+		Question:    opts.Question,
+		Response:    opts.Response,
+		TopicName:   placement.Topic,
 	}
 	factNode, err = g.Store.AddNode(*factNode)
 	if err != nil {
@@ -542,11 +543,11 @@ type RecallOptions struct {
 	MaxRounds int     // max refinement rounds, default 3
 	Threshold float32 // confidence threshold to stop early, default 0.7
 	Limit     int     // max facts in lightweight tree, default 50
-	MinScore       float32  // minimum cosine similarity to include fact
-	Since          int64
-	Until          int64
-	FromOrder      int
-	ToOrder        int
+	MinScore  float32 // minimum cosine similarity to include fact
+	Since     int64
+	Until     int64
+	FromOrder int
+	ToOrder   int
 	// Chat is the synthesis LLM client used for the convergence refinement
 	// loop. It should be built from the session's selected provider+model.
 	// When nil, recall returns the raw semantically filtered tree without
@@ -969,10 +970,26 @@ func skeletonTreeText(tree map[string]TopicTree) string {
 }
 
 func truncate(s string, max int) string {
-	if len(s) > max {
+	if max <= 0 {
+		return ""
+	}
+	// Byte-slicing a string can split a multi-byte UTF-8 sequence, producing
+	// invalid UTF-8 that renders as replacement characters. Walk by rune and
+	// cut at a character boundary so non-ASCII text survives truncation.
+	if len(s) <= max {
+		return s
+	}
+	// Fast path: if the cut point is already on a rune boundary, slice directly.
+	if utf8.RuneStart(s[max]) {
 		return s[:max] + "..."
 	}
-	return s
+	// Otherwise back up to the last rune boundary at or before max bytes.
+	for i := max; i > 0; i-- {
+		if utf8.RuneStart(s[i]) {
+			return s[:i] + "..."
+		}
+	}
+	return "..."
 }
 
 func makeKey(content string) string {
@@ -1003,16 +1020,18 @@ func makeKey(content string) string {
 }
 
 func cosine(a, b []float32) float32 {
-	if len(a) == 0 || len(b) == 0 {
+	// Vectors from different embedding models have different dimensionalities.
+	// Comparing them is meaningless — a partial overlap produces a score that
+	// looks valid but is mathematically wrong. Skip mismatched vectors entirely
+	// so a provider switch degrades to "no match" instead of "wrong match".
+	if len(a) == 0 || len(b) == 0 || len(a) != len(b) {
 		return 0
 	}
 	var dot, magA, magB float32
 	for i := range a {
-		if i < len(b) {
-			dot += a[i] * b[i]
-			magB += b[i] * b[i]
-		}
+		dot += a[i] * b[i]
 		magA += a[i] * a[i]
+		magB += b[i] * b[i]
 	}
 	if magA == 0 || magB == 0 {
 		return 0
@@ -1035,7 +1054,7 @@ func (c *chatClient) Chat(ctx context.Context, system, prompt string) (string, e
 		model = c.provider.Models()[0].ID
 	}
 	req := provider.StreamRequest{
-		Model: model,
+		Model:  model,
 		System: []string{system},
 		Messages: []provider.ModelMessage{
 			{Role: "user", Content: json.RawMessage(fmt.Sprintf("%q", prompt))},

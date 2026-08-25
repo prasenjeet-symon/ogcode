@@ -58,6 +58,8 @@ func (s *Server) routes() http.Handler {
 
 		r.Get("/memory/config", s.handleGetMemoryConfig)
 		r.Post("/memory/config", s.handleSetMemoryConfig)
+		r.Post("/memory/reindex", s.handleMemoryReindex)
+		r.Post("/memory/reset", s.handleMemoryReset)
 
 		r.Get("/search/config", s.handleGetSearchConfig)
 		r.Post("/search/config", s.handleSetSearchConfig)

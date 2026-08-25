@@ -21,6 +21,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
+	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
 
@@ -56,6 +57,10 @@ type LoopRunner struct {
 	// only prompts when its context carries WithPermissionGating — so headless
 	// runs (task, breakdown, note, search) never block on an approval UI.
 	Permissions *permission.Manager
+	// Skills resolves the skills available in a project directory. nil (CLI,
+	// tests) means no skill is ever listed and the skill tool has nothing to
+	// load, which is the behaviour that predates the feature.
+	Skills *skill.Loader
 }
 
 // RunLoop executes the core agent loop: prompt -> stream -> tools -> loop back.
@@ -105,6 +110,23 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	}
 	agentMDContent := LoadAgentMD(workDir)
 	memoryMDContent := LoadMemoryMD(workDir)
+
+	// Skills are resolved once per turn, alongside AGENT.md and MEMORY.md, and
+	// the same list is used for every step of it. Only agents holding the tool
+	// pay for the scan — for the rest the listing would name a call they were
+	// never offered.
+	var visibleSkills []skill.Skill
+	if lr.Skills != nil && agent.HasTool("skill") {
+		reg := lr.Skills.Load(workDir)
+		visibleSkills = reg.Visible()
+		// Config-driven ask/deny rules have to be in the session's ruleset
+		// before the first skill call, or the default catch-all Allow answers
+		// for them. Seeding is idempotent, so repeating it per turn is free and
+		// never clobbers an "always allow" the user has since granted.
+		if lr.Permissions != nil {
+			lr.Permissions.EnsureRules(string(sessionID), skillPermissionRules(reg))
+		}
+	}
 
 	// Resolved once per turn rather than per step: the prompt is rebuilt on every
 	// step, and the index only changes when the user deliberately rebuilds it, so
@@ -471,6 +493,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// Anything that changes mid-session must stay out of entry [0].
 		if compactContextOffered {
 			systemPrompts = append(systemPrompts, compactContextPrompt())
+		}
+		// Out here rather than in entry [0] for the same reason: the user can
+		// add or edit a skill while the session is open, and the cached prefix
+		// must stay byte-identical across the whole session.
+		if guidance := skillGuidancePrompt(visibleSkills); guidance != "" {
+			systemPrompts = append(systemPrompts, guidance)
 		}
 
 		// Mid-loop guidance: appended to the user's turn message content (not the
@@ -2008,8 +2036,43 @@ func permissionPattern(tc pendingToolCall) string {
 		if json.Unmarshal(tc.Input, &in) == nil && in.Command != "" {
 			return in.Command
 		}
+	case "skill":
+		// The pattern is the skill being loaded, so a rule — configured, or
+		// granted by an "always allow" reply — applies to that one skill rather
+		// than to every skill at once.
+		var in struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(tc.Input, &in) == nil && in.Name != "" {
+			return in.Name
+		}
 	}
 	return "*"
+}
+
+// skillPermissionRules converts a registry's configured skill actions into
+// permission rules.
+//
+// Only ask and deny are emitted. Allow is what the default ruleset's trailing
+// catch-all already produces, so a rule for it would add a line per skill and
+// change nothing.
+//
+// Each rule names one concrete skill, never the glob the config was written
+// with: permission.matchGlob resolves an exact match or a bare "*" and nothing
+// else, so a rule carrying "internal-*" would match no call at all and the deny
+// would be silently inert. The glob is resolved on this side, where the set of
+// names it covers is known.
+func skillPermissionRules(reg *skill.Registry) permission.Ruleset {
+	var rules permission.Ruleset
+	for _, s := range reg.List() {
+		switch reg.Action(s.Name) {
+		case skill.Ask:
+			rules = append(rules, permission.Rule{Permission: "skill", Pattern: s.Name, Action: permission.Ask})
+		case skill.Deny:
+			rules = append(rules, permission.Rule{Permission: "skill", Pattern: s.Name, Action: permission.Deny})
+		}
+	}
+	return rules
 }
 
 // capToolOutput is the global backstop that bounds any tool result before it
@@ -2464,6 +2527,18 @@ func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDCo
 			entries = append(entries, st)
 		}
 	}
+
+	// The LaTeX environment is detected once and cached for the process, so it is
+	// static *today*. But detection is a probe of the host, not a session-fixed
+	// value — a future change (or a test forcing the cache) could make it vary, and
+	// the static block must stay byte-identical by construction, not by caching.
+	// It lands here next to the other host-derived, per-turn entries for the same
+	// reason the index status does.
+	if a.HasTool("latex_to_pdf") {
+		if lp := latexInfoPrompt(); lp != "" {
+			entries = append(entries, strings.TrimSpace(lp))
+		}
+	}
 	entries = append(entries, systemReminderPrompt())
 
 	// Output-only agents pin their format constraint last, where it sits closest
@@ -2532,11 +2607,6 @@ Results from project_memory_recall are attributed to the conversation and date t
 
 project_memory_recall also accepts scope: "session", which runs that same dated, attributed search over the current conversation only. Reach for it when you want this session's history with timestamps and ordering rather than the flat summary memory_recall returns.`
 		}
-	}
-
-	// Inject LaTeX environment info for agents that have the latex_to_pdf tool.
-	if a.HasTool("latex_to_pdf") {
-		prompt += latexInfoPrompt()
 	}
 
 	// The instruction-source boundary closes the cacheable block. It applies to
@@ -2616,12 +2686,19 @@ func ensureStartsWithUser(messages []provider.ModelMessage) []provider.ModelMess
 // results), the guidance is appended to the first user-role message regardless.
 // If there are no user messages at all, the guidance is dropped (the loop will
 // re-attempt on the next iteration).
+//
+// The synthetic compaction-summary message that prependCompactionSummary inserts
+// at the front of the slice is skipped: it is a user-role message, but it stands
+// for the agent's own record of earlier steps, not for the user's turn prompt.
+// Attaching mid-loop guidance to it would conflate the two labels and bury the
+// live instruction inside the "[Earlier steps compacted...]" preamble.
 func appendGuidanceToUserMessage(messages []provider.ModelMessage, guidance string) {
 	if len(messages) == 0 || guidance == "" {
 		return
 	}
 	// Find the first user message that carries text content (not a tool result,
-	// which has a ToolCallID). This is the user's original turn prompt.
+	// which has a ToolCallID) and is not the compaction-summary preamble. This is
+	// the user's original turn prompt.
 	for i, m := range messages {
 		if m.Role != "user" || m.ToolCallID != "" {
 			continue
@@ -2630,13 +2707,16 @@ func appendGuidanceToUserMessage(messages []provider.ModelMessage, guidance stri
 		if m.Content != nil {
 			json.Unmarshal(m.Content, &content)
 		}
+		if strings.HasPrefix(content, compactionSummaryPreamble) {
+			continue
+		}
 		content += guidanceUserContent(guidance)
 		messages[i].Content, _ = json.Marshal(content)
 		return
 	}
 	// Fallback: no user text message — append to the first user message of any
-	// kind (e.g. a tool-result-only turn). This is rare but keeps guidance from
-	// being silently dropped.
+	// kind (e.g. a tool-result-only turn), again skipping the compaction-summary
+	// preamble. This is rare but keeps guidance from being silently dropped.
 	for i, m := range messages {
 		if m.Role != "user" {
 			continue
@@ -2644,6 +2724,9 @@ func appendGuidanceToUserMessage(messages []provider.ModelMessage, guidance stri
 		var content string
 		if m.Content != nil {
 			json.Unmarshal(m.Content, &content)
+		}
+		if strings.HasPrefix(content, compactionSummaryPreamble) {
+			continue
 		}
 		content += guidanceUserContent(guidance)
 		messages[i].Content, _ = json.Marshal(content)

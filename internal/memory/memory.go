@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -18,8 +19,8 @@ import (
 // Memory provides the agentic memory lifecycle: read, recall, and write.
 // It wraps a local SQLite-backed knowledge graph with optional LLM inference.
 type Memory struct {
-	Store  *Store
-	Graph  *Graph
+	Store   *Store
+	Graph   *Graph
 	enabled bool
 }
 
@@ -411,7 +412,7 @@ func (m *Memory) SemanticSearch(ctx context.Context, collection, query string, t
 			score = 0
 		}
 		candidates = append(candidates, SearchResult{
-			Doc: Document{ID: id, Collection: collection, Content: content, CreatedAt: created},
+			Doc:   Document{ID: id, Collection: collection, Content: content, CreatedAt: created},
 			Score: score,
 		})
 	}
@@ -428,33 +429,90 @@ func (m *Memory) SemanticSearch(ctx context.Context, collection, query string, t
 	return candidates, nil
 }
 
-// RefreshAll recomputes all document embeddings; useful after provider changes.
+// RefreshAll recomputes all embeddings — both collection documents and graph
+// facts — so it is the recovery path after switching embedding provider.
+// Without re-embedding the graph nodes, session and project recall keep
+// scoring against stale old-dimensionality vectors and (with the cosine
+// dimension guard) silently match nothing.
 func (m *Memory) RefreshAll(ctx context.Context) error {
 	if m.Graph == nil || m.Graph.Embed == nil {
 		return fmt.Errorf("refresh unavailable: no embedder")
 	}
-	rows, err := m.Store.DB().QueryContext(ctx, `SELECT id, content FROM memory_document`)
+
+	// 1) Collection documents (memory_document) — embeddings are stored as
+	// little-endian float32 byte blobs.
+	docRows, err := m.Store.DB().QueryContext(ctx, `SELECT id, content FROM memory_document`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		var content string
-		if err := rows.Scan(&id, &content); err != nil {
+	type docRow struct {
+		id      int64
+		content string
+	}
+	var docs []docRow
+	for docRows.Next() {
+		var r docRow
+		if err := docRows.Scan(&r.id, &r.content); err != nil {
 			continue
 		}
-		vecs, err := m.Graph.Embed.Embed(ctx, []string{content})
-		if err != nil {
-			continue
-		}
-		if len(vecs) == 0 {
+		docs = append(docs, r)
+	}
+	if err := docRows.Err(); err != nil {
+		docRows.Close()
+		return err
+	}
+	docRows.Close()
+	for _, r := range docs {
+		vecs, err := m.Graph.Embed.Embed(ctx, []string{r.content})
+		if err != nil || len(vecs) == 0 {
 			continue
 		}
 		embBlob := floatsToBytes(vecs[0])
 		_, _ = m.Store.DB().ExecContext(ctx,
 			`UPDATE memory_document SET embedding = ? WHERE id = ?`,
-			embBlob, id)
+			embBlob, r.id)
 	}
-	return rows.Err()
+
+	// 2) Graph fact nodes — embeddings are stored as JSON arrays (see
+	// SetEmbedding). We embed each fact's content, which is what AddFact
+	// originally embedded (question + " [ANSWER] " + response). Topic and
+	// concept nodes carry no content and no embedding, so we filter to
+	// type = 'fact'.
+	//
+	// Rows are materialized before any UPDATE runs: the sqlite driver does
+	// not allow a write while a read cursor is still open on the connection.
+	nodeRows, err := m.Store.DB().QueryContext(ctx,
+		`SELECT session_id, key, content FROM nodes WHERE type = 'fact' AND content != ''`)
+	if err != nil {
+		return err
+	}
+	type nodeRow struct {
+		sessionID string
+		key       string
+		content   string
+	}
+	var nodes []nodeRow
+	for nodeRows.Next() {
+		var r nodeRow
+		if err := nodeRows.Scan(&r.sessionID, &r.key, &r.content); err != nil {
+			continue
+		}
+		nodes = append(nodes, r)
+	}
+	if err := nodeRows.Err(); err != nil {
+		nodeRows.Close()
+		return err
+	}
+	nodeRows.Close()
+	for _, r := range nodes {
+		vecs, err := m.Graph.Embed.Embed(ctx, []string{r.content})
+		if err != nil || len(vecs) == 0 {
+			continue
+		}
+		embJSON, _ := json.Marshal(vecs[0])
+		_, _ = m.Store.DB().ExecContext(ctx,
+			`UPDATE nodes SET embedding = ? WHERE session_id = ? AND key = ?`,
+			embJSON, r.sessionID, r.key)
+	}
+	return nil
 }

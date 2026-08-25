@@ -353,3 +353,46 @@ func TestAppendGuidanceToUserMessage_NoUserMessage(t *testing.T) {
 		t.Error("expected no modification when no user message exists")
 	}
 }
+
+// TestAppendGuidanceToUserMessage_SkipsCompactionSummaryPreamble verifies that
+// when the model-facing slice has been narrowed by a compaction, guidance is
+// appended to the user's real turn prompt — not to the synthetic
+// compaction-summary message that prependCompactionSummary prepends at index 0.
+// Otherwise the live mid-loop instruction would be buried inside the
+// "[Earlier steps compacted...]" preamble and the model could misread it.
+func TestAppendGuidanceToUserMessage_SkipsCompactionSummaryPreamble(t *testing.T) {
+	preamble, _ := json.Marshal(compactionSummaryPreamble + goodSummary)
+	turnPrompt, _ := json.Marshal("the original user prompt")
+	msgs := []provider.ModelMessage{
+		{Role: "user", Content: preamble}, // synthetic compaction summary
+		{Role: "assistant", Content: []byte(`"working on it"`)},
+		{Role: "user", Content: turnPrompt}, // the real turn prompt
+	}
+
+	appendGuidanceToUserMessage(msgs, "change direction")
+
+	// The compaction-summary message must be untouched.
+	var summaryContent string
+	if err := json.Unmarshal(msgs[0].Content, &summaryContent); err != nil {
+		t.Fatalf("preamble content is not a JSON string: %v", err)
+	}
+	if strings.Contains(summaryContent, guidanceLabel) {
+		t.Error("guidance was attached to the compaction-summary preamble; " +
+			"it should land on the real user turn prompt instead")
+	}
+
+	// The real turn prompt must carry the guidance.
+	var turnContent string
+	if err := json.Unmarshal(msgs[2].Content, &turnContent); err != nil {
+		t.Fatalf("turn prompt content is not a JSON string: %v", err)
+	}
+	if !strings.Contains(turnContent, "the original user prompt") {
+		t.Error("expected the original turn prompt to be preserved")
+	}
+	if !strings.Contains(turnContent, "change direction") {
+		t.Error("expected guidance appended to the real user turn prompt")
+	}
+	if !strings.Contains(turnContent, guidanceLabel) {
+		t.Error("expected the guidance label in the real turn prompt content")
+	}
+}

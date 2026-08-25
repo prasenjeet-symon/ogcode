@@ -93,17 +93,16 @@ Everything is driven from the `Makefile`. There is no `go install` shortcut for 
 
 ### Bump version
 
-The version is hardcoded in **four files (six entries) that must stay in sync**. GoReleaser overrides the Go files via `-ldflags` for official releases, but local/dev builds fall back to these defaults, and the npm files always need to match:
+The version is hardcoded in **three files (four entries) that must stay in sync**. GoReleaser overrides the Go file via `-ldflags` for official releases, but local/dev builds fall back to these defaults, and the npm files always need to match:
 
 | # | File | Entry | Format | Example |
 |---|------|-------|--------|---------|
 | 1 | `internal/version/version.go` | `Version` var | `vX.Y.Z` (with `v` prefix) | `Version = "v0.13.3"` |
-| 2 | `internal/cli/version.go` | `version` var | `vX.Y.Z` (with `v` prefix) | `version = "v0.13.3"` |
-| 3 | `web/package.json` | `"version"` field | `X.Y.Z` (**no** `v` prefix) | `"version": "0.13.3"` |
-| 4a | `web/package-lock.json` | root `"version"` | `X.Y.Z` (**no** `v` prefix) | `"version": "0.13.3"` |
-| 4b | `web/package-lock.json` | `packages[""].version` | `X.Y.Z` (**no** `v` prefix) | `"version": "0.13.3"` |
+| 2 | `web/package.json` | `"version"` field | `X.Y.Z` (**no** `v` prefix) | `"version": "0.13.3"` |
+| 3a | `web/package-lock.json` | root `"version"` | `X.Y.Z` (**no** `v` prefix) | `"version": "0.13.3"` |
+| 3b | `web/package-lock.json` | `packages[""].version` | `X.Y.Z` (**no** `v` prefix) | `"version": "0.13.3"` |
 
-> **Gotcha**: The Go files use a `v` prefix; the npm files do **not**. Forgetting the npm files (or mixing the prefix) is the most common release mistake — always bump all six entries.
+> **Gotcha**: The Go file uses a `v` prefix; the npm files do **not**. Forgetting the npm files (or mixing the prefix) is the most common release mistake — always bump all four entries. Note: `internal/cli/version.go` previously carried its own `version` var, but that was consolidated into `internal/version` in v0.26.1 — it no longer needs bumping.
 
 Files that **do NOT** need bumping:
 - `.goreleaser.yaml` — uses GoReleaser's `{{ .Version }}` template, no hardcoded version.
@@ -124,7 +123,7 @@ Steps:
 4. **Docker pipeline auto-triggers** — `.github/workflows/docker.yml` builds and pushes the Docker image.
 5. **Post-release** — update the "Current release" line below to the new version so future sessions know it without git inspection.
 
-**Current release**: `v0.26.1`
+**Current release**: `v0.27.0`
 
 ## ogcode — Rich Output Architecture
 
@@ -145,7 +144,7 @@ Steps:
 - **Backend**: Hugot (`github.com/knights-analytics/hugot`) pure-Go `NewGoSession` (GoMLX simplego) — CGO-free. Inference is **mutex-serialized** because the GoMLX backend is not goroutine-safe.
 - **Model delivery (important)**: Only the ~700 KB tokenizer/config assets are `go:embed`-ed. The ~133 MB ONNX weights are **downloaded on first use** from `https://huggingface.co/thenlper/gte-small/resolve/main/onnx/model.onnx` to `~/.ogcode/embed-model/`, SHA-256 verified (`0b01312b59bec0a2558a626f2937be4cbe4bb16d1511560153f598cec488f1f8`). A `.ogcode-model.sha256` sidecar marker skips re-download + re-hash on later runs. This mirrors the search-bridge download pattern and keeps the binary ~55 MB (vs ~188 MB if the weights were embedded).
 - **Why not quantized int8**: The quantized ONNX variant was rejected because Hugot's pure-Go backend only has partial/experimental int8 (`QuantizeLinear`/`DequantizeLinear`) support — too risky for inference correctness. The FP32 model is guaranteed to work.
-- **Migration note**: Switching an existing memory DB from OpenAI (1536-dim) to the local embedder (384-dim) changes vector dimensionality. Existing stored embeddings become incompatible — run `Memory.RefreshAll` (re-embeds all docs) after switching. The cosine code in `graph.go` already guards against dimension mismatch (skips mismatched vectors). Note: switching embedding models (e.g. MiniLM→gte-small) also invalidates existing vectors even at the same dimensionality — re-embed with `Memory.RefreshAll`.
+- **Migration note**: Switching an existing memory DB from OpenAI (1536-dim) to the local embedder (384-dim) changes vector dimensionality. Existing stored embeddings become incompatible — run `Memory.RefreshAll` (re-embeds both collection docs AND graph fact nodes) after switching. The `cosine()` function in `graph.go` guards against dimension mismatch (returns 0 for mismatched-length vectors, so they score as "no match" rather than wrong). Note: switching embedding models (e.g. MiniLM→gte-small) also invalidates existing vectors even at the same dimensionality — re-embed with `Memory.RefreshAll`.
 - **Env overrides**: `OGCODE_EMBED_MODEL_DIR` sets the model cache dir.
 
 ## Prompt Caching

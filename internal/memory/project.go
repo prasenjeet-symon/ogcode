@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Project-scoped recall answers questions against every conversation ever held
@@ -485,9 +486,30 @@ func projectFactsText(facts []Node, matchedKeys map[string]bool, names map[strin
 	out := renderProjectFacts(facts, matchedKeys, names, 300, 2)
 	if len(out) > maxChars {
 		slog.Warn("project recall: fact block exceeds budget after trimming", "chars", len(out), "budget", maxChars)
-		out = out[:maxChars] + "\n… (truncated to fit the context budget — narrow the question or add a date range)\n"
+		out = truncateUTF8(out, maxChars) + "\n… (truncated to fit the context budget — narrow the question or add a date range)\n"
 	}
 	return out
+}
+
+// truncateUTF8 cuts the string to at most max bytes without splitting a
+// multi-byte UTF-8 sequence. A byte-slice (out[:max]) can land inside a rune
+// and produce invalid UTF-8; this backs up to the nearest rune boundary.
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 0 {
+		return ""
+	}
+	if utf8.RuneStart(s[max]) {
+		return s[:max]
+	}
+	for i := max; i > 0; i-- {
+		if utf8.RuneStart(s[i]) {
+			return s[:i]
+		}
+	}
+	return ""
 }
 
 // renderProjectFacts builds the fact block. dropLevel 1 omits neighbour turns,

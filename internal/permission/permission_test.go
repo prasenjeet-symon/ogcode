@@ -72,3 +72,51 @@ func TestRemoveDiscardsPending(t *testing.T) {
 		t.Fatal("Reply succeeded after Remove")
 	}
 }
+
+// The loop calls EnsureRules at the start of every turn, so it has to be
+// idempotent — and it must never overwrite a grant the user gave earlier in the
+// session.
+func TestEnsureRules_SeedsOnceAndPreservesUserGrants(t *testing.T) {
+	m := NewManager()
+	seed := Ruleset{{Permission: "skill", Pattern: "internal-docs", Action: Deny}}
+
+	m.EnsureRules("s1", seed)
+	if got := m.Ruleset("s1").Evaluate("skill", "internal-docs"); got != Deny {
+		t.Fatalf("configured rule not applied: %q", got)
+	}
+	// The trailing catch-all still answers for everything the seed misses.
+	if got := m.Ruleset("s1").Evaluate("skill", "git-release"); got != Allow {
+		t.Errorf("unmatched skill = %q, want allow", got)
+	}
+
+	// A user grant lands ahead of the seeded rules and survives the next turn's
+	// EnsureRules call.
+	m.AddRule("s1", Rule{Permission: "skill", Pattern: "internal-docs", Action: Allow})
+	m.EnsureRules("s1", seed)
+	if got := m.Ruleset("s1").Evaluate("skill", "internal-docs"); got != Allow {
+		t.Errorf("an always-allow grant was overwritten by a later EnsureRules: %q", got)
+	}
+}
+
+// A configured "ask" has to be reached before DefaultRuleset's trailing
+// catch-all Allow, or it would never prompt.
+//
+// Patterns here are concrete, not globs: matchGlob resolves only an exact match
+// or a bare "*", so a caller with glob-shaped configuration has to expand it to
+// the names it covers before seeding — which is what skillPermissionRules in
+// the agent package does.
+func TestEnsureRules_AskBeatsTheDefaultCatchAll(t *testing.T) {
+	m := NewManager()
+	m.EnsureRules("s1", Ruleset{{Permission: "skill", Pattern: "deploy-prod", Action: Ask}})
+	if got := m.Ruleset("s1").Evaluate("skill", "deploy-prod"); got != Ask {
+		t.Errorf("Evaluate = %q, want ask", got)
+	}
+}
+
+func TestEnsureRules_EmptyRulesLeaveTheSessionOnDefaults(t *testing.T) {
+	m := NewManager()
+	m.EnsureRules("s1", nil)
+	if got := m.Ruleset("s1").Evaluate("bash", "rm -rf /"); got != Ask {
+		t.Errorf("bash = %q, want the default ask", got)
+	}
+}

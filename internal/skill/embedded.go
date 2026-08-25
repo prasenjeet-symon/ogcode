@@ -1,0 +1,130 @@
+package skill
+
+import (
+	"fmt"
+	"sync"
+)
+
+// embeddedSources are skills ogcode ships in the binary. They are registered
+// before anything found on disk, so a user who writes a skill of the same name
+// in their own project replaces the built-in rather than colliding with it.
+//
+// They are stored as raw SKILL.md text and parsed through the same Parse used
+// for files, so a built-in cannot drift into a shape a disk skill would be
+// rejected for.
+var embeddedSources = []string{customizeOgcodeSkill}
+
+var (
+	embeddedOnce sync.Once
+	embedded     []Skill
+	embeddedErrs []error
+)
+
+// Embedded returns the built-in skills, parsed once per process.
+func Embedded() ([]Skill, []error) {
+	embeddedOnce.Do(func() {
+		for i, src := range embeddedSources {
+			// parseContent rather than Parse: a built-in has no directory on
+			// disk for the name to match, but it is held to every other rule a
+			// disk skill is. Dir stays empty, which is also the signal that
+			// nothing ships beside it.
+			s, err := parseContent([]byte(src))
+			if err != nil {
+				embeddedErrs = append(embeddedErrs, fmt.Errorf("built-in skill %d: %w", i, err))
+				continue
+			}
+			s.Source = SourceEmbedded
+			embedded = append(embedded, s)
+		}
+	})
+	return embedded, embeddedErrs
+}
+
+// customizeOgcodeSkill documents the files a user edits to configure ogcode. It
+// is the one piece of project knowledge no project's own files can carry: a
+// fresh checkout has no AGENT.md explaining what AGENT.md is for.
+const customizeOgcodeSkill = `---
+name: customize-ogcode
+description: How to configure ogcode for a project — ogcode.json provider and skill settings, AGENT.md behavioural rules, MEMORY.md project knowledge, and authoring new skills. Load this when the user asks to change ogcode's own configuration or behaviour.
+---
+
+# Customizing ogcode
+
+Four files control how ogcode behaves in a project. They serve different
+purposes and are not interchangeable.
+
+## ogcode.json — connection and skill settings
+
+Project config lives in ` + "`ogcode.json`" + ` at the repo root; global config lives in
+` + "`~/.config/ogcode/config.json`" + `. Both have the same shape, and project values
+win field by field.
+
+` + "```json" + `
+{
+  "providers": {
+    "anthropic": { "baseUrl": "", "apiKey": "" },
+    "openai": { "baseUrl": "", "apiKey": "" },
+    "openrouter": { "apiKey": "" },
+    "ollama": { "baseUrl": "", "apiKey": "" }
+  },
+  "skills": {
+    "paths": ["./team-skills"],
+    "urls": ["https://example.com/skills/index.json"],
+    "permissions": { "internal-*": "deny", "deploy-*": "ask" }
+  }
+}
+` + "```" + `
+
+A real environment variable always beats the config file, so a key in the
+environment is not overridden by one in ogcode.json.
+
+## AGENT.md — how the agent should work
+
+AGENT.md holds behavioural rules: build and test commands, formatting policy,
+conventions to follow, things not to touch. ogcode reads every AGENT.md from the
+filesystem root down to the working directory, so a rule in a subdirectory
+layers on top of the repo-wide one.
+
+Write rules the agent cannot infer from the code. Cut the paragraph arguing for
+a rule — the prompt is re-sent on every step of every turn.
+
+## MEMORY.md — what is known about the project
+
+MEMORY.md holds facts, not instructions: decisions and their rationale,
+gotchas, non-obvious behaviour, values that would otherwise be rediscovered.
+If it tells the agent how to act, it belongs in AGENT.md instead.
+
+## Skills — instructions loaded on demand
+
+A skill is a directory holding a SKILL.md. ogcode looks in, from lowest
+precedence to highest:
+
+- ` + "`~/.config/ogcode/skills/`" + `, ` + "`~/.ogcode/skills/`" + `, ` + "`~/.agents/skills/`" + `, ` + "`~/.claude/skills/`" + `
+- any directory listed in ` + "`skills.paths`" + `
+- ` + "`.agents/skills/`" + ` and ` + "`.claude/skills/`" + `, in the project and each parent up to the repo root
+
+` + "```markdown" + `
+---
+name: git-release
+description: Draft release notes, bump the version, and tag the release.
+---
+
+## Steps
+1. ...
+` + "```" + `
+
+The frontmatter name must be lowercase alphanumeric with single hyphens, and
+must match the directory name. The description is what the agent sees in its
+prompt — it decides from that alone whether to load the skill, so describe when
+to use it, not just what it is.
+
+Files shipped beside SKILL.md (scripts, references) are listed to the agent when
+the skill loads, and relative paths in the body resolve against the skill's own
+directory.
+
+## .ogcode/ — runtime state, not configuration
+
+` + "`.ogcode/`" + ` holds the session database, notes, plan archives, and git
+worktrees. It is written by ogcode. Never hand-edit it, and never put skills or
+configuration there.
+`
