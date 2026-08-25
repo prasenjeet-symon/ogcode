@@ -19,7 +19,7 @@ func TestModelFamily(t *testing.T) {
 		{"openrouter", "google/gemini-2.0-flash", "gemini"},
 		{"ollama", "llama3.1", "local"},
 		{"ollama", "qwen2.5-coder:7b", "local"}, // local runtime wins regardless of model
-		{"ogcode-groq", "llama-3.3-70b", "generic"},
+		{"ogcode-cerebras", "llama-3.3-70b", "generic"},
 		{"", "", "generic"},
 	}
 	for _, c := range cases {

@@ -188,14 +188,14 @@ func TestOllamaStatusEndpoint(t *testing.T) {
 // GET /api/providers/free endpoint reports them in priority order with their
 // pool keys masked out.
 func TestFreePoolProvidersEndToEnd(t *testing.T) {
-	const secretKey = "gsk_super_secret_pool_key"
+	const secretKey = "smb_super_secret_pool_key"
 	poolSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"version": 1,
 			"providers": {
 				"cerebras":      {"collection":"Cerebras","baseURL":"https://api.cerebras.ai/v1","keys":["csk_secret"],"defaultModel":"llama-3.3-70b"},
-				"groq":          {"collection":"Groq","baseURL":"https://api.groq.com/openai/v1","keys":["` + secretKey + `"],"defaultModel":"llama-3.3-70b-versatile"},
+				"sambanova":     {"collection":"SambaNova","baseURL":"https://api.sambanova.ai/v1","keys":["` + secretKey + `"],"defaultModel":"Meta-Llama-3.3-70B-Instruct"},
 				"github_models": {"collection":"GitHub Models","baseURL":"https://models.inference.ai.azure.com","keys":["ghp_secret"],"defaultModel":"gpt-4o-mini"}
 			}
 		}`))
@@ -216,14 +216,14 @@ func TestFreePoolProvidersEndToEnd(t *testing.T) {
 	for _, id := range srv.registry.List() {
 		got[id] = true
 	}
-	for _, want := range []string{"ogcode-groq", "ogcode-cerebras", "ogcode-github_models"} {
+	for _, want := range []string{"ogcode-cerebras", "ogcode-sambanova", "ogcode-github_models"} {
 		if !got[want] {
 			t.Fatalf("expected free provider %q registered, got registry %v", want, srv.registry.List())
 		}
 	}
 
-	// 2) The endpoint reports them, Groq first (recommended default), with keys
-	//    never present in the payload.
+	// 2) The endpoint reports them, Cerebras first (highest priority among the
+	//    served providers), with keys never present in the payload.
 	h := srv.routes()
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/providers/free", nil))
@@ -244,8 +244,8 @@ func TestFreePoolProvidersEndToEnd(t *testing.T) {
 	if len(free) != 3 {
 		t.Fatalf("expected 3 free providers, got %d (%v)", len(free), free)
 	}
-	if free[0].Collection != "Groq" {
-		t.Fatalf("expected Groq first (priority order), got %q", free[0].Collection)
+	if free[0].Collection != "Cerebras" {
+		t.Fatalf("expected Cerebras first (priority order), got %q", free[0].Collection)
 	}
 	if free[0].DefaultModel == "" || free[0].BaseURL == "" {
 		t.Fatalf("free provider payload missing baseUrl/defaultModel: %+v", free[0])
@@ -268,7 +268,7 @@ func (s stubProvider) StreamChat(ctx context.Context, req provider.StreamRequest
 // TestModelsSingleGlobalDefault verifies /api/models collapses the several
 // per-provider defaults into exactly one global default — the default model of
 // the highest-priority registered provider (ogcode-openrouter ranks above
-// ogcode-groq) — and that this default is enabled for a fresh user.
+// ogcode-cerebras) — and that this default is enabled for a fresh user.
 func TestModelsSingleGlobalDefault(t *testing.T) {
 	srv := newTestServer(t)
 	srv.registry.ReplaceProviders(map[string]provider.Provider{
@@ -276,8 +276,8 @@ func TestModelsSingleGlobalDefault(t *testing.T) {
 			{ID: "cohere/north-mini-code:free", ProviderID: "ogcode-openrouter", Default: true, ActiveByDefault: true},
 			{ID: "qwen/qwen3-coder:free", ProviderID: "ogcode-openrouter", ActiveByDefault: true},
 		}},
-		"ogcode-groq": stubProvider{id: "ogcode-groq", models: []provider.ModelInfo{
-			{ID: "llama-3.3-70b-versatile", ProviderID: "ogcode-groq", Default: true, ActiveByDefault: true},
+		"ogcode-cerebras": stubProvider{id: "ogcode-cerebras", models: []provider.ModelInfo{
+			{ID: "llama-3.3-70b", ProviderID: "ogcode-cerebras", Default: true, ActiveByDefault: true},
 		}},
 	})
 

@@ -166,15 +166,15 @@ func describeStreamReadError(err error, idleFired bool, idleTimeout time.Duratio
 type StreamEventType string
 
 const (
-	EventTextDelta            StreamEventType = "text-delta"
-	EventToolCallStart        StreamEventType = "tool-call-start"
-	EventToolCallDelta        StreamEventType = "tool-call-delta"
-	EventToolCallEnd          StreamEventType = "tool-call-end"
-	EventReasoning            StreamEventType = "reasoning"
-	EventReasoningSignature   StreamEventType = "reasoning-signature"
-	EventFinish               StreamEventType = "finish"
-	EventUsage                StreamEventType = "usage"
-	EventError                StreamEventType = "error"
+	EventTextDelta          StreamEventType = "text-delta"
+	EventToolCallStart      StreamEventType = "tool-call-start"
+	EventToolCallDelta      StreamEventType = "tool-call-delta"
+	EventToolCallEnd        StreamEventType = "tool-call-end"
+	EventReasoning          StreamEventType = "reasoning"
+	EventReasoningSignature StreamEventType = "reasoning-signature"
+	EventFinish             StreamEventType = "finish"
+	EventUsage              StreamEventType = "usage"
+	EventError              StreamEventType = "error"
 )
 
 // TokenUsage carries per-message token accounting from a provider.
@@ -188,15 +188,15 @@ type TokenUsage struct {
 }
 
 type StreamEvent struct {
-	Type         StreamEventType  `json:"type"`
-	Text         string           `json:"text,omitempty"`
-	Signature    string           `json:"signature,omitempty"`
-	ToolCallID   string           `json:"toolCallId,omitempty"`
-	ToolName     string           `json:"toolName,omitempty"`
-	ToolInput    json.RawMessage  `json:"toolInput,omitempty"`
-	FinishReason *string          `json:"finishReason,omitempty"`
-	Usage        *TokenUsage      `json:"usage,omitempty"`
-	Error        string           `json:"error,omitempty"`
+	Type         StreamEventType `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	Signature    string          `json:"signature,omitempty"`
+	ToolCallID   string          `json:"toolCallId,omitempty"`
+	ToolName     string          `json:"toolName,omitempty"`
+	ToolInput    json.RawMessage `json:"toolInput,omitempty"`
+	FinishReason *string         `json:"finishReason,omitempty"`
+	Usage        *TokenUsage     `json:"usage,omitempty"`
+	Error        string          `json:"error,omitempty"`
 }
 
 type ContentPart struct {
@@ -244,8 +244,8 @@ type ToolDefinition struct {
 
 type StreamRequest struct {
 	Model       string           `json:"model"`
-	System      []string        `json:"system"`
-	Messages    []ModelMessage  `json:"messages"`
+	System      []string         `json:"system"`
+	Messages    []ModelMessage   `json:"messages"`
 	Tools       []ToolDefinition `json:"tools"`
 	Temperature float64          `json:"temperature,omitempty"`
 	MaxTokens   int              `json:"maxTokens,omitempty"`
@@ -516,7 +516,7 @@ func (r *Registry) RefreshModels() {
 // with the community key pool, but never override a user's own credentials.
 var ProviderPriority = []string{
 	"anthropic", "openai", "openrouter", "ollama",
-	"ogcode-openrouter", "ogcode-groq", "ogcode-cerebras", "ogcode-sambanova",
+	"ogcode-openrouter", "ogcode-cerebras", "ogcode-sambanova",
 	"ogcode-github_models", "ogcode-nvidia",
 }
 

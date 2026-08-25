@@ -15,17 +15,17 @@ func sampleFreePoolJSON() string {
 	return `{
 		"version": 1,
 		"providers": {
-			"groq": {
-				"collection": "Groq",
-				"baseURL": "https://api.groq.com/openai/v1",
-				"keys": ["gsk_aaa", "gsk_bbb"],
-				"defaultModel": "llama-3.3-70b-versatile"
-			},
 			"cerebras": {
 				"collection": "Cerebras",
 				"baseURL": "https://api.cerebras.ai/v1",
 				"keys": ["csk_ccc"],
 				"defaultModel": "llama-3.3-70b"
+			},
+			"github_models": {
+				"collection": "GitHub Models",
+				"baseURL": "https://models.inference.ai.azure.com",
+				"keys": ["ghp_ddd"],
+				"defaultModel": "gpt-4o-mini"
 			}
 		}
 	}`
@@ -42,12 +42,12 @@ func TestFreePoolFileParsing(t *testing.T) {
 	if len(file.Providers) != 2 {
 		t.Fatalf("providers = %d, want 2", len(file.Providers))
 	}
-	groq, ok := file.Providers["groq"]
+	cerebras, ok := file.Providers["cerebras"]
 	if !ok {
-		t.Fatal("missing groq provider")
+		t.Fatal("missing cerebras provider")
 	}
-	if len(groq.Keys) != 2 {
-		t.Fatalf("groq keys = %d, want 2", len(groq.Keys))
+	if len(cerebras.Keys) != 1 {
+		t.Fatalf("cerebras keys = %d, want 1", len(cerebras.Keys))
 	}
 }
 
@@ -105,17 +105,17 @@ func contains(s []string, v string) bool {
 
 func TestNewFreePoolProvider(t *testing.T) {
 	def := FreeProviderDef{
-		Collection:   "Groq",
-		BaseURL:      "https://api.groq.com/openai/v1",
-		Keys:         []string{"gsk_test"},
-		DefaultModel: "llama-3.3-70b-versatile",
+		Collection:   "Cerebras",
+		BaseURL:      "https://api.cerebras.ai/v1",
+		Keys:         []string{"csk_test"},
+		DefaultModel: "llama-3.3-70b",
 	}
 	p, err := NewFreePoolProvider(def)
 	if err != nil {
 		t.Fatalf("NewFreePoolProvider: %v", err)
 	}
-	if p.ID() != "ogcode-groq" {
-		t.Fatalf("ID = %q, want ogcode-groq", p.ID())
+	if p.ID() != "ogcode-cerebras" {
+		t.Fatalf("ID = %q, want ogcode-cerebras", p.ID())
 	}
 	if p.BaseURL() != def.BaseURL {
 		t.Fatalf("BaseURL = %q, want %q", p.BaseURL(), def.BaseURL)
@@ -130,8 +130,8 @@ func TestNewFreePoolProvider(t *testing.T) {
 
 func TestNewFreePoolProviderNoKeys(t *testing.T) {
 	def := FreeProviderDef{
-		Collection: "Groq",
-		BaseURL:    "https://api.groq.com/openai/v1",
+		Collection: "Cerebras",
+		BaseURL:    "https://api.cerebras.ai/v1",
 		Keys:       nil,
 	}
 	_, err := NewFreePoolProvider(def)
@@ -144,7 +144,7 @@ func TestFreeProviderListMasksKeys(t *testing.T) {
 	p := freePoolInstance()
 	p.mu.Lock()
 	p.defs = map[string]FreeProviderDef{
-		"groq": {Collection: "Groq", BaseURL: "https://api.groq.com/openai/v1", Keys: []string{"secret"}, DefaultModel: "llama-3.3-70b-versatile"},
+		"cerebras": {Collection: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", Keys: []string{"secret"}, DefaultModel: "llama-3.3-70b"},
 	}
 	p.loaded = true
 	// Use a recent time so the pool is considered fresh.
@@ -162,14 +162,15 @@ func TestFreeProviderListMasksKeys(t *testing.T) {
 
 func TestFreeProviderIDsPriority(t *testing.T) {
 	defs := map[string]FreeProviderDef{
-		"nvidia":   {},
-		"groq":     {},
-		"cerebras": {},
+		"nvidia":     {},
+		"cerebras":   {},
+		"openrouter": {},
+		"sambanova":  {},
 	}
 	ids := FreeProviderIDs(defs)
-	// Groq must come first (it's the recommended default).
-	if len(ids) < 3 || ids[0] != "ogcode-groq" {
-		t.Fatalf("FreeProviderIDs = %v, want ogcode-groq first", ids)
+	// OpenRouter must come first (it's the recommended default).
+	if len(ids) < 4 || ids[0] != "ogcode-openrouter" {
+		t.Fatalf("FreeProviderIDs = %v, want ogcode-openrouter first", ids)
 	}
 }
 
@@ -195,10 +196,10 @@ func TestCurateFreePoolModelsOpenRouter(t *testing.T) {
 }
 
 func TestCurateFreePoolModelsNonOpenRouterEnablesAll(t *testing.T) {
-	// Groq (and other free-tier providers) are already free-only, so nothing is
-	// filtered — but every model must be enabled so the picker isn't empty.
-	fetched := []ModelInfo{{ID: "llama-3.3-70b-versatile"}, {ID: "llama-3.1-8b-instant"}}
-	out := curateFreePoolModels(fetched, "https://api.groq.com/openai/v1")
+	// Cerebras (and other free-tier providers) are already free-only, so nothing
+	// is filtered — but every model must be enabled so the picker isn't empty.
+	fetched := []ModelInfo{{ID: "llama-3.3-70b"}, {ID: "llama-3.1-8b-instant"}}
+	out := curateFreePoolModels(fetched, "https://api.cerebras.ai/v1")
 	if len(out) != 2 {
 		t.Fatalf("non-OpenRouter curation must keep all models, got %d", len(out))
 	}

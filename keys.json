@@ -1,12 +1,6 @@
 {
   "version": 1,
   "providers": {
-    "groq": {
-      "collection": "Groq",
-      "baseURL": "https://api.groq.com/openai/v1",
-      "keys": ["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"],
-      "defaultModel": "llama-3.3-70b-versatile"
-    },
     "openrouter": {
       "collection": "OpenRouter",
       "baseURL": "https://openrouter.ai/api/v1",

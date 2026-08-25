@@ -18,7 +18,7 @@ import (
 // from the shared community key pool. The pool is a JSON file hosted on a
 // public GitHub repo so keys can be rotated centrally without a binary release.
 type FreeProviderDef struct {
-	Collection   string   `json:"collection"`   // grouping label ("Groq", "Cerebras", …)
+	Collection   string   `json:"collection"`   // grouping label ("Cerebras", "SambaNova", …)
 	BaseURL      string   `json:"baseURL"`      // OpenAI-compatible API base URL
 	Keys         []string `json:"keys"`         // pool of API keys (round-robin / random)
 	DefaultModel string   `json:"defaultModel"` // suggested default model ID
@@ -26,7 +26,7 @@ type FreeProviderDef struct {
 
 // freePoolFile is the on-disk JSON schema fetched from the GitHub repo.
 type freePoolFile struct {
-	Version   int                       `json:"version"`
+	Version   int                        `json:"version"`
 	Providers map[string]FreeProviderDef `json:"providers"`
 }
 
@@ -53,9 +53,9 @@ const FreePoolTimeout = freePoolTimeout
 // It is a process-wide singleton fetched lazily so the first call (server
 // startup) loads the pool and subsequent calls reuse it.
 type freePool struct {
-	mu       sync.RWMutex
-	loaded   bool
-	defs     map[string]FreeProviderDef
+	mu        sync.RWMutex
+	loaded    bool
+	defs      map[string]FreeProviderDef
 	fetchedAt time.Time
 }
 
@@ -242,15 +242,15 @@ func pickFreeKey(keys []string) string {
 
 // freePoolCollection is the single UI grouping label applied to every model
 // served from the community free-tier pool, regardless of the upstream provider
-// (Groq, OpenRouter, …). Grouping them all under one dedicated "ogcode"
+// (OpenRouter, Cerebras, …). Grouping them all under one dedicated "ogcode"
 // collection keeps the free models visually separate from — and non-conflicting
 // with — a user's own configured providers (OpenAI/Anthropic/OpenRouter/Ollama/
-// Groq/…).
+// …).
 const freePoolCollection = "ogcode"
 
 // NewFreePoolProvider creates an OpenAI-compatible Provider instance for a
 // free-tier entry from the key pool. The provider ID is keyed by the pool's
-// collection (e.g. "ogcode-groq") so multiple free providers coexist in the
+// collection (e.g. "ogcode-cerebras") so multiple free providers coexist in the
 // registry as separately selectable instances — but every model they serve is
 // tagged with the shared freePoolCollection ("ogcode") label so they all group
 // together in the UI, apart from the user's own providers.
@@ -275,11 +275,12 @@ func NewFreePoolProvider(def FreeProviderDef) (*OpenAIProvider, error) {
 }
 
 // FreeProviderIDs returns the registry IDs for all free-pool providers in a
-// stable priority order (Groq first — the recommended default free provider).
+// stable priority order (OpenRouter first — the recommended default free
+// provider).
 func FreeProviderIDs(defs map[string]FreeProviderDef) []string {
-	// Stable priority: OpenRouter, Groq, Cerebras, SambaNova, GitHub Models,
-	// NVIDIA, then any others alphabetically.
-	priority := []string{"openrouter", "groq", "cerebras", "sambanova", "github_models", "nvidia"}
+	// Stable priority: OpenRouter, Cerebras, SambaNova, GitHub Models, NVIDIA,
+	// then any others alphabetically.
+	priority := []string{"openrouter", "cerebras", "sambanova", "github_models", "nvidia"}
 	seen := make(map[string]bool)
 	var out []string
 	for _, k := range priority {
@@ -307,6 +308,7 @@ func ResetFreePoolForTest() {
 	p.fetchedAt = time.Time{}
 	p.mu.Unlock()
 }
+
 var errFreePoolNoKeys = freePoolError("free pool entry has no keys")
 
 type freePoolError string
