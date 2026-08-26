@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -190,6 +191,40 @@ func TestEnsureProjectFileSkipsWhenAncestorHasOne(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(subDir, "ogcode.json")); err == nil {
 		t.Error("a second ogcode.json was created in the subdirectory")
+	}
+}
+
+func TestEnsureProjectFileAddsToExistingGitignore(t *testing.T) {
+	dir := t.TempDir()
+	// Seed a .gitignore the project already keeps.
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("dist/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if path := EnsureProjectFile(dir); path == "" {
+		t.Fatal("EnsureProjectFile returned empty; want the created file path")
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "ogcode.json") {
+		t.Errorf(".gitignore was not extended to ignore ogcode.json:\n%s", body)
+	}
+	// The pre-existing rule survives.
+	if !strings.Contains(string(body), "dist/") {
+		t.Errorf("the pre-existing dist/ rule was lost:\n%s", body)
+	}
+}
+
+func TestEnsureProjectFileDoesNotCreateGitignore(t *testing.T) {
+	dir := t.TempDir()
+	if path := EnsureProjectFile(dir); path == "" {
+		t.Fatal("EnsureProjectFile returned empty; want the created file path")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("a .gitignore was created; ogcode must only extend an existing one: %v", err)
 	}
 }
 

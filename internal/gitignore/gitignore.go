@@ -295,6 +295,64 @@ func bracket(p string, start int) (string, int, bool) {
 	return "", start, false // unterminated: treat the "[" as literal
 }
 
+// AddPattern appends pattern to the .gitignore in dir if one exists and the
+// pattern is not already present. It returns true when the file was changed.
+//
+// If dir has no .gitignore, nothing happens and false is returned: ogcode does
+// not create a .gitignore on its own — it only extends one the project already
+// keeps. A project with no .gitignore is left that way.
+func AddPattern(dir, pattern string) bool {
+	path := filepath.Join(dir, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// No file (or unreadable): never create one ourselves.
+		return false
+	}
+	if patternAlreadyPresent(data, pattern) {
+		return false
+	}
+	// Ensure the file ends in a newline before appending, so the new line
+	// does not glom onto whatever the last line was.
+	body := string(data)
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		body += "\n"
+	}
+	body += pattern + "\n"
+	return os.WriteFile(path, []byte(body), 0o644) == nil
+}
+
+// patternAlreadyPresent reports whether pattern already appears as its own
+// line in data, so AddPattern is idempotent. It scans line by line, trimming a
+// trailing newline and a trailing carriage return (for CRLF .gitignores),
+// and compares the trimmed line to pattern.
+func patternAlreadyPresent(data []byte, pattern string) bool {
+	for len(data) > 0 {
+		nl := indexByte(data, '\n')
+		var line []byte
+		if nl < 0 {
+			line, data = data, nil
+		} else {
+			line, data = data[:nl], data[nl+1:]
+		}
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		if string(line) == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+func indexByte(b []byte, c byte) int {
+	for i, x := range b {
+		if x == c {
+			return i
+		}
+	}
+	return -1
+}
+
 // trimUnescapedTrailingSpace removes trailing spaces that are not escaped.
 func trimUnescapedTrailingSpace(s string) string {
 	end := len(s)

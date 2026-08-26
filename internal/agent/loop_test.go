@@ -710,3 +710,37 @@ func TestExecuteTool_PanicBecomesToolErrorNotProcessDeath(t *testing.T) {
 		t.Errorf("expected an empty result alongside the error, got %q", result.Output)
 	}
 }
+
+// Regression: the Auto-mode LLM risk verdict used to be parsed with
+// strings.Contains(up, "SAFE"), which matched "NOT SAFE", "not safe", and
+// "UNSAFE" as substrings and auto-approved them. The parser now requires the
+// trimmed verdict to be exactly "SAFE". Anything ambiguous defaults to RiskAsk.
+func TestIsSafeVerdict(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"SAFE", true},
+		{"safe", true},
+		{"Safe", true},
+		{" SAFE ", true},
+		{"SAFE.", true},
+		{"SAFE!", true},
+
+		// The bypass: negations contain "SAFE" as a substring.
+		{"NOT SAFE", false},
+		{"not safe", false},
+		{"UNSAFE", false},
+		{"It is safe", false},
+		{"not safe to run", false},
+		{"DANGER", false},
+		{"ASK", false},
+		{"", false},
+		{"safe to run", false},
+	}
+	for _, c := range cases {
+		if got := isSafeVerdict(strings.ToUpper(c.in)); got != c.want {
+			t.Errorf("isSafeVerdict(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}

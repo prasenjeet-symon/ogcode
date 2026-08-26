@@ -173,6 +173,7 @@ const (
 	ToolRunning   ToolStatus = "running"
 	ToolCompleted ToolStatus = "completed"
 	ToolError     ToolStatus = "error"
+	ToolDenied    ToolStatus = "denied"
 )
 
 type ToolPartData struct {

@@ -1,3 +1,87 @@
+# Release Notes — v0.28.0
+
+## Minor: Auto-Mode Security Hardening, Denied-Tool Status, and UI Polish
+
+This release closes two security gaps in Auto mode's risk classifier, hardens
+the LLM risk-check verdict parser so it can no longer be talked into auto-approving
+a dangerous command, introduces a first-class "denied" status for permission-
+blocked tool calls, and adds several web-UI refinements.
+
+### Security: bash command-segment splitting
+
+The Auto-mode bash risk classifier splits a command line on shell chaining
+operators (`&&`, `||`, `;`, `|`, newlines) so it can judge every segment
+independently. Two bypasses in the old splitter are now closed
+(`internal/permission/risk.go`):
+
+- **Bare inline `&`.** The splitter only matched `" & "` — space-delimited on
+  both sides — so `echo hi&rm -rf /` (no space after the `&`) stayed one
+  segment, was judged by its first word (`echo`), and the destructive tail ran
+  in the background without a prompt. A new `replaceBackgroundAmp` walker splits
+  on background `&` everywhere except where it is part of an fd-dup redirection
+  (`2>&1`, `>&2`, `&>file`), which must stay intact so a safe reader like
+  `cat a.txt > /dev/null 2>&1` stays `RiskSafe`.
+- **Newlines** were already split in v0.27.0; this release adds the regression
+  test that pins it (`TestClassifyBash_BareBackgroundAmpSplits`).
+
+### Security: LLM risk-check verdict parser
+
+When the rules classify a bash command as `RiskUnclear`, Auto mode escalates it
+to a quick LLM call that is asked to reply with exactly one word: `SAFE` or
+`ASK`. The verdict parser used `strings.Contains(up, "SAFE")`, which matched
+`"NOT SAFE"`, `"not safe"`, `"UNSAFE"`, and `"It is safe"` as substrings and
+auto-approved all of them. The parser now requires the trimmed, uppercased
+verdict to **be** `"SAFE"` (allowing trailing punctuation) via `isSafeVerdict`
+(`internal/agent/loop.go`). Anything ambiguous defaults to `RiskAsk` — fail
+safe. `TestIsSafeVerdict` pins the strict match.
+
+The LLM risk check now also uses the loop's resolved model ID rather than
+`sess.Model`, so it resolves the same provider the loop is using instead of
+falling back to an arbitrary first provider when the session has no model
+pinned.
+
+### Denied tool-call status
+
+A tool call blocked by the permission gate used to be recorded as a completed
+call with a denial message, indistinguishable from a normal completion in the
+UI and DB. There is now a `ToolDenied` status (`session.ToolStatus`) and a
+`Result.Denied` flag (`tool.Result`), and the loop records the blocked call
+under the new status. The web UI renders it with a distinct amber "denied"
+badge and icon, and auto-collapses it like a completed/error call
+(`web/src/components/message-item.tsx`, `web/src/api/client.ts`).
+
+### .gitignore auto-management for `ogcode.json`
+
+The per-project `ogcode.json` config file holds local connection overrides —
+API keys, base URLs — that vary per machine and should not be committed. When
+`config.EnsureProjectFile` creates the file, it now extends an **existing**
+`.gitignore` to ignore `ogcode.json` via the new `gitignore.AddPattern`. It is
+idempotent, fixes a missing trailing newline before appending, and never
+creates a `.gitignore` on its own — a project with no `.gitignore` is left that
+way (`internal/gitignore/gitignore.go`, `internal/config/config.go`).
+
+### Web UI
+
+- **Memory dialog** redesigned: design-token theming (CSS custom properties
+  instead of hard-coded color classes), a variant-driven chip and header icon,
+  a single accessible dialog with `role="dialog"`/`aria-modal`, and a cleaner
+  layout (`web/src/components/memory-dialog.tsx`).
+- **Doc index** pre-fetches git status on mount so the changed-files badge
+  populates without opening the changes panel first, and shows a spinner during
+  the initial fetch instead of flashing "Not a git repository" before the API
+  responds (`web/src/pages/docindex.tsx`).
+
+### Other
+
+- Dropped the bundled free-pool Groq provider (the shared `gsk_` key was revoked
+  and emitted a non-200 warning on startup). User-configured Groq is untouched:
+  OpenAI-compatible baseURL detection still labels `groq.com` traffic, and the
+  schema still lists Groq as a user-addable provider. OpenRouter is now the
+  recommended free-pool default (`internal/provider/freepool.go`,
+  `internal/provider/provider.go`).
+
+---
+
 # Release Notes — v0.27.0
 
 ## Minor: Skills System, Memory Maintenance, and Prompt Correctness

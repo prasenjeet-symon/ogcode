@@ -138,7 +138,7 @@ export interface ToolPartData {
 }
 
 export interface ToolState {
-  status: 'pending' | 'running' | 'completed' | 'error';
+  status: 'pending' | 'running' | 'completed' | 'error' | 'denied';
   input: any;
   output?: string;
   error?: string;

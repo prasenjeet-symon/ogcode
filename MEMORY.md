@@ -123,7 +123,7 @@ Steps:
 4. **Docker pipeline auto-triggers** — `.github/workflows/docker.yml` builds and pushes the Docker image.
 5. **Post-release** — update the "Current release" line below to the new version so future sessions know it without git inspection.
 
-**Current release**: `v0.27.0`
+**Current release**: `v0.28.0`
 
 ## ogcode — Rich Output Architecture
 
@@ -155,3 +155,19 @@ Steps:
 - **OpenAI**: Automatic prefix caching — no explicit markers needed. `cached_tokens` is tracked from the response in `TokenUsage.CacheReadTokens`.
 - **OpenRouter**: Passes through to upstream provider; depends on the underlying model.
 - **Ollama**: No prompt caching at the API level.
+
+## WhatsApp Skill (macOS UI scripting)
+
+- **Location**: `~/.claude/skills/whatsapp/` — `SKILL.md` + `scripts/` (`list-chats`, `read-chat`, `send-message`). Built 2026-08-25.
+- **How it works**: Drives WhatsApp.app via AppleScript System Events UI scripting (accessibility tree). No AppleScript dictionary (no .sdef) — WhatsApp only exposes UI elements, so everything is accessibility-tree navigation. Requires Accessibility permission for the process running `osascript` (System Settings → Privacy & Security → Accessibility). Without it: error -25211 `osascript is not allowed assistive access`.
+- **Key UI elements** (by accessibility description): `"List of chats"` (group containing chat buttons), `"Messages in chat with <name>"` (group with message bubbles), `"Compose message"` (text area for input). Chat list buttons' descriptions ARE the chat names. Message bubble descriptions are comma-separated: `"Your message, CONTENT, TIMESTAMP, Sent to NAME, [reaction]"` / `"message, CONTENT, TIMESTAMP, Received from NAME"`.
+- **AppleScript + bash gotchas (hard-won)**:
+  - `entire contents of window 1` is SLOW (400+ elements) and causes the window to lose focus/close mid-enumeration → flaky failures. Use a BFS group-walk instead (queue of elements, `groups of el` to expand). Reliable and faster.
+  - AppleScript handler functions (`on findGroup(el, desc)`) called with `my findGroup(...)` LOSE the `tell application "System Events" / tell process` context — `groups of el` resolves against the wrong context and returns nothing. Inline the BFS loop inside `on run` / the `tell` block instead; do not factor it into a handler.
+  - `bash -n` fails on `out=$(osascript - args <<'EOF' ... EOF)` when the heredoc body contains `AppleScript's` (apostrophe) combined with `if (count of x) > 1 then` — bash's `$(...)` parser confuses the apostrophe + `> 1` as a redirection inside the command substitution even though the heredoc is quoted. Fix: avoid `AppleScript's text item delimiters` in `$(...)` heredocs; do string parsing in Python/bash instead.
+  - `do shell script "echo ... | tr '\\n' ' '"` inside the AppleScript causes WhatsApp's window to lose focus (spawns a subprocess), making subsequent UI queries return empty. Avoid `do shell script` during UI enumeration — emit raw descriptions and flatten newlines in the downstream Python/bash layer.
+  - WhatsApp's accessibility descriptions are prefixed with U+200E (LTR mark). Python `str.startswith("Sent to ")` FAILS on `"‎Sent to"` — must `.lstrip("\u200e\u200f")` before prefix checks.
+  - The compose `"text area"` is ~370+ elements deep in the tree; BFS needs `attempts < 600` (not 300) to reach it.
+  - After `click`-ing a chat to open it, the window state is briefly inconsistent — re-`activate` WhatsApp and retry the messages-group BFS up to 4 times.
+  - The send flow: `set focused of composeEl to true` → `set value of composeEl to msg` → `keystroke return` (the Send button's accessibility description varies, so pressing Return is more reliable than clicking it).
+- **Limitations**: Only messages currently rendered in the scroll view are readable (no full history without scrolling up). No media sending (compose field is text-only). Phone numbers render with spaces/commas in the UI (`+ 9 1,9 8 7 6 5,4 3 2 1 0`); `--phone` normalizes to digits for the `wa.me/<digits>` deep link.

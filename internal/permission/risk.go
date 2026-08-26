@@ -234,20 +234,92 @@ func hasFileRedirect(seg string) bool {
 
 // splitSegments breaks a command line on the common shell chaining operators
 // (heuristic, quote-agnostic — fine for a risk check that only needs to find any
-// dangerous segment). It deliberately does NOT split on a bare "&": that would
-// tear apart fd redirections like "2>&1" / ">&2". Background jobs written as
-// " & " (space-delimited) are still split.
+// dangerous segment).
+//
+// Background "&" splits too, but only when it is NOT part of an fd-dup
+// redirection like "2>&1" or ">&2" — i.e. only when the "&" is not immediately
+// preceded by ">". A bare "&" with no surrounding space ("echo hi&rm -rf /")
+// used to slip through: splitSegments only matched " & " (space-delimited on
+// both sides), so the whole thing stayed one segment and classifySegment
+// judged it by its first word ("echo"), auto-approving "rm -rf /" in the
+// background in Auto mode without a prompt.
 //
 // Newlines separate commands too, and leaving them out used to hand Auto mode a
 // straight bypass: "echo hi\nrm -rf /" stayed one segment, so classifySegment
 // read "echo" as the command, took "rm -rf /" for its arguments, and returned
 // RiskSafe — auto-approving the whole thing without a prompt.
 func splitSegments(cmd string) []string {
+	// First split on the unambiguous operators that never need context.
 	r := strings.NewReplacer(
-		"&&", "\x00", "||", "\x00", ";", "\x00", "|", "\x00", " & ", "\x00",
+		"&&", "\x00", "||", "\x00", ";", "\x00", "|", "\x00",
 		"\n", "\x00", "\r", "\x00",
 	)
-	return strings.Split(r.Replace(cmd), "\x00")
+	s := r.Replace(cmd)
+	// Then split on background "&", but only where it is not preceded by ">"
+	// (which would make it an fd-dup like "2>&1"). A trailing bare "&"
+	// (e.g. "sleep 1 &") is not a separator and is left in place.
+	s = replaceBackgroundAmp(s, "\x00")
+	return strings.Split(s, "\x00")
+}
+
+// replaceBackgroundAmp replaces every standalone "&" (the shell background
+// operator) with sep, leaving fd-dup "&" (the "&" in "2>&1", ">&2", "&>file")
+// untouched. It walks the string so it can look at the preceding character
+// rather than relying on substring matching, which cannot distinguish "echo &x"
+// from "2>&1".
+func replaceBackgroundAmp(s, sep string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '&' {
+			prev := byte(0)
+			if i > 0 {
+				prev = s[i-1]
+			}
+			// ">&" and "&>" are redirections, not background operators.
+			if prev == '>' || prev == '<' {
+				b.WriteByte(s[i])
+				continue
+			}
+			if i+1 < len(s) && (s[i+1] == '>' || s[i+1] == '<') {
+				b.WriteByte(s[i])
+				continue
+			}
+			// Look ahead: a background "&" is followed by end-of-string, whitespace,
+			// or another command char. A "&" immediately followed by another "&"
+			// is already handled (&& was replaced above); treat a lone "&" with
+			// only trailing whitespace as a trailing background marker (no split)
+			// and a "&" followed by a non-space char ("&rm") as an inline background
+			// operator that must split.
+			if i+1 < len(s) {
+				next := s[i+1]
+				if next == '&' { // shouldn't happen post-replace, but be safe
+					b.WriteByte(s[i])
+					continue
+				}
+				if isShellSpace(next) {
+					// "echo hi & " or "echo hi &" — split here so the trailing job
+					// is a separate (empty) segment that ClassifyBash skips.
+					b.WriteString(sep)
+					continue
+				}
+				// "echo hi&rm -rf /" — bare inline background operator. Split.
+				b.WriteString(sep)
+				continue
+			}
+			// Trailing "&" at end of string: a trailing background marker, not a
+			// separator. Leave it; ClassifyBash trims it away.
+			b.WriteByte(s[i])
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// isShellSpace reports whether c is whitespace that separates shell tokens.
+func isShellSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\x00'
 }
 
 // ClassifyWrite classifies a write/edit target. In-project, non-sensitive files

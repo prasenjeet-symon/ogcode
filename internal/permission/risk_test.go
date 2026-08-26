@@ -251,3 +251,43 @@ func TestClassifyWrite_SymlinkedWorkDirDoesNotFalsePositive(t *testing.T) {
 		t.Errorf("ClassifyWrite(real path, symlinked workDir) = %v, want RiskSafe", got)
 	}
 }
+
+// Regression: a bare "&" with no space after it ("echo hi&rm -rf /") used to
+// slip past splitSegments, which only matched " & " (space-delimited on both
+// sides). The whole thing stayed one segment, classifySegment judged it by its
+// first word ("echo"), and the destructive tail ran in the background in Auto
+// mode without a prompt. The fix splits on background "&" except where it is
+// part of an fd-dup redirection ("2>&1", ">&2", "&>file"), which must stay
+// intact so a safe reader like "cat a.txt > /dev/null 2>&1" stays RiskSafe.
+func TestClassifyBash_BareBackgroundAmpSplits(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want Risk
+	}{
+		// The bypass: bare & with no space after it must now split.
+		{"echo hi &rm -rf /", RiskAsk},
+		{"ls &rm -rf /", RiskAsk},
+		{"echo hi&rm -rf /", RiskAsk},
+		{"echo hi& sudo rm -rf /", RiskAsk},
+		// Space-delimited background still splits.
+		{"echo hi & rm -rf /", RiskAsk},
+
+		// Trailing background marker ("cmd &") is not a separator: there is no
+		// second command, so the whole line is judged by the one command. It must
+		// not become a false positive.
+		{"ls -la &", RiskSafe},
+		{"go build ./... &", RiskSafe},
+
+		// fd-dup redirections must NOT be split — the "&" in "2>&1" / ">&2" is
+		// part of the redirection, not a background operator.
+		{"cat a.txt > /dev/null 2>&1", RiskSafe},
+		{"echo hi 2>&1", RiskSafe},
+		// "&>" (bash: redirect stdout+stderr) is a redirection, not background.
+		{"ls &> out.txt", RiskUnclear},
+	}
+	for _, c := range cases {
+		if got := ClassifyBash(c.cmd); got != c.want {
+			t.Errorf("ClassifyBash(%q) = %v, want %v", c.cmd, got, c.want)
+		}
+	}
+}

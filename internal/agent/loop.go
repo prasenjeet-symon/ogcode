@@ -1622,13 +1622,14 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 	// (bash/write/edit) require user approval. Non-gated runs (headless task,
 	// breakdown, note, search, CLI) and a nil manager skip this entirely.
 	if lr.Permissions != nil && PermissionGatingEnabled(ctx) {
-		action, err := lr.requestPermission(ctx, sessionID, tc)
+		action, err := lr.requestPermission(ctx, sessionID, tc, model)
 		if err != nil {
 			return tool.Result{}, err // context cancelled while awaiting approval
 		}
 		if action == permission.Deny {
 			slog.Info("tool call denied by user", "session", sessionID, "tool", tc.Name)
 			return tool.Result{
+				Denied: true,
 				Title:  tc.Name,
 				Output: fmt.Sprintf("Permission denied by the user — the %s call was not run. Do not retry it; ask the user how to proceed or take a different approach.", tc.Name),
 			}, nil
@@ -1819,6 +1820,21 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 				Title:  &tc.Name,
 				Time:   toolData.State.Time,
 			}
+		} else if info.result.Denied {
+			// The permission gate blocked the call; it never ran. Record a
+			// distinct "denied" status so the UI and DB can tell a denied call
+			// apart from one that completed or errored. The denial message is in
+			// Output (not Error) because it is normal flow, not a failure.
+			toolData.State = session.ToolState{
+				Status: session.ToolDenied,
+				Input:  tc.Input,
+				Output: &info.result.Output,
+				Title:  &tc.Name,
+				Time: session.ToolTime{
+					Start: toolData.State.Time.Start,
+					End:   session.Now(),
+				},
+			}
 		} else {
 			toolData.State = session.ToolState{
 				Status:   session.ToolCompleted,
@@ -1871,7 +1887,7 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 // user replies (or the tool/loop context is cancelled). It returns the resolved
 // action (Allow or Deny). An "always" reply is recorded so subsequent matching
 // calls in this session auto-allow.
-func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.SessionID, tc pendingToolCall) (permission.Action, error) {
+func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.SessionID, tc pendingToolCall, model string) (permission.Action, error) {
 	pattern := permissionPattern(tc)
 	action := lr.Permissions.Ruleset(string(sessionID)).Evaluate(tc.Name, pattern)
 	if action == permission.Allow || action == permission.Deny {
@@ -1882,7 +1898,7 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 	// judges safe (rules first, an LLM check for the unclear middle); genuinely
 	// risky calls still fall through to the prompt. Ask mode always prompts.
 	if sess, _ := lr.Store.Get(sessionID); sess != nil && sess.Permission == "auto" {
-		if lr.assessAutoRisk(ctx, sess, tc, pattern) == permission.RiskSafe {
+		if lr.assessAutoRisk(ctx, sess, tc, pattern, model) == permission.RiskSafe {
 			slog.Info("auto-approved low-risk tool call", "session", sessionID, "tool", tc.Name)
 			return permission.Allow, nil
 		}
@@ -1942,15 +1958,19 @@ const riskLLMTimeout = 12 * time.Second
 
 // assessAutoRisk decides, in Auto mode, whether a tool call is safe to run
 // without asking. write/edit are judged purely by the path rules; bash uses the
-// command rules and escalates the unclear middle to a quick LLM check.
-func (lr *LoopRunner) assessAutoRisk(ctx context.Context, sess *session.Session, tc pendingToolCall, pattern string) permission.Risk {
+// command rules and escalates the unclear middle to a quick LLM check. The
+// model argument is the loop's resolved model ID (may differ from sess.Model
+// when the session has no model pinned); it is forwarded to the LLM risk check
+// so it resolves the same provider the loop is using, not an arbitrary first
+// provider from a ResolveProvider("") fallback.
+func (lr *LoopRunner) assessAutoRisk(ctx context.Context, sess *session.Session, tc pendingToolCall, pattern, model string) permission.Risk {
 	switch tc.Name {
 	case "write", "edit":
 		return permission.ClassifyWrite(pattern, sess.Directory)
 	case "bash":
 		r := permission.ClassifyBash(pattern)
 		if r == permission.RiskUnclear {
-			r = lr.assessCommandRiskLLM(ctx, sess.Model, pattern)
+			r = lr.assessCommandRiskLLM(ctx, model, pattern)
 		}
 		return r
 	default:
@@ -2009,12 +2029,28 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, model, command s
 	}
 	up := strings.ToUpper(out.String())
 	verdict := permission.RiskAsk
-	if strings.Contains(up, "SAFE") && !strings.Contains(up, "ASK") && !strings.Contains(up, "UNSAFE") && !strings.Contains(up, "DANGER") {
+	// The model is asked for exactly one word: SAFE or ASK. Require the trimmed
+	// output to BE "SAFE" (allowing trailing punctuation), not merely contain it
+	// — "NOT SAFE", "not safe", "UNSAFE", and "It is safe" all contain "SAFE" as
+	// a substring, and the old Contains check auto-approved all of them. A strict
+	// equals match is fail-safe: anything ambiguous defaults to RiskAsk.
+	if isSafeVerdict(up) {
 		verdict = permission.RiskSafe
 	}
 	lr.Permissions.CacheRisk(command, verdict)
 	slog.Info("auto-mode risk verdict", "command", truncateText(command, 80), "verdict", verdict)
 	return verdict
+}
+
+// isSafeVerdict reports whether the model's uppercased risk verdict is exactly
+// "SAFE" (ignoring surrounding whitespace and trailing punctuation). It must
+// NOT match substrings: "NOT SAFE", "not safe", "UNSAFE", and "It is safe" all
+// contain "SAFE" and would be auto-approved by a naive Contains check.
+func isSafeVerdict(up string) bool {
+	t := strings.TrimSpace(up)
+	t = strings.TrimRight(t, "!.,;")
+	t = strings.TrimSpace(t)
+	return t == "SAFE"
 }
 
 // permissionPattern extracts the resource a tool call acts on, for ruleset

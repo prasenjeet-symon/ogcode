@@ -62,6 +62,11 @@ type Result struct {
 	// results without this flag are capped to MaxToolOutputBytes/MaxToolOutputLines
 	// before they enter the model context.
 	Truncated bool `json:"truncated,omitempty"`
+	// Denied marks that the tool call was rejected by the permission gate and was
+	// never executed. The loop uses it to record a ToolDenied status (distinct
+	// from ToolCompleted/ToolError) so the UI and DB reflect that the call was
+	// blocked rather than run.
+	Denied bool `json:"-"`
 }
 
 // ResultImage is an image attachment on a tool Result.

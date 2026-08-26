@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/prasenjeet-symon/ogcode/internal/gitignore"
 )
 
 // ProviderConfig holds per-provider connection overrides.
@@ -177,6 +179,12 @@ func EnsureProjectFile(dir string) string {
 	defer f.Close()
 	if _, err := f.WriteString(projectFileTemplate); err != nil {
 		return ""
+	}
+	// The config file holds local connection overrides — API keys, base URLs —
+	// that vary per machine, so it should not be committed. Extend an existing
+	// .gitignore to ignore it; if the project keeps no .gitignore, leave it be.
+	if dir != "" {
+		gitignore.AddPattern(dir, "ogcode.json")
 	}
 	return path
 }

@@ -217,3 +217,77 @@ func TestMatch_GitDirectoryIsAlwaysIgnored(t *testing.T) {
 		t.Error("a path merely containing 'git' was excluded")
 	}
 }
+
+func TestAddPattern_AppendsToExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(path, []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if !AddPattern(dir, "ogcode.json") {
+		t.Fatal("AddPattern returned false; want true (the file exists and was changed)")
+	}
+
+	m := New(dir)
+	if !m.Match("ogcode.json", false) {
+		t.Error("ogcode.json should be ignored after AddPattern")
+	}
+	if !m.Match("node_modules", true) {
+		t.Error("the pre-existing node_modules/ rule must still match")
+	}
+}
+
+func TestAddPattern_IsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".gitignore")
+	body := "node_modules/\nogcode.json\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if AddPattern(dir, "ogcode.json") {
+		t.Error("AddPattern returned true; want false because ogcode.json is already present")
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != body {
+		t.Errorf("file was modified by a no-op AddPattern:\ngot:  %q\nwant: %q", got, body)
+	}
+}
+
+func TestAddPattern_NoGitignoreIsLeftAlone(t *testing.T) {
+	dir := t.TempDir()
+
+	if AddPattern(dir, "ogcode.json") {
+		t.Error("AddPattern returned true; want false because no .gitignore exists")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("a .gitignore was created: %v", err)
+	}
+}
+
+func TestAddPattern_FixesMissingTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".gitignore")
+	// Last line has no newline — the appended pattern must not glom onto it.
+	if err := os.WriteFile(path, []byte("node_modules/"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if !AddPattern(dir, "ogcode.json") {
+		t.Fatal("AddPattern returned false; want true")
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "node_modules/\nogcode.json\n"
+	if string(got) != want {
+		t.Errorf("got %q, want %q (the appended line must stand on its own)", got, want)
+	}
+}

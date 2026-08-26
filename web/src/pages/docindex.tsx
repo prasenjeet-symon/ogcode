@@ -35,7 +35,12 @@ export default function DocIndexPage() {
   const [treeWidth, setTreeWidth] = createSignal(340);
   const [copied, setCopied] = createSignal(false);
 
-  onMount(() => docIndex.loadExcludes());
+  onMount(() => {
+    docIndex.loadExcludes();
+    // Pre-fetch git status so the changed-files badge on the toolbar
+    // populates without needing to open the changes panel first.
+    refreshGitStatus();
+  });
 
   // ---- tree state -------------------------------------------------------
 
@@ -156,6 +161,9 @@ export default function DocIndexPage() {
   const [gitStatus, setGitStatus] = createSignal<GitFileStatus[]>([]);
   const [gitIsRepo, setGitIsRepo] = createSignal(false);
   const [gitLoading, setGitLoading] = createSignal(false);
+  // Tracks whether the first git-status fetch has completed, so the
+  // "Not a git repository" fallback doesn't flash before the API responds.
+  const [gitChecked, setGitChecked] = createSignal(false);
   const [selectedChange, setSelectedChange] = createSignal<{ path: string; staged: boolean } | null>(null);
 
   // "wt" = working tree, "log" = commit history.
@@ -187,6 +195,7 @@ export default function DocIndexPage() {
       setGitStatus([]);
     } finally {
       setGitLoading(false);
+      setGitChecked(true);
     }
   };
 
@@ -563,6 +572,11 @@ export default function DocIndexPage() {
 
               {/* Body */}
               <div class="flex-1 overflow-y-auto overflow-x-hidden">
+                <Show when={gitChecked()} fallback={
+                  <div class="flex items-center justify-center py-10">
+                    <div class="w-4 h-4 border-2 border-[color:var(--accent)] border-t-transparent rounded-full animate-spin" />
+                  </div>
+                }>
                 <Show when={gitIsRepo()} fallback={
                   <p class="text-[12px] text-[color:var(--text-muted)] text-center py-10 px-4">
                     Not a git repository.
@@ -681,6 +695,7 @@ export default function DocIndexPage() {
                       </For>
                     </Show>
                   </Show>
+                </Show>
                 </Show>
               </div>
 

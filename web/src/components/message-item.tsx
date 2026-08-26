@@ -104,11 +104,11 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     return diffStat(d.oldText, d.newText);
   });
 
-  // Auto-collapse when tool finishes (running/completed -> completed/error)
+  // Auto-collapse when tool finishes (running/completed -> completed/error/denied)
   // Exception: deep_search auto-expands so the user sees the answer.
   createEffect(() => {
     const s = status();
-    if (s === 'completed' || s === 'error') {
+    if (s === 'completed' || s === 'error' || s === 'denied') {
       if (isDeepSearch()) {
         setExpanded(true);
       } else {
@@ -145,6 +145,7 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
       case 'running':   return 'text-[color:var(--accent)]';
       case 'completed': return 'text-emerald-400';
       case 'error':     return 'text-red-400';
+      case 'denied':    return 'text-amber-400';
       default:          return 'text-zinc-500';
     }
   };
@@ -195,6 +196,12 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M4.93 19h14.14c1.54 0 2.5-1.67 1.73-3L13.73 4.99c-.77-1.33-2.69-1.33-3.46 0L3.2 16c-.77 1.33.19 3 1.73 3z" />
             </svg>
           </Show>
+          <Show when={status() === 'denied'}>
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
+              <circle cx="12" cy="12" r="9" stroke-linecap="round" stroke-linejoin="round" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5.64 5.64l12.72 12.72" />
+            </svg>
+          </Show>
           <Show when={status() === 'pending'}>
             <div class="w-3 h-3 border-[1.5px] border-current rounded-full opacity-60" />
           </Show>
@@ -206,6 +213,9 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
         </span>
         <Show when={isCancelled()}>
           <span class="text-micro text-amber-400/80 font-medium shrink-0">cancelled</span>
+        </Show>
+        <Show when={status() === 'denied'}>
+          <span class="text-micro text-amber-400 font-medium shrink-0">denied</span>
         </Show>
         <Show when={summary()} fallback={<span class="flex-1" />}>
           <span class="text-[color:var(--text-muted)] font-mono text-micro truncate flex-1 min-w-0">
