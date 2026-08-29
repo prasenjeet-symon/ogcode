@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/ogcode-logo-cropped.png" alt="Ogcode Logo" width="200" height="200">
+<img src="assets/ogcode-logo.png" alt="ogcode" width="180" height="180">
 
 # Ogcode
 
