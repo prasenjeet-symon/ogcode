@@ -21,10 +21,6 @@ Built for a future where every token counts. Ogcode curates the *relevant* conte
 
 <br/>
 
-![Ogcode Demo](assets/ogcode_intro.gif)
-
-<br/>
-
 [Context Engineering](#context-engineering--the-real-differentiator) · [Infinite Context](#infinite-context--never-hit-a-models-limit) · [Plan Mode & Parallel PRs](#plan-mode--parallel-prs--ship-features-not-just-suggestions) · [Quick Start](#quick-start) · [Why Ogcode](#why-ogcode) · [Documentation](docs/OUTLINE.md) · [Discord](https://discord.gg/JQP9t8y2Zv)
 
 </div>
@@ -665,8 +661,6 @@ HTML blocks render in a **sandboxed iframe** — scripts run in isolation with n
 ---
 
 ## Agentic Session Memory
-
-![Agentic Memory Demo](assets/agentic_memory.gif)
 
 Traditional assistants send the *entire conversation history* to the LLM every turn — expensive, and quick to hit token limits. Ogcode's **Agentic Session Memory** extracts, stores, and retrieves only the context relevant to each query.
 
