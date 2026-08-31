@@ -1,3 +1,61 @@
+# Release Notes — v0.30.0
+
+## Minor: Relative Relevance Selection for Semantic Memory Recall
+
+This release fixes the way agentic memory decides what is relevant. Recall
+selection is now **relative to the query's own score distribution** instead of
+an absolute cosine floor, which with the bundled embedder was admitting
+effectively every fact in the store — recall looked filtered but paid the
+whole session into the prompt every turn.
+
+### The problem: an absolute gate that admitted everything
+
+Session recall (`internal/memory/graph.go`) scored every fact with cosine
+similarity and kept anything above `0.1`. But normalized sentence embedders do
+not spread similarity across 0→1: `gte-small`, the bundled model, puts two
+*unrelated* English passages at roughly 0.72–0.85, and the median similarity
+between facts from different sessions in a real store measured **0.78**. A 0.1
+floor therefore filtered out ~1% of the corpus. The "semantically filtered"
+tree came back byte-for-byte identical to the full tree, the recall limit of 50
+never cut anything because most sessions have fewer facts, and the synthesis
+LLM saw the entire session — then paid for it again in refinement rounds.
+
+The same pattern existed in project recall (`internal/memory/project.go`):
+limit 60, per-session cap 8, absolute floor 0.1 — "most of the project,
+truncated to fit".
+
+### The fix: selection relative to the candidate pool
+
+New in `internal/memory/selection.go`, shared by session recall
+(`BuildLightweightTree`) and project recall (`scanProject`):
+
+- **Adaptive gate** — a fact must score at least `z = 1.0` standard deviations
+  above the candidate pool's mean cosine, which self-calibrates per query and
+  survives an embedder swap. The gate is skipped for pools of fewer than 5
+  facts, where mean and stddev describe noise and the top-K cap suffices.
+- **Sanity floor, not relevance filter** — `minUsableCosine = 0.1` now only
+  drops broken vectors (zero-length or corrupt embeddings score near 0 against
+  everything).
+- **Recency as a normalized tiebreaker** — applied once, after scores are
+  normalized into [0,1] across the surviving pool, never folded into raw
+  cosine. A recent weak match can no longer evict an older strong one; project
+  recall's exponential decay (45-day half-life now lives in the tiebreaker) and
+  session recall's order-based recency both go through this path.
+- **Limits sized to actually cut** — session recall default 50 → 8, project
+  recall 60 → 12, per-session cap 8 → 4 (a third of the limit so at least three
+  conversations can still reach the answer).
+- **Gate observability** — recall stat lines now log `facts_scanned`,
+  `scored`, `mean_cosine`, `stddev`, `cut`, and `gate_applied` so a cut that
+  over- or under-fires is visible in the logs rather than silent.
+
+### Migration
+
+None. The selection statistics are computed at recall time over whatever
+embeddings the store already holds; existing memory databases work unchanged.
+If you have swapped embedders, the z-score gate re-calibrates automatically —
+no re-embed and no threshold retuning required (re-embedding after a model swap
+remains necessary for vector-space compatibility, as before).
+
 # Release Notes — v0.29.0
 
 ## Minor: MCP Client with OAuth, Built-in Web Search, Prompt Caching, and Vision-Safe Sessions
