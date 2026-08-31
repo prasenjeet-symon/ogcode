@@ -573,35 +573,44 @@ func (g *Graph) BuildLightweightTree(ctx context.Context, sessionID string, f No
 			}
 		}
 
-		type scored struct {
-			node  Node
-			score float32
-		}
-		var scoredFacts []scored
-
-		cosinStart := time.Now()
+		selectStart := time.Now()
+		var (
+			candidates []scoredFact
+			stats      scoreStats
+		)
 		for _, n := range allNodes {
-			if emb, ok := embeddings[n.Key]; ok && len(emb) > 0 {
-				baseScore := cosine(queryVec, emb)
-				if baseScore > 0.1 {
-					recencyBoost := (float32(n.Order) / float32(maxOrder)) * 0.15
-					scoredFacts = append(scoredFacts, scored{node: n, score: baseScore + recencyBoost})
-				}
+			emb, ok := embeddings[n.Key]
+			if !ok || len(emb) == 0 {
+				continue
 			}
+			base := cosine(queryVec, emb)
+			if base < minUsableCosine {
+				continue
+			}
+			stats.add(base)
+			candidates = append(candidates, scoredFact{node: n, score: base})
 		}
-		slog.Info("cosine similarity timing (BuildLightweightTree)",
-			"facts_compared", len(allNodes),
-			"duration", time.Since(cosinStart),
+
+		selected := selectByRelevance(candidates, stats, limit, func(n Node) float32 {
+			return float32(n.Order) / float32(maxOrder)
+		})
+
+		cut, gateApplied := stats.cut(relevanceZCut)
+		slog.Info("recall selection (session)",
+			"facts_scanned", len(allNodes),
+			"scored", len(candidates),
+			"selected", len(selected),
+			"limit", limit,
+			"mean_cosine", fmt.Sprintf("%.3f", stats.mean()),
+			"stddev", fmt.Sprintf("%.3f", stats.stddev()),
+			"cut", fmt.Sprintf("%.3f", cut),
+			"gate_applied", gateApplied,
+			"duration", time.Since(selectStart),
 		)
 
-		sort.Slice(scoredFacts, func(i, j int) bool { return scoredFacts[i].score > scoredFacts[j].score })
-		if len(scoredFacts) > limit {
-			scoredFacts = scoredFacts[:limit]
-		}
-
-		// N-1 / N+1 Context Windowing
+		// N-1 / N+1 Context Windowing, over the selected facts only.
 		targetOrders := make(map[int]bool)
-		for _, s := range scoredFacts {
+		for _, s := range selected {
 			targetOrders[s.node.Order] = true
 			targetOrders[s.node.Order-1] = true
 			targetOrders[s.node.Order+1] = true
@@ -701,6 +710,14 @@ func buildTreeFromNodes(nodes []Node, edges []Edge) map[string]TopicTree {
 
 // ──── Recall ────
 
+// defaultRecallLimit is how many facts session recall hands to synthesis.
+//
+// It was 50, which is larger than most sessions in a real store and so never
+// cut anything: combined with an absolute cosine gate that admitted everything
+// (see selection.go), the "semantically filtered" tree came back byte-for-byte
+// identical to the full tree, and the whole session went into the prompt.
+const defaultRecallLimit = 8
+
 type RecallOptions struct {
 	SessionID string
 	Question  string
@@ -734,7 +751,7 @@ func (g *Graph) Recall(ctx context.Context, opts RecallOptions) (*RecallResult, 
 		opts.Threshold = 0.7
 	}
 	if opts.Limit == 0 {
-		opts.Limit = 50
+		opts.Limit = defaultRecallLimit
 	}
 	if g.Embed == nil {
 		return nil, fmt.Errorf("Recall: embedder is required for agentic memory")
@@ -853,7 +870,7 @@ func (g *Graph) Recall(ctx context.Context, opts RecallOptions) (*RecallResult, 
 			}
 			if err != nil || len(followupFacts) == 0 {
 				// Fallback: fetch recent facts without semantic filter
-				followupTree, followupFacts, err = g.BuildLightweightTree(ctx, opts.SessionID, filter, nil, 20)
+				followupTree, followupFacts, err = g.BuildLightweightTree(ctx, opts.SessionID, filter, nil, defaultRecallLimit)
 			}
 			if err == nil && len(followupFacts) > 0 {
 				// Merge followup facts into the main semantic set so they appear in Round N+1

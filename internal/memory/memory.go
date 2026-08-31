@@ -112,7 +112,8 @@ func (m *Memory) RecallMemory(ctx context.Context, sessionID, question string, c
 	result, err := m.Graph.Recall(ctx, RecallOptions{
 		SessionID: sessionID,
 		Question:  question,
-		Limit:     50,
+		// Limit is left at its default (see defaultRecallLimit); a second copy
+		// of the number here is how the tuned value and the used value drift.
 		MaxRounds: 3,
 		Threshold: 0.7,
 		Chat:      chat,

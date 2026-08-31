@@ -27,15 +27,19 @@ import (
 //     attribute facts to a session and a date, because two sessions months apart
 //     routinely contradict each other and the newer one usually wins.
 const (
-	defaultProjectLimit         = 60
-	defaultProjectPerSessionCap = 8
+	// Limit was 60 and the per-session cap 8. Against an absolute cosine gate
+	// that admitted effectively everything (see selection.go) that was not a
+	// selection at all — it was "most of the project, truncated to fit". Both
+	// are now small enough to actually cut. The cap is a third of the limit so
+	// at least three conversations can still reach the answer, which is the
+	// point of capping per session at all.
+	defaultProjectLimit         = 12
+	defaultProjectPerSessionCap = 4
 	defaultProjectMaxRounds     = 2
 	defaultProjectThreshold     = 0.7
 	defaultProjectHalfLifeDays  = 45.0
 	defaultProjectMaxChars      = 18000
 	defaultProjectMaxTopics     = 40
-	minProjectCosine            = 0.1
-	projectRecencyWeight        = 0.15
 )
 
 // ProjectRecallOptions tunes a project-scoped recall.
@@ -270,6 +274,7 @@ func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]sc
 	// them separately is what turns "nothing relevant was found" into "most of
 	// the corpus was not searchable" — the two look identical from the outside.
 	unembedded := 0
+	var scores scoreStats
 
 	start := time.Now()
 	err := g.Store.ScanProjectFacts(opts.ProjectID, opts.filter(), func(n Node, emb []float32) {
@@ -306,17 +311,25 @@ func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]sc
 			return
 		}
 		base := cosine(queryVec, emb)
-		if base < minProjectCosine {
+		if base < minUsableCosine {
 			return
 		}
-		score := base + projectRecencyWeight*recencyDecay(n.CreatedAt, now, opts.HalfLifeDays)
+		// Every scored fact feeds the distribution, including the ones the
+		// per-session cap is about to drop. The adaptive gate has to describe
+		// the corpus; measuring it on the survivors of an earlier cut would
+		// shift the mean up and cut a second time from the same tail.
+		scores.add(base)
 
+		// Buckets hold raw similarity. Recency is a tiebreaker applied once,
+		// globally, after normalization — folding it in here would let a recent
+		// weak match evict an older strong one before the two are comparable.
+		//
 		// Cap per session before the global cut. Without it a single 400-turn
 		// session can fill every slot and the answer silently loses the rest of
 		// the project's history.
 		bucket := perSession[n.SessionID]
 		if len(bucket) < opts.PerSessionCap {
-			perSession[n.SessionID] = append(bucket, scoredFact{node: n, score: score})
+			perSession[n.SessionID] = append(bucket, scoredFact{node: n, score: base})
 			return
 		}
 		weakest := 0
@@ -325,28 +338,35 @@ func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]sc
 				weakest = i
 			}
 		}
-		if score > bucket[weakest].score {
-			bucket[weakest] = scoredFact{node: n, score: score}
+		if base > bucket[weakest].score {
+			bucket[weakest] = scoredFact{node: n, score: base}
 		}
 	})
 	if err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("scan project facts: %w", err)
 	}
 
-	var matches []scoredFact
+	var candidates []scoredFact
 	for _, bucket := range perSession {
-		matches = append(matches, bucket...)
+		candidates = append(candidates, bucket...)
 	}
-	sort.Slice(matches, func(i, j int) bool { return matches[i].score > matches[j].score })
-	if len(matches) > opts.Limit {
-		matches = matches[:opts.Limit]
-	}
+	matches := selectByRelevance(candidates, scores, opts.Limit, func(n Node) float32 {
+		return recencyDecay(n.CreatedAt, now, opts.HalfLifeDays)
+	})
 
+	cut, gateApplied := scores.cut(relevanceZCut)
 	slog.Info("project recall scan",
 		"project", opts.ProjectID,
 		"facts_scanned", total,
+		"scored", scores.n,
 		"sessions_matched", len(perSession),
+		"candidates", len(candidates),
 		"matches", len(matches),
+		"limit", opts.Limit,
+		"mean_cosine", fmt.Sprintf("%.3f", scores.mean()),
+		"stddev", fmt.Sprintf("%.3f", scores.stddev()),
+		"cut", fmt.Sprintf("%.3f", cut),
+		"gate_applied", gateApplied,
 		"duration", time.Since(start),
 	)
 	return matches, stats, total, unembedded, nil
