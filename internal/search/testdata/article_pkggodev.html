@@ -1,0 +1,2079 @@
+
+<!DOCTYPE html>
+<html lang="en" data-layout="responsive" data-local="">
+  <head>
+    
+    
+    
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="Description" content="Package context defines the Context type, which carries deadlines, cancellation signals, and other request-scoped values across API boundaries and between processes.">
+    
+    <meta class="js-gtmID" data-gtmid="GTM-W8MVQXG">
+    
+    
+  
+    
+  
+    
+    
+    
+    
+    
+  <title>context package - context - Go Packages</title>
+    
+  
+  
+  
+  </head>
+  <body>
+    
+    
+    
+  <header class="go-Header go-Header--full js-siteHeader">
+    <div class="go-Header-inner go-Header-inner--dark">
+      <nav class="go-Header-nav">
+        <a href="https://go.dev/" class="js-headerLogo" data-gtmc="nav link"
+            data-test-id="go-header-logo-link" role="heading" aria-level="1">
+          
+        </a>
+         <div class="skip-navigation-wrapper">
+            <a class="skip-to-content-link" aria-label="Skip to main content" href="#main-content"> Skip to Main Content </a>
+          </div>
+        <div class="go-Header-rightContent">
+          
+<div class="go-SearchForm js-searchForm">
+  <form
+    class="go-InputGroup go-ShortcutKey go-SearchForm-form"
+    action="/search"
+    data-shortcut="/"
+    data-shortcut-alt="search"
+    data-gtmc="search form"
+    aria-label="Search for a package"
+    role="search"
+  >
+    <input name="q" class="go-Input js-searchFocus" aria-label="Search for a package" type="search"
+        autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"
+        placeholder="Search packages or symbols"
+        value="" />
+    <input name="m" value="" hidden>
+    <button class="go-Button go-Button--inverted" aria-label="Submit search">
+      
+    </button>
+  </form>
+  <button class="go-SearchForm-expandSearch js-expandSearch" data-gtmc="nav button"
+      aria-label="Open search" data-test-id="expand-search">
+    
+  </button>
+</div>
+          <ul class="go-Header-menu">
+            <li class="go-Header-menuItem">
+              <a class="js-desktop-menu-hover" href="#" data-gtmc="nav link">
+                Why Go
+                
+              </a>
+              <ul class="go-Header-submenu go-Header-submenu--why js-desktop-submenu-hover" aria-label="submenu">
+                  <li class="go-Header-submenuItem">
+                    <div>
+                      <a href="https://go.dev/solutions#case-studies">
+                        <span>Case Studies</span>
+                      </a>
+                    </div>
+                    <p>Common problems companies solve with Go</p>
+                  </li>
+                  <li class="go-Header-submenuItem">
+                    <div>
+                      <a href="https://go.dev/solutions#use-cases">
+                        <span>Use Cases</span>
+                      </a>
+                    </div>
+                    <p>Stories about how and why companies use Go</p>
+                  </li>
+                  <li class="go-Header-submenuItem">
+                    <div>
+                      <a href="https://go.dev/security/">
+                        <span>Security</span>
+                      </a>
+                    </div>
+                    <p>How Go can help keep you secure by default</p>
+                  </li>
+              </ul>
+            </li>
+            <li class="go-Header-menuItem">
+              <a href="https://go.dev/learn/" data-gtmc="nav link">Learn</a>
+            </li>
+            <li class="go-Header-menuItem">
+              <a class="js-desktop-menu-hover" href="#" data-gtmc="nav link">
+                Docs
+                
+              </a>
+              <ul class="go-Header-submenu go-Header-submenu--docs js-desktop-submenu-hover" aria-label="submenu">
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://go.dev/doc/effective_go">
+                      <span>Effective Go</span>
+                    </a>
+                  </div>
+                  <p>Tips for writing clear, performant, and idiomatic Go code</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://go.dev/doc/">
+                      <span>Go User Manual</span>
+                    </a>
+                  </div>
+                  <p>A complete introduction to building software with Go</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://pkg.go.dev/std">
+                      <span>Standard library</span>
+                    </a>
+                  </div>
+                  <p>Reference documentation for Go's standard library</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://go.dev/doc/devel/release">
+                      <span>Release Notes</span>
+                    </a>
+                  </div>
+                  <p>Learn what's new in each Go release</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="/api">
+                      <span>API</span>
+                    </a>
+                  </div>
+                  <p>Reference documentation for the pkg.go.dev API</p>
+                </li>
+              </ul>
+            </li>
+            <li class="go-Header-menuItem go-Header-menuItem--active">
+              <a href="/" data-gtmc="nav link">Packages</a>
+            </li>
+            <li class="go-Header-menuItem">
+              <a class="js-desktop-menu-hover" href="#" data-gtmc="nav link">
+                Community
+                
+              </a>
+              <ul class="go-Header-submenu go-Header-submenu--community js-desktop-submenu-hover" aria-label="submenu">
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://go.dev/talks/">
+                      <span>Recorded Talks</span>
+                    </a>
+                  </div>
+                  <p>Videos from prior events</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://www.meetup.com/pro/go">
+                      <span>Meetups</span>
+                      <i class="material-icons">
+                        
+                      </i>
+                    </a>
+                  </div>
+                  <p>Meet other local Go developers</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://github.com/golang/go/wiki/Conferences">
+                      <span>Conferences</span>
+                      <i class="material-icons">
+                        
+                      </i>
+                    </a>
+                  </div>
+                  <p>Learn and network with Go developers from around the world</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://go.dev/blog">
+                      <span>Go blog</span>
+                    </a>
+                  </div>
+                  <p>The Go project's official blog.</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    <a href="https://go.dev/help">
+                      <span>Go project</span>
+                    </a>
+                  </div>
+                  <p>Get help and stay informed from Go</p>
+                </li>
+                <li class="go-Header-submenuItem">
+                  <div>
+                    Get connected
+                  </div>
+                  <p></p>
+                  <div class="go-Header-socialIcons">
+                      <a
+                        class="go-Header-socialIcon"
+                        aria-label="Get connected with google-groups (Opens in new window)"
+                        title="Get connected with google-groups (Opens in new window)"
+                        href="https://groups.google.com/g/golang-nuts">
+                        
+                      </a>
+                      <a
+                        class="go-Header-socialIcon"
+                        aria-label="Get connected with github (Opens in new window)"
+                        title="Get connected with github (Opens in new window)"
+                        href="https://github.com/golang">
+                        
+                      </a>
+                      <a
+                        class="go-Header-socialIcon"
+                        aria-label="Get connected with twitter (Opens in new window)"
+                        title="Get connected with twitter (Opens in new window)"
+                        href="https://twitter.com/golang">
+                        
+                      </a>
+                      <a
+                        class="go-Header-socialIcon"
+                        aria-label="Get connected with reddit (Opens in new window)"
+                        title="Get connected with reddit (Opens in new window)"
+                        href="https://www.reddit.com/r/golang/">
+                        
+                      </a>
+                      <a
+                        class="go-Header-socialIcon"
+                        aria-label="Get connected with slack (Opens in new window)"
+                        title="Get connected with slack (Opens in new window)"
+                        href="https://invite.slack.golangbridge.org/">
+                        
+                      </a>
+                      <a
+                        class="go-Header-socialIcon"
+                        aria-label="Get connected with stack-overflow (Opens in new window)"
+                        title=""
+                        href="https://stackoverflow.com/collectives/go">
+                        
+                      </a>
+                  </div>
+                </li>
+              </ul>
+            </li>
+          </ul>
+          <button class="go-Header-navOpen js-headerMenuButton go-Header-navOpen--white" data-gtmc="nav button" aria-label="Open navigation">
+          </button>
+        </div>
+      </nav>
+    </div>
+  </header>
+  <aside class="go-NavigationDrawer js-header">
+    <nav class="go-NavigationDrawer-nav">
+      <div class="go-NavigationDrawer-header">
+        <a href="https://go.dev/">
+          
+        </a>
+      </div>
+      <ul class="go-NavigationDrawer-list">
+          <li class="go-NavigationDrawer-listItem js-mobile-subnav-trigger go-NavigationDrawer-hasSubnav">
+            <a href="#">
+              <span>Why Go</span>
+              <i class="material-icons">
+                
+              </i>
+            </a>
+            <div class="go-NavigationDrawer go-NavigationDrawer-submenuItem">
+              <div class="go-NavigationDrawer-nav">
+                <div class="go-NavigationDrawer-header">
+                  <a href="#">
+                    <i class="material-icons">
+                      
+                      </i>
+                      Why Go
+                  </a>
+                </div>
+                <ul class="go-NavigationDrawer-list">
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/solutions#case-studies">
+                      Case Studies
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/solutions#use-cases">
+                      Use Cases
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/security/">
+                      Security
+                    </a>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="go-NavigationDrawer-listItem">
+            <a href="https://go.dev/learn/">Learn</a>
+          </li>
+          <li class="go-NavigationDrawer-listItem js-mobile-subnav-trigger go-NavigationDrawer-hasSubnav">
+            <a href="#">
+              <span>Docs</span>
+              <i class="material-icons">
+                
+              </i>
+            </a>
+            <div class="go-NavigationDrawer go-NavigationDrawer-submenuItem">
+              <div class="go-NavigationDrawer-nav">
+                <div class="go-NavigationDrawer-header">
+                  <a href="#"><i class="material-icons">
+                    
+                    </i>
+                    Docs
+                  </a>
+                </div>
+                <ul class="go-NavigationDrawer-list">
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/doc/effective_go">
+                      Effective Go
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/doc/">
+                      Go User Manual
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://pkg.go.dev/std">
+                      Standard library
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/doc/devel/release">
+                      Release Notes
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="/api">
+                      API
+                    </a>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="go-NavigationDrawer-listItem go-NavigationDrawer-listItem--active">
+            <a href="/">Packages</a>
+          </li>
+          <li class="go-NavigationDrawer-listItem js-mobile-subnav-trigger go-NavigationDrawer-hasSubnav">
+            <a href="#">
+              <span>Community</span>
+              <i class="material-icons">
+                
+              </i>
+            </a>
+            <div class="go-NavigationDrawer go-NavigationDrawer-submenuItem">
+              <div class="go-NavigationDrawer-nav">
+                <div class="go-NavigationDrawer-header">
+                  <a href="#">
+                    <i class="material-icons">
+                      
+                    </i>
+                    Community
+                  </a>
+                </div>
+                <ul class="go-NavigationDrawer-list">
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/talks/">
+                      Recorded Talks
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://www.meetup.com/pro/go">
+                      Meetups
+                      <i class="material-icons">
+                      
+                      </i>
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://github.com/golang/go/wiki/Conferences">
+                      Conferences
+                      <i class="material-icons">
+                        
+                      </i>
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/blog">
+                      Go blog
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <a href="https://go.dev/help">
+                      Go project
+                    </a>
+                  </li>
+                  <li class="go-NavigationDrawer-listItem">
+                    <div>Get connected</div>
+                    <div class="go-Header-socialIcons">
+                        <a class="go-Header-socialIcon" href="https://groups.google.com/g/golang-nuts"></a>
+                        <a class="go-Header-socialIcon" href="https://github.com/golang"></a>
+                        <a class="go-Header-socialIcon" href="https://twitter.com/golang"></a>
+                        <a class="go-Header-socialIcon" href="https://www.reddit.com/r/golang/"></a>
+                        <a class="go-Header-socialIcon" href="https://invite.slack.golangbridge.org/"></a>
+                        <a class="go-Header-socialIcon" href="https://stackoverflow.com/collectives/go"></a>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </li>
+      </ul>
+    </nav>
+  </aside>
+  <div class="go-NavigationDrawer-scrim js-scrim" role="presentation"></div>
+    
+  <main class="go-Main" id="main-content">
+    <div class="go-Main-banner" role="alert"></div>
+    <header class="go-Main-header js-mainHeader">
+  
+  
+  <nav class="go-Main-headerBreadcrumb go-Breadcrumb" aria-label="Breadcrumb" data-test-id="UnitHeader-breadcrumb">
+    <ol>
+      
+        
+          <li data-test-id="UnitHeader-breadcrumbItem">
+            <a href="/" data-gtmc="breadcrumb link">Discover Packages</a>
+          </li>
+        
+          <li data-test-id="UnitHeader-breadcrumbItem">
+            <a href="/std" data-gtmc="breadcrumb link">Standard library</a>
+          </li>
+        
+        <li>
+          <a href="/context@go1.27.0" data-gtmc="breadcrumb link" aria-current="location"
+              data-test-id="UnitHeader-breadcrumbCurrent">
+            context
+          </a>
+          
+            <button
+              class="go-Button go-Button--inline go-Clipboard js-clipboard"
+              title="Copy path to clipboard.&#10;&#10;context"
+              aria-label="Copy Path to Clipboard"
+              data-to-copy="context"
+              data-gtmc="breadcrumbs button"
+            >
+              
+            </button>
+          
+        
+      </li>
+    </ol>
+  </nav>
+  <div class="go-Main-headerContent">
+    
+  <div class="go-Main-headerTitle js-stickyHeader">
+    <a class="go-Main-headerLogo" href="https://go.dev/" aria-hidden="true" tabindex="-1" data-gtmc="header link" aria-label="Link to Go Homepage">
+      
+    </a>
+    <h1 class="UnitHeader-titleHeading" data-test-id="UnitHeader-title">context</h1>
+    
+      <span class="go-Chip go-Chip--inverted">package</span>
+    
+      <span class="go-Chip go-Chip--inverted">standard library</span>
+    
+    
+      
+        <button
+          class="go-Button go-Button--inline go-Clipboard js-clipboard"
+          title="Copy path to clipboard.&#10;&#10;context"
+          aria-label="Copy Path to Clipboard"
+          data-to-copy="context"
+          data-gtmc="title button"
+          tabindex="-1"
+        >
+          
+        </button>
+      
+    
+  </div>
+    
+      
+  <div class="go-Main-headerDetails">
+    
+      
+  <span class="go-Main-headerDetailItem" data-test-id="UnitHeader-version">
+    <a href="?tab=versions" aria-label="Version: go1.27.0" 
+    data-gtmc="header link" aria-describedby="version-description">
+      <span class="go-textSubtle" aria-hidden="true">Version: </span>
+        go1.27.0
+    </a>
+    <div class="screen-reader-only" id="version-description" hidden>
+      Opens a new window with list of versions in this module.
+    </div>
+    
+    <span class="DetailsHeader-badge--latest" data-test-id="UnitHeader-minorVersionBanner">
+      <span class="go-Chip DetailsHeader-span--latest">Latest</span>
+      <span class="go-Chip DetailsHeader-span--notAtLatest">
+        Latest
+        
+  <details class="go-Tooltip js-tooltip" data-gtmc="tooltip">
+    <summary>
+      
+    </summary>
+    <p>This package is not in the latest version of its module.</p>
+  </details>
+      </span>
+      <a href="/context" aria-label="Go to Latest Version" data-gtmc="header link">
+        <span class="go-Chip go-Chip--alert DetailsHeader-span--goToLatest">Go to latest</span>
+      </a>
+    </span>
+  </span>
+      
+  <span class="go-Main-headerDetailItem" data-test-id="UnitHeader-commitTime">
+    Published: Aug 19, 2026
+  </span>
+      
+  <span class="go-Main-headerDetailItem" data-test-id="UnitHeader-licenses">
+    License: <a href="/context?tab=licenses" data-test-id="UnitHeader-license" 
+        data-gtmc="header link" aria-describedby="license-description">BSD-3-Clause</a>
+      
+    
+  </span>
+  <div class="screen-reader-only" id="license-description" hidden>
+    Opens a new window with license information.
+  </div>
+      
+        
+  <span class="go-Main-headerDetailItem" data-test-id="UnitHeader-imports">
+    <a href="/context?tab=imports" aria-label="Imports: 5"
+        data-gtmc="header link" aria-describedby="imports-description">
+      <span class="go-textSubtle">Imports: </span>5
+    </a>
+  </span>
+  <div class="screen-reader-only" id="imports-description" hidden>
+    Opens a new window with list of imports.
+  </div>
+        
+  <span class="go-Main-headerDetailItem" data-test-id="UnitHeader-importedby">
+    <a href="/context?tab=importedby" aria-label="Imported By: 2,032,418"
+        data-gtmc="header link" aria-describedby="importedby-description">
+       <span class="go-textSubtle">Imported by: </span>2,032,418
+    </a>
+  </span>
+  <div class="screen-reader-only" id="importedby-description" hidden>
+    Opens a new window with list of known importers.
+  </div>
+      
+    
+  </div>
+  
+  <div class="UnitHeader-overflowContainer">
+    
+    <select class="UnitHeader-overflowSelect js-selectNav" tabindex="-1">
+      <option value="/">Main</option>
+      <option value="/context?tab=versions">
+        Versions
+      </option>
+      <option value="/context?tab=licenses">
+        Licenses
+      </option>
+      
+        <option value="/context?tab=imports">
+          Imports
+        </option>
+        <option value="/context?tab=importedby">
+          Imported By
+        </option>
+      
+    </select>
+  </div>
+    
+  </div>
+</header>
+    
+      <aside class="go-Main-aside  js-mainAside">
+  
+  <div class="UnitMeta">
+    <h2 class="go-textLabel">Details</h2>
+    
+  <ul class="UnitMeta-details">
+    <li>
+      <details class="go-Tooltip js-tooltip" data-gtmc="tooltip">
+        <summary class="go-textSubtle">
+          
+  
+          Valid <a href="https://cs.opensource.google/go/go/+/go1.27.0:src/go.mod" target="_blank" rel="noopener">go.mod</a> file
+          
+        </summary>
+        <p aria-live="polite" role="tooltip">
+          The Go module system was introduced in Go 1.11 and is the official dependency management
+          solution for Go.
+        </p>
+      </details>
+    </li>
+    <li>
+      <details class="go-Tooltip js-tooltip" data-gtmc="tooltip">
+        <summary class="go-textSubtle">
+          
+  
+          Redistributable license
+          
+        </summary>
+        <p aria-live="polite" role="tooltip">
+          Redistributable licenses place minimal restrictions on how software can be used,
+          modified, and redistributed.
+        </p>
+      </details>
+    </li>
+    <li>
+      <details class="go-Tooltip js-tooltip" data-gtmc="tooltip">
+        <summary class="go-textSubtle">
+          
+  
+          Tagged version
+          
+        </summary>
+        <p aria-live="polite" role="tooltip">Modules with tagged versions give importers more predictable builds.</p>
+      </details>
+    </li>
+    <li>
+      <details class="go-Tooltip js-tooltip" data-gtmc="tooltip">
+        <summary class="go-textSubtle">
+          
+  
+          Stable version
+          
+        </summary>
+        <p aria-live="polite" role="tooltip">When a project reaches major version v1 it is considered stable.</p>
+      </details>
+    </li>
+    <li class="UnitMeta-detailsLearn">
+      <a href="/about#best-practices" data-gtmc="meta link">Learn more about best practices</a>
+    </li>
+  </ul>
+    <h2 class="go-textLabel">Repository</h2>
+    <div class="UnitMeta-repo">
+      
+        <a href="https://cs.opensource.google/go/go" title="https://cs.opensource.google/go/go" target="_blank" rel="noopener">
+          cs.opensource.google/go/go
+        </a>
+      
+    </div>
+    
+      <h2 class="go-textLabel" data-test-id="links-heading">Links</h2>
+      <ul class="UnitMeta-links">
+        
+          <li>
+            <a href="https://go.dev/security/policy"
+                title="Report security issues in the Go standard library and sub-repositories">
+              
+              Report a Vulnerability
+            </a>
+          </li>
+        
+        
+        
+        
+  
+        
+  
+        
+  
+      </ul>
+    
+  </div>
+</aside>
+    
+    <nav class="go-Main-nav go-Main-nav--sticky js-mainNav" aria-label="Outline">
+  <div class="go-Main-navDesktop">
+    
+  <div class="UnitOutline-jumpTo">
+    <button class="UnitOutline-jumpToInput go-ShortcutKey js-jumpToInput"
+        aria-controls="jump-to-modal"
+        aria-label="Open Jump to Identifier"
+        data-shortcut="f"
+        data-shortcut-alt="find"
+        data-test-id="jump-to-button" data-gtmc="outline button">
+      Jump to ...
+    </button>
+  </div>
+  <ul class="go-Tree js-tree" role="tree" aria-label="Outline">
+    
+    
+      <li>
+        <a href="#section-documentation" data-gtmc="outline link">
+          Documentation
+        </a>
+        
+<ul>
+  
+    <li>
+      <a href="#pkg-overview" data-gtmc="doc outline link">Overview</a>
+    </li>
+  <li class="DocNav-overview">
+      <a href="#pkg-index" data-gtmc="doc outline link">
+        Index
+      </a>
+    </li>
+      <li>
+        <a href="#pkg-examples" data-gtmc="doc outline link">
+          Examples
+        </a>
+        <ul>
+            <li>
+              <a href="#example-AfterFunc-Cond" title="AfterFunc (Cond)" data-gtmc="doc outline link">
+                AfterFunc (Cond)
+              </a>
+            </li>
+            <li>
+              <a href="#example-AfterFunc-Connection" title="AfterFunc (Connection)" data-gtmc="doc outline link">
+                AfterFunc (Connection)
+              </a>
+            </li>
+            <li>
+              <a href="#example-AfterFunc-Merge" title="AfterFunc (Merge)" data-gtmc="doc outline link">
+                AfterFunc (Merge)
+              </a>
+            </li>
+            <li>
+              <a href="#example-WithCancel" title="WithCancel" data-gtmc="doc outline link">
+                WithCancel
+              </a>
+            </li>
+            <li>
+              <a href="#example-WithDeadline" title="WithDeadline" data-gtmc="doc outline link">
+                WithDeadline
+              </a>
+            </li>
+            <li>
+              <a href="#example-WithTimeout" title="WithTimeout" data-gtmc="doc outline link">
+                WithTimeout
+              </a>
+            </li>
+            <li>
+              <a href="#example-WithValue" title="WithValue" data-gtmc="doc outline link">
+                WithValue
+              </a>
+            </li>
+        </ul>
+      </li>
+    <li class="DocNav-constants">
+      <a href="#pkg-constants" data-gtmc="doc outline link">
+        Constants
+      </a>
+    </li>
+    <li class="DocNav-variables">
+      <a href="#pkg-variables" data-gtmc="doc outline link">
+        Variables
+      </a>
+    </li>
+    <li class="DocNav-functions">
+      <a href="#pkg-functions" data-gtmc="doc outline link">
+        Functions
+      </a>
+      
+        <ul>
+          
+            <li>
+              <a href="#AfterFunc" title="AfterFunc(ctx, f)" data-gtmc="doc outline link">
+                AfterFunc(ctx, f)
+              </a>
+            </li>
+          
+            <li>
+              <a href="#Cause" title="Cause(c)" data-gtmc="doc outline link">
+                Cause(c)
+              </a>
+            </li>
+          
+            <li>
+              <a href="#WithCancel" title="WithCancel(parent)" data-gtmc="doc outline link">
+                WithCancel(parent)
+              </a>
+            </li>
+          
+            <li>
+              <a href="#WithCancelCause" title="WithCancelCause(parent)" data-gtmc="doc outline link">
+                WithCancelCause(parent)
+              </a>
+            </li>
+          
+            <li>
+              <a href="#WithDeadline" title="WithDeadline(parent, d)" data-gtmc="doc outline link">
+                WithDeadline(parent, d)
+              </a>
+            </li>
+          
+            <li>
+              <a href="#WithDeadlineCause" title="WithDeadlineCause(parent, d, cause)" data-gtmc="doc outline link">
+                WithDeadlineCause(parent, d, cause)
+              </a>
+            </li>
+          
+            <li>
+              <a href="#WithTimeout" title="WithTimeout(parent, timeout)" data-gtmc="doc outline link">
+                WithTimeout(parent, timeout)
+              </a>
+            </li>
+          
+            <li>
+              <a href="#WithTimeoutCause" title="WithTimeoutCause(parent, timeout, cause)" data-gtmc="doc outline link">
+                WithTimeoutCause(parent, timeout, cause)
+              </a>
+            </li>
+          
+        </ul>
+      
+    </li>
+    <li class="DocNav-types">
+      <a href="#pkg-types" data-gtmc="doc outline link">
+        Types
+      </a>
+      <ul>
+        
+          
+          <li>
+            <a href="#CancelCauseFunc" title="type CancelCauseFunc" data-gtmc="doc outline link">
+              type CancelCauseFunc
+            </a>
+             
+          </li>
+        
+          
+          <li>
+            <a href="#CancelFunc" title="type CancelFunc" data-gtmc="doc outline link">
+              type CancelFunc
+            </a>
+             
+          </li>
+        
+          
+          <li>
+            <a href="#Context" title="type Context" data-gtmc="doc outline link">
+              type Context
+            </a>
+            
+              <ul>
+                
+                  <li>
+                    <a href="#Background" title="Background()"
+                        data-gtmc="doc outline link">
+                      Background()
+                    </a>
+                  </li>
+                
+                  <li>
+                    <a href="#TODO" title="TODO()"
+                        data-gtmc="doc outline link">
+                      TODO()
+                    </a>
+                  </li>
+                
+                  <li>
+                    <a href="#WithValue" title="WithValue(parent, key, val)"
+                        data-gtmc="doc outline link">
+                      WithValue(parent, key, val)
+                    </a>
+                  </li>
+                
+                  <li>
+                    <a href="#WithoutCancel" title="WithoutCancel(parent)"
+                        data-gtmc="doc outline link">
+                      WithoutCancel(parent)
+                    </a>
+                  </li>
+                
+                
+              </ul>
+             
+          </li>
+         
+      </ul>
+    </li>
+  
+  
+</ul>
+      </li>
+    
+    
+      <li>
+        <a href="#section-sourcefiles" data-gtmc="outline link">
+          Source Files
+        </a>
+      </li>
+    
+    
+  </ul>
+  </div>
+  <div class="go-Main-navMobile js-mainNavMobile">
+    <label class="go-Label">
+      <select class="go-Select">
+        
+          <option selected disabled>Documentation</option>
+        
+      </select>
+    </label>
+  </div>
+</nav>
+    <article class="go-Main-article js-mainContent">
+  <div class="UnitDetails" data-test-id="UnitDetails" style="display: block;">
+    <div class="UnitDetails-content js-unitDetailsContent" data-test-id="UnitDetails-content">
+      
+      
+        
+          
+  <div class="UnitDoc">
+    <h2 class="UnitDoc-title" id="section-documentation">
+      
+      Documentation
+      <a class="UnitDoc-idLink" href="#section-documentation" title="Go to Documentation" aria-label="Go to Documentation">¶</a>
+    </h2>
+    
+  
+    
+  
+    <div class="Documentation js-documentation">
+      
+        
+<div class="Documentation-content js-docContent"> <section class="Documentation-overview">
+    <h3 tabindex="-1" id="pkg-overview" class="Documentation-overviewHeader">Overview <a href="#pkg-overview" title="Go to Overview" aria-label="Go to Overview">¶</a></h3>
+<p>Package context defines the Context type, which carries deadlines,
+cancellation signals, and other request-scoped values across API boundaries
+and between processes.
+</p><p>Incoming requests to a server should create a <a href="#Context">Context</a>, and outgoing
+calls to servers should accept a Context. The chain of function
+calls between them must propagate the Context, optionally replacing
+it with a derived Context created using <a href="#WithCancel">WithCancel</a>, <a href="#WithDeadline">WithDeadline</a>,
+<a href="#WithTimeout">WithTimeout</a>, or <a href="#WithValue">WithValue</a>.
+</p><p>A Context may be canceled to indicate that work done on its behalf should stop.
+A Context with a deadline is canceled after the deadline passes.
+When a Context is canceled, all Contexts derived from it are also canceled.
+</p><p>The <a href="#WithCancel">WithCancel</a>, <a href="#WithDeadline">WithDeadline</a>, and <a href="#WithTimeout">WithTimeout</a> functions take a
+Context (the parent) and return a derived Context (the child) and a
+<a href="#CancelFunc">CancelFunc</a>. Calling the CancelFunc directly cancels the child and its
+children, removes the parent&#39;s reference to the child, and stops
+any associated timers. Failing to call the CancelFunc leaks the
+child and its children until the parent is canceled. The go vet tool
+checks that CancelFuncs are used on all control-flow paths.
+</p><p>The <a href="#WithCancelCause">WithCancelCause</a> function returns a <a href="#CancelCauseFunc">CancelCauseFunc</a>, which takes
+an error and records it as the cancellation cause. <a href="#WithDeadlineCause">WithDeadlineCause</a>
+and <a href="#WithTimeoutCause">WithTimeoutCause</a> take a cause to use when the deadline expires.
+Calling <a href="#Cause">Cause</a> on the canceled context or any of its children retrieves
+the cause. If no cause is specified, Cause(ctx) returns the same value
+as ctx.Err().
+</p><p>Programs that use Contexts should follow these rules to keep interfaces
+consistent across packages and enable static analysis tools to check context
+propagation:
+</p><p>Do not store Contexts inside a struct type; instead, pass a Context
+explicitly to each function that needs it. This is discussed further in
+<a href="https://go.dev/blog/context-and-structs">https://go.dev/blog/context-and-structs</a>. The Context should be the first
+parameter, typically named ctx:
+</p><pre>func DoSomething(ctx context.Context, arg Arg) error {
+	// ... use ctx ...
+}
+</pre><p>Do not pass a nil <a href="#Context">Context</a>, even if a function permits it. Pass <a href="#TODO">context.TODO</a>
+if you are unsure about which Context to use.
+</p><p>Use context Values only for request-scoped data that transits processes and
+APIs, not for passing optional parameters to functions.
+</p><p>The same Context may be passed to functions running in different goroutines;
+Contexts are safe for simultaneous use by multiple goroutines.
+</p><p>See <a href="https://go.dev/blog/context">https://go.dev/blog/context</a> for example code for a server that uses
+Contexts.
+</p>
+</section><section class="Documentation-index">
+    <h3 id="pkg-index" class="Documentation-indexHeader">Index <a href="#pkg-index" title="Go to Index" aria-label="Go to Index">¶</a></h3>
+<ul class="Documentation-indexList">
+<li class="Documentation-indexVariables"><a href="#pkg-variables">Variables</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#AfterFunc">func AfterFunc(ctx Context, f func()) (stop func() bool)</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#Cause">func Cause(c Context) error</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#WithCancel">func WithCancel(parent Context) (ctx Context, cancel CancelFunc)</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#WithCancelCause">func WithCancelCause(parent Context) (ctx Context, cancel CancelCauseFunc)</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#WithDeadline">func WithDeadline(parent Context, d time.Time) (Context, CancelFunc)</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#WithDeadlineCause">func WithDeadlineCause(parent Context, d time.Time, cause error) (Context, CancelFunc)</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#WithTimeout">func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc)</a></li>
+<li class="Documentation-indexFunction">
+        <a href="#WithTimeoutCause">func WithTimeoutCause(parent Context, timeout time.Duration, cause error) (Context, CancelFunc)</a></li>
+<li class="Documentation-indexType">
+          <a href="#CancelCauseFunc">type CancelCauseFunc</a></li>
+<li class="Documentation-indexType">
+          <a href="#CancelFunc">type CancelFunc</a></li>
+<li class="Documentation-indexType">
+          <a href="#Context">type Context</a></li>
+<li><ul class="Documentation-indexTypeFunctions">
+<li>
+            <a href="#Background">func Background() Context</a></li>
+<li>
+            <a href="#TODO">func TODO() Context</a></li>
+<li>
+            <a href="#WithValue">func WithValue(parent Context, key, val any) Context</a></li>
+<li>
+            <a href="#WithoutCancel">func WithoutCancel(parent Context) Context</a></li>
+</ul></li>
+</ul>
+</section><section class="Documentation-examples">
+    <h3 tabindex="-1" id="pkg-examples" class="Documentation-examplesHeader">Examples <a class="Documentation-idLink" href="#pkg-examples" title="Go to Examples" aria-label="Go to Examples">¶</a></h3>
+<ul class="Documentation-examplesList">
+<li><a href="#example-AfterFunc-Cond" class="js-exampleHref">AfterFunc (Cond)</a></li>
+<li><a href="#example-AfterFunc-Connection" class="js-exampleHref">AfterFunc (Connection)</a></li>
+<li><a href="#example-AfterFunc-Merge" class="js-exampleHref">AfterFunc (Merge)</a></li>
+<li><a href="#example-WithCancel" class="js-exampleHref">WithCancel</a></li>
+<li><a href="#example-WithDeadline" class="js-exampleHref">WithDeadline</a></li>
+<li><a href="#example-WithTimeout" class="js-exampleHref">WithTimeout</a></li>
+<li><a href="#example-WithValue" class="js-exampleHref">WithValue</a></li>
+</ul>
+</section><h3 tabindex="-1" id="pkg-constants" class="Documentation-constantsHeader">Constants <a href="#pkg-constants" title="Go to Constants" aria-label="Go to Constants">¶</a></h3>
+  <section class="Documentation-constants"><p class="Documentation-empty">This section is empty.</p></section>
+  <h3 tabindex="-1" id="pkg-variables" class="Documentation-variablesHeader">Variables <a href="#pkg-variables" title="Go to Variables" aria-label="Go to Variables">¶</a></h3>
+  <section class="Documentation-variables">
+    <div class="Documentation-declaration">
+      <span class="Documentation-declarationLink"><a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=168">View Source</a></span>
+      <pre><span id="Canceled" data-kind="variable">var Canceled = <a href="/errors">errors</a>.<a href="/errors#New">New</a>(&#34;context canceled&#34;)</span></pre>
+    </div>
+  <p>Canceled is the error returned by <a href="#Context.Err">Context.Err</a> when the context is canceled
+for some reason other than its deadline passing.
+</p>
+    <div class="Documentation-declaration">
+      <span class="Documentation-declarationLink"><a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=172">View Source</a></span>
+      <pre><span id="DeadlineExceeded" data-kind="variable">var DeadlineExceeded <a href="/builtin#error">error</a> = deadlineExceededError{}</span></pre>
+    </div>
+  <p>DeadlineExceeded is the error returned by <a href="#Context.Err">Context.Err</a> when the context is canceled
+due to its deadline passing.
+</p>
+</section>
+  <h3 tabindex="-1" id="pkg-functions" class="Documentation-functionsHeader">Functions <a href="#pkg-functions" title="Go to Functions" aria-label="Go to Functions">¶</a></h3>
+  <section class="Documentation-functions"><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="AfterFunc" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=326">AfterFunc</a> <a class="Documentation-idLink" href="#AfterFunc" title="Go to AfterFunc" aria-label="Go to AfterFunc">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+      <span class="Documentation-sinceVersionLabel">added in</span>
+      <span class="Documentation-sinceVersionVersion">go1.21.0</span>
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func AfterFunc(ctx <a href="#Context">Context</a>, f func()) (stop func() <a href="/builtin#bool">bool</a>)</pre>
+    </div>
+  <p>AfterFunc arranges to call f in its own goroutine after ctx is canceled.
+If ctx is already canceled, AfterFunc calls f immediately in its own goroutine.
+</p><p>Multiple calls to AfterFunc on a context operate independently;
+one does not replace another.
+</p><p>Calling the returned stop function stops the association of ctx with f.
+It returns true if the call stopped f from being run.
+If stop returns false,
+either the context is canceled and f has been started in its own goroutine;
+or f was already stopped.
+The stop function does not wait for f to complete before returning.
+If the caller needs to know whether f is completed,
+it must coordinate with f explicitly.
+</p><p>If ctx has a &#34;AfterFunc(func()) func() bool&#34; method,
+AfterFunc will use it to schedule the call.
+</p>
+<details tabindex="-1" id="example-AfterFunc-Cond" class="Documentation-exampleDetails js-exampleContainer">
+<summary class="Documentation-exampleDetailsHeader">Example (Cond) <a href="#example-AfterFunc-Cond" title="Go to Example (Cond)" aria-label="Go to Example (Cond)">¶</a></summary>
+<div class="Documentation-exampleDetailsBody">
+<p>This example uses AfterFunc to define a function which waits on a sync.Cond,
+stopping the wait when a context is canceled.
+</p>
+<pre class="Documentation-exampleCode">
+package main
+import (
+	&#34;context&#34;
+	&#34;fmt&#34;
+	&#34;sync&#34;
+	&#34;time&#34;
+)
+func main() {
+	waitOnCond := func(ctx context.Context, cond *sync.Cond, conditionMet func() bool) error {
+		stopf := context.AfterFunc(ctx, func() {
+			// We need to acquire cond.L here to be sure that the Broadcast
+			// below won&#39;t occur before the call to Wait, which would result
+			// in a missed signal (and deadlock).
+			cond.L.Lock()
+			defer cond.L.Unlock()
+			// If multiple goroutines are waiting on cond simultaneously,
+			// we need to make sure we wake up exactly this one.
+			// That means that we need to Broadcast to all of the goroutines,
+			// which will wake them all up.
+			//
+			// If there are N concurrent calls to waitOnCond, each of the goroutines
+			// will spuriously wake up O(N) other goroutines that aren&#39;t ready yet,
+			// so this will cause the overall CPU cost to be O(N²).
+			cond.Broadcast()
+		})
+		defer stopf()
+		// Since the wakeups are using Broadcast instead of Signal, this call to
+		// Wait may unblock due to some other goroutine&#39;s context being canceled,
+		// so to be sure that ctx is actually canceled we need to check it in a loop.
+		for !conditionMet() {
+			cond.Wait()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	cond := sync.NewCond(new(sync.Mutex))
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+			defer cancel()
+			cond.L.Lock()
+			defer cond.L.Unlock()
+			err := waitOnCond(ctx, cond, func() bool { return false })
+			fmt.Println(err)
+		})
+	}
+	wg.Wait()
+}
+</pre>
+<pre class="Documentation-exampleOutputContainer js-exampleOutputContainer"><span class="Documentation-exampleOutputLabel">Output:</span>
+<span class="Documentation-exampleOutput">context deadline exceeded
+context deadline exceeded
+context deadline exceeded
+context deadline exceeded
+</span></pre>
+</div>
+<div class="Documentation-exampleButtonsContainer">
+        <p class="Documentation-exampleError" role="alert" aria-atomic="true"></p>
+        <button class="Documentation-exampleShareButton" aria-label="Share Code">Share</button>
+        <button class="Documentation-exampleFormatButton" aria-label="Format Code">Format</button>
+        <button class="Documentation-exampleRunButton" aria-label="Run Code">Run</button>
+      </div></details>
+<details tabindex="-1" id="example-AfterFunc-Connection" class="Documentation-exampleDetails js-exampleContainer">
+<summary class="Documentation-exampleDetailsHeader">Example (Connection) <a href="#example-AfterFunc-Connection" title="Go to Example (Connection)" aria-label="Go to Example (Connection)">¶</a></summary>
+<div class="Documentation-exampleDetailsBody">
+<p>This example uses AfterFunc to define a function which reads from a net.Conn,
+stopping the read when a context is canceled.
+</p>
+<pre class="Documentation-exampleCode">
+package main
+import (
+	&#34;context&#34;
+	&#34;fmt&#34;
+	&#34;net&#34;
+	&#34;time&#34;
+)
+func main() {
+	readFromConn := func(ctx context.Context, conn net.Conn, b []byte) (n int, err error) {
+		stopc := make(chan struct{})
+		stop := context.AfterFunc(ctx, func() {
+			conn.SetReadDeadline(time.Now())
+			close(stopc)
+		})
+		n, err = conn.Read(b)
+		if !stop() {
+			// The AfterFunc was started.
+			// Wait for it to complete, and reset the Conn&#39;s deadline.
+			&lt;-stopc
+			conn.SetReadDeadline(time.Time{})
+			return n, ctx.Err()
+		}
+		return n, err
+	}
+	listener, err := net.Listen(&#34;tcp&#34;, &#34;localhost:0&#34;)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer listener.Close()
+	conn, err := net.Dial(listener.Addr().Network(), listener.Addr().String())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	b := make([]byte, 1024)
+	_, err = readFromConn(ctx, conn, b)
+	fmt.Println(err)
+}
+</pre>
+<pre class="Documentation-exampleOutputContainer js-exampleOutputContainer"><span class="Documentation-exampleOutputLabel">Output:</span>
+<span class="Documentation-exampleOutput">context deadline exceeded
+</span></pre>
+</div>
+<div class="Documentation-exampleButtonsContainer">
+        <p class="Documentation-exampleError" role="alert" aria-atomic="true"></p>
+        <button class="Documentation-exampleShareButton" aria-label="Share Code">Share</button>
+        <button class="Documentation-exampleFormatButton" aria-label="Format Code">Format</button>
+        <button class="Documentation-exampleRunButton" aria-label="Run Code">Run</button>
+      </div></details>
+<details tabindex="-1" id="example-AfterFunc-Merge" class="Documentation-exampleDetails js-exampleContainer">
+<summary class="Documentation-exampleDetailsHeader">Example (Merge) <a href="#example-AfterFunc-Merge" title="Go to Example (Merge)" aria-label="Go to Example (Merge)">¶</a></summary>
+<div class="Documentation-exampleDetailsBody">
+<p>This example uses AfterFunc to define a function which combines
+the cancellation signals of two Contexts.
+</p>
+<pre class="Documentation-exampleCode">
+package main
+import (
+	&#34;context&#34;
+	&#34;errors&#34;
+	&#34;fmt&#34;
+)
+func main() {
+	// mergeCancel returns a context that contains the values of ctx,
+	// and which is canceled when either ctx or cancelCtx is canceled.
+	mergeCancel := func(ctx, cancelCtx context.Context) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancelCause(ctx)
+		stop := context.AfterFunc(cancelCtx, func() {
+			cancel(context.Cause(cancelCtx))
+		})
+		return ctx, func() {
+			stop()
+			cancel(context.Canceled)
+		}
+	}
+	ctx1, cancel1 := context.WithCancelCause(context.Background())
+	defer cancel1(errors.New(&#34;ctx1 canceled&#34;))
+	ctx2, cancel2 := context.WithCancelCause(context.Background())
+	mergedCtx, mergedCancel := mergeCancel(ctx1, ctx2)
+	defer mergedCancel()
+	cancel2(errors.New(&#34;ctx2 canceled&#34;))
+	&lt;-mergedCtx.Done()
+	fmt.Println(context.Cause(mergedCtx))
+}
+</pre>
+<pre class="Documentation-exampleOutputContainer js-exampleOutputContainer"><span class="Documentation-exampleOutputLabel">Output:</span>
+<span class="Documentation-exampleOutput">ctx2 canceled
+</span></pre>
+</div>
+<div class="Documentation-exampleButtonsContainer">
+        <p class="Documentation-exampleError" role="alert" aria-atomic="true"></p>
+        <button class="Documentation-exampleShareButton" aria-label="Share Code">Share</button>
+        <button class="Documentation-exampleFormatButton" aria-label="Format Code">Format</button>
+        <button class="Documentation-exampleRunButton" aria-label="Run Code">Run</button>
+      </div></details>
+  
+        </div><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="Cause" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=289">Cause</a> <a class="Documentation-idLink" href="#Cause" title="Go to Cause" aria-label="Go to Cause">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+      <span class="Documentation-sinceVersionLabel">added in</span>
+      <span class="Documentation-sinceVersionVersion">go1.20</span>
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func Cause(c <a href="#Context">Context</a>) <a href="/builtin#error">error</a></pre>
+    </div>
+  <p>Cause returns a non-nil error explaining why c was canceled.
+The first cancellation of c or one of its parents sets the cause.
+If that cancellation happened via a call to CancelCauseFunc(err),
+then <a href="#Cause">Cause</a> returns err.
+Otherwise Cause(c) returns the same value as c.Err().
+Cause returns nil if c has not been canceled yet.
+</p>
+  
+        </div><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="WithCancel" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=241">WithCancel</a> <a class="Documentation-idLink" href="#WithCancel" title="Go to WithCancel" aria-label="Go to WithCancel">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithCancel(parent <a href="#Context">Context</a>) (ctx <a href="#Context">Context</a>, cancel <a href="#CancelFunc">CancelFunc</a>)</pre>
+    </div>
+  <p>WithCancel returns a derived context that points to the parent context
+but has a new Done channel. The returned context&#39;s Done channel is closed
+when the returned cancel function is called or when the parent context&#39;s
+Done channel is closed, whichever happens first.
+</p><p>Canceling this context releases resources associated with it, so code should
+call cancel as soon as the operations running in this <a href="#Context">Context</a> complete.
+</p>
+<details tabindex="-1" id="example-WithCancel" class="Documentation-exampleDetails js-exampleContainer">
+<summary class="Documentation-exampleDetailsHeader">Example <a href="#example-WithCancel" title="Go to Example" aria-label="Go to Example">¶</a></summary>
+<div class="Documentation-exampleDetailsBody">
+<p>This example demonstrates the use of a cancelable context to prevent a
+goroutine leak. By the end of the example function, the goroutine started
+by gen will return without leaking.
+</p>
+<pre class="Documentation-exampleCode">
+package main
+import (
+	&#34;context&#34;
+	&#34;fmt&#34;
+)
+func main() {
+	// gen generates integers in a separate goroutine and
+	// sends them to the returned channel.
+	// The callers of gen need to cancel the context once
+	// they are done consuming generated integers not to leak
+	// the internal goroutine started by gen.
+	gen := func(ctx context.Context) &lt;-chan int {
+		dst := make(chan int)
+		n := 1
+		go func() {
+			for {
+				select {
+				case &lt;-ctx.Done():
+					return // returning not to leak the goroutine
+				case dst &lt;- n:
+					n++
+				}
+			}
+		}()
+		return dst
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // cancel when we are finished consuming integers
+	for n := range gen(ctx) {
+		fmt.Println(n)
+		if n == 5 {
+			break
+		}
+	}
+}
+</pre>
+<pre class="Documentation-exampleOutputContainer js-exampleOutputContainer"><span class="Documentation-exampleOutputLabel">Output:</span>
+<span class="Documentation-exampleOutput">1
+2
+3
+4
+5
+</span></pre>
+</div>
+<div class="Documentation-exampleButtonsContainer">
+        <p class="Documentation-exampleError" role="alert" aria-atomic="true"></p>
+        <button class="Documentation-exampleShareButton" aria-label="Share Code">Share</button>
+        <button class="Documentation-exampleFormatButton" aria-label="Format Code">Format</button>
+        <button class="Documentation-exampleRunButton" aria-label="Run Code">Run</button>
+      </div></details>
+  
+        </div><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="WithCancelCause" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=269">WithCancelCause</a> <a class="Documentation-idLink" href="#WithCancelCause" title="Go to WithCancelCause" aria-label="Go to WithCancelCause">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+      <span class="Documentation-sinceVersionLabel">added in</span>
+      <span class="Documentation-sinceVersionVersion">go1.20</span>
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithCancelCause(parent <a href="#Context">Context</a>) (ctx <a href="#Context">Context</a>, cancel <a href="#CancelCauseFunc">CancelCauseFunc</a>)</pre>
+    </div>
+  <p>WithCancelCause behaves like <a href="#WithCancel">WithCancel</a> but returns a <a href="#CancelCauseFunc">CancelCauseFunc</a> instead of a <a href="#CancelFunc">CancelFunc</a>.
+Calling cancel with a non-nil error (the &#34;cause&#34;) records that error in ctx;
+it can then be retrieved using Cause(ctx).
+Calling cancel with nil sets the cause to Canceled.
+</p><p>Example use:
+</p><pre>ctx, cancel := context.WithCancelCause(parent)
+cancel(myError)
+ctx.Err() // returns context.Canceled
+context.Cause(ctx) // returns myError
+</pre>
+  
+        </div><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="WithDeadline" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=626">WithDeadline</a> <a class="Documentation-idLink" href="#WithDeadline" title="Go to WithDeadline" aria-label="Go to WithDeadline">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithDeadline(parent <a href="#Context">Context</a>, d <a href="/time">time</a>.<a href="/time#Time">Time</a>) (<a href="#Context">Context</a>, <a href="#CancelFunc">CancelFunc</a>)</pre>
+    </div>
+  <p>WithDeadline returns a derived context that points to the parent context
+but has the deadline adjusted to be no later than d. If the parent&#39;s
+deadline is already earlier than d, WithDeadline(parent, d) is semantically
+equivalent to parent. The returned <a href="#Context.Done">Context.Done</a> channel is closed when
+the deadline expires, when the returned cancel function is called,
+or when the parent context&#39;s Done channel is closed, whichever happens first.
+</p><p>Canceling this context releases resources associated with it, so code should
+call cancel as soon as the operations running in this <a href="#Context">Context</a> complete.
+</p>
+<details tabindex="-1" id="example-WithDeadline" class="Documentation-exampleDetails js-exampleContainer">
+<summary class="Documentation-exampleDetailsHeader">Example <a href="#example-WithDeadline" title="Go to Example" aria-label="Go to Example">¶</a></summary>
+<div class="Documentation-exampleDetailsBody">
+<p>This example passes a context with an arbitrary deadline to tell a blocking
+function that it should abandon its work as soon as it gets to it.
+</p>
+<pre class="Documentation-exampleCode">
+d := time.Now().Add(shortDuration)
+ctx, cancel := context.WithDeadline(context.Background(), d)
+// Even though ctx will be expired, it is good practice to call its
+// cancellation function in any case. Failure to do so may keep the
+// context and its parent alive longer than necessary.
+defer cancel()
+select {
+case &lt;-neverReady:
+	fmt.Println(&#34;ready&#34;)
+case &lt;-ctx.Done():
+	fmt.Println(ctx.Err())
+}
+</pre>
+<pre class="Documentation-exampleOutputContainer js-exampleOutputContainer"><span class="Documentation-exampleOutputLabel">Output:</span>
+<span class="Documentation-exampleOutput">context deadline exceeded
+</span></pre>
+</div>
+</details>
+  
+        </div><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="WithDeadlineCause" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=633">WithDeadlineCause</a> <a class="Documentation-idLink" href="#WithDeadlineCause" title="Go to WithDeadlineCause" aria-label="Go to WithDeadlineCause">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+      <span class="Documentation-sinceVersionLabel">added in</span>
+      <span class="Documentation-sinceVersionVersion">go1.21.0</span>
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithDeadlineCause(parent <a href="#Context">Context</a>, d <a href="/time">time</a>.<a href="/time#Time">Time</a>, cause <a href="/builtin#error">error</a>) (<a href="#Context">Context</a>, <a href="#CancelFunc">CancelFunc</a>)</pre>
+    </div>
+  <p>WithDeadlineCause behaves like <a href="#WithDeadline">WithDeadline</a> but also sets the cause of the
+returned Context when the deadline is exceeded. The returned <a href="#CancelFunc">CancelFunc</a> does
+not set the cause.
+</p>
+  
+        </div><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="WithTimeout" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=704">WithTimeout</a> <a class="Documentation-idLink" href="#WithTimeout" title="Go to WithTimeout" aria-label="Go to WithTimeout">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithTimeout(parent <a href="#Context">Context</a>, timeout <a href="/time">time</a>.<a href="/time#Duration">Duration</a>) (<a href="#Context">Context</a>, <a href="#CancelFunc">CancelFunc</a>)</pre>
+    </div>
+  <p>WithTimeout returns WithDeadline(parent, time.Now().Add(timeout)).
+</p><p>Canceling this context releases resources associated with it, so code should
+call cancel as soon as the operations running in this <a href="#Context">Context</a> complete:
+</p><pre>func slowOperationWithTimeout(ctx context.Context) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()  // releases resources if slowOperation completes before timeout elapses
+	return slowOperation(ctx)
+}
+</pre>
+<details tabindex="-1" id="example-WithTimeout" class="Documentation-exampleDetails js-exampleContainer">
+<summary class="Documentation-exampleDetailsHeader">Example <a href="#example-WithTimeout" title="Go to Example" aria-label="Go to Example">¶</a></summary>
+<div class="Documentation-exampleDetailsBody">
+<p>This example passes a context with a timeout to tell a blocking function that
+it should abandon its work after the timeout elapses.
+</p>
+<pre class="Documentation-exampleCode">
+// Pass a context with a timeout to tell a blocking function that it
+// should abandon its work after the timeout elapses.
+ctx, cancel := context.WithTimeout(context.Background(), shortDuration)
+defer cancel()
+select {
+case &lt;-neverReady:
+	fmt.Println(&#34;ready&#34;)
+case &lt;-ctx.Done():
+	fmt.Println(ctx.Err()) // prints &#34;context deadline exceeded&#34;
+}
+</pre>
+<pre class="Documentation-exampleOutputContainer js-exampleOutputContainer"><span class="Documentation-exampleOutputLabel">Output:</span>
+<span class="Documentation-exampleOutput">context deadline exceeded
+</span></pre>
+</div>
+</details>
+  
+        </div><div class="Documentation-function">
+	  
+  
+  
+    <h4 tabindex="-1" id="WithTimeoutCause" data-kind="function" class="Documentation-functionHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=711">WithTimeoutCause</a> <a class="Documentation-idLink" href="#WithTimeoutCause" title="Go to WithTimeoutCause" aria-label="Go to WithTimeoutCause">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+      <span class="Documentation-sinceVersionLabel">added in</span>
+      <span class="Documentation-sinceVersionVersion">go1.21.0</span>
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithTimeoutCause(parent <a href="#Context">Context</a>, timeout <a href="/time">time</a>.<a href="/time#Duration">Duration</a>, cause <a href="/builtin#error">error</a>) (<a href="#Context">Context</a>, <a href="#CancelFunc">CancelFunc</a>)</pre>
+    </div>
+  <p>WithTimeoutCause behaves like <a href="#WithTimeout">WithTimeout</a> but also sets the cause of the
+returned Context when the timeout expires. The returned <a href="#CancelFunc">CancelFunc</a> does
+not set the cause.
+</p>
+  
+        </div></section>
+  <h3 tabindex="-1" id="pkg-types" class="Documentation-typesHeader">Types <a href="#pkg-types" title="Go to Types" aria-label="Go to Types">¶</a></h3>
+  <section class="Documentation-types"><div class="Documentation-type">
+      
+  
+  
+    <h4 tabindex="-1" id="CancelCauseFunc" data-kind="type" class="Documentation-typeHeader">
+      <span>type <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=256">CancelCauseFunc</a> <a class="Documentation-idLink" href="#CancelCauseFunc" title="Go to CancelCauseFunc" aria-label="Go to CancelCauseFunc">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+      <span class="Documentation-sinceVersionLabel">added in</span>
+      <span class="Documentation-sinceVersionVersion">go1.20</span>
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>type CancelCauseFunc func(cause <a href="/builtin#error">error</a>)</pre>
+    </div>
+  <p>A CancelCauseFunc behaves like a <a href="#CancelFunc">CancelFunc</a> but additionally sets the cancellation cause.
+This cause can be retrieved by calling <a href="#Cause">Cause</a> on the canceled Context or on
+any of its derived Contexts.
+</p><p>If the context has already been canceled, CancelCauseFunc does not set the cause.
+For example, if childContext is derived from parentContext:
+</p><ul class="Documentation-bulletList">
+  <li>if parentContext is canceled with cause1 before childContext is canceled with cause2,
+then Cause(parentContext) == Cause(childContext) == cause1</li>
+  <li>if childContext is canceled with cause2 before parentContext is canceled with cause1,
+then Cause(parentContext) == cause1 and Cause(childContext) == cause2</li>
+</ul>
+  
+    </div><div class="Documentation-type">
+      
+  
+  
+    <h4 tabindex="-1" id="CancelFunc" data-kind="type" class="Documentation-typeHeader">
+      <span>type <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=232">CancelFunc</a> <a class="Documentation-idLink" href="#CancelFunc" title="Go to CancelFunc" aria-label="Go to CancelFunc">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>type CancelFunc func()</pre>
+    </div>
+  <p>A CancelFunc tells an operation to abandon its work.
+A CancelFunc does not wait for the work to stop.
+A CancelFunc may be called by multiple goroutines simultaneously.
+After the first call, subsequent calls to a CancelFunc do nothing.
+</p>
+  
+    </div><div class="Documentation-type">
+      
+  
+  
+    <h4 tabindex="-1" id="Context" data-kind="type" class="Documentation-typeHeader">
+      <span>type <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=72">Context</a> <a class="Documentation-idLink" href="#Context" title="Go to Context" aria-label="Go to Context">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>type Context interface {
+<span id="Context.Deadline" data-kind="method">	<span class="comment">// Deadline returns the time when work done on behalf of this context</span>
+</span>	<span class="comment">// should be canceled. Deadline returns ok==false when no deadline is</span>
+	<span class="comment">// set. Successive calls to Deadline return the same results.</span>
+	Deadline() (deadline <a href="/time">time</a>.<a href="/time#Time">Time</a>, ok <a href="/builtin#bool">bool</a>)
+<span id="Context.Done" data-kind="method">	<span class="comment">// Done returns a channel that&#39;s closed when work done on behalf of this</span>
+</span>	<span class="comment">// context should be canceled. Done may return nil if this context can</span>
+	<span class="comment">// never be canceled. Successive calls to Done return the same value.</span>
+	<span class="comment">// The close of the Done channel may happen asynchronously,</span>
+	<span class="comment">// after the cancel function returns.</span>
+	<span class="comment">//</span>
+	<span class="comment">// WithCancel arranges for Done to be closed when cancel is called;</span>
+	<span class="comment">// WithDeadline arranges for Done to be closed when the deadline</span>
+	<span class="comment">// expires; WithTimeout arranges for Done to be closed when the timeout</span>
+	<span class="comment">// elapses.</span>
+	<span class="comment">//</span>
+	<span class="comment">// Done is provided for use in select statements:</span>
+	<span class="comment">//</span>
+	<span class="comment">//  // Stream generates values with DoSomething and sends them to out</span>
+	<span class="comment">//  // until DoSomething returns an error or ctx.Done is closed.</span>
+	<span class="comment">//  func Stream(ctx context.Context, out chan&lt;- Value) error {</span>
+	<span class="comment">//  	for {</span>
+	<span class="comment">//  		v, err := DoSomething(ctx)</span>
+	<span class="comment">//  		if err != nil {</span>
+	<span class="comment">//  			return err</span>
+	<span class="comment">//  		}</span>
+	<span class="comment">//  		select {</span>
+	<span class="comment">//  		case &lt;-ctx.Done():</span>
+	<span class="comment">//  			return ctx.Err()</span>
+	<span class="comment">//  		case out &lt;- v:</span>
+	<span class="comment">//  		}</span>
+	<span class="comment">//  	}</span>
+	<span class="comment">//  }</span>
+	<span class="comment">//</span>
+	<span class="comment">// See <a href="https://go.dev/blog/pipelines">https://go.dev/blog/pipelines</a> for more examples of how to use</span>
+	<span class="comment">// a Done channel for cancellation.</span>
+	Done() &lt;-chan struct{}
+<span id="Context.Err" data-kind="method">	<span class="comment">// If Done is not yet closed, Err returns nil.</span>
+</span>	<span class="comment">// If Done is closed, Err returns a non-nil error explaining why:</span>
+	<span class="comment">// DeadlineExceeded if the context&#39;s deadline passed,</span>
+	<span class="comment">// or Canceled if the context was canceled for some other reason.</span>
+	<span class="comment">// After Err returns a non-nil error, successive calls to Err return the same error.</span>
+	Err() <a href="/builtin#error">error</a>
+<span id="Context.Value" data-kind="method">	<span class="comment">// Value returns the value associated with this context for key, or nil</span>
+</span>	<span class="comment">// if no value is associated with key. Successive calls to Value with</span>
+	<span class="comment">// the same key returns the same result.</span>
+	<span class="comment">//</span>
+	<span class="comment">// Use context values only for request-scoped data that transits</span>
+	<span class="comment">// processes and API boundaries, not for passing optional parameters to</span>
+	<span class="comment">// functions.</span>
+	<span class="comment">//</span>
+	<span class="comment">// A key identifies a specific value in a Context. Functions that wish</span>
+	<span class="comment">// to store values in Context typically allocate a key in a global</span>
+	<span class="comment">// variable then use that key as the argument to context.WithValue and</span>
+	<span class="comment">// Context.Value. A key can be any type that supports equality;</span>
+	<span class="comment">// packages should define keys as an unexported type to avoid</span>
+	<span class="comment">// collisions.</span>
+	<span class="comment">//</span>
+	<span class="comment">// Packages that define a Context key should provide type-safe accessors</span>
+	<span class="comment">// for the values stored using that key:</span>
+	<span class="comment">//</span>
+	<span class="comment">// 	// Package user defines a User type that&#39;s stored in Contexts.</span>
+	<span class="comment">// 	package user</span>
+	<span class="comment">//</span>
+	<span class="comment">// 	import &#34;context&#34;</span>
+	<span class="comment">//</span>
+	<span class="comment">// 	// User is the type of value stored in the Contexts.</span>
+	<span class="comment">// 	type User struct {...}</span>
+	<span class="comment">//</span>
+	<span class="comment">// 	// key is an unexported type for keys defined in this package.</span>
+	<span class="comment">// 	// This prevents collisions with keys defined in other packages.</span>
+	<span class="comment">// 	type key int</span>
+	<span class="comment">//</span>
+	<span class="comment">// 	// userKey is the key for user.User values in Contexts. It is</span>
+	<span class="comment">// 	// unexported; clients use user.NewContext and user.FromContext</span>
+	<span class="comment">// 	// instead of using this key directly.</span>
+	<span class="comment">// 	var userKey key</span>
+	<span class="comment">//</span>
+	<span class="comment">// 	// NewContext returns a new Context that carries value u.</span>
+	<span class="comment">// 	func NewContext(ctx context.Context, u *User) context.Context {</span>
+	<span class="comment">// 		return context.WithValue(ctx, userKey, u)</span>
+	<span class="comment">// 	}</span>
+	<span class="comment">//</span>
+	<span class="comment">// 	// FromContext returns the User value stored in ctx, if any.</span>
+	<span class="comment">// 	func FromContext(ctx context.Context) (*User, bool) {</span>
+	<span class="comment">// 		u, ok := ctx.Value(userKey).(*User)</span>
+	<span class="comment">// 		return u, ok</span>
+	<span class="comment">// 	}</span>
+	Value(key <a href="/builtin#any">any</a>) <a href="/builtin#any">any</a>
+}</pre>
+    </div>
+  <p>A Context carries a deadline, a cancellation signal, and other values across
+API boundaries.
+</p><p>Context&#39;s methods may be called by multiple goroutines simultaneously.
+</p>
+<div class="Documentation-typeFunc">
+    
+  
+  
+    <h4 tabindex="-1" id="Background" data-kind="function" class="Documentation-typeFuncHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=216">Background</a> <a class="Documentation-idLink" href="#Background" title="Go to Background" aria-label="Go to Background">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func Background() <a href="#Context">Context</a></pre>
+    </div>
+  <p>Background returns a non-nil, empty <a href="#Context">Context</a>. It is never canceled, has no
+values, and has no deadline. It is typically used by the main function,
+initialization, and tests, and as the top-level Context for incoming
+requests.
+</p>
+  
+  </div><div class="Documentation-typeFunc">
+    
+  
+  
+    <h4 tabindex="-1" id="TODO" data-kind="function" class="Documentation-typeFuncHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=224">TODO</a> <a class="Documentation-idLink" href="#TODO" title="Go to TODO" aria-label="Go to TODO">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func TODO() <a href="#Context">Context</a></pre>
+    </div>
+  <p>TODO returns a non-nil, empty <a href="#Context">Context</a>. Code should use context.TODO when
+it&#39;s unclear which Context to use or it is not yet available (because the
+surrounding function has not yet been extended to accept a Context
+parameter).
+</p>
+  
+  </div><div class="Documentation-typeFunc">
+    
+  
+  
+    <h4 tabindex="-1" id="WithValue" data-kind="function" class="Documentation-typeFuncHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=728">WithValue</a> <a class="Documentation-idLink" href="#WithValue" title="Go to WithValue" aria-label="Go to WithValue">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithValue(parent <a href="#Context">Context</a>, key, val <a href="/builtin#any">any</a>) <a href="#Context">Context</a></pre>
+    </div>
+  <p>WithValue returns a derived context that points to the parent Context.
+In the derived context, the value associated with key is val.
+</p><p>Use context Values only for request-scoped data that transits processes and
+APIs, not for passing optional parameters to functions.
+</p><p>The provided key must be comparable and should not be of type
+string or any other built-in type to avoid collisions between
+packages using context. Users of WithValue should define their own
+types for keys. To avoid allocating when assigning to an
+interface{}, context keys often have concrete type
+struct{}. Alternatively, exported context key variables&#39; static
+type should be a pointer or interface.
+</p>
+<details tabindex="-1" id="example-WithValue" class="Documentation-exampleDetails js-exampleContainer">
+<summary class="Documentation-exampleDetailsHeader">Example <a href="#example-WithValue" title="Go to Example" aria-label="Go to Example">¶</a></summary>
+<div class="Documentation-exampleDetailsBody">
+<p>This example demonstrates how a value can be passed to the context
+and also how to retrieve it if it exists.
+</p>
+<pre class="Documentation-exampleCode">
+package main
+import (
+	&#34;context&#34;
+	&#34;fmt&#34;
+)
+func main() {
+	type favContextKey string
+	f := func(ctx context.Context, k favContextKey) {
+		if v := ctx.Value(k); v != nil {
+			fmt.Println(&#34;found value:&#34;, v)
+			return
+		}
+		fmt.Println(&#34;key not found:&#34;, k)
+	}
+	k := favContextKey(&#34;language&#34;)
+	ctx := context.WithValue(context.Background(), k, &#34;Go&#34;)
+	f(ctx, k)
+	f(ctx, favContextKey(&#34;color&#34;))
+}
+</pre>
+<pre class="Documentation-exampleOutputContainer js-exampleOutputContainer"><span class="Documentation-exampleOutputLabel">Output:</span>
+<span class="Documentation-exampleOutput">found value: Go
+key not found: color
+</span></pre>
+</div>
+<div class="Documentation-exampleButtonsContainer">
+        <p class="Documentation-exampleError" role="alert" aria-atomic="true"></p>
+        <button class="Documentation-exampleShareButton" aria-label="Share Code">Share</button>
+        <button class="Documentation-exampleFormatButton" aria-label="Format Code">Format</button>
+        <button class="Documentation-exampleRunButton" aria-label="Run Code">Run</button>
+      </div></details>
+  
+  </div><div class="Documentation-typeFunc">
+    
+  
+  
+    <h4 tabindex="-1" id="WithoutCancel" data-kind="function" class="Documentation-typeFuncHeader">
+      <span>func <a class="Documentation-source" href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go;l=586">WithoutCancel</a> <a class="Documentation-idLink" href="#WithoutCancel" title="Go to WithoutCancel" aria-label="Go to WithoutCancel">¶</a></span>
+  <span class="Documentation-sinceVersion">
+    
+      <span class="Documentation-sinceVersionLabel">added in</span>
+      <span class="Documentation-sinceVersionVersion">go1.21.0</span>
+    
+  </span>
+</h4>
+    
+    <div class="Documentation-declaration">
+      <pre>func WithoutCancel(parent <a href="#Context">Context</a>) <a href="#Context">Context</a></pre>
+    </div>
+  <p>WithoutCancel returns a derived context that points to the parent context
+and is not canceled when parent is canceled.
+The returned context returns no Deadline or Err, and its Done channel is nil.
+Calling <a href="#Cause">Cause</a> on the returned context returns nil.
+</p>
+  
+  </div>
+  
+    </div></section></div> 
+      
+    </div>
+  </div>
+        
+      
+      
+        
+  <div class="UnitFiles js-unitFiles">
+    <h2 class="UnitFiles-title" id="section-sourcefiles">
+      
+      Source Files
+      <a class="UnitFiles-idLink" href="#section-sourcefiles" title="Go to Source Files" aria-label="Go to Source Files">¶</a>
+    </h2><div class="UnitFiles-titleLink">
+      <a href="https://cs.opensource.google/go/go/+/go1.27.0:src/context" target="_blank" rel="noopener">View all Source files</a>
+    </div><div>
+      <ul class="UnitFiles-fileList"><li><a href="https://cs.opensource.google/go/go/+/go1.27.0:src/context/context.go" target="_blank" rel="noopener" title="context.go">context.go</a></li></ul>
+    </div>
+  </div>
+      
+      
+    </div>
+  </div>
+  <div id="showInternal-description" hidden> Click to show internal directories. </div>
+  <div id="hideInternal-description" hidden> Click to hide internal directories. </div>
+</article>
+    <footer class="go-Main-footer"></footer>
+  </main>
+    
+  <footer class="go-Footer">
+    
+    <div class="go-Footer-links">
+      <div class="go-Footer-linkColumn">
+        <a href="https://go.dev/solutions" class="go-Footer-link go-Footer-link--primary"
+            data-gtmc="footer link">
+          Why Go
+        </a>
+        <a href="https://go.dev/solutions#use-cases" class="go-Footer-link"
+            data-gtmc="footer link">
+          Use Cases
+        </a>
+        <a href="https://go.dev/solutions#case-studies" class="go-Footer-link"
+            data-gtmc="footer link">
+          Case Studies
+        </a>
+      </div>
+      <div class="go-Footer-linkColumn">
+        <a href="https://learn.go.dev/" class="go-Footer-link go-Footer-link--primary"
+            data-gtmc="footer link">
+          Get Started
+        </a>
+        <a href="https://play.golang.org" class="go-Footer-link" data-gtmc="footer link">
+          Playground
+        </a>
+        <a href="https://tour.golang.org" class="go-Footer-link" data-gtmc="footer link">
+          Tour
+        </a>
+        <a href="https://stackoverflow.com/questions/tagged/go?tab=Newest" class="go-Footer-link"
+            data-gtmc="footer link">
+          Stack Overflow
+        </a>
+        <a href="https://go.dev/help" class="go-Footer-link"
+            data-gtmc="footer link">
+          Help
+        </a>
+      </div>
+      <div class="go-Footer-linkColumn">
+        <a href="https://pkg.go.dev" class="go-Footer-link go-Footer-link--primary"
+            data-gtmc="footer link">
+          Packages
+        </a>
+        <a href="/std" class="go-Footer-link" data-gtmc="footer link">
+          Standard Library
+        </a>
+        <a href="/golang.org/x" class="go-Footer-link" data-gtmc="footer link">
+          Sub-repositories
+        </a>
+        <a href="https://pkg.go.dev/about" class="go-Footer-link" data-gtmc="footer link">
+          About Go Packages
+        </a>
+         <a href="/api" class="go-Footer-link" data-gtmc="footer link">
+          pkg.go.dev API
+        </a>
+      </div>
+      <div class="go-Footer-linkColumn">
+        <a href="https://go.dev/project" class="go-Footer-link go-Footer-link--primary"
+            data-gtmc="footer link">
+          About
+        </a>
+        <a href="https://go.dev/dl/" class="go-Footer-link" data-gtmc="footer link">Download</a>
+        <a href="https://go.dev/blog" class="go-Footer-link" data-gtmc="footer link">Blog</a>
+        <a href="https://github.com/golang/go/issues" class="go-Footer-link" data-gtmc="footer link">
+          Issue Tracker
+        </a>
+        <a href="https://go.dev/doc/devel/release.html" class="go-Footer-link"
+            data-gtmc="footer link">
+          Release Notes
+        </a>
+        <a href="https://go.dev/brand" class="go-Footer-link" data-gtmc="footer link">
+          Brand Guidelines
+        </a>
+        <a href="https://go.dev/conduct" class="go-Footer-link" data-gtmc="footer link">
+          Code of Conduct
+        </a>
+      </div>
+      <div class="go-Footer-linkColumn">
+        <a href="https://www.twitter.com/golang" class="go-Footer-link go-Footer-link--primary"
+            data-gtmc="footer link">
+          Connect
+        </a>
+        <a href="https://www.twitter.com/golang" class="go-Footer-link" data-gtmc="footer link">
+          Twitter
+        </a>
+        <a href="https://github.com/golang" class="go-Footer-link" data-gtmc="footer link">GitHub</a>
+        <a href="https://invite.slack.golangbridge.org/" class="go-Footer-link"
+            data-gtmc="footer link">
+          Slack
+        </a>
+        <a href="https://reddit.com/r/golang" class="go-Footer-link" data-gtmc="footer link">
+          r/golang
+        </a>
+        <a href="https://www.meetup.com/pro/go" class="go-Footer-link" data-gtmc="footer link">
+          Meetup
+        </a>
+        <a href="https://golangweekly.com/" class="go-Footer-link" data-gtmc="footer link">
+          Golang Weekly
+        </a>
+      </div>
+    </div>
+    <div class="go-Footer-bottom">
+      
+      <ul class="go-Footer-listRow">
+        <li class="go-Footer-listItem">
+          <a href="https://go.dev/copyright" data-gtmc="footer link">Copyright</a>
+        </li>
+        <li class="go-Footer-listItem">
+          <a href="https://go.dev/tos" data-gtmc="footer link">Terms of Service</a>
+        </li>
+        <li class="go-Footer-listItem">
+          <a href="http://www.google.com/intl/en/policies/privacy/" data-gtmc="footer link"
+              target="_blank" rel="noopener">
+            Privacy Policy
+          </a>
+        </li>
+        <li class="go-Footer-listItem">
+          <a href="https://go.dev/s/pkgsite-feedback" target="_blank" rel="noopener"
+              data-gtmc="footer link">
+            Report an Issue
+          </a>
+        </li>
+        <li class="go-Footer-listItem">
+          <button class="go-Button go-Button--text go-Footer-toggleTheme js-toggleTheme" aria-label="Theme Toggle">
+            
+            
+            
+            <p> Theme Toggle </p>
+          </button>
+        </li>
+        <li class="go-Footer-listItem">
+          <button class="go-Button go-Button--text go-Footer-keyboard js-openShortcuts" aria-label="Shorcuts Modal">
+            
+            <p> Shortcuts Modal </p>
+          </button>
+        </li>
+      </ul>
+      <a class="go-Footer-googleLogo" href="https://google.com" target="_blank"rel="noopener"
+          data-gtmc="footer link">
+        
+      </a>
+    </div>
+  </footer>
+    
+  <dialog id="jump-to-modal" class="JumpDialog go-Modal go-Modal--md js-modal">
+    <form method="dialog" data-gmtc="jump to form" aria-label="Jump to Identifier">
+      <div class="Dialog-title go-Modal-header">
+        <h2>Jump to</h2>
+        <button
+          class="go-Button go-Button--inline"
+          type="button"
+          data-modal-close
+          data-gtmc="modal button"
+          aria-label="Close"
+        >
+          
+        </button>
+      </div>
+      <div class="JumpDialog-filter">
+        <input class="JumpDialog-input go-Input" autocomplete="off" type="text">
+      </div>
+      <div class="JumpDialog-body go-Modal-body">
+        <div class="JumpDialog-list"></div>
+      </div>
+      <div class="go-Modal-actions">
+        <button class="go-Button" data-test-id="close-dialog">Close</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="ShortcutsDialog go-Modal go-Modal--sm js-modal">
+    <form method="dialog">
+      <div class="go-Modal-header">
+        <h2>Keyboard shortcuts</h2>
+        <button
+          class="go-Button go-Button--inline"
+          type="button"
+          data-modal-close
+          data-gtmc="modal button"
+          aria-label="Close"
+        >
+          
+        </button>
+      </div>
+      <div class="go-Modal-body">
+        <table>
+          <tbody>
+            <tr><td class="ShortcutsDialog-key">
+              <strong>?</strong></td><td> : This menu</td>
+            </tr>
+            <tr><td class="ShortcutsDialog-key">
+              <strong>/</strong></td><td> : Search site</td>
+            </tr>
+            <tr><td class="ShortcutsDialog-key">
+              <strong>f</strong> or <strong>F</strong></td><td> : Jump to</td>
+            </tr>
+            <tr>
+              <td class="ShortcutsDialog-key"><strong>y</strong> or <strong>Y</strong></td>
+              <td> : Canonical URL</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="go-Modal-actions">
+        <button class="go-Button" data-test-id="close-dialog">Close</button>
+      </div>
+    </form>
+  </dialog>
+    
+      <section class="Cookie-notice js-cookieNotice">
+        <div>go.dev uses cookies from Google to deliver and enhance the quality of its services and to
+        analyze traffic. <a target=_blank href="https://policies.google.com/technologies/cookies">Learn more.</a></div>
+        <div><button class="go-Button">Okay</button></div>
+      </section>
+    
+    
+      
+      <noscript>
+        <iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W8MVQXG"
+                height="0" width="0" style="display:none;visibility:hidden">
+        </iframe>
+      </noscript>
+    
+    
+  
+  <div class="js-canonicalURLPath" data-canonical-url-path="/context@go1.27.0" hidden></div>
+  <div class="js-playgroundVars" data-modulepath="std" data-version="v1.27.0" hidden></div>
+  
+  
+  </body>
+</html>

@@ -1,5 +1,7 @@
 package provider
 
+import "strings"
+
 // CacheVerdict reports whether re-sending a request's prefix to an endpoint is
 // cheap. It drives whether the agent is offered a way to compact its own
 // context mid-turn: compaction pays for itself only when every step re-pays
@@ -56,7 +58,30 @@ func StaticCacheVerdict(p Provider) CacheVerdict {
 	case "ollama":
 		return CacheAbsent
 	}
+
+	// Supplement to the switch above, not a replacement for it: Ollama's
+	// OpenAI-compatible endpoint is routinely configured in the generic "openai"
+	// slot, where p.ID() is "openai" and the case above never fires. Ollama
+	// reports no cached-token field at all, so the observer is blind there and
+	// can only reach CacheAbsent by exhausting its whole window — costing the
+	// first turn of a fresh install the compaction it should have had.
+	//
+	// Strictly additive, and it must stay that way: a URL that looks local can
+	// never imply CacheSupported (see the router note above), it can only
+	// recognise an endpoint already known not to cache.
+	if r, ok := p.(BaseURLReporter); ok && isOllamaBaseURL(r.BaseURL()) {
+		return CacheAbsent
+	}
 	return CacheUnknown
+}
+
+// ollamaDefaultPort is the port Ollama listens on. Matching it is what lets an
+// Ollama server configured in an OpenAI-compatible slot still be recognised.
+const ollamaDefaultPort = ":11434"
+
+// isOllamaBaseURL reports whether a base URL addresses an Ollama server.
+func isOllamaBaseURL(baseURL string) bool {
+	return strings.Contains(baseURL, ollamaDefaultPort)
 }
 
 // cacheObservationSteps is how many steps with a repeated prefix must report

@@ -90,9 +90,33 @@ export interface MessageInfo {
   finish?: string;
   error?: string;
   interrupted?: Interruption;
+  /** How far this turn got on its way to the model. Assistant messages only. */
+  delivery?: Delivery;
   cost?: number;
   tokens?: TokenCounts;
   createdAt: number;
+}
+
+/**
+ * How far a turn got on its way to the model, and how long the model took to
+ * say its first word. It lives on the assistant message; the prompt it answers
+ * is `parentId`, which is how the delivery ticks pair the two.
+ */
+export interface Delivery {
+  /** When the winning request left for the provider. Re-stamped per retry. */
+  dispatchedAt?: number;
+  /** When the provider answered 200 and the stream opened. */
+  connectedAt?: number;
+  /** When the first content event arrived — text, reasoning or a tool call. */
+  firstTokenAt?: number;
+  /** Time to first token: the model's own latency, in ms. */
+  ttftMs?: number;
+  /** What ogcode spent before the request left — prompt build, compaction, backoff. */
+  queuedMs?: number;
+  /** How many attempts the connection took. Above 1 means the stream reopened. */
+  attempts?: number;
+  /** Which event opened the response. */
+  firstTokenKind?: 'text' | 'reasoning' | 'tool';
 }
 
 export type InterruptReason =
@@ -152,6 +176,11 @@ export interface ToolState {
 export interface ReasoningPartData {
   text: string;
   signature?: string;
+  /** Opaque payload of a safety-redacted thinking block. Such a block, and one
+   *  whose thinking text the model withheld, has no text to show. */
+  redactedData?: string;
+  /** The model that produced this block; blocks are only replayable to it. */
+  model?: string;
 }
 
 // User-uploaded image attachment. Data is base64-encoded image bytes.
@@ -192,6 +221,21 @@ export function replyPermission(sessionId: string, permissionId: string, respons
     method: 'POST',
     body: JSON.stringify({ response }),
   });
+}
+
+// List the pending (unanswered) permission requests for a session. The UI uses
+// this to restore the approval queue when switching back to a session — the
+// agent loop stays blocked on each request even while it is off-screen.
+export function listPendingPermissions(sessionId: string): Promise<PendingPermissionAPI[]> {
+  return fetchAPI(`/session/${sessionId}/permission`);
+}
+
+export interface PendingPermissionAPI {
+  permissionId: string;
+  sessionId: string;
+  tool: string;
+  input: string;
+  patterns: string[];
 }
 
 export function abortSession(sessionId: string): Promise<void> {
@@ -236,6 +280,42 @@ export interface ConfigInfo {
 
 export function getConfig(): Promise<ConfigInfo> {
   return fetchAPI('/config');
+}
+
+// Resource usage API
+export interface ResourceSample {
+  at: number;
+  /** Resident set size in bytes — what the OS actually holds for the process. */
+  rss: number;
+  /** Bytes of live Go heap objects. */
+  heapInUse: number;
+  /** All memory the Go runtime holds from the OS, minus what it released back. */
+  goTotal: number;
+  /** Top-style: 100 is one saturated core, so it can exceed 100. */
+  cpuPercent: number;
+  goroutines: number;
+}
+
+export interface ResourceActivity {
+  /** What the process is busy with, e.g. "embedding memory". */
+  label: string;
+  done: number;
+  total: number;
+}
+
+export interface ResourceSnapshot {
+  /** Milliseconds between samples. */
+  interval: number;
+  cores: number;
+  /** Milliseconds since the process started. */
+  uptime: number;
+  /** Absent when nothing long-running is labelling itself. */
+  activity?: ResourceActivity | null;
+  samples: ResourceSample[];
+}
+
+export function getResources(): Promise<ResourceSnapshot> {
+  return fetchAPI('/resources');
 }
 
 // Memory config API
@@ -797,7 +877,6 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 // Search Config API
 export interface SearchConfig {
   enabled: boolean;
-  useRealProfile: boolean;
   // Deep-research pipeline tuning (see settings → web search).
   fetchTopK: number;
   pageChars: number;
@@ -940,4 +1019,15 @@ export function addExclude(directory: string, pattern: string): Promise<ExcludeE
 
 export function deleteExclude(id: string): Promise<void> {
   return fetchAPI(`/docindex/excludes/${id}`, { method: 'DELETE' });
+}
+
+// Skills API
+export interface Skill {
+  name: string;
+  description: string;
+  source: string;
+}
+
+export function listSkills(): Promise<Skill[]> {
+  return fetchAPI('/skills');
 }

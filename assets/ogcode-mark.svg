@@ -1,0 +1,11 @@
+<!-- ogcode mark - "Recall Loop"
+     One stroke that comes three quarters of the way round and then turns
+     inward instead of closing: the product recalls rather than replays, so
+     the loop never has to close.
+     Drawn on a 64 unit grid. Uses currentColor - set `color` on the parent,
+     or override `stroke` directly. For anything rendered at 20px or below use
+     ogcode-mark-small.svg instead: this cut's inner turn fills in. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="ogcode">
+  <path d="M55 32A23 23 0 0 0 32 9A23 23 0 0 0 9 32A23 23 0 0 0 32 55A15 15 0 0 0 45 32"
+        stroke="currentColor" stroke-width="6.5" stroke-linecap="round"/>
+</svg>

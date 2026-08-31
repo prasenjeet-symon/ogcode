@@ -22,12 +22,14 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/git"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
+	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/memory"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/plan"
 	"github.com/prasenjeet-symon/ogcode/internal/project"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/resource"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
@@ -61,12 +63,21 @@ type Server struct {
 	loopRunner      *agent.LoopRunner
 	mem             *memory.Memory
 	permissions     *permission.Manager
+	skillLoader     *skill.Loader
+	mcpManager      *mcp.Manager
+	// mcpConnect, when non-nil, dials the MCP servers lazily after the HTTP
+	// server starts listening (set in Start, invoked from the goroutine below).
+	mcpConnect func()
+	// mcpCancel cancels the lazy-connect context on shutdown so an in-flight
+	// OAuth/dial does not block past the server's lifetime.
+	mcpCancel context.CancelFunc
 
 	// Version check manager
 	versionManager *version.Manager
 
-	// Search bridge (optional — enabled via OGCODE_SEARCH_ENABLED=true)
-	searchBridge *search.BridgeProcess
+	// searchBackend is the active web-search backend, or nil when the user has
+	// turned search off. It is compiled in, so there is no process to manage.
+	searchBackend search.Backend
 
 	// PostHog analytics client (optional — enabled via the settings UI)
 	posthogClient *PostHogClient
@@ -86,6 +97,11 @@ type Server struct {
 	// gitMu serializes all repo-level git operations (worktree add/remove/prune,
 	// branch creation) to prevent concurrent writes from corrupting .git metadata.
 	gitMu sync.Mutex
+
+	// resources samples this process's own CPU/memory for the UI. It idles
+	// while no client is watching, so it costs nothing with no UI open.
+	resources       *resource.Sampler
+	resourcesCancel context.CancelFunc
 
 	// docindexMu protects docindexRunning.
 	docindexMu      sync.Mutex
@@ -125,6 +141,14 @@ func (s *Server) Start() error {
 	s.globalDB = globalDatabase
 
 	s.bus = bus.New(256)
+
+	// 2s cadence, 120 samples retained — a four-minute window, which is long
+	// enough to see a memory reindex spike rise and fall.
+	s.resources = resource.NewSampler(2*time.Second, 120)
+	resourceCtx, resourceCancel := context.WithCancel(context.Background())
+	s.resourcesCancel = resourceCancel
+	go s.resources.Run(resourceCtx)
+
 	s.store = session.NewStore(database)
 	s.planStore = plan.NewStore(database)
 	s.taskStore = task.NewStore(database)
@@ -189,44 +213,112 @@ func (s *Server) Start() error {
 	// directories and remote manifests are consulted; the standard project and
 	// global skill directories are scanned regardless, so a project with no
 	// config still picks up the skills a user has written.
-	skillCfg := config.Load(s.dir).Skills
+	fullCfg := config.Load(s.dir)
+	skillCfg := fullCfg.Skills
 	skillLoader := skill.NewLoader(skill.Config{
 		Paths:       skillCfg.Paths,
 		URLs:        skillCfg.URLs,
 		Permissions: skillCfg.Permissions,
 	})
 	toolRegistry.Register(tool.NewSkillTool(skillLoader))
+	s.skillLoader = skillLoader
 
-	// Search bridge — opt-in via OGCODE_SEARCH_ENABLED=true env var OR the settings UI.
-	// Must be started before loopRunner is built so RunSearchSession can be wired in.
-	searchEnabledEnv := strings.EqualFold(os.Getenv("OGCODE_SEARCH_ENABLED"), "true")
-	searchEnabledDB := false
-	if dbSearchCfg, err := session.GetSearchConfig(globalDatabase); err != nil {
-		slog.Warn("failed to read search config from DB", "err", err)
-	} else {
-		searchEnabledDB = dbSearchCfg.Enabled
+	// MCP servers: build the Manager now (cheap — binds the OAuth callback
+	// receiver only) but defer the actual connections to after the HTTP server
+	// is listening, via a background goroutine (s.mcpConnect). Connecting earlier
+	// blocked startup on slow/OAuth servers: an OAuth-requiring server could hold
+	// startup for up to authTimeout (5 min), during which no HTTP server was
+	// listening and the UI could not surface the OAuth prompt. With lazy connect
+	// the UI is live when the browser opens. Tools are registered as they
+	// arrive; the tool.Registry is locked for concurrent Register+ForAgent.
+	// Failures to connect to an individual server are logged but do not prevent
+	// startup; the server simply contributes no tools. Tools are registered as
+	// "mcp_<server>_<tool>" (the "mcp_" prefix makes the id match the "mcp_*"
+	// glob in the coding agent's toolset) and picked up automatically.
+	mcpMgr, mcpErr := mcp.New(context.Background(), fullCfg)
+	if mcpErr != nil {
+		slog.Warn("mcp: manager construction failed", "err", mcpErr)
 	}
-	var searchClient *search.BridgeClient
-	if searchEnabledEnv || searchEnabledDB {
-		cfg := search.ConfigFromEnv()
-		// DB config takes precedence for UseRealProfile over env var when DB is the source of truth.
-		if searchEnabledDB {
-			if dbSearchCfg, err := session.GetSearchConfig(globalDatabase); err == nil {
-				cfg.UseRealProfile = cfg.UseRealProfile || dbSearchCfg.UseRealProfile
-			}
+	s.mcpManager = mcpMgr
+	// A cancellable context for the lazy connect: shutdown cancels it so an
+	// in-flight OAuth/dial does not outlive the server (the goroutine unblocks
+	// via ctx cancellation rather than waiting out the 5-min authTimeout).
+	mcpCtx, mcpCancel := context.WithCancel(context.Background())
+	s.mcpCancel = mcpCancel
+	// Deferred connect runs after s.routes()/listener bind below; see the
+	// goroutine launched just before the HTTP server starts serving.
+	s.mcpConnect = func() {
+		tools, err := mcpMgr.Connect(mcpCtx)
+		for _, t := range tools {
+			toolRegistry.Register(t)
 		}
-		bridgeDir := os.Getenv("OGCODE_SEARCH_BRIDGE_DIR") // empty → auto-detect from binary
-		proc, err := search.StartBridge(context.Background(), cfg, bridgeDir)
 		if err != nil {
-			slog.Warn("search bridge unavailable; search tools disabled", "err", err)
-		} else {
-			s.searchBridge = proc
-			client := proc.Client()
-			searchClient = client
-			toolRegistry.Register(tool.WebSearchTool{Bridge: client})
-			toolRegistry.Register(tool.FetchPageTool{Bridge: client})
-			slog.Info("search bridge started; web_search and fetch_page tools registered")
+			slog.Warn("mcp: one or more servers failed to connect", "err", err)
 		}
+		if len(tools) > 0 {
+			slog.Info("mcp: tools registered after lazy connect", "count", len(tools))
+		}
+	}
+
+	// Web search. On by default — the backend is compiled into this binary, so
+	// there is nothing to install and nothing to start. It is resolved before
+	// loopRunner is built so RunSearchSession can be wired in.
+	//
+	// Precedence: OGCODE_SEARCH_ENABLED wins when set (either direction, for
+	// scripted and CI runs), otherwise the settings-screen toggle decides. A
+	// database that cannot be read leaves search on rather than silently
+	// stripping the research tools.
+	searchEnabled := true
+	if dbSearchCfg, err := session.GetSearchConfig(globalDatabase); err != nil {
+		slog.Warn("failed to read search config from DB; leaving web search enabled", "err", err)
+	} else {
+		searchEnabled = dbSearchCfg.Enabled
+	}
+	if v := os.Getenv("OGCODE_SEARCH_ENABLED"); v != "" {
+		searchEnabled = strings.EqualFold(v, "true")
+	}
+
+	// searchBackend is an interface, so only ever assign a non-nil implementation
+	// to it: a typed-nil pointer would still compare != nil and would get dead
+	// tools registered against it.
+	var searchBackend search.Backend
+	if searchEnabled {
+		native := search.NewNativeBackend()
+
+		// The HTTP path runs first and answers almost everything: it presents a
+		// real browser's TLS fingerprint, so the engines that used to refuse it
+		// no longer do, and it returns in about a second without touching the
+		// user's screen.
+		//
+		// Safari sits behind it for the cases that path cannot win — an engine
+		// that has started refusing this IP, a bot challenge, a page that only
+		// exists once its scripts have run. It costs several seconds and opens
+		// windows, so it runs when the fast path has produced nothing, not
+		// before. One pleasant consequence: someone who never hits a block is
+		// never asked for Automation permission, because the probe that raises
+		// that prompt only happens on first use.
+		//
+		// OGCODE_SEARCH_BROWSER picks a different arrangement:
+		//   native — HTTP only, for anyone who would rather no window ever opened
+		//   safari — browser first, for a network where the HTTP path is blocked
+		//            outright and trying it first is only latency
+		//
+		// On every OS but macOS the Safari constructor returns nil and the chain
+		// collapses to the native backend, so this reads the same everywhere.
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_SEARCH_BROWSER"))) {
+		case "native":
+			searchBackend = native
+		case "safari":
+			searchBackend = search.NewFallbackBackend(search.NewSafariBackend(), native)
+		default:
+			searchBackend = search.NewFallbackBackend(native, search.NewSafariBackend())
+		}
+		s.searchBackend = searchBackend
+		toolRegistry.Register(tool.WebSearchTool{Bridge: searchBackend})
+		toolRegistry.Register(tool.FetchPageTool{Bridge: searchBackend})
+		slog.Info("web search enabled; web_search and fetch_page tools registered")
+	} else {
+		slog.Info("web search disabled by configuration")
 	}
 
 	// memory_recall will be registered below after mem is initialized
@@ -283,6 +375,31 @@ func (s *Server) Start() error {
 			toolRegistry.Register(tool.NewMemoryRecallTool(mem, registry))
 			toolRegistry.Register(tool.NewProjectMemoryRecallTool(mem, registry))
 			s.backfillMemoryProjects(memStore)
+			// Facts stored without an embedding are invisible to semantic
+			// recall, and until the embedder was fixed almost none of them got
+			// one. Repair the backlog in the background so an existing graph
+			// becomes searchable without the user having to know about
+			// /api/memory/reindex. No-op once the backlog is clear.
+			go func() {
+				// The backfill saturates several cores for minutes on an old
+				// graph, so it labels itself: the resource pill then says what
+				// is eating the machine instead of leaving the user to guess.
+				defer s.resources.ClearActivity()
+				embedded, failed, err := mem.BackfillEmbeddings(context.Background(), func(done, total int) {
+					s.resources.SetActivity(resource.Activity{
+						Label: "embedding memory",
+						Done:  done,
+						Total: total,
+					})
+				})
+				if err != nil {
+					slog.Warn("agentic memory: embedding backfill failed", "err", err)
+					return
+				}
+				if embedded > 0 || failed > 0 {
+					slog.Info("agentic memory: embedding backfill finished", "embedded", embedded, "failed", failed)
+				}
+			}()
 			slog.Info("agentic memory enabled (local embedder; synthesis uses session LLM)")
 		}
 	}
@@ -311,7 +428,7 @@ func (s *Server) Start() error {
 		Dir:             s.dir,
 		Memory:          mem,
 		NoteStore:       s.noteStore,
-		SearchBridge:    searchClient,
+		SearchBridge:    searchBackend,
 		// Read the deep-research tuning fresh from the global config DB on each
 		// call so settings-screen changes apply without a server restart.
 		SearchParams: func() session.SearchConfig {
@@ -341,7 +458,7 @@ func (s *Server) Start() error {
 	}
 
 	// Register deep_search after loopRunner is built (needs RunSearchSession).
-	if s.searchBridge != nil {
+	if searchBackend != nil {
 		toolRegistry.Register(tool.DeepSearchTool{Run: s.loopRunner.RunSearchSession})
 		slog.Info("deep_search tool registered")
 	}
@@ -412,6 +529,13 @@ func (s *Server) Start() error {
 	slog.Info("starting ogcode server", "addr", addr, "dir", s.dir)
 	go openBrowser(url)
 
+	// MCP servers connect lazily now that the HTTP server is listening — the
+	// UI/bus are live so an OAuth-required server's browser prompt reaches the
+	// user instead of blocking a startup that has no listener yet.
+	if s.mcpConnect != nil {
+		go s.mcpConnect()
+	}
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -439,9 +563,25 @@ func (s *Server) Start() error {
 		slog.Warn("close listener", "err", err)
 	}
 
-	// Stop search bridge
-	if s.searchBridge != nil {
-		s.searchBridge.Stop()
+	// Stop the resource sampler.
+	if s.resourcesCancel != nil {
+		s.resourcesCancel()
+	}
+
+	// Cancel any in-flight lazy MCP connect so its dials/OAuth unblock before
+	// we tear the Manager down. Connect's own race-guard then closes any session
+	// that landed after this point.
+	if s.mcpCancel != nil {
+		s.mcpCancel()
+	}
+
+	// Close MCP server connections (terminates stdio subprocesses and HTTP
+	// sessions). Done after the HTTP server is down so in-flight tool calls
+	// have already been cancelled by the context.
+	if s.mcpManager != nil {
+		if err := s.mcpManager.Close(); err != nil {
+			slog.Warn("close mcp manager", "err", err)
+		}
 	}
 
 	// Stop PostHog analytics client (flushes queued events)

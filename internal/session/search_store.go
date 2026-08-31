@@ -20,11 +20,10 @@ const (
 // SearchConfig holds the global web-search toggle plus the deep-research
 // pipeline tuning knobs (pages fetched, per-page size).
 type SearchConfig struct {
-	Enabled        bool  `json:"enabled"`
-	UseRealProfile bool  `json:"useRealProfile"`
-	FetchTopK      int   `json:"fetchTopK"`
-	PageChars      int   `json:"pageChars"`
-	UpdatedAt      int64 `json:"updatedAt"`
+	Enabled   bool  `json:"enabled"`
+	FetchTopK int   `json:"fetchTopK"`
+	PageChars int   `json:"pageChars"`
+	UpdatedAt int64 `json:"updatedAt"`
 }
 
 // clampParams clamps the research knobs into their valid range, substituting the
@@ -49,16 +48,19 @@ func clampInt(v, lo, hi, def int) int {
 }
 
 // GetSearchConfig returns the stored config. If no row exists it returns the
-// defaults (disabled, with default research params). Research params are always
+// defaults, which have search ENABLED: the backend is compiled into the binary
+// and needs nothing installed, so there is no setup step to gate it behind.
+// A user who does not want outbound requests turns the toggle off, and that
+// stored choice is honoured on every later read. Research params are always
 // clamped so callers never receive zero/invalid values.
 func GetSearchConfig(database *db.DB) (*SearchConfig, error) {
-	var enabled, useRealProfile, fetchTopK, pageChars int
+	var enabled, fetchTopK, pageChars int
 	var updatedAt int64
 	err := database.QueryRow(
-		`SELECT enabled, use_real_profile, fetch_top_k, page_chars, time_updated FROM search_config WHERE id = 1`,
-	).Scan(&enabled, &useRealProfile, &fetchTopK, &pageChars, &updatedAt)
+		`SELECT enabled, fetch_top_k, page_chars, time_updated FROM search_config WHERE id = 1`,
+	).Scan(&enabled, &fetchTopK, &pageChars, &updatedAt)
 	if err == sql.ErrNoRows {
-		def := &SearchConfig{}
+		def := &SearchConfig{Enabled: true}
 		def.clampParams()
 		return def, nil
 	}
@@ -66,11 +68,10 @@ func GetSearchConfig(database *db.DB) (*SearchConfig, error) {
 		return nil, fmt.Errorf("get search config: %w", err)
 	}
 	cfg := &SearchConfig{
-		Enabled:        enabled != 0,
-		UseRealProfile: useRealProfile != 0,
-		FetchTopK:      fetchTopK,
-		PageChars:      pageChars,
-		UpdatedAt:      updatedAt,
+		Enabled:   enabled != 0,
+		FetchTopK: fetchTopK,
+		PageChars: pageChars,
+		UpdatedAt: updatedAt,
 	}
 	cfg.clampParams()
 	return cfg, nil
@@ -80,23 +81,22 @@ func GetSearchConfig(database *db.DB) (*SearchConfig, error) {
 // before persisting so an invalid client payload can never store bad values.
 func SetSearchConfig(database *db.DB, c *SearchConfig) error {
 	c.clampParams()
-	enabled, useRealProfile := 0, 0
+	enabled := 0
 	if c.Enabled {
 		enabled = 1
 	}
-	if c.UseRealProfile {
-		useRealProfile = 1
-	}
+	// The legacy use_real_profile column is left in place rather than dropped:
+	// it is NOT NULL DEFAULT 0, so omitting it here is safe, and keeping it
+	// means an older binary can still read this database.
 	_, err := database.Exec(`
-		INSERT INTO search_config (id, enabled, use_real_profile, fetch_top_k, page_chars, time_updated)
-		VALUES (1, ?, ?, ?, ?, ?)
+		INSERT INTO search_config (id, enabled, fetch_top_k, page_chars, time_updated)
+		VALUES (1, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
-			enabled          = excluded.enabled,
-			use_real_profile = excluded.use_real_profile,
-			fetch_top_k      = excluded.fetch_top_k,
-			page_chars       = excluded.page_chars,
-			time_updated     = excluded.time_updated
-	`, enabled, useRealProfile, c.FetchTopK, c.PageChars, Now())
+			enabled      = excluded.enabled,
+			fetch_top_k  = excluded.fetch_top_k,
+			page_chars   = excluded.page_chars,
+			time_updated = excluded.time_updated
+	`, enabled, c.FetchTopK, c.PageChars, Now())
 	if err != nil {
 		return fmt.Errorf("set search config: %w", err)
 	}

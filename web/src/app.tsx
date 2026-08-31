@@ -1,4 +1,4 @@
-import { Route, Router, useNavigate, useLocation } from '@solidjs/router';
+import { Navigate, Route, Router, useNavigate, useLocation } from '@solidjs/router';
 import { createEffect } from 'solid-js';
 import { ServerProvider } from './context/server';
 import { OnboardingProvider, useOnboarding } from './context/onboarding';
@@ -23,6 +23,7 @@ import DocIndexPage from './pages/docindex';
 import SettingsLayout from './pages/settings/layout';
 import GeneralSettings from './pages/settings/general';
 import ModelsSettings from './pages/settings/models';
+import SkillsSettings from './pages/settings/skills';
 import AboutSettings from './pages/settings/about';
 import Onboarding from './pages/onboarding';
 import NotFound from './pages/not-found';
@@ -40,9 +41,14 @@ export default function App() {
       <Route path="/notes" component={NotesPage} />
       <Route path="/notes/:id" component={NoteDetailPage} />
       <Route path="/docindex" component={DocIndexPage} />
+      {/* Skills moved under Settings, where the rest of "what this agent can
+          reach for" lives. The old path still resolves so bookmarks and links
+          from earlier sessions do not dead-end on the 404 page. */}
+      <Route path="/skills" component={() => <Navigate href="/settings/skills" />} />
       <Route path="/settings" component={SettingsLayout}>
         <Route path="/" component={GeneralSettings} />
         <Route path="/models" component={ModelsSettings} />
+        <Route path="/skills" component={SkillsSettings} />
         <Route path="/about" component={AboutSettings} />
       </Route>
       {/* Catch-all: without it the router matches nothing and renders a blank

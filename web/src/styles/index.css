@@ -972,6 +972,24 @@ textarea.auto-resize {
 .chat-flow > * + [data-role="user"] { margin-top: 1.875rem; }
 .chat-flow > [data-role="user"] + * { margin-top: 1.125rem; }
 
+/* The transcript's scrollport.
+
+   `overflow-anchor: none` is the load-bearing line. Chrome anchors the scroll
+   position to a node it picks inside the viewport and silently corrects
+   scrollTop whenever content above that node changes height. The streaming
+   message re-renders its whole markdown subtree on every chunk, so Chrome lost
+   and re-picked its anchor several times a second and corrected against our
+   follow-the-bottom scroll — the view jumped up, snapped back, and jittered for
+   the length of a long answer. Position is held explicitly in lib/chat-scroll.ts
+   instead, which can tell a real gesture from a relayout.
+
+   `overscroll-behavior: contain` keeps a flick at either end from chaining out
+   to the page behind the transcript. */
+.chat-scroll {
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+}
+
 /* The conversation's reading column — shared by the transcript, the
    composer and the empty state so all three share one centre line. */
 .chat-col {
@@ -1092,4 +1110,73 @@ textarea.auto-resize {
   background-image:
     radial-gradient(circle at 1px 1px, rgba(94, 106, 210, 0.04) 1px, transparent 0);
   background-size: 24px 24px;
+}
+
+/* ============================================================
+   Settings editor
+   Search filters by hiding individual setting rows rather than
+   unmounting them, so a section can end up with a heading and no
+   body. :has() lets the heading disappear with its contents, with
+   no bookkeeping in every page about which of its rows survived.
+   ============================================================ */
+[data-section]:not(:has([data-setting]:not([hidden]))) {
+  display: none;
+}
+
+/* ============================================================
+   Settings slider
+   `accent-color` alone paints a native slider in the theme but
+   keeps each platform's own knob. The settings page borrows the
+   phone-style control instead: a thin track and a large round
+   white knob that is easy to grab with a pointer and reads the
+   same on every OS. Both engines need their own selectors, and
+   neither inherits from the other, so the two blocks are not
+   redundant.
+   ============================================================ */
+.slider-ios {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 22px;
+}
+.slider-ios::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+}
+.slider-ios::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+}
+.slider-ios:active::-webkit-slider-thumb {
+  cursor: grabbing;
+}
+.slider-ios::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+}
+.slider-ios::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.slider-ios::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.slider-ios:disabled {
+  opacity: 0.5;
 }

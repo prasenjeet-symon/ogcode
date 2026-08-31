@@ -185,7 +185,7 @@ func TestRunLoop_GuidanceCancelsTextOnlyStream_DeletesOrphan(t *testing.T) {
 
 	// The converted provider messages must alternate user → assistant with no
 	// consecutive assistant messages.
-	model := convertMessages(msgs)
+	model := convertMessages(msgs, false, "claude-opus-4-6")
 	for i := 1; i < len(model); i++ {
 		if model[i].Role == "assistant" && model[i-1].Role == "assistant" {
 			t.Errorf("consecutive assistant messages at positions %d-%d — the API would reject this with a 400", i-1, i)

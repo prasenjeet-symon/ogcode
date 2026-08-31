@@ -115,7 +115,7 @@ func (t ProjectMemoryRecallTool) Execute(ctx context.Context, args json.RawMessa
 		}
 	}
 
-	recall := t.Memory.RecallProjectMemory(ctx, memory.ProjectRecallRequest{
+	recall, err := t.Memory.RecallProjectMemory(ctx, memory.ProjectRecallRequest{
 		ProjectID: projectID,
 		Question:  params.Question,
 		Since:     since,
@@ -127,6 +127,10 @@ func (t ProjectMemoryRecallTool) Execute(ctx context.Context, args json.RawMessa
 	title := "Project Memory Recall"
 	if onlySession != "" {
 		title = "Session Memory Recall"
+	}
+	if err != nil {
+		// See MemoryRecallTool: a failed lookup must not read as an empty one.
+		return Result{Title: title, Output: "Memory lookup failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
 	}
 	if recall == "" {
 		where := "this project's memory"

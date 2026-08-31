@@ -138,12 +138,17 @@ func (g *Graph) ProjectRecall(ctx context.Context, opts ProjectRecallOptions) (*
 		return nil, fmt.Errorf("embed question: %w", err)
 	}
 
-	matches, stats, totalFacts, err := g.scanProject(opts, queryVec)
+	matches, stats, totalFacts, unembedded, err := g.scanProject(opts, queryVec)
 	if err != nil {
 		return nil, err
 	}
 	if totalFacts == 0 {
 		return &ProjectRecallResult{}, nil
+	}
+	if unembedded > 0 {
+		slog.Warn("project recall: facts skipped because they carry no embedding",
+			"project", opts.ProjectID, "unembedded", unembedded, "total", totalFacts,
+			"hint", "POST /api/memory/reindex to backfill")
 	}
 
 	facts, sessionCount, err := g.expandWithNeighbours(matches, opts)
@@ -221,7 +226,7 @@ func (g *Graph) ProjectRecall(ctx context.Context, opts ProjectRecallOptions) (*
 		// more than this one did.
 		if parsed.FollowUp != "" {
 			if fvecs, err := g.Embed.Embed(ctx, []string{parsed.FollowUp}); err == nil && len(fvecs) > 0 {
-				extra, _, _, err := g.scanProject(opts, fvecs[0])
+				extra, _, _, _, err := g.scanProject(opts, fvecs[0])
 				if err == nil && len(extra) > 0 {
 					seen := make(map[string]bool, len(facts))
 					for _, f := range facts {
@@ -256,11 +261,15 @@ func (g *Graph) ProjectRecall(ctx context.Context, opts ProjectRecallOptions) (*
 // the top matches and aggregating the topic map. Both outputs come from the same
 // scan because the pass is the expensive part: re-reading every row to build the
 // map separately would double the cost of every recall.
-func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]scoredFact, map[string]*topicStat, int, error) {
+func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]scoredFact, map[string]*topicStat, int, int, error) {
 	stats := make(map[string]*topicStat)
 	perSession := make(map[string][]scoredFact)
 	now := time.Now().UnixMilli()
 	total := 0
+	// A fact with no embedding can never match, however relevant it is. Counting
+	// them separately is what turns "nothing relevant was found" into "most of
+	// the corpus was not searchable" — the two look identical from the outside.
+	unembedded := 0
 
 	start := time.Now()
 	err := g.Store.ScanProjectFacts(opts.ProjectID, opts.filter(), func(n Node, emb []float32) {
@@ -289,7 +298,11 @@ func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]sc
 			st.Labels[l]++
 		}
 
-		if len(emb) == 0 || len(queryVec) == 0 {
+		if len(emb) == 0 {
+			unembedded++
+			return
+		}
+		if len(queryVec) == 0 {
 			return
 		}
 		base := cosine(queryVec, emb)
@@ -317,7 +330,7 @@ func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]sc
 		}
 	})
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("scan project facts: %w", err)
+		return nil, nil, 0, 0, fmt.Errorf("scan project facts: %w", err)
 	}
 
 	var matches []scoredFact
@@ -336,7 +349,7 @@ func (g *Graph) scanProject(opts ProjectRecallOptions, queryVec []float32) ([]sc
 		"matches", len(matches),
 		"duration", time.Since(start),
 	)
-	return matches, stats, total, nil
+	return matches, stats, total, unembedded, nil
 }
 
 // recencyDecay returns 1.0 for a fact written now, decaying by half every

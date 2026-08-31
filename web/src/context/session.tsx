@@ -12,6 +12,7 @@ import {
   sendPrompt,
   sendGuidance,
   replyPermission,
+  listPendingPermissions,
   type PermissionResponse,
   getModels,
   updateSession,
@@ -76,6 +77,8 @@ interface SessionContextValue {
   renameSession: (id: string, title: string) => Promise<void>;
   newSession: (model?: string) => Promise<Session>;
   prompt: (content: string, images?: ImagePartData[]) => Promise<void>;
+  /** True when this optimistic message never reached the server. */
+  sendFailed: (messageId: string) => boolean;
   guidance: (content: string, cancelTool?: boolean) => Promise<boolean>;
   abort: () => Promise<void>;
   /** Restart the loop on a session whose last turn was interrupted. */
@@ -155,6 +158,11 @@ export const SessionProvider: ParentComponent = (props) => {
   };
   // Track which session is currently loading (not a global flag)
   const [loadingSessionId, setLoadingSessionId] = createSignal<string>('');
+  // Optimistic messages whose POST never landed. Without this an failed send
+  // leaves a bubble on screen that looks delivered, and the only trace is a
+  // console error — the delivery ticks read this to show it as failed instead.
+  const [failedSends, setFailedSends] = createSignal<Set<string>>(new Set());
+  const sendFailed = (messageId: string) => failedSends().has(messageId);
   // Compute loading state: true only if active session is the one loading
   const loading = () => loadingSessionId() === activeSession()?.id && loadingSessionId() !== '';
 
@@ -208,7 +216,27 @@ export const SessionProvider: ParentComponent = (props) => {
   // or when the loop exits.
   const [guidanceActive, setGuidanceActive] = createSignal(false);
   let guidanceTimer: ReturnType<typeof setTimeout> | null = null;
-  const [pendingPermissions, setPendingPermissions] = createSignal<PendingPermission[]>([]);
+  // Per-session permission queues, keyed by session id. A permission prompt is
+  // owned by the session whose agent loop raised it — not by whichever session
+  // happens to be on screen — so the loop stays blocked on the reply even while
+  // the user has switched away. The active session's queue is what the UI shows.
+  const [permQueues, setPermQueues] = createSignal<Record<string, PendingPermission[]>>({});
+  const pendingPermissions = () => {
+    const sess = activeSession();
+    return sess ? permQueues()[sess.id] || [] : [];
+  };
+  const setPermQueue = (sessionId: string, updater: (prev: PendingPermission[]) => PendingPermission[]) => {
+    setPermQueues((all) => {
+      const prev = all[sessionId] || [];
+      const next = updater(prev);
+      if (next.length === 0 && prev.length === 0) return all;
+      if (next.length === 0) {
+        const { [sessionId]: _drop, ...rest } = all;
+        return rest;
+      }
+      return { ...all, [sessionId]: next };
+    });
+  };
 
   const [models, setModels] = createSignal<ModelInfo[]>([]);
   // Model selection chosen before any session exists (e.g. on the home page).
@@ -499,6 +527,38 @@ export const SessionProvider: ParentComponent = (props) => {
         setMemorySavedTokens(fresh.memoryTokensSaved ?? 0);
       }
 
+      // Restore any pending permission prompts for this session. Prompts raised
+      // while the user was viewing another session were never dropped server-side
+      // (the agent loop is still blocked on them), but the client may not have
+      // seen the permission.requested event if it arrived while this session was
+      // off-screen, or the queue was cleared before the per-session queue landed.
+      // Fetching here makes the prompt reappear on return.
+      try {
+        const pending = await listPendingPermissions(id);
+        if (activeSession()?.id !== id) return;
+        // Merge, not replace: an SSE permission.requested for this session may
+        // have landed while the fetch was in flight, and overwriting would drop
+        // it. The backend list is authoritative for what is *still* pending, so
+        // any local entry not in the list has already been answered/cancelled and
+        // is dropped; entries the backend confirms are added.
+        const fetchedIds = new Set(pending.map((p) => p.permissionId));
+        setPermQueue(id, (prev) => {
+          const kept = prev.filter((p) => fetchedIds.has(p.permissionId));
+          const have = new Set(kept.map((p) => p.permissionId));
+          const added = pending
+            .filter((p) => !have.has(p.permissionId))
+            .map((p) => ({
+              permissionId: p.permissionId,
+              tool: p.tool,
+              pattern: p.patterns?.[0] ?? '',
+              input: p.input,
+            }));
+          return [...kept, ...added];
+        });
+      } catch (e) {
+        /* non-fatal — the SSE handler will still append future prompts */
+      }
+
       // Always keep a background poll so the session stays in sync
       startBgPoll(id);
 
@@ -689,9 +749,14 @@ export const SessionProvider: ParentComponent = (props) => {
     if (!session) return;
     setLoadingSessionId(session.id);
 
+    // One id for the message and every part of it. Recomputing 'temp-' + Date.now()
+    // per part let the clock tick between them, so a part could end up pointing at
+    // a message id that did not exist. The ticks key off this id too.
+    const tempId = 'temp-' + Date.now();
+
     const imageParts = (images || []).map((img, i) => ({
-      id: 'temp-img-' + Date.now() + '-' + i,
-      messageId: 'temp-' + Date.now(),
+      id: tempId + '-img-' + i,
+      messageId: tempId,
       sessionId: session.id,
       type: 'image' as const,
       data: img,
@@ -702,7 +767,7 @@ export const SessionProvider: ParentComponent = (props) => {
     // Optimistic: add user message immediately
     const tempUserMsg: MessageWithParts = {
       info: {
-        id: 'temp-' + Date.now(),
+        id: tempId,
         sessionId: session.id,
         role: 'user',
         createdAt: Date.now(),
@@ -710,8 +775,8 @@ export const SessionProvider: ParentComponent = (props) => {
       parts: [
         ...imageParts,
         {
-          id: 'temp-part-' + Date.now(),
-          messageId: 'temp-' + Date.now(),
+          id: tempId + '-part',
+          messageId: tempId,
           sessionId: session.id,
           type: 'text',
           data: { text: content },
@@ -732,6 +797,8 @@ export const SessionProvider: ParentComponent = (props) => {
       startPolling(session.id);
     } catch (e) {
       console.error('send prompt failed:', e);
+      // The optimistic bubble stays on screen, so say what happened to it.
+      setFailedSends((prev) => new Set(prev).add(tempId));
       setLoadingSessionId('');
     }
   }
@@ -926,7 +993,9 @@ export const SessionProvider: ParentComponent = (props) => {
   // --- Tool permission prompts ---
   // The backend blocks a mutating tool call (bash/write/edit) until the user
   // approves it, publishing permission.requested and, on resolution,
-  // permission.replied. We keep a per-session queue and answer via
+  // permission.replied. We keep a per-session queue (keyed by session id, not by
+  // the active session) so a prompt raised in session A survives a switch to
+  // session B — the agent loop in A is still blocked on the reply. answer via
   // respondPermission. The tick-guard ensures each event is processed once.
   let lastProcessedPermTick = 0;
   createEffect(on(server.eventTick, (tick) => {
@@ -936,20 +1005,19 @@ export const SessionProvider: ParentComponent = (props) => {
     if (!last) return;
     const p = (last.properties as any) || {};
     if (last.type === 'permission.requested') {
-      const sess = activeSession();
-      if (!sess || p.sessionId !== sess.id) return;
-      setPendingPermissions((prev) =>
+      const sid = p.sessionId;
+      if (!sid) return;
+      setPermQueue(sid, (prev) =>
         prev.some((x) => x.permissionId === p.permissionId)
           ? prev
           : [...prev, { permissionId: p.permissionId, tool: p.tool, pattern: p.pattern, input: p.input }],
       );
     } else if (last.type === 'permission.replied') {
-      setPendingPermissions((prev) => prev.filter((x) => x.permissionId !== p.permissionId));
+      const sid = p.sessionId;
+      if (!sid) return;
+      setPermQueue(sid, (prev) => prev.filter((x) => x.permissionId !== p.permissionId));
     }
   }));
-
-  // Permission prompts are per-session — drop the queue when switching sessions.
-  createEffect(on(activeSession, () => setPendingPermissions([])));
 
   // Resync on detected event drops: when the server's event sequence gaps (a
   // slow client overflowed the bus buffer), re-fetch the active session's
@@ -969,7 +1037,7 @@ export const SessionProvider: ParentComponent = (props) => {
     const sess = activeSession();
     // Optimistically dismiss so the UI feels instant; the backend also emits
     // permission.replied which reconciles any other client.
-    setPendingPermissions((prev) => prev.filter((x) => x.permissionId !== permissionId));
+    if (sess) setPermQueue(sess.id, (prev) => prev.filter((x) => x.permissionId !== permissionId));
     if (!sess) return;
     try {
       await replyPermission(sess.id, permissionId, response);
@@ -1030,6 +1098,7 @@ export const SessionProvider: ParentComponent = (props) => {
     renameSession,
     newSession,
     prompt,
+    sendFailed,
     guidance,
     abort,
     resume,

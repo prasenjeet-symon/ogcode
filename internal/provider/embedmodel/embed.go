@@ -7,9 +7,8 @@
 // paths, the small tokenizer/config assets are embedded in the binary and
 // lazily materialized to a cache directory on first use, while the large ONNX
 // weight file (~133 MB) is downloaded on first use from Hugging Face rather
-// than bloating the binary. This mirrors ogcode's existing search-bridge
-// download pattern and keeps the distributable binary small while preserving
-// the single-command, no-API-key experience.
+// than bloating the binary, which keeps the distributable binary small while
+// preserving the single-command, no-API-key experience.
 //
 // gte-small was chosen over the previous all-MiniLM-L6-v2 because it scores
 // higher on the MTEB benchmark (~61.4 vs ~56.3), requires no query/passage

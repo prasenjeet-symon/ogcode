@@ -10,6 +10,7 @@ import TaskBoard from '../components/task-board';
 import Breadcrumb from '../components/breadcrumb';
 import NotificationBell from '../components/notification-bell';
 import TokenPill from '../components/token-pill';
+import ResourcePill from '../components/resource-pill';
 import MemoryDialog from '../components/memory-dialog';
 import { NotFoundPanel } from './not-found';
 
@@ -124,6 +125,7 @@ function PlanDetailContent() {
             </Show>
 
             <TokenPill messages={plan.messages} />
+            <ResourcePill />
 
             <Show when={server.memoryEnabled()}>
               <MemoryDialog

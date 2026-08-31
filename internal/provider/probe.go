@@ -8,7 +8,6 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
-	"strings"
 	"sync"
 )
 
@@ -46,7 +45,7 @@ func tinyImage() string {
 func ProbeImageSupport(ctx context.Context, p Provider, modelID string) (supports bool, definitive bool, err error) {
 	textJSON, _ := json.Marshal("Reply with: ok")
 	req := StreamRequest{
-		Model:     modelID,
+		Model: modelID,
 		Messages: []ModelMessage{{
 			Role:    "user",
 			Content: textJSON,
@@ -85,11 +84,8 @@ func ProbeImageSupport(ctx context.Context, p Provider, modelID string) (support
 // image/modality-related error is a definitive "no"; anything else is
 // inconclusive so the caller falls back to a heuristic without caching.
 func classifyProbeError(errStr string) (bool, bool, error) {
-	low := strings.ToLower(errStr)
-	for _, hint := range imageRejectionHints {
-		if strings.Contains(low, hint) {
-			return false, true, nil
-		}
+	if IsImageRejectionMessage(errStr) {
+		return false, true, nil
 	}
 	return false, false, &probeError{msg: errStr}
 }

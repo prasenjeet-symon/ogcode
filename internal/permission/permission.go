@@ -27,11 +27,11 @@ type Rule struct {
 type Ruleset []Rule
 
 type Request struct {
-	ID        PermissionID
-	SessionID string
-	Tool      string
-	Input     string
-	Patterns  []string
+	ID        PermissionID `json:"permissionId"`
+	SessionID string       `json:"sessionId"`
+	Tool      string       `json:"tool"`
+	Input     string       `json:"input"`
+	Patterns  []string     `json:"patterns"`
 }
 
 // Evaluate checks the ruleset and returns the action for the given tool and path.
@@ -153,6 +153,22 @@ func (m *Manager) Remove(id PermissionID) {
 	m.mu.Lock()
 	delete(m.pending, id)
 	m.mu.Unlock()
+}
+
+// PendingForSession returns all pending (unanswered) permission requests for a
+// session, in creation order. The UI uses this to restore the permission queue
+// when the user switches back to a session whose prompt was dismissed by the
+// view change — the agent loop is still blocked on the reply.
+func (m *Manager) PendingForSession(sessionID string) []Request {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Request
+	for _, pr := range m.pending {
+		if pr.Request.SessionID == sessionID {
+			out = append(out, pr.Request)
+		}
+	}
+	return out
 }
 
 func (m *Manager) Reply(id PermissionID, response string) bool {

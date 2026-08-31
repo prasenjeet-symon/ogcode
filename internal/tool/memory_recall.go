@@ -64,7 +64,13 @@ func (t MemoryRecallTool) Execute(ctx context.Context, args json.RawMessage, tct
 		}
 	}
 
-	recall := t.Memory.RecallMemory(ctx, string(tctx.SessionID), params.Question, chat)
+	recall, err := t.Memory.RecallMemory(ctx, string(tctx.SessionID), params.Question, chat)
+	if err != nil {
+		// Distinct from an empty result on purpose: "nothing found" would tell
+		// the model memory holds nothing on this subject, when in fact the
+		// lookup failed and the answer may well be in there.
+		return Result{Title: "Memory Recall", Output: "Memory lookup failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
+	}
 	if recall == "" {
 		return Result{Title: "Memory Recall", Output: "No relevant past context found in memory."}, nil
 	}

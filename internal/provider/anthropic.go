@@ -54,6 +54,70 @@ func (p *AnthropicProvider) Models() []ModelInfo {
 	return all
 }
 
+// anthropicThinkingBlock renders one stored reasoning block back into the
+// content array. A redacted block is not a thinking block with a missing
+// signature: it has its own type and carries its payload in `data`. Sending it
+// as a thinking block — or dropping it — breaks the sequence the API checks
+// against what the model originally generated, and is rejected with a 400.
+func anthropicThinkingBlock(rp ReasoningPart) map[string]any {
+	if rp.RedactedData != "" {
+		return map[string]any{
+			"type": "redacted_thinking",
+			"data": rp.RedactedData,
+		}
+	}
+	return map[string]any{
+		"type":      "thinking",
+		"thinking":  rp.Text,
+		"signature": rp.Signature,
+	}
+}
+
+// anthropicCatalogModel looks up a model's catalogued facts. A model the catalog
+// does not know — a future ID, or one reached through a proxy — resolves to
+// nothing, and callers fall back to what is safe for any model.
+func anthropicCatalogModel(id string) (CatalogModel, bool) {
+	for _, m := range AnthropicModels {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return CatalogModel{}, false
+}
+
+// thinkingConfigFor returns the thinking configuration for a model, or nil when
+// none should be sent.
+//
+// The mode is a per-model fact and lives in the catalog: 4.6 and later take
+// `adaptive`, where the model decides how much to think and reasons between
+// tool calls without a beta header, while earlier models take only a fixed
+// budget that has to be sized against max_tokens. A model the catalog does not
+// know — a future ID, or one reached through a proxy — gets nothing, since
+// sending a mode a model rejects fails the whole request.
+//
+// `display: "summarized"` is what makes the reasoning readable. It defaults to
+// "omitted" on 4.7 and later, which returns thinking blocks with empty text —
+// correct on the wire, but it leaves ogcode's reasoning drawer with nothing in
+// it and the user watching a long pause before any output appears.
+//
+// The configuration is rendered into the prompt, so it must stay stable for the
+// life of a cached conversation. Keying it to the model alone keeps it so.
+func thinkingConfigFor(model string) *anthropicThinking {
+	m, ok := anthropicCatalogModel(model)
+	if !ok || m.Thinking != "adaptive" {
+		return nil
+	}
+	return &anthropicThinking{Type: "adaptive", Display: "summarized"}
+}
+
+// isToolResult reports whether a message carries a tool result rather than
+// conversational content. The internal format marks these two ways — the role
+// the OpenAI wire format uses, and the id the result answers — and a message
+// that has either must never be emitted as an Anthropic role.
+func isToolResult(m ModelMessage) bool {
+	return m.Role == "tool" || m.ToolCallID != ""
+}
+
 func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error) {
 	model := req.Model
 	if model == "" {
@@ -67,11 +131,17 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 			continue
 		}
 
-		if m.ToolCallID != "" {
+		// Tool results are recognised by role as well as by id. Anthropic has no
+		// "tool" role — it carries results as tool_result blocks inside a user
+		// message — so a message that reached here as role "tool" and fell
+		// through to the generic branch below would be sent verbatim and
+		// rejected with `unknown variant \`tool\``. Keying only on ToolCallID
+		// left exactly that hole open for any result whose id went missing.
+		if isToolResult(m) {
 			// Tool result: collect consecutive tool results into one user message
 			// (Anthropic requires alternating roles, so all results for one turn go together)
 			var blocks []map[string]any
-			for i < len(req.Messages) && req.Messages[i].ToolCallID != "" {
+			for i < len(req.Messages) && isToolResult(req.Messages[i]) {
 				tr := req.Messages[i]
 				var output string
 				if err := json.Unmarshal(tr.Content, &output); err != nil {
@@ -125,12 +195,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 			var blocks []map[string]any
 			// Prepend thinking blocks first (required by Anthropic API)
 			for _, rp := range m.ReasoningParts {
-				thinkingBlock := map[string]any{
-					"type":      "thinking",
-					"thinking":  rp.Text,
-					"signature": rp.Signature,
-				}
-				blocks = append(blocks, thinkingBlock)
+				blocks = append(blocks, anthropicThinkingBlock(rp))
 			}
 			if err := json.Unmarshal(m.ToolCalls, &calls); err == nil {
 				if m.Content != nil {
@@ -188,11 +253,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 			if m.Role == "assistant" && len(m.ReasoningParts) > 0 {
 				var blocks []map[string]any
 				for _, rp := range m.ReasoningParts {
-					blocks = append(blocks, map[string]any{
-						"type":      "thinking",
-						"thinking":  rp.Text,
-						"signature": rp.Signature,
-					})
+					blocks = append(blocks, anthropicThinkingBlock(rp))
 				}
 				var text string
 				if m.Content != nil {
@@ -281,14 +342,40 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	// base system prompt are the other two).
 	attachMessageCacheBreakpoint(messages)
 
+	var thinking *anthropicThinking
+	if req.Thinking {
+		thinking = thinkingConfigFor(model)
+	}
+	temperature := req.Temperature
+	if thinking != nil {
+		// Sampling parameters and thinking do not go together: the models that
+		// take a thinking configuration reject temperature outright (4.7 and
+		// later) or restrict it while thinking. Thinking is the more useful of
+		// the two for an agent loop, so it wins.
+		temperature = 0
+	}
+
+	maxTokens := max(req.MaxTokens, 4096)
+	if thinking != nil && req.MaxTokens == 0 {
+		// Thinking is billed and counted as output: it shares max_tokens with the
+		// answer. Against the 4096 default a long chain of reasoning eats the room
+		// the answer needs and the turn stops mid-sentence, so a thinking request
+		// gets the model's own published ceiling instead. max_tokens is a bound,
+		// not an allocation — nothing is charged for room left unused.
+		if m, ok := anthropicCatalogModel(model); ok && m.MaxOutputTokens > 0 {
+			maxTokens = m.MaxOutputTokens
+		}
+	}
+
 	body := anthropicRequest{
 		Model:       model,
-		MaxTokens:   max(req.MaxTokens, 4096),
+		MaxTokens:   maxTokens,
 		System:      systemBlocks,
 		Messages:    messages,
 		Tools:       tools,
 		Stream:      true,
-		Temperature: req.Temperature,
+		Temperature: temperature,
+		Thinking:    thinking,
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -395,14 +482,22 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 						ToolCallID: currentToolID,
 						ToolName:   currentToolName,
 					}
+				case "thinking":
+					// Opening a thinking block. When the model's thinking text is
+					// withheld — `display: "omitted"`, the default on current models
+					// — the block produces no thinking_delta at all, and this event
+					// plus the closing signature_delta are the only evidence it
+					// existed. It still has to be replayed, so the boundary is
+					// announced rather than inferred from the first text delta.
+					ch <- StreamEvent{Type: EventReasoningStart}
 				case "redacted_thinking":
-					// A redacted thinking block has no text deltas — only a signature
-					// delivered on the content_block_start event. Emit an empty reasoning
-					// event (so the loop creates a reasoning part) followed by the
-					// signature, so the block is round-tripped to the API on later turns.
-					ch <- StreamEvent{Type: EventReasoning, Text: ""}
-					if evt.ContentBlock.Signature != "" {
-						ch <- StreamEvent{Type: EventReasoningSignature, Signature: evt.ContentBlock.Signature}
+					// A redacted thinking block has no text deltas and no signature —
+					// its entire content is the opaque `data` payload delivered on the
+					// content_block_start event. It must be round-tripped as a
+					// redacted_thinking block, so it gets its own event rather than
+					// being flattened into a signature on an empty thinking block.
+					if evt.ContentBlock.Data != "" {
+						ch <- StreamEvent{Type: EventReasoningRedacted, RedactedData: evt.ContentBlock.Data}
 					}
 				}
 			}
@@ -481,6 +576,15 @@ type anthropicRequest struct {
 	Tools       []anthropicTool        `json:"tools,omitempty"`
 	Stream      bool                   `json:"stream"`
 	Temperature float64                `json:"temperature,omitempty"`
+	Thinking    *anthropicThinking     `json:"thinking,omitempty"`
+}
+
+// anthropicThinking is the request's thinking configuration. Type is the mode;
+// Display asks for the reasoning to come back readable rather than as empty
+// blocks.
+type anthropicThinking struct {
+	Type    string `json:"type"`
+	Display string `json:"display,omitempty"`
 }
 
 // anthropicSystemBlock is a content block within the system field. Anthropic
@@ -575,6 +679,9 @@ type anthropicContentBlock struct {
 	Text      string          `json:"text,omitempty"`
 	Thinking  string          `json:"thinking,omitempty"`
 	Signature string          `json:"signature,omitempty"`
+	// Data is the opaque payload of a redacted_thinking block. Redacted
+	// blocks carry no signature and no text — this field is the whole block.
+	Data string `json:"data,omitempty"`
 }
 
 type anthropicDelta struct {

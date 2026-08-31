@@ -1,4 +1,4 @@
-.PHONY: dev build clean
+.PHONY: dev build clean install
 
 dev:
 	@echo "Starting Go server on :9595..."
@@ -32,11 +32,7 @@ install: build
 			|| echo "warning: codesign failed; if ogcode is Killed:9, run: codesign --force --sign - $(HOME)/.local/bin/ogcode"; \
 	fi
 	@echo "Installed to $(HOME)/.local/bin/ogcode"
-	mkdir -p $(HOME)/.local/share/ogcode/search-bridge
-	cp tools/search-bridge/package.json tools/search-bridge/server.js $(HOME)/.local/share/ogcode/search-bridge/
-	cd $(HOME)/.local/share/ogcode/search-bridge && npm install --legacy-peer-deps --cache /tmp/npm-cache
-	cd $(HOME)/.local/share/ogcode/search-bridge && npx playwright install chromium
-	@echo "Search bridge installed to $(HOME)/.local/share/ogcode/search-bridge"
+	@echo "Web search is built in — no Node.js or Chromium needed."
 
 clean:
 	rm -f ogcode

@@ -1,0 +1,626 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<!--[if IE 6]><html class="ie6" xmlns="http://www.w3.org/1999/xhtml"><![endif]-->
+<!--[if IE 7]><html class="lt-ie8 lt-ie9" xmlns="http://www.w3.org/1999/xhtml"><![endif]-->
+<!--[if IE 8]><html class="lt-ie9" xmlns="http://www.w3.org/1999/xhtml"><![endif]-->
+<!--[if gt IE 8]><!--><html xmlns="http://www.w3.org/1999/xhtml"><!--<![endif]-->
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=1" />
+  <meta name="referrer" content="origin" />
+  <meta name="HandheldFriendly" content="true" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>chromedp set user data dir at DuckDuckGo</title>
+  <link title="DuckDuckGo (HTML)" type="application/opensearchdescription+xml" rel="search" href="//duckduckgo.com/opensearch_html_v2.xml" />
+  <link href="//duckduckgo.com/favicon.ico" rel="shortcut icon" />
+  <link rel="icon" href="//duckduckgo.com/favicon.ico" type="image/x-icon" />
+  <link id="icon60" rel="apple-touch-icon" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_60x60.png?v=2"/>
+  <link id="icon76" rel="apple-touch-icon" sizes="76x76" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_76x76.png?v=2"/>
+  <link id="icon120" rel="apple-touch-icon" sizes="120x120" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_120x120.png?v=2"/>
+  <link id="icon152" rel="apple-touch-icon" sizes="152x152" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_152x152.png?v=2"/>
+  <link rel="image_src" href="//duckduckgo.com/assets/icons/meta/DDG-icon_256x256.png">
+  <link rel="stylesheet" media="handheld, all" href="//duckduckgo.com/dist/h.b7791eaa1c6d921ef675.css" type="text/css"/>
+</head>
+
+<body class="body--html">
+  <a name="top" id="top"></a>
+
+  <form action="/html/" method="post">
+    <input type="text" name="state_hidden" id="state_hidden" />
+  </form>
+
+  <div>
+    <div class="site-wrapper-border"></div>
+
+    <div id="header" class="header cw header--html">
+      <a title="DuckDuckGo" href="/html/" class="header__logo-wrap"></a>
+
+      <form name="x" class="header__form" action="/html/" method="post">
+        <div class="search search--header">
+          <input name="q" autocomplete="off" class="search__input" id="search_form_input_homepage" type="text" value="chromedp set user data dir" />
+          <input name="b" id="search_button_homepage" class="search__button search__button--html" value="" title="Search" alt="Search" type="submit" />
+        </div>
+
+        
+        
+        
+        
+
+        <div class="frm__select">
+          <select name="kl">
+            
+              <option value="" >All Regions</option>
+            
+              <option value="ar-es" >Argentina</option>
+            
+              <option value="au-en" >Australia</option>
+            
+              <option value="at-de" >Austria</option>
+            
+              <option value="be-fr" >Belgium (fr)</option>
+            
+              <option value="be-nl" >Belgium (nl)</option>
+            
+              <option value="br-pt" >Brazil</option>
+            
+              <option value="bg-bg" >Bulgaria</option>
+            
+              <option value="ca-en" >Canada (en)</option>
+            
+              <option value="ca-fr" >Canada (fr)</option>
+            
+              <option value="ct-ca" >Catalonia</option>
+            
+              <option value="cl-es" >Chile</option>
+            
+              <option value="cn-zh" >China</option>
+            
+              <option value="co-es" >Colombia</option>
+            
+              <option value="hr-hr" >Croatia</option>
+            
+              <option value="cz-cs" >Czech Republic</option>
+            
+              <option value="dk-da" >Denmark</option>
+            
+              <option value="ee-et" >Estonia</option>
+            
+              <option value="fi-fi" >Finland</option>
+            
+              <option value="fr-fr" >France</option>
+            
+              <option value="de-de" >Germany</option>
+            
+              <option value="gr-el" >Greece</option>
+            
+              <option value="hk-tzh" >Hong Kong</option>
+            
+              <option value="hu-hu" >Hungary</option>
+            
+              <option value="is-is" >Iceland</option>
+            
+              <option value="in-en" >India (en)</option>
+            
+              <option value="id-en" >Indonesia (en)</option>
+            
+              <option value="ie-en" >Ireland</option>
+            
+              <option value="il-en" >Israel (en)</option>
+            
+              <option value="it-it" >Italy</option>
+            
+              <option value="jp-jp" >Japan</option>
+            
+              <option value="kr-kr" >Korea</option>
+            
+              <option value="lv-lv" >Latvia</option>
+            
+              <option value="lt-lt" >Lithuania</option>
+            
+              <option value="my-en" >Malaysia (en)</option>
+            
+              <option value="mx-es" >Mexico</option>
+            
+              <option value="nl-nl" >Netherlands</option>
+            
+              <option value="nz-en" >New Zealand</option>
+            
+              <option value="no-no" >Norway</option>
+            
+              <option value="pk-en" >Pakistan (en)</option>
+            
+              <option value="pe-es" >Peru</option>
+            
+              <option value="ph-en" >Philippines (en)</option>
+            
+              <option value="pl-pl" >Poland</option>
+            
+              <option value="pt-pt" >Portugal</option>
+            
+              <option value="ro-ro" >Romania</option>
+            
+              <option value="ru-ru" >Russia</option>
+            
+              <option value="xa-ar" >Saudi Arabia</option>
+            
+              <option value="sg-en" >Singapore</option>
+            
+              <option value="sk-sk" >Slovakia</option>
+            
+              <option value="sl-sl" >Slovenia</option>
+            
+              <option value="za-en" >South Africa</option>
+            
+              <option value="es-ca" >Spain (ca)</option>
+            
+              <option value="es-es" >Spain (es)</option>
+            
+              <option value="se-sv" >Sweden</option>
+            
+              <option value="ch-de" >Switzerland (de)</option>
+            
+              <option value="ch-fr" >Switzerland (fr)</option>
+            
+              <option value="tw-tzh" >Taiwan</option>
+            
+              <option value="th-en" >Thailand (en)</option>
+            
+              <option value="tr-tr" >Turkey</option>
+            
+              <option value="us-en" >US (English)</option>
+            
+              <option value="us-es" >US (Spanish)</option>
+            
+              <option value="ua-uk" >Ukraine</option>
+            
+              <option value="uk-en" >United Kingdom</option>
+            
+              <option value="vn-en" >Vietnam (en)</option>
+            
+          </select>
+        </div>
+
+        <div class="frm__select frm__select--last">
+          <select class="" name="df">
+            
+              <option value="" selected>Any Time</option>
+            
+              <option value="d" >Past Day</option>
+            
+              <option value="w" >Past Week</option>
+            
+              <option value="m" >Past Month</option>
+            
+              <option value="y" >Past Year</option>
+            
+          </select>
+        </div>
+      </form>
+    </div>
+
+    
+
+    
+      <!-- Web results are present -->
+      <div>
+        <div class="serp__results">
+          <div id="links" class="results">
+            
+
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2B%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=77a98b11411f93041a9839bfde432c1df08ae509d59fb33c9fc267fa3bde8db2">Chromium Docs - User Data Directory - Google Open Source</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2B%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=77a98b11411f93041a9839bfde432c1df08ae509d59fb33c9fc267fa3bde8db2">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/chromium.googlesource.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2B%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=77a98b11411f93041a9839bfde432c1df08ae509d59fb33c9fc267fa3bde8db2">
+                            chromium.googlesource.com/chromium/src/+/master/docs/user_data_dir.md
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2B%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=77a98b11411f93041a9839bfde432c1df08ae509d59fb33c9fc267fa3bde8db2">Introduction The <b>user</b> <b>data</b> directory contains profile <b>data</b> such as history, bookmarks, and cookies, as well as other per-installation local state. Each profile is a subdirectory (often Default) within the <b>user</b> <b>data</b> directory. Current Location To determine the <b>user</b> <b>data</b> directory for a running Chrome instance: Navigate to chrome://version Look for the Profile Path field. This gives the path to ...</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F798&amp;rut=cfe65f6efc7d859e0b195e66de5f4914d8a9ea415cb91855ec79ede2c174a2e4">How works UserDataDir ? · Issue #798 · chromedp/chromedp - GitHub</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F798&amp;rut=cfe65f6efc7d859e0b195e66de5f4914d8a9ea415cb91855ec79ede2c174a2e4">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/github.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F798&amp;rut=cfe65f6efc7d859e0b195e66de5f4914d8a9ea415cb91855ec79ede2c174a2e4">
+                            github.com/chromedp/chromedp/issues/798
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F798&amp;rut=cfe65f6efc7d859e0b195e66de5f4914d8a9ea415cb91855ec79ede2c174a2e4">closed this as completed on Apr 22, 2021 quantonganh added a commit that references this issue on Feb 23, 2024 prevent <b>chromedp</b> from setting <b>user-data-dir</b> to a temp <b>dir</b></a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2Fgithub.com%2Fchromedp%2Fchromedp&amp;rut=3c6745a81513dcf20b04b571c556d3c7a4be55becf506061174d22e8fc4abaab">chromedp package - github.com/chromedp/chromedp - Go Packages</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2Fgithub.com%2Fchromedp%2Fchromedp&amp;rut=3c6745a81513dcf20b04b571c556d3c7a4be55becf506061174d22e8fc4abaab">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/pkg.go.dev.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2Fgithub.com%2Fchromedp%2Fchromedp&amp;rut=3c6745a81513dcf20b04b571c556d3c7a4be55becf506061174d22e8fc4abaab">
+                            pkg.go.dev/github.com/chromedp/chromedp
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2Fgithub.com%2Fchromedp%2Fchromedp&amp;rut=3c6745a81513dcf20b04b571c556d3c7a4be55becf506061174d22e8fc4abaab">Package <b>chromedp</b> is a high level Chrome DevTools Protocol client that simplifies driving browsers for scraping, unit testing, or profiling web pages using the CDP.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2Bshow%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=7508cbc0d5d4a10409691bedb2ba1779e0b5e1c4b15b5f2bb31081eed76b4c83">docs/user_data_dir.md - chromium/src - Git at Google</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2Bshow%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=7508cbc0d5d4a10409691bedb2ba1779e0b5e1c4b15b5f2bb31081eed76b4c83">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/chromium.googlesource.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2Bshow%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=7508cbc0d5d4a10409691bedb2ba1779e0b5e1c4b15b5f2bb31081eed76b4c83">
+                            chromium.googlesource.com/chromium/src/+show/master/docs/user_data_dir.md
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromium.googlesource.com%2Fchromium%2Fsrc%2F%2Bshow%2Fmaster%2Fdocs%2Fuser_data_dir.md&amp;rut=7508cbc0d5d4a10409691bedb2ba1779e0b5e1c4b15b5f2bb31081eed76b4c83">3. If the system config <b>dir</b> is an ancestor of the profile <b>dir</b>, the <b>user</b> cache <b>dir</b> is the system cache <b>dir</b> plus the relative path from the system config <b>dir</b> to the profile <b>dir</b>. 4. Otherwise, the <b>user</b> cache <b>dir</b> is the same as the profile <b>dir</b>. Example (Linux): * [<b>user</b> <b>data</b> <b>dir</b>] `~/.config/google-chrome` * [profile <b>dir</b>] `~/.config/google-chrome ...</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgist.github.com%2Faont%2Fc8bd778e33dee4e2063d32364e9e0e8f&amp;rut=b60d419381b86e581794f737816730093bf0fe90018cd11ccb6a4f0cd6d1cc9c">0 Understanding Chromes --user-data-dir Option.md · GitHub</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgist.github.com%2Faont%2Fc8bd778e33dee4e2063d32364e9e0e8f&amp;rut=b60d419381b86e581794f737816730093bf0fe90018cd11ccb6a4f0cd6d1cc9c">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/gist.github.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgist.github.com%2Faont%2Fc8bd778e33dee4e2063d32364e9e0e8f&amp;rut=b60d419381b86e581794f737816730093bf0fe90018cd11ccb6a4f0cd6d1cc9c">
+                            gist.github.com/aont/c8bd778e33dee4e2063d32364e9e0e8f
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgist.github.com%2Faont%2Fc8bd778e33dee4e2063d32364e9e0e8f&amp;rut=b60d419381b86e581794f737816730093bf0fe90018cd11ccb6a4f0cd6d1cc9c">Automation Tools like Selenium, Puppeteer, or Playwright often rely on --<b>user-data-dir</b> to launch Chrome with a controlled environment. Parallel Profiles Launch multiple independent Chrome instances, each with its own <b>set</b> of extensions and settings, by pointing them to different directories.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdeepwiki.com%2Fchromedp%2Fchromedp%2F2%2Dbrowser%2Dmanagement&amp;rut=b0f99056b392fa10d3c59c279f03ffc0358d8c50d768df44a33abb16bfc339af">Browser Management | chromedp/chromedp | DeepWiki</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdeepwiki.com%2Fchromedp%2Fchromedp%2F2%2Dbrowser%2Dmanagement&amp;rut=b0f99056b392fa10d3c59c279f03ffc0358d8c50d768df44a33abb16bfc339af">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/deepwiki.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdeepwiki.com%2Fchromedp%2Fchromedp%2F2%2Dbrowser%2Dmanagement&amp;rut=b0f99056b392fa10d3c59c279f03ffc0358d8c50d768df44a33abb16bfc339af">
+                            deepwiki.com/chromedp/chromedp/2-browser-management
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdeepwiki.com%2Fchromedp%2Fchromedp%2F2%2Dbrowser%2Dmanagement&amp;rut=b0f99056b392fa10d3c59c279f03ffc0358d8c50d768df44a33abb16bfc339af">Common ExecAllocator options: Flag (name, value): <b>Set</b> Chrome command-line flags <b>UserDataDir</b> (<b>dir</b>): Specify <b>user</b> <b>data</b> directory ProxyServer (proxy): <b>Set</b> proxy server Headless: Run in headless mode NoSandbox: Disable Chrome sandbox Sources: allocate.go 100-511 browser.go 345-376 <b>chromedp</b>.go 480-546 Debugging and Monitoring</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromeenterprise.google%2Fpolicies%2Fuser%2Ddata%2Ddir%2F&amp;rut=eccd2e7c43f58d8e63ac831cb3ae1812c5c1548ec0d4c874569af50182651655">UserDataDir: Set user data directory | Chrome Enterprise</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromeenterprise.google%2Fpolicies%2Fuser%2Ddata%2Ddir%2F&amp;rut=eccd2e7c43f58d8e63ac831cb3ae1812c5c1548ec0d4c874569af50182651655">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/chromeenterprise.google.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromeenterprise.google%2Fpolicies%2Fuser%2Ddata%2Ddir%2F&amp;rut=eccd2e7c43f58d8e63ac831cb3ae1812c5c1548ec0d4c874569af50182651655">
+                            chromeenterprise.google/policies/user-data-dir/
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fchromeenterprise.google%2Fpolicies%2Fuser%2Ddata%2Ddir%2F&amp;rut=eccd2e7c43f58d8e63ac831cb3ae1812c5c1548ec0d4c874569af50182651655">Configures the directory that Google Chrome will use for storing <b>user</b> <b>data</b>. If you <b>set</b> this policy, Google Chrome will use the provided directory regardless whether the <b>user</b> has specified the <b>&#x27;--user-data-dir&#x27;</b> flag or not.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F818&amp;rut=30d2e8ec9f7fa58e2c8ec2a8b7636383add2c05cc2ef5bcaaf249bbe9a7e613f">Cookies not saving to userDataDir - call `chromedp.Cancel ... - GitHub</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F818&amp;rut=30d2e8ec9f7fa58e2c8ec2a8b7636383add2c05cc2ef5bcaaf249bbe9a7e613f">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/github.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F818&amp;rut=30d2e8ec9f7fa58e2c8ec2a8b7636383add2c05cc2ef5bcaaf249bbe9a7e613f">
+                            github.com/chromedp/chromedp/issues/818
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fchromedp%2Fchromedp%2Fissues%2F818&amp;rut=30d2e8ec9f7fa58e2c8ec2a8b7636383add2c05cc2ef5bcaaf249bbe9a7e613f">Can you start the browser from command line with --<b>user</b>-<b>data</b>-dir=your-<b>dir</b>, and see whether the cookies are stored without <b>chromedp</b>? I guess the reason is that the browser won&#x27;t store session cookies.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fstackoverflow.com%2Fquestions%2F59287313%2Fload%2Dup%2Dexisting%2Dchrome%2Duser%2Dprofile%2Ddata%2Dwith%2Dchromedp&amp;rut=7c6baef00e908c59e1cc9a2dbedd8be811ba62cf927b653749e10db44b35a4cb">Load up existing Chrome user profile &amp; data with chromedp</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fstackoverflow.com%2Fquestions%2F59287313%2Fload%2Dup%2Dexisting%2Dchrome%2Duser%2Dprofile%2Ddata%2Dwith%2Dchromedp&amp;rut=7c6baef00e908c59e1cc9a2dbedd8be811ba62cf927b653749e10db44b35a4cb">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/stackoverflow.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fstackoverflow.com%2Fquestions%2F59287313%2Fload%2Dup%2Dexisting%2Dchrome%2Duser%2Dprofile%2Ddata%2Dwith%2Dchromedp&amp;rut=7c6baef00e908c59e1cc9a2dbedd8be811ba62cf927b653749e10db44b35a4cb">
+                            stackoverflow.com/questions/59287313/load-up-existing-chrome-user-profile-data-with-chromedp
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fstackoverflow.com%2Fquestions%2F59287313%2Fload%2Dup%2Dexisting%2Dchrome%2Duser%2Dprofile%2Ddata%2Dwith%2Dchromedp&amp;rut=7c6baef00e908c59e1cc9a2dbedd8be811ba62cf927b653749e10db44b35a4cb">When I load up a <b>chromedp</b> context I want it to use my default Chrome session. Keeping all session <b>data</b> and things. So when I load up Dropbox, Discord, Twitter, YouTube... etc I should already logged in and can readily interact with them through <b>chromedp</b>. I understand there may be security concerns so this action may be impossible.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fsupport.google.com%2Fchrome%2Fa%2Fanswer%2F9866158%3Fhl%3Den&amp;rut=358ade4faedc15e10f43e8ae5f533b68cdb6f8782ea9f2d2bad98d574dc99b98">Supported directory variables</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fsupport.google.com%2Fchrome%2Fa%2Fanswer%2F9866158%3Fhl%3Den&amp;rut=358ade4faedc15e10f43e8ae5f533b68cdb6f8782ea9f2d2bad98d574dc99b98">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/support.google.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fsupport.google.com%2Fchrome%2Fa%2Fanswer%2F9866158%3Fhl%3Den&amp;rut=358ade4faedc15e10f43e8ae5f533b68cdb6f8782ea9f2d2bad98d574dc99b98">
+                            support.google.com/chrome/a/answer/9866158?hl=en
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fsupport.google.com%2Fchrome%2Fa%2Fanswer%2F9866158%3Fhl%3Den&amp;rut=358ade4faedc15e10f43e8ae5f533b68cdb6f8782ea9f2d2bad98d574dc99b98">As an admin, you can use variables to configure file paths, such as the directory that Chrome uses for storing <b>user</b> <b>data</b>. That way, you don&#x27;t need to <b>set</b> a hard-coded path. For example, to store profile <b>data</b> under the <b>user</b> local application <b>data</b> on Windows, <b>set</b> the <b>UserDataDir</b> policy to $ {local_app_data}&#92;Chrome&#92;Profile.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+
+            
+              
+              
+                <div class="nav-link">
+                  <form action="/html/" method="post">
+                    <input type="submit" class='btn btn--alt' value="Next" />
+                    <input type="hidden" name="q" value="chromedp set user data dir" />
+                    <input type="hidden" name="s" value="10" />
+                    <input type="hidden" name="nextParams" value="" />
+                    <input type="hidden" name="v" value="l" />
+                    <input type="hidden" name="o" value="json" />
+                    <input type="hidden" name="dc" value="11" />
+                    <input type="hidden" name="api" value="d.js" />
+                    <input type="hidden" name="vqd" value="4-276066253020037807951926949604738965983" />
+
+                    
+                    
+                    
+                      <input name="kl" value="wt-wt" type="hidden" />
+                    
+                    
+                    
+                    
+                  </form>
+                </div>
+              
+            
+
+            <div class="feedback-btn">
+              <a rel="nofollow" href="//duckduckgo.com/feedback.html" target="_new">Feedback</a>
+            </div>
+            <div class="clear"></div>
+          </div>
+        </div>
+      </div> <!-- links wrapper //-->
+    
+  </div>
+
+  <div id="bottom_spacing2"></div>
+
+  
+    <img src="//duckduckgo.com/t/sl_h"/>
+  
+</body>
+</html>

@@ -1,8 +1,9 @@
-import { Index, Show, createEffect, on, onMount, onCleanup, createSignal } from 'solid-js';
+import { Index, Show, createEffect, on, createSignal } from 'solid-js';
 import { useSession } from '../context/session';
 import MessageItem from './message-item';
-import { saveScroll, getScroll } from '../lib/scroll-memory';
+import { createChatScroll } from '../lib/chat-scroll';
 import JumpToLatest from './jump-to-latest';
+import Logo from './logo';
 
 function isToolResultMessage(msg: any): boolean {
   if (msg.info.role !== 'user') return false;
@@ -18,24 +19,10 @@ function isEmptyInProgress(msg: any): boolean {
 
 export default function MessageList() {
   const session = useSession();
-  let scrollRef: HTMLDivElement | undefined;
-  let bottomAnchor: HTMLDivElement | undefined;
-  let restored = false;
-  const [isScrolledUp, setIsScrolledUp] = createSignal(false);
   const [unreadCount, setUnreadCount] = createSignal(0);
   // Messages already seen. Unread is (total - readMarker); without this the
   // badge showed the whole conversation's length the moment you scrolled up.
   const [readMarker, setReadMarker] = createSignal(0);
-
-  // Whether the user is "stuck to the bottom" — true when they're at the
-  // bottom and should auto-scroll with new content. Stays true during
-  // streaming as long as the user doesn't scroll up.
-  const [stickToBottom, setStickToBottom] = createSignal(true);
-
-  const scrollKey = () => {
-    const id = session.activeSession()?.id || '';
-    return id ? `chat:${id}` : '';
-  };
 
   const visibleMessages = () => {
     const activeId = session.activeSession()?.id;
@@ -44,65 +31,36 @@ export default function MessageList() {
       .filter((msg: any) => !isToolResultMessage(msg) && !isEmptyInProgress(msg));
   };
 
-  // Detect whether the user is near the bottom (within 80px threshold).
-  const checkNearBottom = () => {
-    if (!scrollRef) return false;
-    return scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight < 80;
-  };
-
-  // Track scroll position and update stickiness
-  onMount(() => {
-    if (!scrollRef) return;
-    const handler = () => {
-      if (!scrollRef) return;
-      const key = scrollKey();
-      if (key) saveScroll(key, scrollRef.scrollTop);
-
-      const nearBottom = checkNearBottom();
-      setIsScrolledUp(!nearBottom);
-      setStickToBottom(nearBottom);
-      if (nearBottom) {
-        setUnreadCount(0);
-        setReadMarker(visibleMessages().length);
-      }
-    };
-    scrollRef.addEventListener('scroll', handler, { passive: true });
-    onCleanup(() => scrollRef?.removeEventListener('scroll', handler));
+  // Follows new content only while the view is at the bottom, and holds the
+  // reading position anywhere else. See lib/chat-scroll.ts.
+  const scroll = createChatScroll({
+    key: () => {
+      const id = session.activeSession()?.id || '';
+      return id ? `chat:${id}` : '';
+    },
+    onAtBottom: () => {
+      setUnreadCount(0);
+      setReadMarker(visibleMessages().length);
+    },
   });
 
   // Restore scroll once messages first appear after mount/navigation.
   createEffect(on(
     () => visibleMessages().length,
-    (count) => {
-      if (restored || !scrollRef || count === 0) return;
-      const key = scrollKey();
-      const saved = key ? getScroll(key) : 0;
-      requestAnimationFrame(() => {
-        if (!scrollRef) return;
-        if (saved > 0) {
-          scrollRef.scrollTop = saved;
-        } else {
-          bottomAnchor?.scrollIntoView({ behavior: 'instant' });
-        }
-        restored = true;
-      });
-    },
+    (count) => { if (count > 0) scroll.restore(); },
   ));
 
   // When the session changes, reset state and stick to bottom.
   createEffect(on(
     () => session.activeSession()?.id,
     () => {
-      restored = false;
-      setStickToBottom(true);
-      setIsScrolledUp(false);
+      scroll.reset();
       setUnreadCount(0);
       setReadMarker(0);
     },
   ));
 
-  // Auto-scroll when new content arrives during streaming.
-  // Only scrolls if stickToBottom is true (user is at the bottom).
+  // Follow new content during streaming, or count what arrived while away.
   createEffect(on(
     () => {
       const msgs = session.messages();
@@ -117,16 +75,9 @@ export default function MessageList() {
       return msgs.length + ':' + tailMark + ':' + loadingKey;
     },
     (_curr, prev) => {
-      if (!scrollRef) return;
-      if (prev === undefined && !restored) return;
-
-      if (stickToBottom()) {
-        // Use scrollIntoView on the bottom anchor — much more reliable than
-        // setting scrollTop because the DOM has already updated by the time
-        // this effect runs (SolidJS synchronous rendering).
-        requestAnimationFrame(() => {
-          bottomAnchor?.scrollIntoView({ behavior: 'instant' });
-        });
+      if (prev === undefined && !scroll.hasRestored()) return;
+      if (scroll.stickToBottom()) {
+        scroll.follow();
         setReadMarker(visibleMessages().length);
       } else {
         // User scrolled up — count only messages that arrived since they left.
@@ -137,29 +88,23 @@ export default function MessageList() {
 
 
   const scrollToBottom = () => {
-    if (bottomAnchor) {
-      bottomAnchor.scrollIntoView({ behavior: 'smooth' });
-    }
-    setStickToBottom(true);
-    setIsScrolledUp(false);
+    scroll.jumpToBottom();
     setUnreadCount(0);
     setReadMarker(visibleMessages().length);
   };
 
   return (
     <div class="flex-1 min-h-0 relative flex flex-col">
-      <div ref={scrollRef} class="flex-1 overflow-y-auto">
+      <div ref={scroll.attachScroll} class="chat-scroll flex-1 overflow-y-auto">
         {/* Spacing is rhythmic rather than uniform (see .chat-flow): a wide gap
             opens before each new user prompt, a medium one under it, and the
             agent's own run of tool calls and replies stays tightly packed —
             so the transcript reads as turns, not as an evenly spaced list. */}
-        <div class="chat-col chat-flow px-4 md:px-8 pt-6 pb-4">
+        <div ref={scroll.attachContent} class="chat-col chat-flow px-4 md:px-8 pt-6 pb-4">
           <Show when={visibleMessages().length === 0 && !session.loading()}>
             <div class="flex flex-col items-center justify-center py-24 text-center animate-fade-in-up">
               <div class="w-11 h-11 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--border-subtle)] flex items-center justify-center mb-3.5">
-                <svg class="w-5 h-5 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+                <Logo class="w-6 h-6 text-[color:var(--accent)]" />
               </div>
               <p class="text-ui font-medium text-[color:var(--text-primary)] mb-1">Ready when you are</p>
               <p class="text-meta text-[color:var(--text-tertiary)]">Describe a task, ask a question, or paste an error.</p>
@@ -186,15 +131,13 @@ export default function MessageList() {
             </div>
           </Show>
 
-          {/* Bottom anchor for auto-scroll */}
-          <div ref={bottomAnchor} />
         </div>
 
       </div>
 
       {/* Anchored to the message column and just above the composer, so it
           centres on the conversation and never overlaps a grown input. */}
-      <Show when={isScrolledUp()}>
+      <Show when={scroll.isScrolledUp()}>
         <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
           <JumpToLatest count={unreadCount()} onClick={scrollToBottom} />
         </div>

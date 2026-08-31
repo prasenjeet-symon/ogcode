@@ -45,7 +45,7 @@ func Embedded() ([]Skill, []error) {
 // fresh checkout has no AGENT.md explaining what AGENT.md is for.
 const customizeOgcodeSkill = `---
 name: customize-ogcode
-description: How to configure ogcode for a project — ogcode.json provider and skill settings, AGENT.md behavioural rules, MEMORY.md project knowledge, and authoring new skills. Load this when the user asks to change ogcode's own configuration or behaviour.
+description: How to configure ogcode for a project — ogcode.json provider, skill, and MCP server settings, AGENT.md behavioural rules, MEMORY.md project knowledge, and authoring new skills. Load this when the user asks to change ogcode's own configuration or behaviour.
 ---
 
 # Customizing ogcode
@@ -71,12 +71,71 @@ win field by field.
     "paths": ["./team-skills"],
     "urls": ["https://example.com/skills/index.json"],
     "permissions": { "internal-*": "deny", "deploy-*": "ask" }
+  },
+  "mcp": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "github": {
+      "url": "https://mcp.example.com/github",
+      "headers": { "Authorization": "Bearer ghp_token" }
+    }
   }
 }
 ` + "```" + `
 
 A real environment variable always beats the config file, so a key in the
 environment is not overridden by one in ogcode.json.
+
+## MCP — external tools over the Model Context Protocol
+
+The ` + "`mcp`" + ` block declares external MCP servers whose tools are exposed to
+the agent alongside ogcode's built-in tools. It goes in the same ` + "`ogcode.json`" + `
+(project) or ` + "`~/.config/ogcode/config.json`" + ` (global) as ` + "`providers`" + ` and
+` + "`skills`" + `. Each key is a server name you choose; its value is one of two shapes:
+
+- **Local subprocess (stdio)**: set ` + "`command`" + ` (the executable) and ` + "`args`" + `
+  (its arguments). ` + "`env`" + ` augments — never replaces — the parent process
+  environment.
+- **Remote HTTP**: set ` + "`url`" + ` and, optionally, ` + "`headers`" + `. The endpoint is
+  a streamable-http server. Set ` + "`transport`" + ` to ` + "`\"sse\"`" + ` explicitly for an
+  older SSE endpoint.
+
+` + "`transport`" + ` is optional and auto-detected: stdio when ` + "`command`" + ` is set,
+otherwise streamable-http. At startup ogcode connects to every declared server
+in parallel. Each server's tools are registered under the id
+` + "`mcp_<server>_<tool>`" + ` and surfaced to the coding agent through the ` + "`mcp_*`" + `
+glob, so no code change is needed to use them. The ` + "`mcp_`" + ` prefix is what
+makes the id match the glob; without it the tool connects but never reaches the
+agent. Server and tool names are sanitised into the character set providers
+accept for a function name (a-z, A-Z, 0-9, ` + "`_`" + `, ` + "`-`" + `), so a
+server or tool whose own name contains anything else still yields a usable id.
+A server that fails to connect is skipped with a warning; the rest still load.
+
+Merging is **per-name override**, not a union: if a project re-states a server
+the global config already named, the project definition replaces the global one
+wholesale (re-stating a server implies intent to own its full definition). A
+project name the global config did not have is simply added.
+
+### Pitfalls
+
+- **Servers connect at startup, not mid-session.** Editing ` + "`ogcode.json`" + ` or
+  ` + "`~/.config/ogcode/config.json`" + ` has no effect on the running session — fully
+  restart ogcode for a new or changed server to connect.
+- **Don't bridge a remote server through ` + "`npx mcp-remote`" + `.** A Claude
+  Desktop config often wraps a remote HTTP server as
+  ` + "`\"command\": \"npx\", \"args\": [\"-y\", \"mcp-remote\", \"<url>\"]`" + `. Copied
+  verbatim into ogcode this can spawn the ` + "`mcp-remote`" + ` process yet never
+  complete the MCP handshake, so no ` + "`mcp_*`" + ` tools register — silently. Use
+  ogcode's native ` + "`url`" + ` + ` + "`transport`" + ` shape instead, which cuts out the
+  middleman and talks to the endpoint directly.
+- **A live subprocess is not proof of a working connection.** ` + "`mcp-remote`" + `
+  running only shows ogcode launched the bridge, not that tools loaded. The real
+  test is whether ` + "`mcp_<server>_*`" + ` tools appear in the session. If a remote
+  server still won't load through the native shape, try omitting ` + "`transport`" + `
+  (let ogcode auto-detect) or pointing ` + "`url`" + ` at the ` + "`/mcp`" + ` base path
+  rather than ` + "`/mcp/stream`" + `.
 
 ## AGENT.md — how the agent should work
 

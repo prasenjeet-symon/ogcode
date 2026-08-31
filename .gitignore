@@ -18,6 +18,11 @@ web/.solid/
 # Environment
 .env
 
+# Per-project ogcode config — local connection overrides (API keys, base URLs)
+# that vary per machine. EnsureProjectFile extends an existing .gitignore with
+# this pattern; it is also listed here so this repo never commits its own.
+ogcode.json
+
 # Winget manifests (managed by GoReleaser in winget-pkgs fork)
 manifests/
 
@@ -32,3 +37,8 @@ manifests/
 exponential_equations.tex
 polynomial_equations.pdf
 GIT_DIFF_PLAN.md
+# Project long-term memory — machine-local working notes, loaded at runtime by
+# LoadMemoryMD from whatever directory ogcode is opened in. Never tracked: it is
+# personal to a checkout, and it is re-sent in full on every model request, so a
+# committed one becomes every contributor's per-turn token cost as well as ours.
+MEMORY.md

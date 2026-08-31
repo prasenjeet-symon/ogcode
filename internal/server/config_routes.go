@@ -149,8 +149,8 @@ func (s *Server) configPayload() map[string]any {
 		"port":           s.port,
 		"memoryEnabled":  memoryEnabled,
 		"memoryProvider": memoryProvider,
-		"searchEnabled":  s.searchBridge != nil,
-		"searchRunning":  s.searchBridge != nil,
+		"searchEnabled":  s.searchBackend != nil,
+		"searchRunning":  s.searchBackend != nil,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -98,13 +99,13 @@ func (m *Memory) ReadMemory(ctx context.Context, sessionID string) string {
 // RecallMemory performs semantic recall for a specific question. chat is the
 // synthesis LLM client built from the session's selected provider+model; when
 // nil, recall returns the raw semantically filtered tree without synthesis.
-func (m *Memory) RecallMemory(ctx context.Context, sessionID, question string, chat ChatClient) string {
+func (m *Memory) RecallMemory(ctx context.Context, sessionID, question string, chat ChatClient) (string, error) {
 	if !m.Enabled() {
-		return ""
+		return "", nil
 	}
 	if m.Graph.Embed == nil {
 		slog.Warn("RecallMemory: no embedder configured")
-		return m.ReadMemory(ctx, sessionID)
+		return m.ReadMemory(ctx, sessionID), nil
 	}
 	_ = m.Store.EnsureSession(sessionID)
 
@@ -117,8 +118,12 @@ func (m *Memory) RecallMemory(ctx context.Context, sessionID, question string, c
 		Chat:      chat,
 	})
 	if err != nil {
+		// Reported rather than flattened to "": the caller renders an empty
+		// result as "no relevant past context found", which tells the model
+		// memory holds nothing about the question when the truth is that the
+		// lookup never ran.
 		slog.Warn("memory recall failed", "err", err)
-		return ""
+		return "", err
 	}
 
 	var display string
@@ -129,7 +134,7 @@ func (m *Memory) RecallMemory(ctx context.Context, sessionID, question string, c
 		display = result.Answer
 	}
 	slog.Info("memory recall returned context", "session", sessionID, "len", len(display))
-	return display
+	return display, nil
 }
 
 // DefaultProjectSessionTypes are the session types project-scoped recall reads.
@@ -154,17 +159,17 @@ type ProjectRecallRequest struct {
 // RecallProjectMemory performs semantic recall across every conversation held in
 // a project. chat is the synthesis LLM built from the session's selected model;
 // when nil, the assembled cross-session context is returned without synthesis.
-func (m *Memory) RecallProjectMemory(ctx context.Context, req ProjectRecallRequest) string {
+func (m *Memory) RecallProjectMemory(ctx context.Context, req ProjectRecallRequest) (string, error) {
 	if !m.Enabled() {
-		return ""
+		return "", nil
 	}
 	if m.Graph.Embed == nil {
 		slog.Warn("RecallProjectMemory: no embedder configured")
-		return ""
+		return "", nil
 	}
 	if req.ProjectID == "" {
 		slog.Warn("RecallProjectMemory: no project id resolved")
-		return ""
+		return "", nil
 	}
 
 	result, err := m.Graph.ProjectRecall(ctx, ProjectRecallOptions{
@@ -177,11 +182,12 @@ func (m *Memory) RecallProjectMemory(ctx context.Context, req ProjectRecallReque
 		Chat:         req.Chat,
 	})
 	if err != nil {
+		// See RecallMemory: an error is not the same as an empty result.
 		slog.Warn("project memory recall failed", "err", err)
-		return ""
+		return "", err
 	}
 	if result.TotalFacts == 0 || strings.TrimSpace(result.Answer) == "" {
-		return ""
+		return "", nil
 	}
 
 	display := result.Answer
@@ -191,7 +197,7 @@ func (m *Memory) RecallProjectMemory(ctx context.Context, req ProjectRecallReque
 	}
 	slog.Info("project memory recall returned context",
 		"project", req.ProjectID, "len", len(display), "sessions", result.SessionsUsed, "facts", result.TotalFacts)
-	return display
+	return display, nil
 }
 
 // Scope identifies the session a memory write belongs to, plus the workspace
@@ -217,6 +223,17 @@ func (m *Memory) WriteMemory(ctx context.Context, scope Scope, question, respons
 		return
 	}
 	go func() {
+		// This goroutine is detached from any request, so a panic here is not
+		// contained by anything — it takes the whole server down. Memory is a
+		// best-effort side channel; a bad LLM response or an empty model list
+		// must not be able to end the process.
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("memory: panic while persisting turn; memory write dropped",
+					"session", scope.SessionID, "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
+
 		bgCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
@@ -429,6 +446,127 @@ func (m *Memory) SemanticSearch(ctx context.Context, collection, query string, t
 	return candidates, nil
 }
 
+// BackfillEmbeddings embeds only the facts that have no embedding, leaving
+// existing vectors untouched. It exists because a fact stored without one is
+// invisible to every semantic recall — scanProject and BuildLightweightTree
+// both skip it — so a graph that accumulated unembedded facts looks full but
+// searches as if it were empty.
+//
+// Unlike RefreshAll this is incremental and safe to run on every start: it is a
+// no-op once the backlog is cleared. It stops at the first context
+// cancellation so a shutdown does not have to wait for the whole backlog.
+//
+// progress, when non-nil, is called after each fact with the number finished
+// and the size of the backlog, so a caller can tell the user why the machine is
+// busy. It runs on this goroutine and should not block.
+func (m *Memory) BackfillEmbeddings(ctx context.Context, progress func(done, total int)) (embedded, failed int, err error) {
+	if m.Graph == nil || m.Graph.Embed == nil {
+		return 0, 0, fmt.Errorf("backfill unavailable: no embedder")
+	}
+
+	// Materialized before any UPDATE: the sqlite driver will not accept a write
+	// while a read cursor is open on the same connection.
+	rows, err := m.Store.DB().QueryContext(ctx,
+		`SELECT session_id, key, question, summary, content FROM nodes
+		 WHERE type = 'fact' AND content != '' AND (embedding IS NULL OR embedding = '')`)
+	if err != nil {
+		return 0, 0, err
+	}
+	type factRow struct{ sessionID, key, question, summary, content string }
+	var pending []factRow
+	for rows.Next() {
+		var r factRow
+		if err := rows.Scan(&r.sessionID, &r.key, &r.question, &r.summary, &r.content); err != nil {
+			continue
+		}
+		pending = append(pending, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, 0, err
+	}
+	rows.Close()
+	if len(pending) == 0 {
+		return 0, 0, nil
+	}
+
+	slog.Info("memory: backfilling missing fact embeddings", "facts", len(pending))
+	for _, r := range pending {
+		if err := ctx.Err(); err != nil {
+			slog.Info("memory: backfill stopped early", "embedded", embedded, "remaining", len(pending)-embedded-failed)
+			return embedded, failed, nil
+		}
+
+		started := time.Now()
+		vecs, err := m.Graph.Embed.Embed(ctx, []string{factEmbedText(r.question, r.summary, r.content)})
+		took := time.Since(started)
+
+		switch {
+		case err != nil || len(vecs) == 0 || len(vecs[0]) == 0:
+			failed++
+			slog.Warn("memory: backfill could not embed fact", "session", r.sessionID, "key", r.key, "err", err)
+		default:
+			if err := m.Store.SetEmbedding(r.sessionID, r.key, vecs[0]); err != nil {
+				failed++
+				slog.Warn("memory: backfill could not persist embedding", "session", r.sessionID, "key", r.key, "err", err)
+			} else {
+				embedded++
+			}
+		}
+
+		if progress != nil {
+			progress(embedded+failed, len(pending))
+		}
+		if !restAfterEmbed(ctx, took) {
+			slog.Info("memory: backfill stopped early", "embedded", embedded, "remaining", len(pending)-embedded-failed)
+			return embedded, failed, nil
+		}
+	}
+	slog.Info("memory: backfill complete", "embedded", embedded, "failed", failed)
+	return embedded, failed, nil
+}
+
+// backfillRestRatio paces the backfill: after each fact it rests this many times
+// the embedding's own duration. The backfill is a repair job with no deadline,
+// but the local embedder saturates several cores for a couple of hundred
+// milliseconds per fact, so running it flat out pins the machine and competes
+// with whatever the user is actually doing. Resting in proportion to the work
+// keeps the ratio honest on any hardware — a fast machine still finishes fast, a
+// slow one backs off further — where a fixed sleep would not.
+const backfillRestRatio = 3
+
+// backfillMaxRest caps a single pause so one pathologically slow fact cannot
+// stall the rest of the backlog behind it.
+const backfillMaxRest = 2 * time.Second
+
+// backfillRest is how long to rest after an embedding that took the given time.
+func backfillRest(took time.Duration) time.Duration {
+	rest := took * backfillRestRatio
+	if rest > backfillMaxRest {
+		rest = backfillMaxRest
+	}
+	return rest
+}
+
+// restAfterEmbed pauses in proportion to how long the last embedding took. It
+// reports whether the backfill should continue: a cancellation during the rest
+// ends it, so shutdown never waits out a pause.
+func restAfterEmbed(ctx context.Context, took time.Duration) bool {
+	rest := backfillRest(took)
+	if rest <= 0 {
+		return ctx.Err() == nil
+	}
+
+	timer := time.NewTimer(rest)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 // RefreshAll recomputes all embeddings — both collection documents and graph
 // facts — so it is the recovery path after switching embedding provider.
 // Without re-embedding the graph nodes, session and project recall keep
@@ -482,19 +620,21 @@ func (m *Memory) RefreshAll(ctx context.Context) error {
 	// Rows are materialized before any UPDATE runs: the sqlite driver does
 	// not allow a write while a read cursor is still open on the connection.
 	nodeRows, err := m.Store.DB().QueryContext(ctx,
-		`SELECT session_id, key, content FROM nodes WHERE type = 'fact' AND content != ''`)
+		`SELECT session_id, key, question, summary, content FROM nodes WHERE type = 'fact' AND content != ''`)
 	if err != nil {
 		return err
 	}
 	type nodeRow struct {
 		sessionID string
 		key       string
+		question  string
+		summary   string
 		content   string
 	}
 	var nodes []nodeRow
 	for nodeRows.Next() {
 		var r nodeRow
-		if err := nodeRows.Scan(&r.sessionID, &r.key, &r.content); err != nil {
+		if err := nodeRows.Scan(&r.sessionID, &r.key, &r.question, &r.summary, &r.content); err != nil {
 			continue
 		}
 		nodes = append(nodes, r)
@@ -504,15 +644,29 @@ func (m *Memory) RefreshAll(ctx context.Context) error {
 		return err
 	}
 	nodeRows.Close()
+
+	var ok, failed int
 	for _, r := range nodes {
-		vecs, err := m.Graph.Embed.Embed(ctx, []string{r.content})
-		if err != nil || len(vecs) == 0 {
+		// Same text selection AddFact uses, so a refreshed vector is comparable
+		// with a freshly written one. Embedding raw content here while AddFact
+		// embeds the summary would put the two halves of the corpus in
+		// different regions of the vector space.
+		vecs, err := m.Graph.Embed.Embed(ctx, []string{factEmbedText(r.question, r.summary, r.content)})
+		if err != nil || len(vecs) == 0 || len(vecs[0]) == 0 {
+			failed++
+			slog.Warn("memory: refresh could not embed fact", "session", r.sessionID, "key", r.key, "err", err)
 			continue
 		}
 		embJSON, _ := json.Marshal(vecs[0])
-		_, _ = m.Store.DB().ExecContext(ctx,
+		if _, err := m.Store.DB().ExecContext(ctx,
 			`UPDATE nodes SET embedding = ? WHERE session_id = ? AND key = ?`,
-			embJSON, r.sessionID, r.key)
+			embJSON, r.sessionID, r.key); err != nil {
+			failed++
+			slog.Warn("memory: refresh could not persist embedding", "session", r.sessionID, "key", r.key, "err", err)
+			continue
+		}
+		ok++
 	}
+	slog.Info("memory: refresh complete", "facts", len(nodes), "embedded", ok, "failed", failed, "documents", len(docs))
 	return nil
 }

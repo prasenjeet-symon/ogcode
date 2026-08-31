@@ -72,6 +72,10 @@ func (s *Server) routes() http.Handler {
 
 		r.Get("/pricing", s.handleGetPricing)
 
+		r.Get("/resources", s.handleResources)
+
+		r.Get("/skills", s.handleListSkills)
+
 		r.Route("/session", func(r chi.Router) {
 			r.Get("/", s.handleListSessions)
 			r.Post("/", s.handleCreateSession)
@@ -85,6 +89,7 @@ func (s *Server) routes() http.Handler {
 				r.Post("/prompt", s.handlePrompt)
 				r.Post("/guidance", s.handleGuidance)
 				r.Get("/message", s.handleGetMessages)
+				r.Get("/permission", s.handleListPermissions)
 				r.Post("/permission/{permissionID}", s.handlePermissionReply)
 			})
 		})

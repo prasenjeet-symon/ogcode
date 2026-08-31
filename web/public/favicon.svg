@@ -1,4 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-  <rect width="100" height="100" rx="20" fill="#3b82f6"/>
-  <text x="50" y="68" text-anchor="middle" fill="white" font-size="50" font-weight="bold" font-family="monospace">&gt;_</text>
+<!-- Rendered at 16-32px in a tab strip, so this uses the small cut: heavier
+     stroke, shorter inner turn. See assets/ogcode-mark.svg for the master. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#5E6AD2"/>
+  <g transform="translate(9 9) scale(0.72)" color="#FFFFFF">
+    <path d="M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33"
+          stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+  </g>
 </svg>

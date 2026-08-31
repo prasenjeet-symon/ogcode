@@ -1,7 +1,24 @@
-import { For, Show, createSignal, createMemo, createEffect, untrack, onMount } from 'solid-js';
+import { For, Show, createSignal, createMemo, createEffect, untrack, onMount, type JSX } from 'solid-js';
 import { useSession } from '../../context/session';
 import type { ModelInfo, ProviderConfig } from '../../api/client';
 import { getProviderConfigs, setProviderConfig } from '../../api/client';
+import {
+  Group,
+  Row,
+  Button,
+  IconButton,
+  LinkAction,
+  Chip,
+  Tag,
+  StatusChip,
+  Banner,
+  TextField,
+  EmptyState,
+  Mono,
+  fieldClass,
+  matches,
+  useShell,
+} from './ui';
 import {
   PROVIDER_DEFS,
   PROVIDER_GUIDE,
@@ -12,20 +29,20 @@ import {
 } from '../../lib/providers';
 
 // ---------------------------------------------------------------------------
-// Models settings — a workbench, not a stack of cards.
+// Models — one card per provider.
 //
 // ogcode speaks four protocols and only four: anthropic, openai, openrouter,
 // ollama (see NewProviderWithConfig, which rejects everything else). Every
-// other vendor — Gemini, DeepSeek, Groq, Together, Mistral, … — arrives
-// through the OpenAI slot with a different base URL. So the screen is built as
-// four slots in a rail plus one detail pane, with the guidance needed to pick
-// between them; it does not invent an integration per vendor.
+// other vendor — Gemini, DeepSeek, Groq, Together — arrives through the OpenAI
+// slot with a different base URL.
 //
-// Layout is rail + pane rather than a column of collapsible cards: choosing a
-// provider *replaces* the pane instead of expanding a section, so nothing
-// pushes the rest of the page around and the model list is never buried under
-// three accordions.
+// Each protocol gets a sheet holding its credentials and its slice of the
+// catalogue, so the whole picture is one scroll rather than a rail you have to
+// click through provider by provider.
 // ---------------------------------------------------------------------------
+
+const CHIP_ICON =
+  'M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z';
 
 /** The bundled free pool arrives as providerId "ogcode-groq", "ogcode-…". */
 const FREE_POOL = 'ogcode';
@@ -37,7 +54,6 @@ function slotOf(m: ModelInfo): string {
 interface Slot {
   id: string;
   label: string;
-  dot: string;
   def?: ProviderDef;
   /** Read-only slots have no credentials to configure. */
   readOnly?: boolean;
@@ -45,15 +61,11 @@ interface Slot {
 
 export default function ModelsSettings() {
   const session = useSession();
-  const [selected, setSelected] = createSignal<string>('anthropic');
-  const [query, setQuery] = createSignal('');
-  const [enabledOnly, setEnabledOnly] = createSignal(false);
+  const shell = useShell();
   const [configs, setConfigs] = createSignal<Record<string, ProviderConfig>>({});
   const [loadingConfigs, setLoadingConfigs] = createSignal(true);
-  // Opening on a provider the user never set up means landing on an empty pane.
-  // Once the catalogue arrives, jump to the slot that actually has models —
-  // but only once, so it never yanks the pane out from under a later click.
-  let landed = false;
+
+  createEffect(() => shell.report({ noun: 'settings' }));
 
   onMount(async () => {
     try {
@@ -66,16 +78,11 @@ export default function ModelsSettings() {
     }
   });
 
-  // The rail always shows the four real slots, plus the free pool and any
+  // The page always shows the four real slots, plus the free pool and any
   // unexpected provider id that turns up in the catalogue — a model the user
   // can see in the picker must be reachable here, whatever its provider.
   const slots = createMemo<Slot[]>(() => {
-    const base: Slot[] = PROVIDER_DEFS.map((def) => ({
-      id: def.id,
-      label: def.label,
-      dot: def.dot,
-      def,
-    }));
+    const base: Slot[] = PROVIDER_DEFS.map((def) => ({ id: def.id, label: def.label, def }));
     const known = new Set(base.map((s) => s.id));
     const extra = new Set<string>();
     for (const m of session.models()) {
@@ -83,253 +90,81 @@ export default function ModelsSettings() {
       if (!known.has(slot)) extra.add(slot);
     }
     if (extra.has(FREE_POOL)) {
-      base.push({ id: FREE_POOL, label: 'ogcode free pool', dot: 'bg-emerald-400', readOnly: true });
+      base.push({ id: FREE_POOL, label: 'ogcode free pool', readOnly: true });
       extra.delete(FREE_POOL);
     }
-    for (const id of [...extra].sort()) {
-      base.push({ id, label: id, dot: 'bg-zinc-400', readOnly: true });
-    }
+    for (const id of [...extra].sort()) base.push({ id, label: id, readOnly: true });
     return base;
   });
 
-  // Names and IDs match anywhere, because people type fragments of them ("4o",
-  // "coder"). Collections match only at a word boundary: a plain substring test
-  // makes "llama" hit every model in *O-llama Cloud*, which drowns the models
-  // actually called llama. Provider ids are not searched at all — the rail
-  // already carries that dimension, and "ollama" would collide the same way.
-  const matches = (m: ModelInfo, q: string) => {
-    if (!q) return true;
-    if (m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) return true;
-    const collection = (m.collection || '').toLowerCase();
-    return collection ? collection.split(/[\s\-_/]+/).some((word) => word.startsWith(q)) : false;
-  };
-
-  /** Per-slot counts, recomputed against the live query so the rail doubles as a search result map. */
-  const counts = createMemo(() => {
-    const q = query().trim().toLowerCase();
-    const out: Record<string, { total: number; enabled: number; hits: number }> = {};
-    for (const m of session.models()) {
-      const slot = slotOf(m);
-      const c = out[slot] || (out[slot] = { total: 0, enabled: 0, hits: 0 });
-      c.total++;
-      if (m.enabled) c.enabled++;
-      if (matches(m, q)) c.hits++;
-    }
-    return out;
-  });
-
-  createEffect(() => {
-    if (landed) return;
-    const models = session.models();
-    if (models.length === 0) return;
-    landed = true;
-    const c = counts();
-    // Prefer a slot the user actually owns and has models behind: configurable
-    // beats the read-only bundled pool, then richest first. Landing on the free
-    // pool would open a pane with nothing to configure.
-    const best = slots()
-      .filter((s) => (c[s.id]?.total ?? 0) > 0)
-      .sort((a, b) => {
-        const own = Number(!!b.def) - Number(!!a.def);
-        if (own !== 0) return own;
-        return (c[b.id]?.enabled ?? 0) - (c[a.id]?.enabled ?? 0);
-      })[0];
-    if (best) setSelected(best.id);
-  });
-
-  const activeSlot = createMemo(() => slots().find((s) => s.id === selected()) ?? slots()[0]);
-
-  const visibleModels = createMemo(() => {
-    const q = query().trim().toLowerCase();
-    const slot = selected();
-    const only = enabledOnly();
-    return session.models()
-      .filter((m) => slotOf(m) === slot && matches(m, q) && (!only || m.enabled))
+  const modelsFor = (slotId: string) =>
+    session
+      .models()
+      .filter((m) => slotOf(m) === slotId)
       // Sorted by name only — never by enabled state, or a row would jump out
       // from under the cursor the moment it was toggled.
       .sort((a, b) => a.name.localeCompare(b.name));
-  });
 
-  /** Slots holding matches for the current query other than the one on screen. */
-  const elsewhere = createMemo(() => {
-    if (!query().trim()) return [];
-    const c = counts();
-    return slots().filter((s) => s.id !== selected() && (c[s.id]?.hits ?? 0) > 0);
-  });
-
-  const totals = createMemo(() => {
-    const all = session.models();
-    return { total: all.length, enabled: all.filter((m) => m.enabled).length };
+  /** True when a query is live and nothing anywhere on the page matched it. */
+  const nothingMatched = createMemo(() => {
+    const q = shell.query().trim();
+    if (!q) return false;
+    return !slots().some(
+      (slot) =>
+        matches(q, slot.label, slot.id) ||
+        modelsFor(slot.id).some((m) => modelMatches(m, q)) ||
+        CREDENTIAL_TERMS.some((t) => matches(q, t)),
+    );
   });
 
   return (
-    <div class="h-full flex flex-col overflow-hidden anim-enter">
-      {/* Toolbar */}
-      <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center gap-3 px-6">
-        <h1 class="text-ui font-semibold text-[color:var(--text-primary)]">Models</h1>
-        <span class="text-micro text-[color:var(--text-muted)] tabular-nums">
-          {totals().enabled} of {totals().total} enabled
-        </span>
-        <div class="flex-1" />
-        <div class="relative w-64">
-          <svg class="w-3 h-3 text-[color:var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={query()}
-            onInput={(e) => setQuery(e.currentTarget.value)}
-            placeholder="Filter models"
-            aria-label="Filter models"
-            class="w-full h-7 pl-7 pr-2 rounded-[5px] bg-[color:var(--bg-elevated)] border border-[color:var(--border-subtle)]
-                   text-meta text-[color:var(--text-primary)] placeholder:text-[color:var(--text-muted)]
-                   focus:outline-none focus:border-[color:var(--border-strong)] transition-colors"
-          />
-        </div>
-      </header>
-
-      <div class="flex-1 min-h-0 flex">
-        {/* Provider rail */}
-        <nav class="w-[14.5rem] shrink-0 border-r border-[color:var(--border-subtle)] overflow-y-auto py-4">
-          <div class="px-4 pb-2 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-muted)] select-none">
-            Providers
-          </div>
-          <For each={slots()}>
-            {(slot) => {
-              const c = () => counts()[slot.id] ?? { total: 0, enabled: 0, hits: 0 };
-              const isActive = () => selected() === slot.id;
-              const configured = () => isConfigured(slot, configs()[slot.id]);
-              return (
-                <button
-                  type="button"
-                  onClick={() => setSelected(slot.id)}
-                  class={`group/row relative w-full flex items-center gap-2.5 h-8 pl-4 pr-3 text-ui text-left transition-colors
-                    ${isActive()
-                      ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)] font-medium'
-                      : 'text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)]'
-                    }`}
-                >
-                  <Show when={isActive()}>
-                    <span class="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-[color:var(--accent)]" />
-                  </Show>
-                  <span
-                    class={`w-1.5 h-1.5 rounded-full shrink-0 ${slot.dot} ${configured() ? '' : 'opacity-30'}`}
-                    title={configured() ? 'Configured' : 'Not configured'}
-                  />
-                  <span class="truncate flex-1">{slot.label}</span>
-                  <Show
-                    when={query().trim()}
-                    fallback={
-                      <span class="text-micro tabular-nums text-[color:var(--text-muted)]">
-                        {c().enabled}/{c().total}
-                      </span>
-                    }
-                  >
-                    <span
-                      class={`text-micro tabular-nums ${c().hits > 0 ? 'text-[color:var(--text-secondary)]' : 'text-[color:var(--text-muted)] opacity-40'}`}
-                    >
-                      {c().hits}
-                    </span>
-                  </Show>
-                </button>
-              );
+    <Show
+      when={!nothingMatched()}
+      fallback={
+        <EmptyState
+          icon="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z"
+          title={`Nothing matches "${shell.query()}"`}
+          body="Try a model name, a provider, or a word like key or endpoint."
+        />
+      }
+    >
+      <For each={slots()}>
+        {(slot) => (
+          <ProviderSection
+            slot={slot}
+            models={modelsFor(slot.id)}
+            config={configs()[slot.id]}
+            loadingConfig={loadingConfigs()}
+            onSaved={(c) => setConfigs({ ...configs(), [slot.id]: c })}
+            onToggle={(m) => session.toggleModel(m, !m.enabled)}
+            onRemove={async (m) => {
+              if (!confirm(`Remove "${m.name}"? This deletes the custom model.`)) return;
+              await session.removeCustomModel(m.id);
             }}
-          </For>
-
-          <div class="mx-4 mt-6 pt-4 border-t border-[color:var(--border-subtle)]">
-            <p class="text-micro leading-[1.7] text-[color:var(--text-muted)]">
-              Every other vendor — Gemini, DeepSeek, Groq, Together — connects through the
-              <span class="text-[color:var(--text-tertiary)]"> OpenAI </span>
-              slot.
-            </p>
-          </div>
-        </nav>
-
-        {/* Detail pane. The content sits in a bounded column with generous
-            gutters: stretched edge to edge on a wide display the guidance
-            became one long line and the price column drifted an inch away
-            from the model it belongs to. */}
-        <section class="flex-1 min-w-0 overflow-y-auto">
-          {/* Not `keyed`. slots() is rebuilt from session.models(), so every
-              model toggle — and every background catalogue refresh — produces
-              a new Slot object. Keying on it tore the pane down and built it
-              again, which silently emptied a half-typed API key and closed the
-              add-model row mid-edit. Keying on nothing keeps the components
-              alive and lets their props update in place. */}
-          <Show when={activeSlot()}>
-            {(slot) => (
-              // One column width for the whole pane. When the table ran wider
-              // than the guidance and the fields above it, the name and its
-              // model ID drifted apart and the price floated off on its own.
-              <div class="max-w-[48rem] px-8 py-7">
-                <ProviderHeader slot={slot()} config={configs()[slot().id]} />
-
-                <Show when={slot().def && !loadingConfigs()}>
-                  <ConnectionBlock
-                    def={slot().def!}
-                    config={configs()[slot().id]}
-                    onSaved={(c) => setConfigs({ ...configs(), [slot().id]: c })}
-                  />
-                </Show>
-
-                <Show when={slot().readOnly}>
-                  <p class="mt-7 text-meta leading-[1.7] text-[color:var(--text-tertiary)] max-w-[44rem]">
-                    These models ship with ogcode and need no credentials. Toggle them off if you would
-                    rather keep the picker to your own providers.
-                  </p>
-                </Show>
-
-                <ModelTable
-                  models={visibleModels()}
-                  slot={slot()}
-                  query={query()}
-                  totalInSlot={counts()[slot().id]?.total ?? 0}
-                  enabledInSlot={counts()[slot().id]?.enabled ?? 0}
-                  configured={isConfigured(slot(), configs()[slot().id])}
-                  enabledOnly={enabledOnly()}
-                  onEnabledOnly={setEnabledOnly}
-                  onToggle={(m) => session.toggleModel(m, !m.enabled)}
-                  onRemove={async (m) => {
-                    if (!confirm(`Remove "${m.name}"? This deletes the custom model.`)) return;
-                    await session.removeCustomModel(m.id);
-                  }}
-                  onAdd={(id, name, collection) =>
-                    session.addCustomModel(id, slot().id, name, collection || undefined)
-                  }
-                  suggestedCollection={
-                    slot().id === 'openai'
-                      ? collectionForBaseURL(configs()['openai']?.effectiveBaseUrl || configs()['openai']?.baseUrl || '')
-                      : ''
-                  }
-                />
-
-                <Show when={elsewhere().length > 0}>
-                  <div class="mt-5 text-meta text-[color:var(--text-tertiary)] flex items-center gap-2 flex-wrap">
-                    <span>Also matching elsewhere:</span>
-                    <For each={elsewhere()}>
-                      {(s) => (
-                        <button
-                          type="button"
-                          onClick={() => setSelected(s.id)}
-                          class="inline-flex items-center gap-1.5 h-6 px-2 rounded-[5px] border border-[color:var(--border-subtle)]
-                                 bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-strong)]
-                                 text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] transition-colors"
-                        >
-                          <span class={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-                          {s.label}
-                          <span class="tabular-nums text-[color:var(--text-muted)]">{counts()[s.id]?.hits ?? 0}</span>
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-              </div>
-            )}
-          </Show>
-        </section>
-      </div>
-    </div>
+            onAdd={(id, name, collection) =>
+              session.addCustomModel(id, slot.id, name, collection || undefined)
+            }
+          />
+        )}
+      </For>
+    </Show>
   );
+}
+
+/** Words that keep the credential rows on screen while searching, so "key" or
+ *  "endpoint" finds them under every provider. */
+const CREDENTIAL_TERMS = ['API key', 'Base URL', 'endpoint', 'credentials', 'models'];
+
+// Names and IDs match anywhere, because people type fragments of them ("4o",
+// "coder"). Collections match only at a word boundary: a plain substring test
+// makes "llama" hit every model in *O-llama Cloud*, which drowns the models
+// actually called llama.
+function modelMatches(m: ModelInfo, q: string): boolean {
+  const query = q.trim().toLowerCase();
+  if (!query) return true;
+  if (m.name.toLowerCase().includes(query) || m.id.toLowerCase().includes(query)) return true;
+  const collection = (m.collection || '').toLowerCase();
+  return collection ? collection.split(/[\s\-_/]+/).some((w) => w.startsWith(query)) : false;
 }
 
 /** A slot counts as configured when a key is set (app or env), or — for Ollama — an endpoint alone. */
@@ -340,62 +175,91 @@ function isConfigured(slot: Slot, config: ProviderConfig | undefined): boolean {
   return !!slot.def?.keyOptional && !!(config.effectiveBaseUrl || config.baseUrl);
 }
 
-// ---------- Provider header: what this slot is, and when to reach for it ----
-
-function ProviderHeader(props: { slot: Slot; config: ProviderConfig | undefined }) {
+function ProviderSection(props: {
+  slot: Slot;
+  models: ModelInfo[];
+  config: ProviderConfig | undefined;
+  loadingConfig: boolean;
+  onSaved: (c: ProviderConfig) => void;
+  onToggle: (m: ModelInfo) => void | Promise<void>;
+  onRemove: (m: ModelInfo) => void;
+  onAdd: (id: string, name: string, collection: string) => Promise<void>;
+}) {
+  const shell = useShell();
   const guide = () => PROVIDER_GUIDE[props.slot.id];
+
   const pointedAt = () => {
     if (props.slot.id !== 'openai') return '';
-    const url = props.config?.effectiveBaseUrl || props.config?.baseUrl || '';
-    return collectionForBaseURL(url);
+    return collectionForBaseURL(props.config?.effectiveBaseUrl || props.config?.baseUrl || '');
   };
 
-  return (
-    <div>
-      <div class="flex items-center gap-2.5">
-        <span class={`w-2 h-2 rounded-full ${props.slot.dot}`} />
-        <h2 class="text-[0.9375rem] font-semibold tracking-[-0.01em] text-[color:var(--text-primary)]">{props.slot.label}</h2>
-        {/* When the OpenAI slot is aimed at another vendor, say so in the title —
-            it is the single most confusing state this screen can be in. */}
-        <Show when={pointedAt()}>
-          {(name) => (
-            <span class="text-micro font-medium px-1.5 h-5 inline-flex items-center rounded-[4px] bg-[color:var(--accent-soft)] text-[color:var(--accent)]">
-              pointed at {name()}
-            </span>
-          )}
-        </Show>
-      </div>
+  const visibleModels = createMemo(() => props.models.filter((m) => modelMatches(m, shell.query())));
+  const slotMatches = () => matches(shell.query(), props.slot.label, props.slot.id);
+  const hideRow = (...terms: string[]) =>
+    !slotMatches() && !matches(shell.query(), ...terms) && visibleModels().length === 0;
 
-      <Show when={guide()} fallback={
-        <p class="mt-2 text-meta text-[color:var(--text-tertiary)]">
-          Bundled models — no configuration required.
-        </p>
-      }>
-        {(g) => (
+  const enabledCount = () => props.models.filter((m) => m.enabled).length;
+  const configured = () => isConfigured(props.slot, props.config);
+
+  return (
+    <Group
+      id={props.slot.id}
+      title={pointedAt() ? `${props.slot.label} → ${pointedAt()}` : props.slot.label}
+      icon={CHIP_ICON}
+      description={
+        <Show when={guide()} fallback="Bundled with ogcode — no credentials required.">
           <>
-            <p class="mt-2 text-ui text-[color:var(--text-secondary)] max-w-[44rem]">{g().tagline}</p>
-            {/* The two questions a provider has to answer, as a labelled pair
-                rather than three same-weight sentences — at a glance you can
-                find the one you came for instead of reading all of it. */}
-            <dl class="mt-4 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-4 gap-y-2.5 max-w-[46rem]">
-              <dt class="text-micro font-medium uppercase tracking-[0.06em] text-[color:var(--text-muted)] pt-[3px]">Use when</dt>
-              <dd class="text-meta leading-[1.65] text-[color:var(--text-secondary)]">{g().useWhen}</dd>
-              <dt class="text-micro font-medium uppercase tracking-[0.06em] text-[color:var(--text-muted)] pt-[3px]">Trade-off</dt>
-              <dd class="text-meta leading-[1.65] text-[color:var(--text-tertiary)]">{g().tradeoff}</dd>
-            </dl>
+            {guide()!.tagline}
+            <span class="block mt-1">
+              <span class="text-[color:var(--text-muted)]">Use when </span>
+              {guide()!.useWhen}
+            </span>
           </>
-        )}
+        </Show>
+      }
+      action={
+        <Show when={configured()} fallback={<StatusChip tone="muted">Not set up</StatusChip>}>
+          <StatusChip tone="ok">{enabledCount()} on</StatusChip>
+        </Show>
+      }
+    >
+      <Show when={props.slot.def && !props.loadingConfig}>
+        <Credentials def={props.slot.def!} config={props.config} onSaved={props.onSaved} hide={hideRow} />
       </Show>
-    </div>
+
+      <Row
+        label="Models"
+        helper="Which of this provider's models appear in the picker."
+        stacked
+        hidden={hideRow('models', 'catalogue', 'available')}
+      >
+        <ModelList
+          all={props.models}
+          visible={visibleModels()}
+          slot={props.slot}
+          configured={configured()}
+          filtering={!!shell.query().trim()}
+          onToggle={props.onToggle}
+          onRemove={props.onRemove}
+          onAdd={props.onAdd}
+          suggestedCollection={
+            props.slot.id === 'openai'
+              ? collectionForBaseURL(props.config?.effectiveBaseUrl || props.config?.baseUrl || '')
+              : ''
+          }
+        />
+      </Row>
+    </Group>
   );
 }
 
-// ---------- Connection: key + endpoint, always visible, never an accordion ---
+// ---------- Credentials ------------------------------------------------------
 
-function ConnectionBlock(props: {
+function Credentials(props: {
   def: ProviderDef;
   config: ProviderConfig | undefined;
   onSaved: (c: ProviderConfig) => void;
+  hide: (...terms: string[]) => boolean;
 }) {
   const [apiKey, setApiKey] = createSignal('');
   const [baseURL, setBaseURL] = createSignal('');
@@ -406,15 +270,13 @@ function ConnectionBlock(props: {
 
   const guide = () => PROVIDER_GUIDE[props.def.id];
 
-  // Re-seed the form when the pane switches providers — otherwise one
+  // Re-seed the form when the card switches providers — otherwise one
   // provider's endpoint would carry into another's form.
   //
-  // The guard is load-bearing. `on(() => props.def.id, …)` looks like it fires
-  // on id changes, but `on` re-runs its body whenever the dependency
-  // *expression* re-evaluates, and reading `props.def` walks the slots memo
-  // back to session.models(). Every model toggle and every background
-  // catalogue refresh therefore re-ran the seed and wiped a half-typed API key
-  // out of the field. Comparing the id ourselves makes those runs no-ops.
+  // The guard is load-bearing. Reading `props.def` walks back to
+  // session.models(), so every model toggle and every background catalogue
+  // refresh re-ran the seed and wiped a half-typed API key out of the field.
+  // Comparing the id ourselves makes those runs no-ops.
   let seededFor = '';
   createEffect(() => {
     const id = props.def.id;
@@ -433,22 +295,18 @@ function ConnectionBlock(props: {
   const effectiveURL = () => props.config?.effectiveBaseUrl || '';
   const endpointOverridden = () => !!effectiveURL() && effectiveURL() !== (props.config?.baseUrl || '');
 
-  const status = () => {
-    if (envKeySet() && dbKeySet()) return { text: 'Key set — env and app', tone: 'ok' as const };
-    if (envKeySet()) return { text: `Key set via ${guide()?.envKey ?? 'env'}`, tone: 'ok' as const };
-    if (dbKeySet()) return { text: 'Key set', tone: 'ok' as const };
-    if (props.def.keyOptional && (effectiveURL() || props.config?.baseUrl)) {
-      return { text: 'Endpoint set — no key needed', tone: 'ok' as const };
-    }
-    return { text: 'Not configured', tone: 'off' as const };
+  const keyState = () => {
+    if (envKeySet() && dbKeySet()) return 'Key set — environment and app';
+    if (envKeySet()) return `Key set via ${guide()?.envKey ?? 'the environment'}`;
+    if (dbKeySet()) return 'Key stored in ogcode';
+    return '';
   };
 
   // The server preserves a stored key ONLY when it receives the "__SET__"
   // sentinel (handleSetProviderConfig); every other value is written verbatim.
   // So an untouched, empty key field must send the sentinel — sending "" would
-  // silently delete a working key the moment someone edited only the Base URL,
-  // which is exactly what the endpoint presets invite you to do.
-  const save = async () => {
+  // silently delete a working key the moment someone edited only the Base URL.
+  const commit = async () => {
     setError('');
     setSaved(false);
     setSaving(true);
@@ -469,8 +327,8 @@ function ConnectionBlock(props: {
     }
   };
 
-  // Because a blank field now means "keep the stored key", clearing one needs
-  // its own deliberate action rather than a side effect of saving.
+  // Because a blank field means "keep the stored key", clearing one needs its
+  // own deliberate action rather than a side effect of saving.
   const clearKey = async () => {
     if (!confirm(`Remove the stored ${props.def.label} API key from ogcode?`)) return;
     setError('');
@@ -486,238 +344,175 @@ function ConnectionBlock(props: {
     }
   };
 
-  const field = `w-full h-8 px-2.5 rounded-md bg-[color:var(--bg-elevated)] border border-[color:var(--border-default)]
-                 text-meta font-mono text-[color:var(--text-primary)] placeholder:text-[color:var(--text-muted)]
-                 focus:outline-none focus:border-[color:var(--accent)] transition-colors`;
-
   return (
-    <div class="mt-8 pt-7 border-t border-[color:var(--border-subtle)]">
-      <div class="flex items-center gap-3 mb-4">
-        <span class="text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-muted)]">
-          Connection
-        </span>
-        <span class="flex items-center gap-1.5">
-          <span class={`w-1.5 h-1.5 rounded-full ${status().tone === 'ok' ? 'bg-emerald-400' : 'bg-[color:var(--text-muted)]'}`} />
-          <span class={`text-micro font-medium ${status().tone === 'ok' ? 'text-emerald-400' : 'text-[color:var(--text-muted)]'}`}>
-            {status().text}
-          </span>
-        </span>
-        <div class="flex-1" />
-        <Show when={guide()?.keysURL}>
-          <a
-            href={guide()!.keysURL}
-            target="_blank"
-            rel="noreferrer noopener"
-            class="text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--accent)] transition-colors"
+    <>
+      <Row
+        label="API key"
+        helper={
+          <Show
+            when={dbKeySet()}
+            fallback={<>Read from <Mono>{guide()?.envKey}</Mono> if that variable is set. Applies after ogcode restarts.</>}
           >
-            get a key at {guide()!.keysLabel} ↗
-          </a>
-        </Show>
-      </div>
-
-      <div class="space-y-3.5 max-w-[46rem]">
-        <Row
-          label="API key"
-          note={
-            <Show
-              when={dbKeySet()}
-              fallback={<>Read from <span class="font-mono text-[color:var(--text-tertiary)]">{guide()?.envKey}</span> if that variable is set.</>}
-            >
-              <>
-                Leave blank to keep the stored key.
-                <Show when={envKeySet()}>
-                  {' '}<span class="font-mono text-[color:var(--text-tertiary)]">{guide()?.envKey}</span> is also set and takes priority over it.
-                </Show>
-                {' · '}
-                <button
-                  type="button"
-                  onClick={clearKey}
-                  class="text-[color:var(--text-tertiary)] hover:text-red-400 transition-colors underline underline-offset-2"
-                >
-                  remove stored key
-                </button>
-              </>
-            </Show>
-          }
-        >
-          <input
-            type="password"
-            value={apiKey()}
-            onInput={(e) => setApiKey(e.currentTarget.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
-            placeholder={
-              dbKeySet() ? 'leave blank to keep the saved key'
-              : envKeySet() ? 'leave blank to use the environment key'
-              : guide()?.keyHint ?? 'sk-…'
-            }
-            class={field}
-          />
-        </Row>
-
-        <Show when={props.def.hasBaseURL}>
-          <Row label="Base URL" hint="optional">
-            <input
-              ref={baseRef}
-              type="text"
-              value={baseURL()}
-              onInput={(e) => setBaseURL(e.currentTarget.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
-              placeholder={guide()?.defaultBaseURL ?? ''}
-              class={field}
+            <>
+              Leave blank to keep the stored key.
+              <Show when={envKeySet()}>
+                {' '}<Mono>{guide()?.envKey}</Mono> is also set and takes priority.
+              </Show>
+            </>
+          </Show>
+        }
+        stacked
+        hidden={props.hide('API key', 'credentials', 'token')}
+      >
+        <div class="flex items-center gap-2 flex-wrap">
+          <div class="flex-1 min-w-[14rem]">
+            <TextField
+              password
+              mono
+              value={apiKey()}
+              onInput={setApiKey}
+              onEnter={commit}
+              disabled={saving()}
+              ariaLabel={`${props.def.label} API key`}
+              placeholder={
+                dbKeySet() ? 'leave blank to keep the saved key'
+                : envKeySet() ? 'leave blank to use the environment key'
+                : guide()?.keyHint ?? 'sk-…'
+              }
             />
-          </Row>
-        </Show>
+          </div>
+          <Button onClick={commit} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
+        </div>
+        <div class="mt-2 flex items-center gap-3 flex-wrap">
+          <Show when={keyState()}>
+            <StatusChip tone="ok">{keyState()}</StatusChip>
+          </Show>
+          <Show when={saved()}>
+            <span class="text-micro" style={{ color: 'var(--success)' }}>Saved — restart ogcode to apply.</span>
+          </Show>
+          <Show when={error()}>
+            <span class="text-micro" style={{ color: 'var(--danger)' }}>{error()}</span>
+          </Show>
+          <Show when={dbKeySet()}>
+            <LinkAction onClick={clearKey}>Remove stored key</LinkAction>
+          </Show>
+          <Show when={guide()?.keysURL}>
+            <LinkAction href={guide()!.keysURL}>Get a key at {guide()!.keysLabel}</LinkAction>
+          </Show>
+        </div>
+      </Row>
 
-        {/* One-click endpoints — the whole point of the OpenAI slot. Clicking a
-            vendor fills the field; the user still supplies that vendor's key
-            and presses Save, so nothing changes behind their back. */}
-        <Show when={props.def.id === 'openai'}>
-          <Row label="Point at" hint="one at a time">
-            <div class="flex flex-wrap gap-1.5">
-              <PresetChip
-                label="OpenAI"
-                dot="bg-emerald-400"
-                active={!collectionForBaseURL(baseURL())}
-                onClick={() => setBaseURL('')}
-              />
-              <For each={COMPATIBLE_PRESETS}>
-                {(preset) => (
-                  <PresetChip
-                    label={preset.label}
-                    dot={preset.dot}
-                    active={collectionForBaseURL(baseURL()) === preset.collection}
-                    title={`${preset.baseURL} — key looks like ${preset.keyHint}`}
-                    onClick={() => setBaseURL(preset.baseURL)}
-                  />
-                )}
-              </For>
-              <PresetChip
-                label="Custom…"
-                dot="bg-zinc-400"
-                active={false}
-                title="Any OpenAI-compatible endpoint — vLLM, LM Studio, LiteLLM, a company gateway"
-                onClick={() => baseRef?.focus()}
+      <Show when={props.def.hasBaseURL}>
+        <Row
+          label="Base URL"
+          helper={
+            <>
+              Where requests are sent. Leave blank for the default
+              <Show when={guide()?.defaultBaseURL}> — <Mono>{guide()!.defaultBaseURL}</Mono></Show>.
+            </>
+          }
+          stacked
+          hidden={props.hide('Base URL', 'endpoint', 'host')}
+        >
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex-1 min-w-[14rem]">
+              <TextField
+                mono
+                ref={(el) => (baseRef = el)}
+                value={baseURL()}
+                onInput={setBaseURL}
+                onEnter={commit}
+                disabled={saving()}
+                ariaLabel={`${props.def.label} base URL`}
+                placeholder={guide()?.defaultBaseURL ?? ''}
               />
             </div>
-          </Row>
-        </Show>
+            <Button onClick={commit} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
+          </div>
+          <Show when={endpointOverridden()}>
+            <div class="mt-1.5">
+              <Banner tone="warn">
+                Currently calling <Mono>{effectiveURL()}</Mono>
+                {props.config?.envBaseURLSet
+                  ? ` — ${guide()?.envBaseURL ?? 'the environment variable'} wins over the value above.`
+                  : ' — the saved endpoint was unreachable.'}
+              </Banner>
+            </div>
+          </Show>
+        </Row>
+      </Show>
 
-        <Show when={endpointOverridden()}>
-          <Row label="">
-            <p class="text-micro text-[color:var(--text-tertiary)]">
-              Currently calling <span class="font-mono text-[color:var(--accent)]">{effectiveURL()}</span>
-              {props.config?.envBaseURLSet
-                ? ` — ${guide()?.envBaseURL ?? 'the environment variable'} wins over the value above.`
-                : ' — the saved endpoint was unreachable.'}
-            </p>
-          </Row>
-        </Show>
-
-        <div class="flex items-center gap-3 pt-1 pl-[6.5rem]">
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving()}
-            class="h-8 px-3.5 rounded-md text-meta font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)]
-                   hover:bg-[color:var(--accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {saving() ? 'Saving…' : 'Save'}
-          </button>
-          <span class="text-micro text-[color:var(--text-muted)]">
-            <Show when={error()} fallback={
-              <Show when={saved()} fallback="Applies after ogcode restarts.">
-                <span class="text-emerald-400">Saved — restart ogcode to apply.</span>
-              </Show>
-            }>
-              <span class="text-red-400">{error()}</span>
-            </Show>
-          </span>
-        </div>
-      </div>
-    </div>
+      {/* One-click endpoints — the whole point of the OpenAI slot. Choosing a
+          vendor fills the field; the user still supplies that vendor's key and
+          saves, so nothing changes behind their back. */}
+      <Show when={props.def.id === 'openai'}>
+        <Row
+          label="Point at"
+          helper="Aim this slot at another OpenAI-compatible vendor. One at a time — the key above must belong to whichever you pick."
+          stacked
+          hidden={props.hide('Point at', 'gemini deepseek groq together vendor preset compatible')}
+        >
+          <div class="flex flex-wrap gap-2">
+            <Chip active={!collectionForBaseURL(baseURL())} onClick={() => setBaseURL('')}>
+              OpenAI
+            </Chip>
+            <For each={COMPATIBLE_PRESETS}>
+              {(preset) => (
+                <Chip
+                  active={collectionForBaseURL(baseURL()) === preset.collection}
+                  title={`${preset.baseURL} — key looks like ${preset.keyHint}`}
+                  onClick={() => setBaseURL(preset.baseURL)}
+                >
+                  {preset.label}
+                </Chip>
+              )}
+            </For>
+            <Chip
+              active={false}
+              title="Any OpenAI-compatible endpoint — vLLM, LM Studio, LiteLLM, a company gateway"
+              onClick={() => baseRef?.focus()}
+            >
+              Custom…
+            </Chip>
+          </div>
+        </Row>
+      </Show>
+    </>
   );
 }
 
-function Row(props: { label: string; hint?: string; children: any; note?: any }) {
-  return (
-    <div class="flex items-start gap-4">
-      <div class="w-[5.5rem] shrink-0 pt-1.5 text-meta text-[color:var(--text-tertiary)] leading-tight">
-        {props.label}
-        <Show when={props.hint}>
-          <div class="text-micro text-[color:var(--text-muted)] mt-0.5">{props.hint}</div>
-        </Show>
-      </div>
-      <div class="flex-1 min-w-0">
-        {props.children}
-        <Show when={props.note}>
-          <div class="mt-1.5 text-micro text-[color:var(--text-muted)]">{props.note}</div>
-        </Show>
-      </div>
-    </div>
-  );
-}
+// ---------- Model list -------------------------------------------------------
 
-function PresetChip(props: { label: string; dot: string; active: boolean; title?: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      title={props.title}
-      class={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-micro font-medium border transition-colors
-        ${props.active
-          ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-          : 'border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]'
-        }`}
-    >
-      <span class={`w-1.5 h-1.5 rounded-full ${props.dot} ${props.active ? '' : 'opacity-70'}`} />
-      {props.label}
-    </button>
-  );
-}
-
-// ---------- Model table ------------------------------------------------------
-
-const GRID = 'grid grid-cols-[1.25rem_minmax(7rem,1fr)_minmax(0,1.4fr)_7rem_1.25rem] items-center gap-4';
-
-function ModelTable(props: {
-  models: ModelInfo[];
+function ModelList(props: {
+  all: ModelInfo[];
+  visible: ModelInfo[];
   slot: Slot;
-  query: string;
-  totalInSlot: number;
-  enabledInSlot: number;
   configured: boolean;
-  enabledOnly: boolean;
-  onEnabledOnly: (v: boolean) => void;
+  filtering: boolean;
   onToggle: (m: ModelInfo) => void | Promise<void>;
   onRemove: (m: ModelInfo) => void;
   onAdd: (id: string, name: string, collection: string) => Promise<void>;
   suggestedCollection: string;
 }) {
-
-  // Collection sub-headers only earn their line when a provider actually holds
-  // more than one — Ollama's local vs cloud catalogue, or OpenAI plus models
-  // added under a vendor collection.
-  const sections = createMemo(() => {
-    const map = new Map<string, ModelInfo[]>();
-    for (const m of props.models) {
-      const key = m.collection || '';
-      const list = map.get(key) || [];
-      list.push(m);
-      map.set(key, list);
-    }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  });
-
+  const [enabledOnly, setEnabledOnly] = createSignal(false);
   const [bulkBusy, setBulkBusy] = createSignal(false);
+  const [expanded, setExpanded] = createSignal(false);
+
+  const rows = createMemo(() => props.visible.filter((m) => !enabledOnly() || m.enabled));
+
+  // A provider with hundreds of models (OpenRouter) would otherwise put its
+  // whole catalogue into a page that already holds four other providers.
+  const LIMIT = 20;
+  const capped = createMemo(() => (expanded() || props.filtering ? rows() : rows().slice(0, LIMIT)));
+  const hiddenCount = () => rows().length - capped().length;
 
   // Sequential, not a parallel fan-out. Each toggle POSTs one preference and
   // gets the *entire* model list back, which replaces local state — so firing
-  // 400 of them at once (OpenRouter's catalogue) means 400 responses racing to
-  // overwrite each other with snapshots taken before their siblings landed,
-  // and the last one to arrive quietly undoes an arbitrary number of the rest.
+  // 400 of them at once means 400 responses racing to overwrite each other with
+  // snapshots taken before their siblings landed.
   const setAll = async (enabled: boolean) => {
     if (bulkBusy()) return;
-    const targets = props.models.filter((m) => m.enabled !== enabled);
+    const targets = rows().filter((m) => m.enabled !== enabled);
     if (targets.length === 0) return;
     setBulkBusy(true);
     try {
@@ -727,106 +522,79 @@ function ModelTable(props: {
     }
   };
 
-  return (
-    <div class="mt-8 pt-7 border-t border-[color:var(--border-subtle)]">
-      {/* One header bar, not two. The previous version stacked a toolbar on a
-          row of column labels; the labels said what the columns obviously
-          were, so only the price unit survived — it is the one thing you
-          cannot infer from the values. */}
-      <div class="sticky top-0 z-10 bg-[color:var(--bg-base)] -mx-8 px-8 pb-3">
-        <div class="flex items-center gap-3">
-          <span class="text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-muted)]">
-            Models
-          </span>
-          <span class="text-micro tabular-nums text-[color:var(--text-muted)]">
-            {props.enabledInSlot}/{props.totalInSlot} enabled
-          </span>
-          <div class="flex-1" />
-          <Show when={props.totalInSlot > 0}>
-            <button
-              type="button"
-              onClick={() => props.onEnabledOnly(!props.enabledOnly)}
-              class={`text-micro transition-colors ${props.enabledOnly
-                ? 'text-[color:var(--accent)]'
-                : 'text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]'}`}
-              title="Show only the models that appear in the picker"
-            >
-              Enabled only
-            </button>
-            <span class="text-[color:var(--border-strong)]">·</span>
-            <button
-              type="button"
-              onClick={() => setAll(true)}
-              disabled={bulkBusy()}
-              class="text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] disabled:opacity-50 transition-colors"
-            >
-              {bulkBusy() ? 'Working…' : 'Enable all'}
-            </button>
-            <span class="text-[color:var(--border-strong)]">·</span>
-            <button
-              type="button"
-              onClick={() => setAll(false)}
-              disabled={bulkBusy()}
-              class="text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] disabled:opacity-50 transition-colors"
-            >
-              None
-            </button>
-            {/* Caption for the price column, pushed clear of the action run so
-                it does not read as a fourth button. */}
-            <span class="text-micro text-[color:var(--text-muted)] ml-6">in / out per 1M</span>
-          </Show>
-        </div>
-      </div>
+  // Collection sub-headers only earn their line when a provider actually holds
+  // more than one — Ollama's local versus cloud catalogue, for instance.
+  const sections = createMemo(() => {
+    const map = new Map<string, ModelInfo[]>();
+    for (const m of capped()) {
+      const key = m.collection || '';
+      map.set(key, [...(map.get(key) || []), m]);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  });
 
-      <For each={sections()}>
-        {([collection, models]) => (
-          <>
-            <Show when={collection && sections().length > 1}>
-              <div class="flex items-center gap-2 mt-4 mb-1.5">
-                <span class="text-micro font-medium text-[color:var(--text-tertiary)]">{collection}</span>
-                <span class="text-micro tabular-nums text-[color:var(--text-muted)]">{models.length}</span>
-                <span class="flex-1 h-px bg-[color:var(--border-subtle)]" />
-              </div>
-            </Show>
-            <For each={models}>
-              {(m) => (
-                <ModelRow
-                  model={m}
-                  onToggle={() => props.onToggle(m)}
-                  onRemove={() => props.onRemove(m)}
-                />
-              )}
-            </For>
-          </>
-        )}
-      </For>
+  return (
+    <div>
+      <Show when={props.all.length > 0}>
+        <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+          <Chip active={enabledOnly()} onClick={() => setEnabledOnly(!enabledOnly())}>
+            Enabled only
+          </Chip>
+          <Chip onClick={() => setAll(true)}>{bulkBusy() ? 'Working…' : 'Enable all'}</Chip>
+          <Chip onClick={() => setAll(false)}>Disable all</Chip>
+        </div>
+      </Show>
+
+      <Show when={rows().length > 0}>
+        <div class="border-t border-[color:var(--border-subtle)]">
+          <For each={sections()}>
+            {([collection, models]) => (
+              <>
+                <Show when={collection && sections().length > 1}>
+                  <div class="flex items-center gap-2 pt-3 pb-1">
+                    <span class="text-micro font-medium uppercase tracking-[0.06em] text-[color:var(--text-muted)]">
+                      {collection}
+                    </span>
+                    <span class="text-micro tabular-nums text-[color:var(--text-muted)]">{models.length}</span>
+                  </div>
+                </Show>
+                <For each={models}>
+                  {(m) => (
+                    <ModelItem model={m} onToggle={() => props.onToggle(m)} onRemove={() => props.onRemove(m)} />
+                  )}
+                </For>
+              </>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      <Show when={hiddenCount() > 0}>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          class="mt-2 text-meta font-medium text-[color:var(--accent)] hover:underline underline-offset-2"
+        >
+          Show {hiddenCount()} more
+        </button>
+      </Show>
 
       {/* An empty list is nearly always a missing credential or a pending
-          restart, so say which — "no models" on its own leaves the user with
-          nothing to act on. */}
-      <Show when={props.models.length === 0}>
-        <div class="py-6 max-w-[44rem]">
-          <p class="text-meta text-[color:var(--text-secondary)]">
-            {props.query
-              ? `Nothing here matches "${props.query}".`
-              : props.enabledOnly
-              ? 'Every model from this provider is currently disabled.'
-              : props.configured
-              ? `${props.slot.label} is connected, but its catalogue is empty.`
-              : `${props.slot.label} has no models because it is not connected yet.`}
-          </p>
-          <Show when={!props.query && !props.enabledOnly}>
-            <p class="mt-1.5 text-meta text-[color:var(--text-tertiary)] leading-relaxed">
-              {props.configured
-                ? props.slot.id === 'ollama'
-                  ? 'Pull a model with `ollama pull qwen2.5-coder`, then restart ogcode.'
-                  : 'Restart ogcode to refresh the catalogue, or add a model ID by hand below.'
-                : props.slot.id === 'ollama'
-                ? 'Install Ollama, pull a model, and point Base URL at it — no API key needed.'
-                : 'Add an API key above and restart ogcode; its models then appear here.'}
-            </p>
-          </Show>
-        </div>
+          restart, so say which — "no models" alone leaves nothing to act on. */}
+      <Show when={rows().length === 0}>
+        <p class="text-meta text-[color:var(--text-tertiary)] leading-[1.6]">
+          {props.filtering
+            ? 'No models here match the search.'
+            : enabledOnly()
+            ? 'Every model from this provider is currently disabled.'
+            : props.configured
+            ? props.slot.id === 'ollama'
+              ? 'Connected, but the catalogue is empty. Pull a model with `ollama pull qwen2.5-coder`, then restart ogcode.'
+              : 'Connected, but the catalogue is empty. Restart ogcode to refresh it, or add a model ID by hand below.'
+            : props.slot.id === 'ollama'
+            ? 'Not connected. Install Ollama, pull a model, and point Base URL at it — no API key needed.'
+            : 'Not connected. Add an API key above and restart ogcode; its models then appear here.'}
+        </p>
       </Show>
 
       <Show when={!props.slot.readOnly}>
@@ -841,94 +609,70 @@ function ModelTable(props: {
   );
 }
 
-function ModelRow(props: { model: ModelInfo; onToggle: () => void; onRemove: () => void }) {
+function ModelItem(props: { model: ModelInfo; onToggle: () => void; onRemove: () => void }) {
   const hasPrice = () => props.model.inputPricePerM > 0 || props.model.outputPricePerM > 0;
   return (
-    // 36px rows with the hover band bled into the gutter: the list breathes,
-    // and the row you are pointing at is unmistakable without a border on
-    // every single one.
     <div
-      class={`${GRID} group/row -mx-3 px-3 h-9 rounded-md
-              hover:bg-[color:var(--bg-hover)]/60 transition-colors
-              ${props.model.enabled ? '' : 'opacity-50'}`}
+      class={`group/row flex items-center gap-3 h-8 border-b border-[color:var(--border-subtle)] last:border-b-0
+              hover:bg-[color:var(--bg-hover)]/40 transition-colors ${props.model.enabled ? '' : 'opacity-60'}`}
     >
-      <Check on={props.model.enabled} onClick={props.onToggle} label={props.model.name} />
+      <button
+        type="button"
+        role="switch"
+        aria-checked={props.model.enabled}
+        aria-label={`${props.model.enabled ? 'Disable' : 'Enable'} ${props.model.name}`}
+        onClick={props.onToggle}
+        class={`w-[15px] h-[15px] shrink-0 rounded-[4px] border flex items-center justify-center transition-colors
+          ${props.model.enabled
+            ? 'bg-[color:var(--accent)] border-[color:var(--accent)] text-[color:var(--on-primary)]'
+            : 'bg-[color:var(--bg-elevated)] border-[color:var(--border-strong)] text-transparent hover:border-[color:var(--text-tertiary)]'
+          }`}
+      >
+        <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      </button>
 
-      <div class="flex items-center gap-1.5 min-w-0">
+      <div class="min-w-0 flex-1 flex items-center gap-1.5">
         <span class="text-meta text-[color:var(--text-primary)] truncate">{props.model.name}</span>
         <Show when={props.model.default}>
           <Tag tone="accent">default</Tag>
         </Show>
         <Show when={props.model.isCustom}>
-          <Tag tone="muted">custom</Tag>
+          <Tag>custom</Tag>
         </Show>
-        <Show when={subProviderLabel(props.model)}>
-          {(label) => <Tag tone="muted">{label()}</Tag>}
-        </Show>
+        <Show when={subProviderLabel(props.model)}>{(label) => <Tag>{label()}</Tag>}</Show>
       </div>
 
-      <span class="text-micro font-mono text-[color:var(--text-muted)] truncate" title={props.model.id}>
+      <span
+        class="hidden md:block shrink-0 w-[10rem] text-micro font-mono text-[color:var(--text-muted)] truncate"
+        title={props.model.id}
+      >
         {props.model.id}
       </span>
 
-      <span class="text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]">
+      <span
+        class="shrink-0 w-[6rem] text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]"
+        title="Input / output price per 1M tokens"
+      >
         <Show when={hasPrice()} fallback={<span class="text-[color:var(--text-muted)]">—</span>}>
           ${fmtPrice(props.model.inputPricePerM)} / ${fmtPrice(props.model.outputPricePerM)}
         </Show>
       </span>
 
-      <Show when={props.model.isCustom} fallback={<span />}>
-        <button
-          type="button"
-          onClick={props.onRemove}
-          title="Remove custom model"
-          aria-label={`Remove ${props.model.name}`}
-          class="w-5 h-5 flex items-center justify-center rounded text-[color:var(--text-muted)]
-                 opacity-0 group-hover/row:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition"
-        >
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </Show>
+      <span class="w-7 shrink-0 flex justify-end">
+        <Show when={props.model.isCustom}>
+          <span class="opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 transition-opacity">
+            <IconButton
+              danger
+              onClick={props.onRemove}
+              label={`Remove ${props.model.name}`}
+              path="M6 18L18 6M6 6l12 12"
+            />
+          </span>
+        </Show>
+      </span>
     </div>
-  );
-}
-
-/** A checkbox, not a pill switch: this is a list of things to include, and a
- *  40px switch per row would double the row height for no added meaning. */
-function Check(props: { on: boolean; onClick: () => void; label: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={props.on}
-      aria-label={`${props.on ? 'Disable' : 'Enable'} ${props.label}`}
-      onClick={props.onClick}
-      class={`w-[15px] h-[15px] rounded-[4px] border flex items-center justify-center transition-colors
-        ${props.on
-          ? 'bg-[color:var(--accent)] border-[color:var(--accent)] text-[color:var(--on-primary)]'
-          : 'border-[color:var(--border-strong)] text-transparent hover:border-[color:var(--text-tertiary)]'
-        }`}
-    >
-      <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-      </svg>
-    </button>
-  );
-}
-
-function Tag(props: { tone: 'accent' | 'muted'; children: any }) {
-  return (
-    <span
-      class={`shrink-0 text-micro leading-none px-1 py-[3px] rounded-[3px] font-medium
-        ${props.tone === 'accent'
-          ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-          : 'bg-[color:var(--bg-elevated)] text-[color:var(--text-muted)]'
-        }`}
-    >
-      {props.children}
-    </span>
   );
 }
 
@@ -968,9 +712,7 @@ function AddModelRow(props: {
     }
   };
 
-  const field = `h-7 px-2 rounded-[5px] bg-[color:var(--bg-elevated)] border border-[color:var(--border-default)]
-                 text-meta text-[color:var(--text-primary)] placeholder:text-[color:var(--text-muted)]
-                 focus:outline-none focus:border-[color:var(--accent)] transition-colors min-w-0`;
+  const field = `${fieldClass} min-w-0 text-meta`;
 
   return (
     <Show
@@ -979,10 +721,11 @@ function AddModelRow(props: {
         <button
           type="button"
           onClick={start}
-          class="mt-3 -mx-3 px-3 h-9 w-[calc(100%+1.5rem)] rounded-md flex items-center gap-2 text-meta text-[color:var(--text-tertiary)]
-                 hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/60 transition-colors"
+          class="mt-2 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-meta font-medium
+                 text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]
+                 hover:bg-[color:var(--bg-hover)] transition-colors"
         >
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
           </svg>
           Add a model to {props.providerLabel}
@@ -990,7 +733,7 @@ function AddModelRow(props: {
       }
     >
       <div class="mt-4 pt-4 border-t border-[color:var(--border-subtle)]">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
           <input
             ref={(el) => requestAnimationFrame(() => el.focus())}
             type="text"
@@ -1001,6 +744,7 @@ function AddModelRow(props: {
               if (e.key === 'Escape') setOpen(false);
             }}
             placeholder="model-id (exactly as the provider names it)"
+            aria-label="Model ID"
             class={`${field} font-mono flex-[1.4]`}
           />
           <input
@@ -1012,6 +756,7 @@ function AddModelRow(props: {
               if (e.key === 'Escape') setOpen(false);
             }}
             placeholder="Display name (optional)"
+            aria-label="Display name"
             class={`${field} flex-1`}
           />
           <Show when={props.showCollection}>
@@ -1024,31 +769,17 @@ function AddModelRow(props: {
                 if (e.key === 'Escape') setOpen(false);
               }}
               placeholder="Group"
+              aria-label="Group"
               title="Groups this model under a vendor name in the picker"
-              class={`${field} w-28`}
+              class={`${field} w-24`}
             />
           </Show>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy()}
-            class="h-7 px-3 shrink-0 rounded-[5px] text-meta font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)]
-                   hover:bg-[color:var(--accent-hover)] disabled:opacity-50 transition-colors"
-          >
-            {busy() ? 'Adding…' : 'Add'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            class="h-7 px-2 shrink-0 rounded-[5px] text-meta text-[color:var(--text-tertiary)]
-                   hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)] transition-colors"
-          >
-            Cancel
-          </button>
+          <Button onClick={submit} disabled={busy()}>{busy() ? 'Adding…' : 'Add'}</Button>
+          <Button variant="text" onClick={() => setOpen(false)}>Cancel</Button>
         </div>
         <p class="mt-1.5 text-micro text-[color:var(--text-muted)]">
           <Show when={error()} fallback="ogcode does not verify the ID — a typo shows up as a failed request on first use.">
-            <span class="text-red-400">{error()}</span>
+            <span style={{ color: 'var(--danger)' }}>{error()}</span>
           </Show>
         </p>
       </div>
@@ -1058,8 +789,8 @@ function AddModelRow(props: {
 
 // Always two decimals. In a right-aligned tabular column, "$1.6" next to
 // "$0.40" breaks the decimal alignment that makes prices comparable at a
-// glance — the point of putting them in a column at all. Sub-cent rates are
-// real on aggregators, and rounding them to "0.00" would read as free.
+// glance. Sub-cent rates are real on aggregators, and rounding them to "0.00"
+// would read as free.
 function fmtPrice(n: number): string {
   if (n > 0 && n < 0.01) return '<0.01';
   return n.toFixed(2);

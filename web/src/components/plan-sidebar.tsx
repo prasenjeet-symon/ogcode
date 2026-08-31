@@ -130,6 +130,19 @@ export default function PlanSidebar() {
             </svg>
           </button>
           <button
+            onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
+            title="Skills"
+            class={`w-8 h-8 rounded-lg flex items-center justify-center transition
+              ${location.pathname.startsWith('/settings/skills')
+                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
+              }`}
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+          </button>
+          <button
             onClick={() => navigate('/settings', { state: { from: location.pathname } })}
             title="Settings"
             class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition"
@@ -320,6 +333,20 @@ export default function PlanSidebar() {
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
           </svg>
           <span>Doc Index</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
+          class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
+            ${location.pathname.startsWith('/settings/skills')
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+            }`}
+        >
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+          </svg>
+          <span>Skills</span>
         </button>
       </div>
 

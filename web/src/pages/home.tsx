@@ -4,6 +4,7 @@ import { useSession } from '../context/session';
 import { useServer } from '../context/server';
 import SessionSidebar from '../components/session-sidebar';
 import ModelSelector from '../components/model-selector';
+import Logo from '../components/logo';
 
 const SUGGESTIONS: string[] = [
   'Explain this codebase',
@@ -169,9 +170,7 @@ function HomeContent() {
                           backdrop-blur-md bg-[color:var(--bg-base)]/70 border-b border-[color:var(--border-subtle)]">
             <div class="flex items-center gap-2.5">
               <div class="w-7 h-7 rounded-lg bg-[color:var(--accent)] flex items-center justify-center shadow-md shadow-[color:var(--accent)]/20 ring-1 ring-white/10">
-                <svg class="w-3.5 h-3.5 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+                <Logo class="w-3.5 h-3.5 text-[color:var(--on-primary)]" small />
               </div>
               <span class="text-[14px] font-semibold tracking-tight text-zinc-100">ogcode</span>
               <span class="ml-1.5 px-1.5 py-[1px] rounded text-[9px] font-mono font-medium text-[color:var(--accent)] bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/20">

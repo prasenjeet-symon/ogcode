@@ -56,7 +56,7 @@ func TestBuildSystemPrompt_MemoryMDSection_ContainsPurposeSection(t *testing.T) 
 		"### Purpose",
 		"### What belongs in MEMORY.md",
 		"### What does NOT belong in MEMORY.md",
-		"### How it differs from AGENT.md and agentic memory",
+		"### How it differs from AGENT.md",
 		"### How to maintain MEMORY.md",
 	} {
 		if !strings.Contains(prompt, sub) {
@@ -507,6 +507,7 @@ func TestConvertMessagesReasoningParts(t *testing.T) {
 	reasoningData, _ := json.Marshal(session.ReasoningPartData{
 		Text:      "Let me think about this step by step.",
 		Signature: "ErkBCgIYAhIM...",
+		Model:     "claude-opus-4-6",
 	})
 
 	messages := []*session.MessageWithParts{
@@ -525,7 +526,7 @@ func TestConvertMessagesReasoningParts(t *testing.T) {
 		},
 	}
 
-	result := convertMessages(messages)
+	result := convertMessages(messages, false, "claude-opus-4-6")
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
@@ -549,6 +550,7 @@ func TestConvertMessagesReasoningPartsWithToolCalls(t *testing.T) {
 	reasoningData, _ := json.Marshal(session.ReasoningPartData{
 		Text:      "I need to use a tool.",
 		Signature: "ToolSig==",
+		Model:     "claude-opus-4-6",
 	})
 
 	messages := []*session.MessageWithParts{
@@ -567,7 +569,7 @@ func TestConvertMessagesReasoningPartsWithToolCalls(t *testing.T) {
 		},
 	}
 
-	result := convertMessages(messages)
+	result := convertMessages(messages, false, "claude-opus-4-6")
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
@@ -581,6 +583,197 @@ func TestConvertMessagesReasoningPartsWithToolCalls(t *testing.T) {
 	}
 	if result[0].ReasoningParts[0].Signature != "ToolSig==" {
 		t.Errorf("expected reasoning signature, got %q", result[0].ReasoningParts[0].Signature)
+	}
+}
+
+// TestConvertMessagesReasoningReplayGuard covers the cases where stored thinking
+// blocks must NOT be forwarded. Thinking blocks are tied to the model that
+// produced them: an unsigned one (what an OpenAI-family model stores, since it
+// keeps its reasoning server-side) has nothing to verify it with and is
+// rejected, and a signed one replayed to a different model is silently ignored
+// while still being billed as input. Both are reachable by switching the
+// session's model mid-conversation.
+func TestConvertMessagesReasoningReplayGuard(t *testing.T) {
+	assistantWith := func(parts ...session.ReasoningPartData) []*session.MessageWithParts {
+		msg := &session.MessageWithParts{
+			Info: session.MessageInfo{Role: session.RoleAssistant},
+			Parts: []session.Part{{
+				Type: session.PartText,
+				Data: json.RawMessage(`{"text":"done"}`),
+			}},
+		}
+		for _, d := range parts {
+			data, _ := json.Marshal(d)
+			msg.Parts = append([]session.Part{{Type: session.PartReasoning, Data: data}}, msg.Parts...)
+		}
+		return []*session.MessageWithParts{msg}
+	}
+
+	t.Run("unsigned reasoning from an OpenAI-family model is dropped", func(t *testing.T) {
+		msgs := assistantWith(session.ReasoningPartData{Text: "thinking out loud", Model: "deepseek-reasoner"})
+		got := convertMessages(msgs, false, "claude-opus-4-6")
+		if len(got[0].ReasoningParts) != 0 {
+			t.Errorf("unsigned reasoning must not reach Anthropic, got %+v", got[0].ReasoningParts)
+		}
+	})
+
+	t.Run("signed reasoning from a different model is dropped", func(t *testing.T) {
+		msgs := assistantWith(session.ReasoningPartData{Text: "prior", Signature: "sig==", Model: "claude-opus-4-6"})
+		got := convertMessages(msgs, false, "claude-sonnet-4-6")
+		if len(got[0].ReasoningParts) != 0 {
+			t.Errorf("cross-model reasoning must not be replayed, got %+v", got[0].ReasoningParts)
+		}
+	})
+
+	t.Run("reasoning of unknown origin is dropped", func(t *testing.T) {
+		msgs := assistantWith(session.ReasoningPartData{Text: "legacy row", Signature: "sig=="})
+		got := convertMessages(msgs, false, "claude-opus-4-6")
+		if len(got[0].ReasoningParts) != 0 {
+			t.Errorf("reasoning with no recorded model must be dropped, got %+v", got[0].ReasoningParts)
+		}
+	})
+
+	t.Run("one foreign block drops the whole sequence", func(t *testing.T) {
+		msgs := assistantWith(
+			session.ReasoningPartData{Text: "b", Signature: "sig2==", Model: "claude-opus-4-6"},
+			session.ReasoningPartData{Text: "a", Signature: "sig1==", Model: "gpt-5"},
+		)
+		got := convertMessages(msgs, false, "claude-opus-4-6")
+		if len(got[0].ReasoningParts) != 0 {
+			t.Errorf("a partial sequence is itself a 400; expected all dropped, got %+v", got[0].ReasoningParts)
+		}
+	})
+
+	t.Run("redacted block from the current model survives", func(t *testing.T) {
+		msgs := assistantWith(session.ReasoningPartData{RedactedData: "EuYBCg==", Model: "claude-opus-4-6"})
+		got := convertMessages(msgs, false, "claude-opus-4-6")
+		if len(got[0].ReasoningParts) != 1 {
+			t.Fatalf("expected the redacted block to be replayed, got %+v", got[0].ReasoningParts)
+		}
+		if got[0].ReasoningParts[0].RedactedData != "EuYBCg==" {
+			t.Errorf("expected the payload carried through, got %+v", got[0].ReasoningParts[0])
+		}
+	})
+}
+
+// TestConvertMessages_StripsToolResultImagesWhenModelLacksVision verifies that
+// convertMessages does NOT attach images to tool-result messages when
+// modelSupportsImages is false. A non-vision model rejects image input with a
+// 400, and that 400 is classified fatal (non-resumable), killing the session.
+// The image can originate from view_image, read_pdf_page, or an MCP tool — all
+// persist a ToolImage in the tool state. Without this guard, a stale image from
+// earlier in the history (or one produced this turn because the capability probe
+// was wrong) is re-sent on every subsequent turn and the session dies.
+func TestConvertMessages_StripsToolResultImagesWhenModelLacksVision(t *testing.T) {
+	output := "Image screenshot.png (300x200, png) is attached."
+	toolData := session.ToolPartData{
+		Tool:   "view_image",
+		CallID: "call_img_1",
+		State: session.ToolState{
+			Status: session.ToolCompleted,
+			Input:  json.RawMessage(`{"path":"screenshot.png"}`),
+			Output: &output,
+			Image: &session.ToolImage{
+				MediaType: "image/jpeg",
+				Data:      "dGVzdA==", // "test" base64
+			},
+		},
+	}
+	toolDataJSON, _ := json.Marshal(toolData)
+
+	// A user message carrying the tool result (the shape writeToolResultMessage
+	// produces) followed by an assistant message.
+	messages := []*session.MessageWithParts{
+		{
+			Info: session.MessageInfo{Role: session.RoleUser},
+			Parts: []session.Part{{
+				Type: session.PartTool,
+				Data: toolDataJSON,
+			}},
+		},
+	}
+
+	// modelSupportsImages=false: the image must NOT be forwarded.
+	stripped := convertMessages(messages, false, "claude-opus-4-6")
+	if len(stripped) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(stripped))
+	}
+	if stripped[0].Role != "tool" {
+		t.Fatalf("expected role 'tool', got %q", stripped[0].Role)
+	}
+	if len(stripped[0].Images) != 0 {
+		t.Errorf("expected 0 images when modelSupportsImages=false, got %d — a non-vision model would 400 on this", len(stripped[0].Images))
+	}
+
+	// modelSupportsImages=true: the image MUST be forwarded.
+	withImages := convertMessages(messages, true, "claude-opus-4-6")
+	if len(withImages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(withImages))
+	}
+	if len(withImages[0].Images) != 1 {
+		t.Fatalf("expected 1 image when modelSupportsImages=true, got %d", len(withImages[0].Images))
+	}
+	if withImages[0].Images[0].MediaType != "image/jpeg" {
+		t.Errorf("expected media type 'image/jpeg', got %q", withImages[0].Images[0].MediaType)
+	}
+}
+
+// TestConvertMessages_StripsImagesFromPriorHistory verifies that images from
+// tool results earlier in the conversation are also stripped — not just the
+// most recent one. The bug scenario: a vision-capable model produced a tool
+// image earlier, then the user switched to a non-vision model; the persisted
+// ToolImage is replayed from history and kills the new model's session.
+func TestConvertMessages_StripsImagesFromPriorHistory(t *testing.T) {
+	mkToolResult := func(callID, toolName string, img *session.ToolImage) session.Part {
+		output := "result"
+		td := session.ToolPartData{
+			Tool:   toolName,
+			CallID: callID,
+			State: session.ToolState{
+				Status: session.ToolCompleted,
+				Input:  json.RawMessage(`{}`),
+				Output: &output,
+				Image:  img,
+			},
+		}
+		data, _ := json.Marshal(td)
+		return session.Part{Type: session.PartTool, Data: data}
+	}
+
+	img := &session.ToolImage{MediaType: "image/png", Data: "aW1n=="}
+
+	messages := []*session.MessageWithParts{
+		// Earlier user turn with a tool result carrying an image.
+		{
+			Info: session.MessageInfo{Role: session.RoleUser},
+			Parts: []session.Part{
+				mkToolResult("call_1", "view_image", img),
+			},
+		},
+		// Assistant response.
+		{
+			Info: session.MessageInfo{Role: session.RoleAssistant},
+			Parts: []session.Part{{
+				Type: session.PartText,
+				Data: json.RawMessage(`{"text":"I see the image."}`),
+			}},
+		},
+		// Later user turn with another tool result carrying an image.
+		{
+			Info: session.MessageInfo{Role: session.RoleUser},
+			Parts: []session.Part{
+				mkToolResult("call_2", "read_pdf_page", img),
+			},
+		},
+	}
+
+	result := convertMessages(messages, false, "claude-opus-4-6")
+	imageCount := 0
+	for _, m := range result {
+		imageCount += len(m.Images)
+	}
+	if imageCount != 0 {
+		t.Errorf("expected 0 images across all messages when modelSupportsImages=false, got %d — prior-history images would 400 a non-vision model", imageCount)
 	}
 }
 

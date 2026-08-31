@@ -172,7 +172,7 @@ func containsAll(s string, subs ...string) bool {
 // The fetches run on their own goroutines, where an unrecovered panic is not
 // this function's problem but the whole process's: it would take down every
 // session the server is serving, not just this search. A nil SearchBridge gives
-// a fetch that panics for real (FetchPage dereferences its receiver), so
+// a fetch that panics for real (calling FetchPage on a nil interface), so
 // without the recover this test does not fail — it kills the test binary.
 //
 // The contract is that a panicking fetch is dropped like a failing one.

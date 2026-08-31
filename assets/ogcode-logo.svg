@@ -1,0 +1,11 @@
+<!-- ogcode logo - the mark on its tile. This is the avatar-shaped lockup:
+     README, app icon, social. The tile radius is 22% of its side, which holds
+     the squircle look at any size. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"
+     fill="none" role="img" aria-label="ogcode">
+  <rect width="200" height="200" rx="44" fill="#5E6AD2"/>
+  <g transform="translate(36 36) scale(2)" color="#FFFFFF">
+    <path d="M55 32A23 23 0 0 0 32 9A23 23 0 0 0 9 32A23 23 0 0 0 32 55A15 15 0 0 0 45 32"
+          stroke="currentColor" stroke-width="6.5" stroke-linecap="round"/>
+  </g>
+</svg>

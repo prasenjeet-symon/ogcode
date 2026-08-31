@@ -83,34 +83,9 @@ Write-Host "  ogcode version      # Check version" -ForegroundColor White
 Write-Host ""
 Write-Host "Next step: set your AI provider API key (see README for options)." -ForegroundColor Yellow
 
-# ── Optional: Web Search Agent setup ────────────────────────────────────────
-# The release archive already contains search-bridge\server.js and package.json,
-# extracted above into $installDir\search-bridge. If Node.js is available, install
-# its dependencies plus the headless Chromium that Playwright needs.
+# ── Web search ──────────────────────────────────────────────────────────────
+# Search is built into the binary: it queries JS-free search endpoints over
+# plain HTTP and extracts page text in-process. Nothing to install, and it is
+# on by default.
 Write-Host ""
-Write-Host "Setting up web search agent..." -ForegroundColor Cyan
-$bridgeDir = "$installDir\search-bridge"
-$hasNode = (Get-Command node -ErrorAction SilentlyContinue) -and (Get-Command npm -ErrorAction SilentlyContinue)
-if (-not (Test-Path "$bridgeDir\server.js") -or -not (Test-Path "$bridgeDir\package.json")) {
-    Write-Host "  Bridge files not found in release archive - web search unavailable." -ForegroundColor Yellow
-} elseif ($hasNode) {
-    # Don't let npm's stderr progress output abort the whole installer.
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    Push-Location $bridgeDir
-    try {
-        npm install --legacy-peer-deps --silent
-        npx playwright install chromium
-        Write-Host "Web search agent ready. Enable it in ogcode Settings -> General." -ForegroundColor Green
-    } catch {
-        Write-Host "  Web search setup did not complete. To finish manually:" -ForegroundColor Yellow
-        Write-Host "    cd $bridgeDir; npm install; npx playwright install chromium" -ForegroundColor White
-    } finally {
-        Pop-Location
-        $ErrorActionPreference = $prevEap
-    }
-} else {
-    Write-Host "Node.js not found - bridge files installed but search not yet active." -ForegroundColor Yellow
-    Write-Host "  Install Node.js, then run:" -ForegroundColor White
-    Write-Host "    cd $bridgeDir; npm install; npx playwright install chromium" -ForegroundColor White
-}
+Write-Host "Web search is built in and enabled by default." -ForegroundColor Green

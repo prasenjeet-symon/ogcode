@@ -536,13 +536,46 @@ Enable infinite-context memory across sessions:
 export OGCODE_AGENTIC_MEMORY_MODE=true
 ```
 
-### Web Search (optional)
+### Web Search
 
-Give your agent the ability to research current documentation:
+Web search is built into the binary and **on by default** — there is nothing to
+install and no API key to obtain. Turn it off with:
 
 ```bash
-export OGCODE_SEARCH_ENABLED=true
+export OGCODE_SEARCH_ENABLED=false
 ```
+
+Requests are made to look like a browser's, because search engines block clients
+that do not. The HTTP path presents a real Chrome, Firefox or Safari TLS
+fingerprint via uTLS, with the matching User-Agent, client hints and header set,
+a cookie jar, referrers that follow the results page a link was found on, and
+randomised pacing between queries.
+
+**Searches go over HTTP first** — about a second, and nothing appears on your
+screen. On macOS, **Safari is the fallback**: it runs only when the HTTP path
+comes back with nothing, which means an engine has started refusing you, a page
+is behind a bot challenge, or a page only exists once its scripts have run. It
+costs several seconds and opens a window, so it earns that when the fast path
+has already failed. If you never hit a block, macOS never even asks for
+permission to control Safari.
+
+| Variable | Effect |
+| --- | --- |
+| `OGCODE_SEARCH_ENABLED=false` | Turn web search off entirely |
+| `OGCODE_SEARCH_BROWSER=native` | HTTP only — never open a browser window |
+| `OGCODE_SEARCH_BROWSER=safari` | Browser first, HTTP as the fallback — for a network where the HTTP path is blocked outright |
+| `OGCODE_SEARXNG_URL=https://…` | Query your own SearxNG instance ahead of every built-in engine (needs its JSON format enabled) |
+| `OGCODE_SEARCH_PERSONA=chrome-133-macos` | Pin the impersonated browser instead of drawing one at random |
+
+Engines are tried in order until one answers: DuckDuckGo, Brave, Bing, Yahoo —
+plus Google when Safari is driving, since Google builds its results in the page
+and no HTTP client can read them.
+
+To let ogcode read pages that render themselves with JavaScript — single-page
+docs sites, and Google's results — enable Safari's **Settings → Advanced → Show
+features for web developers**, then **Develop → Allow JavaScript from Apple
+Events**. Without it everything still works from the served markup; those pages
+just come back thin.
 
 ---
 
@@ -711,9 +744,9 @@ Ogcode is a single Go binary that embeds a SolidJS web UI and runs its own HTTP 
                     │
                     ▼
             ┌─────────────┐    ┌─────────────┐    ┌──────────────┐
-            │  Knowledge  │    │   Call      │    │   Search    │
-            │   Graph     │    │   Graph     │    │   Bridge    │
-            │  (Memory)   │    │ (Code Rel)  │    │  (Web/JS)   │
+            │  Knowledge  │    │   Call      │    │   Web       │
+            │   Graph     │    │   Graph     │    │   Search    │
+            │  (Memory)   │    │ (Code Rel)  │    │ (native Go) │
             └─────────────┘    └─────────────┘    └──────────────┘
 ```
 
@@ -723,7 +756,10 @@ Ogcode is a single Go binary that embeds a SolidJS web UI and runs its own HTTP 
 | **Session Store** | SQLite database for conversations, plans, tasks, and permissions               |
 | **Git Worktrees** | An isolated branch per task, so multiple agents work in parallel               |
 | **Knowledge Graph** | Persistent semantic memory with vector embeddings                            |
-| **Search Bridge** | Playwright-based headless Chrome for web research                              |
+| **Web Search**    | Built into the binary and on by default — no Node.js, no Chromium, no API key, no third-party search service. Four engines tried in order: DuckDuckGo, Brave, Bing, Yahoo |
+| **Browser realism** | Requests carry a real browser's TLS fingerprint (uTLS), matching User-Agent and client hints, a cookie jar, result-page referrers and randomised pacing — engines block clients that look automated, and most of that judgement is made at the TLS handshake, before a header is read |
+| **Search fallback** | Set `OGCODE_SEARXNG_URL` to a SearxNG instance with the JSON format enabled, and it is queried ahead of the built-in engines |
+| **Browser fallback** | **macOS only, and only when the HTTP path returns nothing** — a blocked engine, a bot challenge, a page that renders itself. Drives your own Safari, which carries your cookies, runs page JavaScript and adds Google to the chain. Declining the Automation prompt, or being on any other OS, simply leaves the HTTP path as the whole story. `OGCODE_SEARCH_BROWSER` sets `native` (never) or `safari` (first) |
 
 ---
 

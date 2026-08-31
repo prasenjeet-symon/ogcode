@@ -9,6 +9,20 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
+// handleListPermissions returns all pending (unanswered) permission requests for
+// a session. The UI calls this when switching to a session to restore any
+// approval prompts that were dropped from view while another session was open —
+// the agent loop is still blocked on each one.
+func (s *Server) handleListPermissions(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	var reqs []permission.Request
+	if s.permissions != nil {
+		reqs = s.permissions.PendingForSession(sessionID)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reqs)
+}
+
 // handlePermissionReply handles user responses to permission requests
 func (s *Server) handlePermissionReply(w http.ResponseWriter, r *http.Request) {
 	sessionID := session.SessionID(chi.URLParam(r, "sessionID"))

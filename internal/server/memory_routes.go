@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -249,7 +250,13 @@ func (s *Server) handleMemoryReindex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "agentic memory not enabled")
 		return
 	}
-	if err := s.mem.RefreshAll(r.Context()); err != nil {
+	// Re-embedding every fact in the store takes minutes on a large graph. Tying
+	// it to the request context means a browser that gives up first leaves the
+	// corpus half-embedded — exactly the split state this endpoint exists to
+	// repair — so the work is detached from the client and bounded on its own.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
+	defer cancel()
+	if err := s.mem.RefreshAll(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -261,19 +268,30 @@ func (s *Server) handleMemoryReset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "agentic memory not enabled")
 		return
 	}
-	if _, err := s.mem.Store.DB().ExecContext(r.Context(), `DELETE FROM memory_document`); err != nil {
+	// The graph tables are "nodes" and "edges"; the memory_node/memory_edge
+	// names here never existed, so reset deleted every document, then failed on
+	// the second statement and returned 500 — destroying half the store and
+	// reporting failure. Run the whole thing in one transaction so it is
+	// all-or-nothing.
+	tx, err := s.mem.Store.DB().BeginTx(r.Context(), nil)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, err := s.mem.Store.DB().ExecContext(r.Context(), `DELETE FROM memory_node`); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		`DELETE FROM memory_document`,
+		`DELETE FROM memory_collection`,
+		`DELETE FROM edges`,
+		`DELETE FROM nodes`,
+		`DELETE FROM sessions`,
+	} {
+		if _, err := tx.ExecContext(r.Context(), stmt); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
-	if _, err := s.mem.Store.DB().ExecContext(r.Context(), `DELETE FROM memory_edge`); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if _, err := s.mem.Store.DB().ExecContext(r.Context(), `DELETE FROM memory_collection`); err != nil {
+	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

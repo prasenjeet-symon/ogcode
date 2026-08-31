@@ -104,6 +104,7 @@ func estimateRequestTokens(req provider.StreamRequest) int {
 		for _, rp := range m.ReasoningParts {
 			tokens += estimateTokens(rp.Text)
 			tokens += estimateTokens(rp.Signature)
+			tokens += estimateTokens(rp.RedactedData)
 		}
 	}
 	// Tool definitions are sent on every request and were previously ignored.

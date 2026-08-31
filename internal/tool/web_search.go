@@ -9,9 +9,9 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 )
 
-// WebSearchTool searches the web via the Playwright bridge and returns a markdown list of results.
+// WebSearchTool searches the web via the configured search backend and returns a markdown list of results.
 type WebSearchTool struct {
-	Bridge *search.BridgeClient
+	Bridge search.Backend
 }
 
 func (WebSearchTool) ID() string { return "web_search" }

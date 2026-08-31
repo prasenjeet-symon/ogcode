@@ -1,10 +1,26 @@
-import { Show, For, createMemo, createSignal, onMount } from 'solid-js';
+import { Show, For, createMemo, createSignal, onMount, createEffect, type JSX } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { useTheme } from '../../context/theme';
 import { getSearchConfig, setSearchConfig } from '../../api/client';
-import ModelSelector from '../../components/model-selector';
+import {
+  Group,
+  Row,
+  Switch,
+  Slider,
+  Select,
+  Value,
+  StatusChip,
+  Banner,
+  Kbd,
+  Mono,
+  Spinner,
+  CopyButton,
+  fieldClass,
+  matches,
+  useShell,
+} from './ui';
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -15,22 +31,41 @@ const PROVIDER_LABELS: Record<string, string> = {
   mistral: 'Mistral',
 };
 
+const ICONS = {
+  workspace: 'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
+  palette: 'M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42',
+  globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3 7.5 7.03 7.5 12s2.015 9 4.5 9zm-8.716-5.25h17.432M3.284 8.25h17.432',
+  research: 'M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z',
+  models: 'M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z',
+  keyboard: 'M6.75 3.75h.008v.008H6.75v-.008zM6.75 7.5h.008v.008H6.75V7.5zm0 3.75h.008v.008H6.75v-.008zM10.5 3.75h.008v.008H10.5v-.008zM10.5 7.5h.008v.008H10.5V7.5zm0 3.75h.008v.008H10.5v-.008zM14.25 3.75h.008v.008h-.008v-.008zM14.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM17.25 3.75h.008v.008h-.008v-.008zM17.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM4.5 18.75h15a.75.75 0 00.75-.75v-1.5a.75.75 0 00-.75-.75h-15a.75.75 0 00-.75.75v1.5a.75.75 0 00.75.75z',
+  hotkey: 'M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zM12 15.75V18m3.75-3.75V18M4.5 4.5h15a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18V6a1.5 1.5 0 011.5-1.5z',
+};
+
+// Defaults, matching session.SearchConfig in Go.
+const DEFAULTS = { fetchTopK: 4, pageChars: 6000, primaryColor: '#5e6ad2' };
+const BOUNDS = {
+  fetchTopK: { min: 1, max: 10 },
+  pageChars: { min: 1000, max: 20000, step: 500 },
+};
+
 export default function GeneralSettings() {
   const server = useServer();
   const session = useSession();
-  const theme = useTheme();
   const navigate = useNavigate();
+  const shell = useShell();
+
+  createEffect(() => shell.report({ noun: 'settings' }));
+
+  /** A row shows when the query appears anywhere a reader would look for it. */
+  const hide = (...text: (string | undefined)[]) => !matches(shell.query(), ...text);
 
   const stats = createMemo(() => {
     const all = session.models();
-    const enabled = all.filter((m) => m.enabled);
-    const providers = new Set(all.map((m) => m.providerId));
-    const customs = all.filter((m) => m.isCustom);
     return {
       total: all.length,
-      enabled: enabled.length,
-      providers: providers.size,
-      customs: customs.length,
+      enabled: all.filter((m) => m.enabled).length,
+      providers: new Set(all.map((m) => m.providerId)).size,
+      custom: all.filter((m) => m.isCustom).length,
     };
   });
 
@@ -40,184 +75,293 @@ export default function GeneralSettings() {
   });
 
   return (
-    <div class="max-w-3xl mx-auto px-8 py-10 anim-enter">
-      {/* Page header */}
-      <header class="mb-10">
-        <h1 class="text-2xl font-semibold tracking-tight text-zinc-50">General</h1>
-        <p class="text-[13px] text-zinc-500 mt-1.5">
-          Workspace information and high-level defaults for this session.
-        </p>
-      </header>
-
-      <div class="space-y-6">
-        {/* Workspace card */}
-        <Card title="Workspace" description="The directory ogcode is operating on.">
-          <Row label="Directory">
-            <span class="font-mono text-[12px] text-zinc-200 break-all">
-              {server.directory() || '—'}
-            </span>
-          </Row>
-          <Row label="Connection">
-            <div class="flex items-center gap-2">
-              <span class={`w-1.5 h-1.5 rounded-full ${server.connected() ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-              <span class="text-[12px] text-zinc-200">
-                {server.connected() ? 'Live' : 'Disconnected'}
-              </span>
-            </div>
-          </Row>
-          <Show when={server.branch()}>
-            <Row label="Branch">
-              <span class="font-mono text-[12px] text-zinc-200">{server.branch()}</span>
-            </Row>
+    <>
+      <Group id="workspace" title="Workspace" icon={ICONS.workspace}>
+        <Row
+          label="Directory"
+          helper="Sessions, themes and indexes are scoped to this folder."
+          hidden={hide('Directory', 'folder workspace path')}
+        >
+          <Value>{shortPath(server.directory())}</Value>
+          <Show when={server.directory()}>
+            <CopyButton text={server.directory()!} label="" />
           </Show>
-        </Card>
+        </Row>
+        <Row label="Git branch" hidden={hide('Git branch', 'repository vcs')}>
+          <Show when={server.branch()} fallback={<Value mono={false} tone="muted">Not a git repository</Value>}>
+            <Value>{server.branch()}</Value>
+          </Show>
+        </Row>
+        <Row label="Server" helper="This window's link to the ogcode process." hidden={hide('Server connection status')}>
+          <Show when={server.connected()} fallback={<StatusChip tone="danger">Disconnected</StatusChip>}>
+            <StatusChip tone="ok">Connected</StatusChip>
+          </Show>
+        </Row>
+      </Group>
 
-        {/* Search card */}
-        <Card
-          title="Web Search Agent"
-          description="Enables parallel web research via headless Chrome. Build and note agents can call deep_search to fetch and synthesise live information. Requires a server restart to take effect."
-        >
-          <SearchConfigForm />
-        </Card>
+      <ThemeGroup hide={hide} />
 
-        {/* Theme card */}
-        <Card
-          title="Theme"
-          description="Set a primary accent color for this project. The full palette is derived automatically and persisted per directory."
-        >
-          <ThemePicker />
-        </Card>
+      <SearchGroups hide={hide} />
 
-        {/* Models summary */}
-        <Card
-          title="Models"
-          description="Manage which AI models are available across your sessions."
-          action={
-            <button
-              type="button"
-              onClick={() => navigate('/settings/models')}
-              class="h-8 px-3 text-[12px] font-medium text-zinc-200 border border-[color:var(--border-default)]
-                     hover:border-[color:var(--border-strong)] hover:bg-[color:var(--bg-hover)]
-                     rounded-lg transition flex items-center gap-1.5"
-            >
-              Manage
-              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          }
+      <Group id="models" title="Models" icon={ICONS.models}>
+        <Row
+          label="Default model"
+          helper="What a new session starts with."
+          onClick={() => navigate('/settings/models')}
+          hidden={hide('Default model', 'provider picker')}
         >
-          <div class="grid grid-cols-4 gap-px rounded-lg overflow-hidden bg-[color:var(--border-subtle)]">
-            <Stat label="Enabled" value={stats().enabled} />
+          <Show when={defaultModel()} fallback={<Value mono={false} tone="muted">None enabled</Value>}>
+            <span class="flex items-center gap-2 min-w-0">
+              <Value>{defaultModel()!.name}</Value>
+              <span class="text-micro text-[color:var(--text-muted)] hidden sm:inline">
+                {PROVIDER_LABELS[defaultModel()!.providerId] || defaultModel()!.providerId}
+              </span>
+            </span>
+          </Show>
+        </Row>
+        <Row
+          label="Catalogue"
+          helper="How many models ogcode knows about, and how many reach the picker."
+          stacked
+          hidden={hide('Catalogue', 'how many models providers custom enabled')}
+        >
+          <div class="flex flex-wrap gap-x-10 gap-y-4">
+            <Stat label="Enabled" value={stats().enabled} accent />
             <Stat label="Available" value={stats().total} />
             <Stat label="Providers" value={stats().providers} />
-            <Stat label="Custom" value={stats().customs} />
+            <Stat label="Custom" value={stats().custom} />
           </div>
-          <Show when={defaultModel()}>
-            <div class="pt-3 mt-3 border-t border-[color:var(--border-subtle)]">
-              <div class="text-[11px] text-zinc-500 mb-1">Default model</div>
-              <div class="flex items-center gap-2">
-                <span class="text-[13px] text-zinc-100 font-medium">{defaultModel()!.name}</span>
-                <span class="text-[11px] text-zinc-500">
-                  {PROVIDER_LABELS[defaultModel()!.providerId] || defaultModel()!.providerId}
-                </span>
-              </div>
-            </div>
-          </Show>
-        </Card>
+        </Row>
+      </Group>
 
-        {/* Model hotkeys */}
-        <Card
-          title="Model Hotkeys"
-          description="Pin up to 4 models to numbered slots and switch between them instantly with Alt+1–4. Each slot holds one model — a model can only occupy a single slot at a time."
-        >
-          <ModelHotkeyConfig />
-        </Card>
+      <Group
+        id="hotkeys"
+        title="Model hotkeys"
+        icon={ICONS.hotkey}
+        description="Pin a model to a numbered slot and switch to it from anywhere in the app."
+      >
+        <HotkeyRows hide={hide} />
+      </Group>
 
-        {/* Keyboard shortcuts */}
-        <Card title="Keyboard" description="Shortcuts available throughout the app.">
-          <div class="space-y-2">
-            <Shortcut keys={['Enter']} description="Send message" />
-            <Shortcut keys={['Shift', 'Enter']} description="Insert newline" />
-            <Shortcut keys={['⌘', 'N']} description="Start new session" />
-            <Shortcut keys={['Alt', '1–4']} description="Switch to pinned model slot" />
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function Card(props: { title: string; description?: string; action?: any; children: any }) {
-  return (
-    <section class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] overflow-hidden">
-      <header class="px-5 pt-4 pb-3 flex items-start justify-between gap-4 border-b border-[color:var(--border-subtle)]">
-        <div class="min-w-0">
-          <h2 class="text-[14px] font-semibold text-zinc-100">{props.title}</h2>
-          <Show when={props.description}>
-            <p class="text-[12px] text-zinc-500 mt-0.5">{props.description}</p>
-          </Show>
-        </div>
-        {props.action}
-      </header>
-      <div class="px-5 py-4">{props.children}</div>
-    </section>
-  );
-}
-
-function Row(props: { label: string; children: any }) {
-  return (
-    <div class="flex items-start justify-between gap-4 py-2 first:pt-0 last:pb-0">
-      <div class="text-[12px] text-zinc-500 shrink-0 pt-0.5 w-24">{props.label}</div>
-      <div class="flex-1 min-w-0 text-right">{props.children}</div>
-    </div>
-  );
-}
-
-function Stat(props: { label: string; value: number | string }) {
-  return (
-    <div class="bg-[color:var(--bg-surface)] px-3 py-3 text-center">
-      <div class="text-[18px] font-semibold text-zinc-100 tabular-nums leading-none">{props.value}</div>
-      <div class="text-[10.5px] text-zinc-500 mt-1.5 uppercase tracking-wider">{props.label}</div>
-    </div>
-  );
-}
-
-function Shortcut(props: { keys: string[]; description: string }) {
-  return (
-    <div class="flex items-center justify-between py-1">
-      <span class="text-[12.5px] text-zinc-300">{props.description}</span>
-      <div class="flex items-center gap-1">
-        <For each={props.keys}>
-          {(k, i) => (
-            <span class="flex items-center gap-1">
-              <Show when={i() > 0}>
-                <span class="text-zinc-600 text-[10px]">+</span>
-              </Show>
-              <kbd class="px-1.5 py-0.5 rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[10.5px] text-zinc-300">
-                {k}
-              </kbd>
-            </span>
+      <Group id="keyboard" title="Keyboard shortcuts" icon={ICONS.keyboard}>
+        <For each={SHORTCUTS}>
+          {(s) => (
+            <Row label={s.action} hidden={hide(s.action, s.keys.join(' '), 'shortcut keyboard')}>
+              <span class="flex items-center gap-1">
+                <For each={s.keys}>
+                  {(k, i) => (
+                    <>
+                      <Show when={i() > 0}>
+                        <span class="text-micro text-[color:var(--text-muted)]">+</span>
+                      </Show>
+                      <Kbd>{k}</Kbd>
+                    </>
+                  )}
+                </For>
+              </span>
+            </Row>
           )}
         </For>
+      </Group>
+    </>
+  );
+}
+
+const SHORTCUTS = [
+  { action: 'Send message', keys: ['Enter'] },
+  { action: 'Insert newline', keys: ['Shift', 'Enter'] },
+  { action: 'Start new session', keys: ['⌘', 'N'] },
+  { action: 'Switch to pinned model slot', keys: ['Alt', '1–4'] },
+];
+
+/** Absolute paths are long and their tail is the informative half. */
+function shortPath(dir: string): string {
+  if (!dir) return '—';
+  const home = dir.match(/^\/(Users|home)\/[^/]+/);
+  return home ? `~${dir.slice(home[0].length)}` : dir;
+}
+
+function Stat(props: { label: string; value: number; accent?: boolean }) {
+  return (
+    <div>
+      <div
+        class="text-[1.125rem] font-semibold tabular-nums leading-none"
+        style={{ color: props.accent ? 'var(--accent)' : 'var(--text-primary)' }}
+      >
+        {props.value}
       </div>
+      <div class="mt-1 text-micro text-[color:var(--text-muted)]">{props.label}</div>
     </div>
   );
 }
 
+type Hide = (...text: (string | undefined)[]) => boolean;
 
-// Deep-research tuning bounds — must match session.SearchConfig clamps in Go.
-const RESEARCH_PARAMS = {
-  fetchTopK: { min: 1, max: 10, def: 4 },
-  pageChars: { min: 1000, max: 20000, def: 6000 },
-} as const;
+// ---------------------------------------------------------------------------
+// Appearance
+// ---------------------------------------------------------------------------
 
-function SearchConfigForm() {
+const PRESETS = [
+  { label: 'Violet', hex: '#5e6ad2' },
+  { label: 'Blue', hex: '#3b82f6' },
+  { label: 'Indigo', hex: '#6366f1' },
+  { label: 'Purple', hex: '#8b5cf6' },
+  { label: 'Rose', hex: '#f43f5e' },
+  { label: 'Amber', hex: '#f59e0b' },
+  { label: 'Emerald', hex: '#10b981' },
+  { label: 'Cyan', hex: '#06b6d4' },
+  { label: 'Pink', hex: '#ec4899' },
+];
+
+function ThemeGroup(props: { hide: Hide }) {
+  const themeCtx = useTheme();
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal('');
+  const [draft, setDraft] = createSignal<string | null>(null);
+
+  const isValidHex = (s: string) => /^#[0-9a-fA-F]{6}$/.test(s) || /^#[0-9a-fA-F]{3}$/.test(s);
+  const current = () => draft() ?? themeCtx.primaryColor();
+
+  const apply = async (hex: string) => {
+    setDraft(hex);
+    setError('');
+    if (!isValidHex(hex)) {
+      setError('Use a six-digit hex colour, for example #5e6ad2.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await themeCtx.setPrimaryColor(hex);
+      setDraft(null);
+    } catch {
+      setError('Could not save the theme.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Group
+      id="appearance"
+      title="Appearance"
+      icon={ICONS.palette}
+      description="One colour drives the whole palette. Saved per project directory, so each workspace keeps its own identity."
+    >
+      <Row
+        label="Accent colour"
+        helper="Pick a colour, type a hex value, or start from a preset."
+        stacked
+        hidden={props.hide('Accent colour', 'theme primary color palette hex')}
+      >
+        <div class="flex items-center gap-2 flex-wrap">
+          <label class="relative w-8 h-8 shrink-0 rounded-[3px] overflow-hidden border border-[color:var(--border-default)] cursor-pointer">
+            <input
+              type="color"
+              value={current()}
+              onInput={(e) => apply(e.currentTarget.value)}
+              disabled={saving()}
+              aria-label="Pick an accent colour"
+              class="absolute -inset-2 w-[calc(100%+1rem)] h-[calc(100%+1rem)] cursor-pointer bg-transparent appearance-none border-0 p-0"
+            />
+          </label>
+          <input
+            type="text"
+            value={current()}
+            onChange={(e) => apply(e.currentTarget.value.trim())}
+            disabled={saving()}
+            placeholder={DEFAULTS.primaryColor}
+            aria-label="Accent colour hex"
+            spellcheck={false}
+            class={`${fieldClass} w-[6.75rem] font-mono text-meta`}
+          />
+          <Show when={saving()}>
+            <Spinner class="w-4 h-4 text-[color:var(--text-muted)]" />
+          </Show>
+          <Show when={current().toLowerCase() !== DEFAULTS.primaryColor}>
+            <button
+              type="button"
+              onClick={() => apply(DEFAULTS.primaryColor)}
+              class="text-meta font-medium text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] transition-colors"
+            >
+              Reset
+            </button>
+          </Show>
+        </div>
+
+        <div class="mt-2 flex items-center gap-1.5 flex-wrap">
+          <For each={PRESETS}>
+            {(p) => {
+              const active = () => current().toLowerCase() === p.hex;
+              return (
+                <button
+                  type="button"
+                  onClick={() => apply(p.hex)}
+                  disabled={saving()}
+                  title={p.label}
+                  aria-label={`Use ${p.label}`}
+                  aria-pressed={active()}
+                  class="w-6 h-6 rounded-full shrink-0 flex items-center justify-center transition-transform hover:scale-110"
+                  style={{
+                    background: p.hex,
+                    'box-shadow': active()
+                      ? '0 0 0 2px var(--bg-surface), 0 0 0 4px var(--text-primary)'
+                      : 'inset 0 0 0 1px rgba(255,255,255,0.14)',
+                  }}
+                >
+                  <Show when={active()}>
+                    <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </Show>
+                </button>
+              );
+            }}
+          </For>
+        </div>
+
+        <Show when={error()}>
+          <p class="mt-2 text-meta" style={{ color: 'var(--danger)' }}>{error()}</p>
+        </Show>
+      </Row>
+
+      <Row
+        label="Preview"
+        helper="How the derived palette reads on the controls it colours."
+        stacked
+        hidden={props.hide('Preview', 'palette derived colours theme')}
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="h-8 px-3 inline-flex items-center rounded-[3px] text-meta font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] shadow-sm">
+            Primary
+          </span>
+          <span class="h-8 px-3 inline-flex items-center rounded-[3px] text-meta font-medium bg-[color:var(--accent-soft)] text-[color:var(--accent)]">
+            Tonal
+          </span>
+          <span class="h-8 px-3 inline-flex items-center gap-2 rounded-lg text-meta border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] text-[color:var(--text-secondary)]">
+            <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--accent)]" />
+            Active
+          </span>
+          <span
+            class="h-8 px-3 inline-flex items-center rounded-[3px] text-meta font-mono text-[color:var(--accent)] border border-[color:var(--accent)]"
+            style={{ 'box-shadow': '0 0 0 3px var(--accent-ring)' }}
+          >
+            Focus
+          </span>
+        </div>
+      </Row>
+    </Group>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Web search + deep research
+// ---------------------------------------------------------------------------
+
+function SearchGroups(props: { hide: Hide }) {
   const server = useServer();
-  const [enabled, setEnabled] = createSignal(false);
-  const [useRealProfile, setUseRealProfile] = createSignal(false);
-  const [fetchTopK, setFetchTopK] = createSignal<number>(RESEARCH_PARAMS.fetchTopK.def);
-  const [pageChars, setPageChars] = createSignal<number>(RESEARCH_PARAMS.pageChars.def);
+  const [enabled, setEnabled] = createSignal(true);
+  const [fetchTopK, setFetchTopK] = createSignal(DEFAULTS.fetchTopK);
+  const [pageChars, setPageChars] = createSignal(DEFAULTS.pageChars);
   const [loading, setLoading] = createSignal(true);
   const [saving, setSaving] = createSignal(false);
   const [restartNeeded, setRestartNeeded] = createSignal(false);
@@ -227,7 +371,6 @@ function SearchConfigForm() {
     try {
       const cfg = await getSearchConfig();
       setEnabled(cfg.enabled);
-      setUseRealProfile(cfg.useRealProfile);
       if (cfg.fetchTopK) setFetchTopK(cfg.fetchTopK);
       if (cfg.pageChars) setPageChars(cfg.pageChars);
     } catch {
@@ -237,18 +380,13 @@ function SearchConfigForm() {
     }
   });
 
-  // save persists the full config. Bridge-lifecycle changes (enable / real
-  // profile) need a restart; research-param changes apply live on the next
-  // deep_search, so they show a transient "Saved" instead.
+  // save persists the full config. Toggling search on or off is applied when
+  // the tools are registered at startup, so it needs a restart; research
+  // parameters apply live on the next deep_search and show a transient "Saved".
   const save = async (opts: { restart: boolean }) => {
     setSaving(true);
     try {
-      await setSearchConfig({
-        enabled: enabled(),
-        useRealProfile: useRealProfile(),
-        fetchTopK: fetchTopK(),
-        pageChars: pageChars(),
-      });
+      await setSearchConfig({ enabled: enabled(), fetchTopK: fetchTopK(), pageChars: pageChars() });
       if (opts.restart) {
         setRestartNeeded(true);
       } else {
@@ -260,8 +398,7 @@ function SearchConfigForm() {
     }
   };
 
-  const handleToggle = async () => {
-    const next = !enabled();
+  const toggle = async (next: boolean) => {
     setEnabled(next);
     try {
       await save({ restart: true });
@@ -270,27 +407,9 @@ function SearchConfigForm() {
     }
   };
 
-  const handleProfileToggle = async () => {
-    const next = !useRealProfile();
-    setUseRealProfile(next);
-    try {
-      await save({ restart: true });
-    } catch {
-      setUseRealProfile(!next);
-    }
-  };
-
-  // commitParam clamps to bounds, updates the signal, and saves live.
-  const commitParam = async (
-    key: keyof typeof RESEARCH_PARAMS,
-    setter: (v: number) => void,
-    prev: number,
-    raw: string,
-  ) => {
-    const b = RESEARCH_PARAMS[key];
-    let v = Math.round(Number(raw));
-    if (!Number.isFinite(v)) v = b.def;
-    v = Math.min(b.max, Math.max(b.min, v));
+  // Sliders fire continuously while dragging; only the release writes to the
+  // server, so one drag is one request instead of forty.
+  const commit = async (setter: (v: number) => void, prev: number, v: number) => {
     setter(v);
     try {
       await save({ restart: false });
@@ -300,339 +419,154 @@ function SearchConfigForm() {
   };
 
   return (
-    <Show when={!loading()} fallback={
-      <div class="py-4 flex items-center gap-2 text-[12px] text-zinc-500">
-        <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4m0 8v4m8-8h-4M8 12H4" />
-        </svg>
-        Loading…
-      </div>
-    }>
-      <div class="space-y-3">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <div class="text-[13px] text-zinc-100 font-medium">Enable web search</div>
-            <div class="text-[11.5px] text-zinc-500 mt-0.5 leading-snug">
-              Starts a headless Chrome bridge at server launch. Build and note agents gain <code class="font-mono bg-[color:var(--bg-elevated)] px-1 rounded">deep_search</code> and <code class="font-mono bg-[color:var(--bg-elevated)] px-1 rounded">web_search</code> tools.
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled()}
-            disabled={saving()}
-            onClick={handleToggle}
-            class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent
-              transition-colors duration-200 focus:outline-none disabled:opacity-50
-              ${enabled() ? 'bg-[color:var(--accent)]' : 'bg-[color:var(--bg-hover)]'}`}
-          >
-            <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow
-              transition duration-200 ${enabled() ? 'translate-x-4' : 'translate-x-0'}`} />
-          </button>
-        </div>
-        {/* Bridge live status */}
-        <Show when={enabled() && !restartNeeded()}>
-          <Show
-            when={server.searchRunning()}
-            fallback={
-              <div class="flex items-center gap-2 text-[11.5px] text-red-400 bg-red-400/10 rounded-md px-3 py-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                Bridge failed to start. Check that Node.js is installed and run <code class="font-mono bg-[color:var(--bg-elevated)] px-1 rounded">npx playwright install chromium</code> in <code class="font-mono bg-[color:var(--bg-elevated)] px-1 rounded">~/.local/share/ogcode/search-bridge/</code>, then restart.
-              </div>
-            }
-          >
-            <div class="flex items-center gap-2 text-[11.5px] text-emerald-400">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-              Bridge running — web_search, fetch_page and deep_search tools are active.
-            </div>
+    <>
+      <Group
+        id="search"
+        title="Web search"
+        icon={ICONS.globe}
+        description="Lets the build and note agents research live information. Search ships inside ogcode — there is nothing to install."
+      >
+        <Row
+          label="Enable web search"
+          helper={
+            <>
+              Adds <Mono>web_search</Mono>, <Mono>fetch_page</Mono> and <Mono>deep_search</Mono> to the
+              agent's toolset. Takes effect after ogcode restarts.
+            </>
+          }
+          hidden={props.hide('Enable web search', 'deep_search web_search fetch_page internet research tools')}
+        >
+          <Show when={!loading()} fallback={<Spinner class="w-4 h-4 text-[color:var(--text-muted)]" />}>
+            <Switch checked={enabled()} disabled={saving()} onChange={toggle} label="Enable web search" />
           </Show>
-        </Show>
+        </Row>
 
-        <Show when={restartNeeded()}>
-          <div class="flex items-center gap-2 text-[11.5px] text-amber-400 bg-amber-400/10 rounded-md px-3 py-2">
-            <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-            </svg>
-            Restart the server for this change to take effect.
-          </div>
-        </Show>
-        <Show when={enabled()}>
-          <div class="border-t border-[color:var(--border-subtle)] pt-3 mt-1 space-y-3">
-            {/* Real Chrome profile toggle */}
-            <div class="flex items-center justify-between gap-4">
-              <div class="min-w-0">
-                <div class="text-[13px] text-zinc-100 font-medium">Use real Chrome profile</div>
-                <div class="text-[11.5px] text-zinc-500 mt-0.5 leading-snug">
-                  Uses your Chrome cookies and logins for better search results. Chrome must be <strong class="text-zinc-400">fully closed</strong> before starting ogcode.
-                </div>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={useRealProfile()}
-                disabled={saving()}
-                onClick={handleProfileToggle}
-                class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent
-                  transition-colors duration-200 focus:outline-none disabled:opacity-50
-                  ${useRealProfile() ? 'bg-[color:var(--accent)]' : 'bg-[color:var(--bg-hover)]'}`}
-              >
-                <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow
-                  transition duration-200 ${useRealProfile() ? 'translate-x-4' : 'translate-x-0'}`} />
-              </button>
-            </div>
-
-            {/* Real profile warning */}
-            <Show when={useRealProfile()}>
-              <div class="flex items-center gap-2 text-[11.5px] text-amber-400 bg-amber-400/10 rounded-md px-3 py-2">
-                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-                </svg>
-                Close Chrome completely before restarting ogcode. Chrome locks its profile — two processes cannot share it simultaneously.
-              </div>
-            </Show>
-          </div>
-
-          {/* Deep-research pipeline tuning — applies live, no restart */}
-          <div class="border-t border-[color:var(--border-subtle)] pt-3 mt-1 space-y-3">
-            <div class="min-w-0">
-              <div class="text-[13px] text-zinc-100 font-medium">Deep research tuning</div>
-              <div class="text-[11.5px] text-zinc-500 mt-0.5 leading-snug">
-                Controls the <code class="font-mono bg-[color:var(--bg-elevated)] px-1 rounded">deep_search</code> pipeline. Higher values dig deeper; lower values run faster. Changes apply on the next search — no restart needed.
-              </div>
-            </div>
-
-            <ResearchParamRow
-              label="Pages fetched"
-              hint="Top-ranked results read in full before answering."
-              value={fetchTopK()}
-              min={RESEARCH_PARAMS.fetchTopK.min}
-              max={RESEARCH_PARAMS.fetchTopK.max}
-              disabled={saving()}
-              onCommit={(raw, prev) => commitParam('fetchTopK', setFetchTopK, prev, raw)}
-            />
-            <ResearchParamRow
-              label="Characters per page"
-              hint="How much of each page feeds the final synthesis."
-              value={pageChars()}
-              min={RESEARCH_PARAMS.pageChars.min}
-              max={RESEARCH_PARAMS.pageChars.max}
-              step={500}
-              disabled={saving()}
-              onCommit={(raw, prev) => commitParam('pageChars', setPageChars, prev, raw)}
-            />
-
-            <Show when={paramsSaved()}>
-              <div class="flex items-center gap-1.5 text-[11.5px] text-emerald-400">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                Saved.
-              </div>
-            </Show>
-          </div>
-        </Show>
-      </div>
-    </Show>
-  );
-}
-
-// ResearchParamRow renders one labelled numeric knob for the deep-research
-// tuning panel. It commits on change (blur/enter) so clamping never fights the
-// user mid-keystroke.
-function ResearchParamRow(props: {
-  label: string;
-  hint: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  disabled?: boolean;
-  onCommit: (raw: string, prev: number) => void;
-}) {
-  return (
-    <div class="flex items-center justify-between gap-4">
-      <div class="min-w-0">
-        <div class="text-[12.5px] text-zinc-200">{props.label}</div>
-        <div class="text-[11px] text-zinc-500 mt-0.5 leading-snug">{props.hint}</div>
-      </div>
-      <input
-        type="number"
-        min={props.min}
-        max={props.max}
-        step={props.step ?? 1}
-        value={props.value}
-        disabled={props.disabled}
-        onChange={(e) => props.onCommit(e.currentTarget.value, props.value)}
-        class="w-20 h-8 px-2.5 shrink-0 rounded-md border border-[color:var(--border-default)]
-               bg-[color:var(--bg-elevated)] text-[12px] font-mono text-zinc-200 text-right
-               focus:outline-none focus:border-[color:var(--accent)] transition disabled:opacity-50"
-      />
-    </div>
-  );
-}
-
-function ModelHotkeyConfig() {
-  const session = useSession();
-  const slots = () => session.modelSlots();
-
-  const handleSelect = (slot: number, modelId: string) => {
-    session.setModelSlot(slot, modelId);
-  };
-
-  const handleClear = (slot: number) => {
-    session.setModelSlot(slot, null);
-  };
-
-  return (
-    <div class="space-y-2">
-      <For each={slots()}>
-        {(modelId, index) => (
-          <div class="flex items-center gap-3">
-            <kbd class="px-2 py-1 rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)]
-                         font-mono text-[12px] text-zinc-300 w-12 text-center shrink-0">
-              Alt+{index() + 1}
-            </kbd>
-            <div class="flex-1 min-w-0 flex items-center gap-2">
-              <ModelSelector
-                selectedModel={() => modelId || ''}
-                onSelect={(id) => handleSelect(index(), id)}
-                placement="bottom"
-              />
-              <Show when={modelId}>
-                <button
-                  type="button"
-                  onClick={() => handleClear(index())}
-                  title="Clear slot"
-                  class="h-8 w-8 rounded-md flex items-center justify-center transition-all var(--spring-sm)
-                         text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]
-                         active:scale-[0.95] shrink-0"
+        <Show when={!loading() && (restartNeeded() || enabled())}>
+          <Row label="Status" stacked hidden={props.hide('Status', 'web search backend running restart')}>
+            <Show
+              when={restartNeeded()}
+              fallback={
+                <Show
+                  when={server.searchRunning()}
+                  fallback={
+                    <Banner tone="danger">
+                      The search backend did not start. Check the server logs, then restart ogcode.
+                    </Banner>
+                  }
                 >
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </Show>
-            </div>
-          </div>
-        )}
-      </For>
-      <Show when={slots().every((s) => !s)}>
-        <p class="text-[11.5px] text-zinc-500 pt-1 leading-relaxed">
-          Assign a model to each slot, then press <kbd class="px-1 py-0.5 rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[10.5px] text-zinc-300">Alt</kbd> + the slot number anywhere in the app to switch instantly.
-        </p>
+                  <Banner tone="ok">
+                    Search is active — <Mono>web_search</Mono>, <Mono>fetch_page</Mono> and{' '}
+                    <Mono>deep_search</Mono> are ready.
+                  </Banner>
+                </Show>
+              }
+            >
+              <Banner tone="warn">Restart the server for this change to take effect.</Banner>
+            </Show>
+          </Row>
+        </Show>
+      </Group>
+
+      {/* Tuning is its own card: it saves live, while the switch above needs a
+          restart — folding them together misled people about what was in
+          effect. */}
+      <Show when={!loading() && enabled()}>
+        <Group
+          id="research"
+          title="Deep research"
+          icon={ICONS.research}
+          description={
+            <>
+              Shapes the <Mono>deep_search</Mono> pipeline. Higher values dig deeper, lower values answer
+              faster. Changes apply to the next search.
+            </>
+          }
+          action={
+            <Show when={paramsSaved()}>
+              <StatusChip tone="ok">Saved</StatusChip>
+            </Show>
+          }
+        >
+          <Row
+            label="Pages fetched"
+            helper="Top-ranked results read in full before the agent answers."
+            stacked
+            hidden={props.hide('Pages fetched', 'deep research top results read in full')}
+          >
+            <Slider
+              value={fetchTopK()}
+              min={BOUNDS.fetchTopK.min}
+              max={BOUNDS.fetchTopK.max}
+              disabled={saving()}
+              ariaLabel="Pages fetched"
+              format={(v) => `${v} page${v === 1 ? '' : 's'}`}
+              onInput={setFetchTopK}
+              onCommit={(v) => commit(setFetchTopK, fetchTopK(), v)}
+            />
+          </Row>
+          <Row
+            label="Characters per page"
+            helper="How much of each fetched page feeds the final synthesis."
+            stacked
+            hidden={props.hide('Characters per page', 'deep research synthesis length')}
+          >
+            <Slider
+              value={pageChars()}
+              min={BOUNDS.pageChars.min}
+              max={BOUNDS.pageChars.max}
+              step={BOUNDS.pageChars.step}
+              disabled={saving()}
+              ariaLabel="Characters per page"
+              format={(v) => v.toLocaleString()}
+              onInput={setPageChars}
+              onCommit={(v) => commit(setPageChars, pageChars(), v)}
+            />
+          </Row>
+        </Group>
       </Show>
-    </div>
+    </>
   );
 }
 
-function ThemePicker() {
-  const themeCtx = useTheme();
-  const [saving, setSaving] = createSignal(false);
-  const [error, setError] = createSignal('');
+// ---------------------------------------------------------------------------
+// Model hotkeys — one row per slot, each a plain dropdown.
+// ---------------------------------------------------------------------------
 
-  const isValidHex = (s: string) => /^#[0-9a-fA-F]{6}$/.test(s) || /^#[0-9a-fA-F]{3}$/.test(s);
+function HotkeyRows(props: { hide: Hide }) {
+  const session = useSession();
 
-  const handleInput = async (hex: string) => {
-    setError('');
-    if (!isValidHex(hex)) {
-      setError('Invalid hex color (use #RRGGBB)');
-      return;
-    }
-    setSaving(true);
-    try {
-      await themeCtx.setPrimaryColor(hex);
-    } catch {
-      setError('Failed to save theme');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const options = createMemo(() => [
+    { value: '', label: 'None' },
+    ...session
+      .models()
+      .filter((m) => m.enabled)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((m) => ({ value: m.id, label: m.name })),
+  ]);
 
-  const presets = [
-    { label: 'Linear Violet', hex: '#5e6ad2' },
-    { label: 'Blue', hex: '#3b82f6' },
-    { label: 'Indigo', hex: '#6366f1' },
-    { label: 'Violet', hex: '#8b5cf6' },
-    { label: 'Rose', hex: '#f43f5e' },
-    { label: 'Amber', hex: '#f59e0b' },
-    { label: 'Emerald', hex: '#10b981' },
-    { label: 'Cyan', hex: '#06b6d4' },
-    { label: 'Pink', hex: '#ec4899' },
-  ];
+  const nameOf = (id: string | null) => session.models().find((m) => m.id === id)?.name ?? '';
 
   return (
-    <div class="space-y-4">
-      <div class="flex items-center gap-3">
-        {/* Native color picker */}
-        <div class="relative">
-          <input
-            type="color"
-            value={themeCtx.primaryColor()}
-            onInput={(e) => handleInput(e.currentTarget.value)}
-            disabled={saving()}
-            class="w-10 h-10 rounded-lg border-2 border-[color:var(--border-default)] cursor-pointer
-                   bg-transparent appearance-none [&::-webkit-color-swatch-wrapper]:p-0
-                   [&::-webkit-color-swatch]:rounded-md [&::-webkit-color-swatch]:border-none"
+    <For each={session.modelSlots()}>
+      {(modelId, index) => (
+        <Row
+          label={
+            <span class="flex items-center gap-1.5">
+              <Kbd>Alt</Kbd>
+              <span class="text-micro text-[color:var(--text-muted)]">+</span>
+              <Kbd>{index() + 1}</Kbd>
+            </span>
+          }
+          hidden={props.hide(`Alt ${index() + 1}`, 'hotkey model slot switch', nameOf(modelId))}
+        >
+          <Select
+            value={modelId || ''}
+            options={options()}
+            ariaLabel={`Model for Alt+${index() + 1}`}
+            onChange={(id) => session.setModelSlot(index(), id || null)}
           />
-        </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <input
-              type="text"
-              value={themeCtx.primaryColor()}
-              onChange={(e) => handleInput(e.currentTarget.value)}
-              disabled={saving()}
-              placeholder="#5e6ad2"
-              class="w-28 h-8 px-2.5 rounded-md border border-[color:var(--border-default)]
-                     bg-[color:var(--bg-elevated)] text-[12px] font-mono text-zinc-200
-                     focus:outline-none focus:border-[color:var(--accent)] transition"
-            />
-            <Show when={saving()}>
-              <svg class="w-3.5 h-3.5 animate-spin text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4m0 8v4m8-8h-4M8 12H4" />
-              </svg>
-            </Show>
-          </div>
-          <Show when={error()}>
-            <p class="text-[11px] text-red-400 mt-1">{error()}</p>
-          </Show>
-        </div>
-        {/* Live preview swatch with derived accent */}
-        <div class="flex items-center gap-1.5">
-          <span class="text-[11px] text-zinc-500 mr-1">Preview</span>
-          <span class="w-6 h-6 rounded-md border border-[color:var(--border-default)]" style={{ background: 'var(--accent)' }} />
-          <span class="w-6 h-6 rounded-md border border-[color:var(--border-default)]" style={{ background: 'var(--accent-hover)' }} />
-          <span class="w-6 h-6 rounded-md border border-[color:var(--border-default)]" style={{ background: 'var(--accent-soft)' }} />
-          <span class="w-6 h-6 rounded-md border border-[color:var(--border-default)]" style={{ background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-surface)' }} title="Sidebar tint" />
-        </div>
-      </div>
-
-      {/* Preset swatches */}
-      <div>
-        <div class="text-[11px] text-zinc-500 mb-2">Presets</div>
-        <div class="flex flex-wrap gap-2">
-          <For each={presets}>
-            {(p) => (
-              <button
-                type="button"
-                onClick={() => handleInput(p.hex)}
-                disabled={saving()}
-                title={p.label}
-                class={`w-7 h-7 rounded-lg border-2 transition-colors
-                  ${themeCtx.primaryColor() === p.hex
-                    ? 'border-white ring-2 ring-white/20'
-                    : 'border-[color:var(--border-default)] hover:border-[color:var(--border-strong)]'
-                  }`}
-                style={{ background: p.hex }}
-              />
-            )}
-          </For>
-        </div>
-      </div>
-
-      <div class="pt-3 mt-1 border-t border-[color:var(--border-subtle)]">
-        <p class="text-[11px] text-zinc-500 leading-relaxed">
-          Theme is saved per project directory. Reopening ogcode from this path restores your colors automatically.
-        </p>
-      </div>
-    </div>
+        </Row>
+      )}
+    </For>
   );
 }

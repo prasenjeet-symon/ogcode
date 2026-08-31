@@ -3,6 +3,7 @@ import { useSession } from '../context/session';
 import { useServer } from '../context/server';
 import { createSignal, createMemo, For, Show } from 'solid-js';
 import { deleteSession } from '../api/client';
+import Logo from './logo';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -171,6 +172,19 @@ export default function SessionSidebar() {
             </svg>
           </button>
           <button
+            onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
+            title="Skills"
+            class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
+              ${location.pathname.startsWith('/settings/skills')
+                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
+              }`}
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+          </button>
+          <button
             onClick={() => navigate('/settings', { state: { from: location.pathname } })}
             title="Settings"
             class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92]"
@@ -191,9 +205,7 @@ export default function SessionSidebar() {
           class="flex items-center gap-2 flex-1 min-w-0 group"
         >
           <span class="w-6 h-6 rounded-md bg-[color:var(--accent)] flex items-center justify-center shadow-sm shadow-[color:var(--accent)]/15 ring-1 ring-white/10 shrink-0 group-hover:shadow-[color:var(--accent)]/25 transition-shadow">
-            <svg class="w-3 h-3 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.6">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+            <Logo class="w-3 h-3 text-[color:var(--on-primary)]" small />
           </span>
           <span class="text-ui font-semibold text-[color:var(--text-primary)] truncate transition-colors">ogcode</span>
         </button>
@@ -365,6 +377,20 @@ export default function SessionSidebar() {
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
           </svg>
           <span>Project Index</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
+          class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
+            ${location.pathname.startsWith('/settings/skills')
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+            }`}
+        >
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 5.74L18 6.75l-.259-1.01a3.375 3.375 0 00-2.455-2.455L14.27 3 14.526 2.01a3.375 3.375 0 012.455-2.455L18 1.25l.259-1.01a3.375 3.375 0 012.455 2.455L21 5.25l1.01-.259a3.375 3.375 0 012.455 2.455z" />
+          </svg>
+          <span>Skills</span>
         </button>
       </div>
 

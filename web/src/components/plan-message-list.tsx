@@ -1,8 +1,9 @@
-import { Index, Show, createEffect, on, onMount, onCleanup, createSignal } from 'solid-js';
+import { Index, Show, createEffect, on, createSignal } from 'solid-js';
 import { usePlan } from '../context/plan';
 import MessageItem from './message-item';
-import { saveScroll, getScroll } from '../lib/scroll-memory';
+import { createChatScroll } from '../lib/chat-scroll';
 import JumpToLatest from './jump-to-latest';
+import Logo from './logo';
 
 function isToolResultMessage(msg: any): boolean {
   if (msg.info.role !== 'user') return false;
@@ -18,20 +19,10 @@ function isEmptyInProgress(msg: any): boolean {
 
 export default function PlanMessageList() {
   const plan = usePlan();
-  let scrollRef: HTMLDivElement | undefined;
-  let bottomAnchor: HTMLDivElement | undefined;
-  let restored = false;
-  const [isScrolledUp, setIsScrolledUp] = createSignal(false);
   const [unreadCount, setUnreadCount] = createSignal(0);
   // Messages already seen. Unread is (total - readMarker); without this the
   // badge showed the whole conversation's length the moment you scrolled up.
   const [readMarker, setReadMarker] = createSignal(0);
-  const [stickToBottom, setStickToBottom] = createSignal(true);
-
-  const scrollKey = () => {
-    const id = plan.activePlan()?.id || '';
-    return id ? `plan:${id}` : '';
-  };
 
   const visibleMessages = () => {
     const activeId = plan.activePlan()?.sessionId;
@@ -40,53 +31,28 @@ export default function PlanMessageList() {
       .filter((msg: any) => !isToolResultMessage(msg) && !isEmptyInProgress(msg));
   };
 
-  const checkNearBottom = () => {
-    if (!scrollRef) return false;
-    return scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight < 80;
-  };
-
-  onMount(() => {
-    if (!scrollRef) return;
-    const handler = () => {
-      if (!scrollRef) return;
-      const key = scrollKey();
-      if (key) saveScroll(key, scrollRef.scrollTop);
-      const nearBottom = checkNearBottom();
-      setIsScrolledUp(!nearBottom);
-      setStickToBottom(nearBottom);
-      if (nearBottom) {
-        setUnreadCount(0);
-        setReadMarker(visibleMessages().length);
-      }
-    };
-    scrollRef.addEventListener('scroll', handler, { passive: true });
-    onCleanup(() => scrollRef?.removeEventListener('scroll', handler));
+  // Follows new content only while the view is at the bottom, and holds the
+  // reading position anywhere else. See lib/chat-scroll.ts.
+  const scroll = createChatScroll({
+    key: () => {
+      const id = plan.activePlan()?.id || '';
+      return id ? `plan:${id}` : '';
+    },
+    onAtBottom: () => {
+      setUnreadCount(0);
+      setReadMarker(visibleMessages().length);
+    },
   });
 
   createEffect(on(
     () => visibleMessages().length,
-    (count) => {
-      if (restored || !scrollRef || count === 0) return;
-      const key = scrollKey();
-      const saved = key ? getScroll(key) : 0;
-      requestAnimationFrame(() => {
-        if (!scrollRef) return;
-        if (saved > 0) {
-          scrollRef.scrollTop = saved;
-        } else {
-          bottomAnchor?.scrollIntoView({ behavior: 'instant' });
-        }
-        restored = true;
-      });
-    },
+    (count) => { if (count > 0) scroll.restore(); },
   ));
 
   createEffect(on(
     () => plan.activePlan()?.id,
     () => {
-      restored = false;
-      setStickToBottom(true);
-      setIsScrolledUp(false);
+      scroll.reset();
       setUnreadCount(0);
       setReadMarker(0);
     },
@@ -106,12 +72,9 @@ export default function PlanMessageList() {
       return msgs.length + ':' + tailMark + ':' + loadingKey;
     },
     (_curr, prev) => {
-      if (!scrollRef) return;
-      if (prev === undefined && !restored) return;
-      if (stickToBottom()) {
-        requestAnimationFrame(() => {
-          bottomAnchor?.scrollIntoView({ behavior: 'instant' });
-        });
+      if (prev === undefined && !scroll.hasRestored()) return;
+      if (scroll.stickToBottom()) {
+        scroll.follow();
         setReadMarker(visibleMessages().length);
       } else {
         setUnreadCount(Math.max(0, visibleMessages().length - readMarker()));
@@ -121,17 +84,15 @@ export default function PlanMessageList() {
 
 
   const scrollToBottom = () => {
-    if (bottomAnchor) bottomAnchor.scrollIntoView({ behavior: 'smooth' });
-    setStickToBottom(true);
-    setIsScrolledUp(false);
+    scroll.jumpToBottom();
     setUnreadCount(0);
     setReadMarker(visibleMessages().length);
   };
 
   return (
     <div class="flex-1 min-h-0 relative flex flex-col">
-      <div ref={scrollRef} class="flex-1 overflow-y-auto">
-        <div class="max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-6">
+      <div ref={scroll.attachScroll} class="chat-scroll flex-1 overflow-y-auto">
+        <div ref={scroll.attachContent} class="max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-6">
           <Show when={visibleMessages().length === 0 && !plan.loading()}>
             <div class="flex flex-col items-center justify-center py-24 text-center">
               <div class="w-14 h-14 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--border-subtle)] flex items-center justify-center mb-4">
@@ -168,9 +129,7 @@ export default function PlanMessageList() {
           <Show when={plan.loading()}>
             <div class="flex gap-3 animate-fade-in">
               <div class="w-7 h-7 shrink-0 rounded-lg bg-[color:var(--accent)] flex items-center justify-center shadow-sm">
-                <svg class="w-3.5 h-3.5 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+                <Logo class="w-3.5 h-3.5 text-[color:var(--on-primary)]" small />
               </div>
               <div class="flex items-center py-1.5">
                 <div class="thinking-dots">
@@ -181,15 +140,13 @@ export default function PlanMessageList() {
               </div>
             </div>
           </Show>
-
-          <div ref={bottomAnchor} />
         </div>
 
       </div>
 
       {/* Anchored to the message column and just above the composer, so it
           centres on the conversation and never overlaps a grown input. */}
-      <Show when={isScrolledUp()}>
+      <Show when={scroll.isScrolledUp()}>
         <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
           <JumpToLatest count={unreadCount()} onClick={scrollToBottom} />
         </div>

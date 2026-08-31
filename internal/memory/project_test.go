@@ -133,7 +133,7 @@ func TestScanProjectCapsFactsPerSession(t *testing.T) {
 	opts.PerSessionCap = 3
 	opts.Limit = 50
 
-	matches, stats, total, err := g.scanProject(opts, []float32{1, 0})
+	matches, stats, total, _, err := g.scanProject(opts, []float32{1, 0})
 	if err != nil {
 		t.Fatalf("scanProject: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestScanProjectSkipsUnrelatedFacts(t *testing.T) {
 
 	opts := ProjectRecallOptions{ProjectID: "/proj", Question: "MATCH?"}
 	opts.applyDefaults()
-	matches, _, total, err := g.scanProject(opts, []float32{1, 0})
+	matches, _, total, _, err := g.scanProject(opts, []float32{1, 0})
 	if err != nil {
 		t.Fatalf("scanProject: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestRecencyBreaksSimilarityTies(t *testing.T) {
 
 	opts := ProjectRecallOptions{ProjectID: "/proj", Question: "MATCH?"}
 	opts.applyDefaults()
-	matches, _, _, err := g.scanProject(opts, []float32{1, 0})
+	matches, _, _, _, err := g.scanProject(opts, []float32{1, 0})
 	if err != nil {
 		t.Fatalf("scanProject: %v", err)
 	}

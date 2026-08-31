@@ -4,6 +4,7 @@ import MarkdownContent from './markdown-content';
 import FileDiff, { diffStat } from './file-diff';
 import { useNote } from '../context/note';
 import { useSession } from '../context/session';
+import DeliveryTicks, { formatLatency } from './delivery-ticks';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -374,23 +375,31 @@ function ImagePartDisplay(props: { data: ImagePartData }) {
 
 function ReasoningPartDisplay(props: { data: ReasoningPartData }) {
   const [expanded, setExpanded] = createSignal(false);
-  const charCount = () => props.data.text.length;
+  // A block can legitimately carry no text: safety-redacted reasoning, or a
+  // model whose thinking display is withheld. There is nothing to reveal, so
+  // the row says so rather than offering a drawer that opens on nothing.
+  const text = () => props.data.text ?? '';
+  const hasText = () => text().length > 0;
+  const charCount = () => text().length;
   const isLong = () => charCount() > 500;
 
   return (
     <div class="my-1.5">
       <button
         type="button"
-        aria-expanded={expanded()}
-        onClick={() => setExpanded(!expanded())}
+        disabled={!hasText()}
+        aria-expanded={hasText() ? expanded() : undefined}
+        onClick={() => hasText() && setExpanded(!expanded())}
         class="reasoning-toggle flex items-center gap-1.5 text-meta h-7 px-2 rounded-md transition-colors"
       >
-        <svg
-          class={`w-2.5 h-2.5 transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Show when={hasText()}>
+          <svg
+            class={`w-2.5 h-2.5 transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </Show>
         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
         </svg>
@@ -400,12 +409,15 @@ function ReasoningPartDisplay(props: { data: ReasoningPartData }) {
             {charCount().toLocaleString()} chars
           </span>
         </Show>
+        <Show when={!hasText()}>
+          <span class="reasoning-count text-micro ml-0.5">not shown</span>
+        </Show>
       </button>
-      <Show when={expanded()}>
+      <Show when={expanded() && hasText()}>
         <div class="reveal">
           <div>
             <div class="reasoning-body ml-[1.15rem] mt-1.5 pl-3 text-meta text-[color:var(--text-tertiary)] whitespace-pre-wrap break-words leading-[1.65] max-h-[400px] overflow-y-auto">
-              {props.data.text}
+              {text()}
             </div>
           </div>
         </div>
@@ -563,11 +575,13 @@ function UserMessage(props: { msg: MessageWithParts }) {
           </button>
         </Show>
 
-        {/* Hover actions — icon-only so a turn is never framed by a row of
-            buttons competing with the message itself. */}
-        <div class="flex items-center justify-end gap-0.5 mt-0.5 -mr-1 h-7
-                    opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
-          <span class="text-micro text-[color:var(--text-muted)] tabular-nums mr-1">{timestamp()}</span>
+        {/* Receipt line. The delivery state and the time stay visible — a
+            receipt you have to hover to read is not a receipt — while the
+            actions beside them still appear only on hover, so a turn is never
+            framed by a row of buttons competing with the message itself. */}
+        <div class="flex items-center justify-end gap-0.5 mt-0.5 -mr-1 h-7">
+          <div class="flex items-center gap-0.5
+                      opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
           <Show when={userText()}>
             <button
               type="button"
@@ -609,6 +623,9 @@ function UserMessage(props: { msg: MessageWithParts }) {
               </Show>
             </button>
           </Show>
+          </div>
+          <span class="text-micro text-[color:var(--text-muted)] tabular-nums ml-1 mr-1">{timestamp()}</span>
+          <DeliveryTicks msg={props.msg} />
         </div>
       </div>
     </div>
@@ -618,6 +635,20 @@ function UserMessage(props: { msg: MessageWithParts }) {
 function AssistantMessage(props: { msg: MessageWithParts }) {
   const timestamp = () => formatTime(props.msg.info.createdAt);
   const [copied, setCopied] = createSignal(false);
+
+  // The visible figure is the model's latency alone. Everything that explains a
+  // slow one — ogcode's prompt building and compaction, a stream that had to be
+  // reopened, whether the model thought before it wrote — lives in the tooltip,
+  // because those are questions asked after the fact.
+  const ttftTitle = () => {
+    const d = props.msg.info.delivery;
+    if (!d?.ttftMs) return '';
+    const parts = [`Model answered in ${formatLatency(d.ttftMs)}`];
+    if (d.firstTokenKind && d.firstTokenKind !== 'text') parts.push(`starting with ${d.firstTokenKind}`);
+    if (d.queuedMs) parts.push(`${formatLatency(d.queuedMs)} spent before the request left`);
+    if (d.attempts && d.attempts > 1) parts.push(`${d.attempts} connection attempts`);
+    return parts.join(' · ');
+  };
   let copyTimer: ReturnType<typeof setTimeout>;
 
   // A turn with no finish reason and no error is still being written. When its
@@ -688,10 +719,28 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
           </div>
         </Show>
 
-        {/* Action bar (hover) */}
+        {/* Footer. The latency reading stays visible — it is the answer to a
+            question the reader has already asked by the time the turn lands —
+            while the buttons beside it still fade in on hover. */}
         <Show when={props.msg.info.finish && hasText()}>
-          <div class="mt-1 flex items-center gap-0.5 -ml-1.5 h-7
-                      opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+          <div class="mt-1 flex items-center gap-0.5 -ml-1.5 h-7">
+            {/* Time to first token: how long the model took to start answering,
+                measured from when the request left for the provider. Rendered
+                only once the turn has finished, so the figure never ticks.
+                Leads the row so it never sits behind the hover-only copy
+                button's reserved width. */}
+            <Show when={props.msg.info.delivery?.ttftMs}>
+              {(ttft) => (
+                <span
+                  class="text-micro text-[color:var(--text-tertiary)] tabular-nums -ml-1.5"
+                  title={ttftTitle()}
+                >
+                  {formatLatency(ttft())} to first token
+                </span>
+              )}
+            </Show>
+            <div class="flex items-center gap-0.5
+                        opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
             <button
               type="button"
               onClick={handleCopy}
@@ -714,6 +763,7 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
               </Show>
             </button>
             <span class="text-micro text-[color:var(--text-muted)] tabular-nums ml-1">{timestamp()}</span>
+            </div>
           </div>
         </Show>
       </div>

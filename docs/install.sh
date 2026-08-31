@@ -100,29 +100,9 @@ echo "  # Ollama Cloud:"
 echo "  export OLLAMA_BASE_URL=https://api.ollama.com/v1"
 echo "  export OLLAMA_API_KEY=your-key"
 
-# ── Optional: Web Search Agent setup ────────────────────────────────────────
-# The release archive already contains a search-bridge/ directory with server.js
-# and package.json — extract them, then run npm install + playwright install.
+# ── Web search ──────────────────────────────────────────────────────────────
+# Search is built into the binary: it queries JS-free search endpoints over
+# plain HTTP and extracts page text in-process. Nothing to install, and it is
+# on by default.
 echo ""
-echo "Setting up web search agent..."
-BRIDGE_DIR="$HOME/.local/share/ogcode/search-bridge"
-mkdir -p "$BRIDGE_DIR"
-
-# Extract bridge files from the release archive we already downloaded.
-# The archive stores them under search-bridge/, so strip that leading component
-# to drop server.js + package.json directly into $BRIDGE_DIR (where npm runs).
-tar -xzf "$TMP_DIR/$ASSET" -C "$BRIDGE_DIR" --strip-components=1 \
-    "search-bridge/server.js" "search-bridge/package.json" 2>/dev/null || true
-
-if [ ! -f "$BRIDGE_DIR/server.js" ] || [ ! -f "$BRIDGE_DIR/package.json" ]; then
-    echo "⚠️  Bridge files not found in release archive — web search unavailable."
-elif command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-    ( cd "$BRIDGE_DIR" && \
-      npm install --legacy-peer-deps --silent 2>/dev/null && \
-      npx playwright install chromium 2>/dev/null )
-    echo "✅ Web search agent ready. Enable it in ogcode Settings → General."
-else
-    echo "ℹ️  Node.js not found — bridge files installed but search not yet active."
-    echo "   Install Node.js then run:"
-    echo "     cd $BRIDGE_DIR && npm install && npx playwright install chromium"
-fi
+echo "Web search is built in and enabled by default."

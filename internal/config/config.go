@@ -29,10 +29,70 @@ type SkillsConfig struct {
 	Permissions map[string]string `json:"permissions,omitempty"`
 }
 
+// MCPServerConfig configures a single Model Context Protocol server
+// connection. A server is either a local subprocess (Command + Args + Env) or
+// a remote HTTP endpoint (URL + Headers). Transport is one of "stdio",
+// "streamable-http", or "sse" — when empty, it is inferred from whether
+// Command or URL is set (stdio if Command, otherwise http).
+//
+// Authorization: a server with a URL and no Headers gets an OAuth handler
+// attached automatically — the first 401 triggers the authorization-code
+// (with PKCE) flow, so servers like Cal.com connect with no extra config. A
+// server with Headers keeps the static bearer-token path and no OAuth. The
+// optional Auth block overrides the defaults (pre-registered client, custom
+// scopes, or SkipOAuth to disable the handler entirely).
+type MCPServerConfig struct {
+	// Transport forces the transport; empty auto-detects from Command/URL.
+	Transport string `json:"transport,omitempty"`
+	// Command is the executable run as a stdio subprocess server.
+	Command string `json:"command,omitempty"`
+	// Args are passed to Command.
+	Args []string `json:"args,omitempty"`
+	// Env augments (not replaces) the parent process environment for Command.
+	Env map[string]string `json:"env,omitempty"`
+	// URL is the endpoint for a streamable-http or sse server.
+	URL string `json:"url,omitempty"`
+	// Headers are sent with HTTP requests to a URL-based server. When set, the
+	// server uses the static-token path and no OAuth handler is attached.
+	Headers map[string]string `json:"headers,omitempty"`
+	// Auth configures OAuth for a URL-based server. When nil (the default for a
+	// server with a URL and no Headers), Dynamic Client Registration is used
+	// with a localhost redirect — the "just works" path. Setting any field
+	// opts into an explicit client. Has no effect for stdio servers or when
+	// Headers is set.
+	Auth *MCPAuthConfig `json:"auth,omitempty"`
+}
+
+// MCPAuthConfig configures OAuth authorization for a URL-based MCP server. It
+// only applies to streamable-http servers without static Headers. Leave the
+// whole block nil (or empty) for the default: Dynamic Client Registration with
+// a loopback redirect, which works against servers like Cal.com with no
+// pre-registered client.
+type MCPAuthConfig struct {
+	// ClientID is a pre-registered OAuth client identifier. When set, Dynamic
+	// Client Registration is skipped and this client is used directly. Leave
+	// empty to use DCR (the default).
+	ClientID string `json:"clientId,omitempty"`
+	// ClientSecret is the secret for a pre-registered confidential client.
+	// Only meaningful when ClientID is set. Leave empty for a public client.
+	ClientSecret string `json:"clientSecret,omitempty"`
+	// Scopes are requested beyond what the server advertises. Empty = the
+	// server's scopes_supported plus offline_access (when refresh tokens are
+	// requested).
+	Scopes []string `json:"scopes,omitempty"`
+	// SkipOAuth disables the OAuth handler for this server even with no
+	// Headers — for a server that returns 401 but is not an OAuth server.
+	SkipOAuth bool `json:"skipOAuth,omitempty"`
+}
+
+// MCPConfig holds the named MCP servers ogcode connects to at startup.
+type MCPConfig map[string]MCPServerConfig
+
 // Config is ogcode's file-based configuration.
 type Config struct {
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
 	Skills    SkillsConfig              `json:"skills,omitempty"`
+	MCP       MCPConfig                 `json:"mcp,omitempty"`
 }
 
 // envNames maps each provider ID ogcode knows about to the environment
@@ -80,6 +140,17 @@ func Load(dir string) *Config {
 				merged.Skills.Permissions = map[string]string{}
 			}
 			merged.Skills.Permissions[pattern] = action
+		}
+		// MCP servers merge per-name with project-local taking precedence.
+		// A project names a server the global config did not → it is added;
+		// a project re-states one the global config already had → project-local
+		// replaces it wholesale (the fields are independent and re-stating a
+		// server implies intent to own its full definition).
+		for name, sc := range c.MCP {
+			if merged.MCP == nil {
+				merged.MCP = map[string]MCPServerConfig{}
+			}
+			merged.MCP[name] = sc
 		}
 	}
 	return merged
@@ -155,7 +226,8 @@ const projectFileTemplate = `{
     "paths": [],
     "urls": [],
     "permissions": {}
-  }
+  },
+  "mcp": {}
 }
 `
 

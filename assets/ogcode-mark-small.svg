@@ -1,0 +1,8 @@
+<!-- ogcode mark - small cut, for 20px and below (favicon, dense UI).
+     Same gesture as the master with a heavier stroke and a shorter inner
+     turn, so the gap between the outer ring and the tail survives being
+     rasterised onto a 16px grid. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="ogcode">
+  <path d="M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33"
+        stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+</svg>

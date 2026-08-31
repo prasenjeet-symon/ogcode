@@ -34,21 +34,29 @@ func TestAPIError_IsTransient(t *testing.T) {
 
 func TestAPIError_IsContextLength(t *testing.T) {
 	cases := []struct {
-		code int
-		body string
-		want bool
+		provider string
+		code     int
+		body     string
+		want     bool
 	}{
-		{400, "This model's maximum context length is 8192 tokens", true},
-		{400, `{"error":{"code":"context_length_exceeded"}}`, true},
-		{400, "prompt is too long", true},
-		{400, "", true}, // Ollama empty-body overflow
-		{400, `{"error":"invalid api key format"}`, false},
-		{429, "context length exceeded", false}, // not a 400 → not a context error
-		{500, "", false},
+		{"openai", 400, "This model's maximum context length is 8192 tokens", true},
+		{"openai", 400, `{"error":{"code":"context_length_exceeded"}}`, true},
+		{"openai", 400, "prompt is too long", true},
+		{"ollama", 400, "", true},   // Ollama empty-body overflow
+		{"ollama", 400, "  ", true}, // whitespace-only body counts as empty
+		// A body-less 400 from a remote provider is an opaque rejection, not an
+		// overflow: reporting it as one sends the user compacting a conversation
+		// that was never too big.
+		{"ogcode-openrouter", 400, "", false},
+		{"openai", 400, "", false},
+		{"openai", 400, `{"error":"invalid api key format"}`, false},
+		{"openai", 429, "context length exceeded", false}, // not a 400 → not a context error
+		{"ollama", 500, "", false},
 	}
 	for _, c := range cases {
-		if got := (&APIError{StatusCode: c.code, Body: c.body}).IsContextLength(); got != c.want {
-			t.Errorf("IsContextLength(%d,%q) = %v, want %v", c.code, c.body, got, c.want)
+		err := &APIError{Provider: c.provider, StatusCode: c.code, Body: c.body}
+		if got := err.IsContextLength(); got != c.want {
+			t.Errorf("IsContextLength(%s,%d,%q) = %v, want %v", c.provider, c.code, c.body, got, c.want)
 		}
 	}
 }
@@ -83,5 +91,33 @@ func TestNewAPIError_ParsesRetryAfter(t *testing.T) {
 	}
 	if !e.IsTransient() {
 		t.Error("429 should be transient")
+	}
+}
+
+func TestAPIError_IsImageRejection(t *testing.T) {
+	cases := []struct {
+		name string
+		code int
+		body string
+		want bool
+	}{
+		{"image not supported", 400, "this model does not support image input", true},
+		{"vision not supported", 400, "model lacks vision capabilities", true},
+		{"multimodal error", 400, "multimodal input not accepted", true},
+		{"modality error", 400, "unsupported modality", true},
+		{"no images", 400, "no images allowed", true},
+		{"not support image", 400, "does not support image", true},
+		{"generic 400", 400, "invalid request body", false},
+		{"context length 400", 400, "prompt is too long", false},
+		{"500 not image rejection", 500, "image error", false},
+		{"429 not image rejection", 429, "rate limited", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := (&APIError{StatusCode: c.code, Body: c.body}).IsImageRejection()
+			if got != c.want {
+				t.Errorf("IsImageRejection(%d,%q) = %v, want %v", c.code, c.body, got, c.want)
+			}
+		})
 	}
 }

@@ -92,7 +92,7 @@ func TestCancelPartialToolCalls_PairsToolUseWithResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
-	if uses, results := toolUseIDs(convertMessages(before)), toolResultIDs(convertMessages(before)); len(uses) == 0 || len(results) != 0 {
+	if uses, results := toolUseIDs(convertMessages(before, false, "claude-opus-4-6")), toolResultIDs(convertMessages(before, false, "claude-opus-4-6")); len(uses) == 0 || len(results) != 0 {
 		t.Fatalf("precondition: expected dangling tool_use and no results, got uses=%v results=%v", uses, results)
 	}
 
@@ -105,7 +105,7 @@ func TestCancelPartialToolCalls_PairsToolUseWithResult(t *testing.T) {
 	}
 
 	// Every assistant tool_use must now be paired with a tool_result.
-	model := convertMessages(msgs)
+	model := convertMessages(msgs, false, "claude-opus-4-6")
 	uses := toolUseIDs(model)
 	results := toolResultIDs(model)
 	if len(uses) != 2 {
@@ -159,13 +159,25 @@ func TestCancelPartialToolCalls_SanitizesInvalidJSONArgs(t *testing.T) {
 		t.Fatalf("create assistant msg: %v", err)
 	}
 
-	// A tool part whose accumulated input is partial/invalid JSON (interrupted
-	// mid-stream).
-	partData, _ := json.Marshal(session.ToolPartData{
+	// The persisted part always holds valid JSON: the loop coerces unparseable
+	// arguments to {} before writing, precisely so one bad tool call cannot
+	// leave an unreadable record behind. The partial, invalid input lives where
+	// it actually accumulates — in the in-memory pendingToolCall below — and
+	// that is what the cancel path has to sanitize before it is replayed.
+	//
+	// The setup used to marshal the invalid input straight into the part. That
+	// marshal fails (json.RawMessage is validated on the way out) and the error
+	// was discarded, so the part was stored empty and the assertion below was
+	// satisfied by a tool_use with no id and no name — the very shape that makes
+	// Anthropic reject the whole conversation.
+	partData, err := json.Marshal(session.ToolPartData{
 		Tool:   "write",
 		CallID: "call_partial",
-		State:  session.ToolState{Status: session.ToolPending, Input: json.RawMessage(`{"path":"a.js","content":"const x`)},
+		State:  session.ToolState{Status: session.ToolPending, Input: json.RawMessage(`{}`)},
 	})
+	if err != nil {
+		t.Fatalf("marshal tool part: %v", err)
+	}
 	part := &session.Part{ID: session.NewPartID(), MessageID: assistantID, SessionID: sess.ID, Type: session.PartTool, Data: partData, CreatedAt: session.Now(), UpdatedAt: session.Now()}
 	if err := store.CreatePart(part); err != nil {
 		t.Fatalf("create tool part: %v", err)
@@ -187,7 +199,7 @@ func TestCancelPartialToolCalls_SanitizesInvalidJSONArgs(t *testing.T) {
 
 	// The tool_use arguments in the converted (provider-bound) request must now
 	// be valid JSON.
-	model := convertMessages(msgs)
+	model := convertMessages(msgs, false, "claude-opus-4-6")
 	sawToolUse := false
 	for _, m := range model {
 		if m.Role != "assistant" || m.ToolCalls == nil {

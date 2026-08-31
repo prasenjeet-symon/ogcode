@@ -14,6 +14,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
+	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
@@ -177,13 +178,32 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 
 	// Skills, from the same ogcode.json this command already loads for
 	// provider settings.
-	skillCfg := config.Load(dir).Skills
+	fullCfg := config.Load(dir)
+	skillCfg := fullCfg.Skills
 	skillLoader := skill.NewLoader(skill.Config{
 		Paths:       skillCfg.Paths,
 		URLs:        skillCfg.URLs,
 		Permissions: skillCfg.Permissions,
 	})
 	toolRegistry.Register(tool.NewSkillTool(skillLoader))
+
+	// MCP servers: build the Manager now, then connect synchronously. The CLI
+	// is a one-shot headless run (no UI/bus to surface an OAuth prompt), so the
+	// eager connect preserves the prior behaviour — the agent's first step has
+	// the tools in hand. Close is deferred so subprocesses are torn down when
+	// runPrompt returns.
+	mcpMgr, mcpErr := mcp.New(context.Background(), fullCfg)
+	if mcpErr != nil {
+		slog.Warn("mcp: manager construction failed", "err", mcpErr)
+	}
+	mcpTools, connErr := mcpMgr.Connect(context.Background())
+	if connErr != nil {
+		slog.Warn("mcp: one or more servers failed to connect", "err", connErr)
+	}
+	for _, t := range mcpTools {
+		toolRegistry.Register(t)
+	}
+	defer mcpMgr.Close()
 
 	b := bus.New(1024)
 	store := session.NewStore(database)

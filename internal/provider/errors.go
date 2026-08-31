@@ -32,16 +32,45 @@ func (e *APIError) IsTransient() bool {
 }
 
 // IsContextLength reports whether the error is a context-window overflow. These
-// arrive as 400s whose body mentions the context length; a bare 400 with an empty
-// body (Ollama's overflow response) is also treated as overflow.
+// arrive as 400s whose body mentions the context length. A bare 400 with an empty
+// body counts too, but only from Ollama, which is the one endpoint that answers an
+// overflowing prompt that way. Every other provider explains its 400s, so treating
+// a body-less one as overflow there just mislabels an unrelated rejection — and
+// sends the user off compacting a conversation that was never too big.
 func (e *APIError) IsContextLength() bool {
 	if e.StatusCode != http.StatusBadRequest {
 		return false
 	}
 	if strings.TrimSpace(e.Body) == "" {
-		return true // Ollama returns an empty-body 400 when the prompt overflows
+		return e.Provider == "ollama"
 	}
 	return IsContextLengthMessage(e.Body)
+}
+
+// IsImageRejection reports whether the error is a 400 caused by the model not
+// accepting image input. The body of such a response mentions image/modality/
+// vision support. Used by the agent loop to make these failures resumable
+// (resume strips the offending images) instead of fatal, since a non-vision
+// model producing a tool image is a capability mismatch, not a malformed
+// request — switching models or retrying without images fixes it.
+func (e *APIError) IsImageRejection() bool {
+	if e.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	return IsImageRejectionMessage(e.Body)
+}
+
+// IsImageRejectionMessage reports whether a message/body indicates the model
+// does not accept image input. Shared by APIError.IsImageRejection, the probe's
+// classifyProbeError, and the loop's string-matching fallback so they never drift.
+func IsImageRejectionMessage(s string) bool {
+	lower := strings.ToLower(s)
+	for _, hint := range imageRejectionHints {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewAPIError builds an APIError from a non-2xx HTTP response, parsing the

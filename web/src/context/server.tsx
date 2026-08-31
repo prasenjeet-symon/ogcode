@@ -1,6 +1,7 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
 import { createSignal } from 'solid-js';
-import { getPath, getConfig, getVCS, getMode } from '../api/client';
+import { getPath, getConfig, getVCS, getMode, getResources } from '../api/client';
+import type { ResourceSample, ResourceActivity } from '../api/client';
 import { createSSE, type SSEEvent } from '../api/sse';
 
 interface ServerContextValue {
@@ -14,6 +15,10 @@ interface ServerContextValue {
   memoryEnabled: () => boolean;
   memoryProvider: () => string;
   searchRunning: () => boolean;
+  // Rolling window of this process's own CPU/memory samples, oldest first, and
+  // the context needed to read them (cadence, core count, process uptime).
+  resources: () => ResourceSample[];
+  resourceMeta: () => ResourceMeta;
   // Monotonically increasing counter that ticks on every relevant SSE event.
   // Consumers use this as a reactive dependency to know when to re-fetch.
   eventTick: () => number;
@@ -22,6 +27,18 @@ interface ServerContextValue {
   // dropped to a full buffer). Consumers should force a full state re-fetch.
   resyncTick: () => number;
 }
+
+export interface ResourceMeta {
+  interval: number;
+  cores: number;
+  uptime: number;
+  // What the server is busy with, when it has said. Null the rest of the time.
+  activity: ResourceActivity | null;
+}
+
+// Mirrors the server's retention so the client window and the backfill it gets
+// from /resources describe the same span of time.
+const RESOURCE_RETAIN = 120;
 
 const ServerContext = createContext<ServerContextValue>();
 
@@ -39,6 +56,13 @@ export const ServerProvider: ParentComponent = (props) => {
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
   const [resyncTick, setResyncTick] = createSignal(0);
+  const [resources, setResources] = createSignal<ResourceSample[]>([]);
+  const [resourceMeta, setResourceMeta] = createSignal<ResourceMeta>({
+    interval: 2000,
+    cores: 0,
+    uptime: 0,
+    activity: null,
+  });
   // Highest event seq seen on this connection, for drop detection. Reset to 0 on
   // reconnect (a new EventSource restarts the server's per-connection numbering).
   let lastSeq = 0;
@@ -59,6 +83,18 @@ export const ServerProvider: ParentComponent = (props) => {
   // Load server mode
   getMode().then((info) => {
     if (info.mode) setMode(info.mode as 'build' | 'plan');
+  }).catch(() => { /* ignore */ });
+
+  // Backfill the resource window in one shot so the graph opens populated
+  // instead of drawing itself one sample at a time off the SSE stream.
+  getResources().then((snap) => {
+    setResourceMeta({
+      interval: snap.interval,
+      cores: snap.cores,
+      uptime: snap.uptime,
+      activity: snap.activity ?? null,
+    });
+    if (snap.samples?.length) setResources(snap.samples.slice(-RESOURCE_RETAIN));
   }).catch(() => { /* ignore */ });
 
   getConfig().then((config) => {
@@ -91,6 +127,11 @@ export const ServerProvider: ParentComponent = (props) => {
     } else if (event.type === 'server.config') {
       setMemoryEnabled(!!event.properties?.memoryEnabled);
       setMemoryProvider(event.properties?.memoryProvider ?? '');
+    } else if (event.type === 'server.resources') {
+      appendResourceSample(event.properties);
+      // Deliberately does NOT bump eventTick: that counter is a re-fetch signal
+      // for consumers, and a telemetry frame arriving every couple of seconds
+      // would have the whole app reloading its state on a timer.
     } else if (event.type === 'server.heartbeat') {
       // keep alive
     } else {
@@ -98,6 +139,37 @@ export const ServerProvider: ParentComponent = (props) => {
       setEventTick((n) => n + 1);
     }
   });
+
+  function appendResourceSample(props: any) {
+    const sample: ResourceSample | undefined = props?.sample;
+    if (!sample || typeof sample.at !== 'number') return;
+
+    if (typeof props.interval === 'number') {
+      setResourceMeta({
+        interval: props.interval,
+        cores: props.cores ?? 0,
+        uptime: props.uptime ?? 0,
+        activity: props.activity ?? null,
+      });
+    }
+
+    setResources((prev) => {
+      // The server's sampler and this stream's ticker run on independent
+      // timers, so a frame can occasionally repeat the sample the previous one
+      // carried. Keyed on `at`, a repeat is dropped rather than drawn twice.
+      const last = prev[prev.length - 1];
+      if (last && last.at >= sample.at) return prev;
+
+      const next = [...prev, sample];
+      // Drop anything older than the window. Sampling pauses when no client is
+      // watching, so after a backgrounded tab reconnects the array can hold
+      // pre-gap samples; plotted by index they would splice across the gap and
+      // show a jump that never happened.
+      const cutoff = sample.at - resourceMeta().interval * RESOURCE_RETAIN;
+      const fresh = next.filter((s) => s.at >= cutoff);
+      return fresh.length > RESOURCE_RETAIN ? fresh.slice(-RESOURCE_RETAIN) : fresh;
+    });
+  }
 
   const value: ServerContextValue = {
     directory,
@@ -110,6 +182,8 @@ export const ServerProvider: ParentComponent = (props) => {
     memoryEnabled,
     memoryProvider,
     searchRunning,
+    resources,
+    resourceMeta,
     eventTick,
     lastEvent,
     resyncTick,

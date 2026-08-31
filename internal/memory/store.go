@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -897,6 +898,18 @@ func migrate(db *sql.DB) error {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("memory: migrate: %s: %w", stmt, err)
 		}
+	}
+
+	// Clean up nameless concept nodes left by a placement fallback that wrote an
+	// empty concept key whenever the inference LLM was unavailable. They carry
+	// no content and no embedding — a concept key is only ever a label — so the
+	// only thing they contribute is a blank "Concept:" line in every tree
+	// render. Facts are attached by topic_name, not by an edge to the concept
+	// row, so removing these loses nothing.
+	if res, err := db.Exec(`DELETE FROM nodes WHERE type = 'concept' AND TRIM(key) = ''`); err != nil {
+		return fmt.Errorf("memory: migrate: drop nameless concepts: %w", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		slog.Info("memory: removed nameless concept nodes", "count", n)
 	}
 
 	// Indexes covering the project-scoped access paths. They are created after

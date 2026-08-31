@@ -67,6 +67,18 @@ func classifyInterruption(err error, step int) *session.Interruption {
 				Detail:    "The provider failed on its own side. Resuming retries the same request.",
 				Step:      step,
 			}
+		case apiErr.IsImageRejection():
+			// A 400 because the model doesn't accept images — not a malformed
+			// request. Resume strips tool-result images (convertMessages skips
+			// them when modelSupportsImages is false), so the retried request is
+			// valid. The capability cache is also invalidated so the next run
+			// probes fresh and resolves to false.
+			return &session.Interruption{
+				Reason:    session.InterruptModelCapability,
+				Resumable: true,
+				Detail:    "The model rejected an image in the conversation. Resuming will retry without images, or switch to a vision-capable model.",
+				Step:      step,
+			}
 		case apiErr.StatusCode >= 400:
 			// A 4xx that is none of the above is the request itself being wrong,
 			// and the resumed request would be identically wrong.

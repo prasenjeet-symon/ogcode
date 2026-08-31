@@ -1,5 +1,10 @@
 package agent
 
+import (
+	"regexp"
+	"strings"
+)
+
 // Agent defines an agent configuration with available tools and system prompt.
 type Agent struct {
 	ID          string
@@ -18,7 +23,7 @@ type Agent struct {
 // codingAgentTools is the shared full-access toolset used by both the
 // interactive BuildAgent and the headless TaskAgent — they differ only in their
 // system prompt framing, not their capabilities.
-var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task", "skill"}
+var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task", "skill", "mcp_*"}
 
 // codingAgentSystem builds the full-access coding-agent system prompt. The two
 // modes share the same body but differ in framing:
@@ -60,7 +65,7 @@ func codingAgentSystem(mode string) string {
    **When you need external knowledge, use deep_search:**
    - Unfamiliar library or API → search "library_name API documentation and usage examples"
    - Latest version or changelog → search "library_name latest version changelog breaking changes"
-   - Choosing between libraries → search "library_a vs library_b comparison 2025"
+   - Choosing between libraries → search "library_a vs library_b comparison", adding the current year from the date in your context
    - Fixing a cryptic error → search the exact error message plus language and framework
    - Security advisories → search "library_name CVE security vulnerability"
    - Best practices → search "pattern language best practices"
@@ -79,7 +84,7 @@ func codingAgentSystem(mode string) string {
 
 ` + step6 + `
 
-` + parallelToolCallsPrompt(true) + `
+` + parallelToolCallsPrompt(true, true) + `
 
 ## Error recovery
 
@@ -163,11 +168,11 @@ Once you have enough information, produce a plan with this structure:
 
 When your plan is complete, tell the user explicitly: "This plan is ready to lock." Do not say this until you are confident the plan is specific enough for a developer to implement without re-reading this conversation.
 
-` + parallelToolCallsPrompt(false) + `
+` + parallelToolCallsPrompt(false, true) + `
 
 ## Hard rules
 
-- You MUST NOT write, edit, or create any file. Read-only access only.
+- You MUST NOT change the project. You have no write or edit tools, and the shell is not a way around that: no redirecting output into a file, no "sed -i", no formatter, generator, or build step that rewrites sources. Read, run read-only commands, and plan.
 - Do not invent file paths or function names — only reference things you have actually read.
 - Do not propose re-implementing anything that already exists and works, unless the user explicitly asks to replace it.
 - Stay tightly scoped. Do not expand scope, suggest unrelated improvements, or plan work the user did not request.
@@ -221,7 +226,7 @@ var BreakdownAgent = Agent{
 
 7. **Call submit_task_breakdown** with the complete task array. Do not output raw JSON.
 
-` + parallelToolCallsPrompt(false) + `
+` + parallelToolCallsPrompt(false, true) + `
 
 ## Hard rules
 
@@ -260,7 +265,7 @@ var NoteAgent = Agent{
 
 4. **Output ONLY the note.** Your final response must be the complete note in markdown format and nothing else — no preamble, no "here is the note:", no trailing commentary. Just the raw markdown starting with the # title.
 
-` + parallelToolCallsPrompt(false) + `
+` + parallelToolCallsPrompt(false, true) + `
 
 ## Hard rules
 
@@ -340,7 +345,7 @@ Do NOT add a third round of searches or fetches unless the results are clearly i
 - Output ONLY the synthesised answer, no preamble.
 - Prefer official documentation, GitHub repos, and authoritative blogs over SEO-heavy aggregator sites.
 
-` + parallelToolCallsPrompt(false),
+` + parallelToolCallsPrompt(false, false),
 }
 
 // SubagentAgent is the autonomous, read-only sub-agent invoked via the `task`
@@ -367,7 +372,7 @@ var SubagentAgent = Agent{
 
 3. **Report back.** Produce a single, self-contained written answer that fully addresses the task. Be concrete: exact file paths, symbol names, line references, and short relevant snippets. Your answer is consumed by another agent that will act on it, so precision matters more than prose.
 
-` + parallelToolCallsPrompt(false) + `
+` + parallelToolCallsPrompt(false, true) + `
 
 ## Hard rules
 
@@ -378,10 +383,23 @@ var SubagentAgent = Agent{
 ` + "\n" + noPackageManagerDirsPrompt(),
 }
 
+// HasTool reports whether toolID is in the agent's allowed toolset. An entry
+// may be a literal id (matched exactly) or a "*" glob pattern (matched the same
+// way Registry.ForAgent expands globs), so an agent listing "mcp_*" authorizes
+// any "mcp_<server>/<tool>" at call time — not just at the point tools are
+// offered to the model. Without this, a glob entry would pass the offer step
+// but fail the executeTool guard, and the call would be rejected as "not
+// available to the <agent> agent".
 func (a *Agent) HasTool(toolID string) bool {
 	for _, t := range a.Tools {
 		if t == toolID {
 			return true
+		}
+		if strings.Contains(t, "*") {
+			pattern := strings.ReplaceAll(t, "*", ".*")
+			if re, err := regexp.Compile("^" + pattern + "$"); err == nil && re.MatchString(toolID) {
+				return true
+			}
 		}
 	}
 	return false

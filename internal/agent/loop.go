@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,10 +37,10 @@ type LoopRunner struct {
 	MaxSteps        int
 	Memory          *memory.Memory
 	NoteStore       *note.Store
-	// SearchBridge is the Playwright search bridge client used by the deep-research
-	// pipeline (RunSearchSession) for web_search and fetch_page. nil when the search
-	// bridge is disabled — deep_search is only registered when it is non-nil.
-	SearchBridge *search.BridgeClient
+	// SearchBridge is the web-search backend used by the deep-research pipeline
+	// (RunSearchSession) and by web_search and fetch_page. nil when search is
+	// disabled — deep_search is only registered when it is non-nil.
+	SearchBridge search.Backend
 	// SearchParams, when set, returns the current deep-research tuning read fresh
 	// from the global config DB, so settings-screen changes take effect on the next
 	// deep_search without a restart. nil → built-in defaults.
@@ -64,6 +65,10 @@ type LoopRunner struct {
 }
 
 // RunLoop executes the core agent loop: prompt -> stream -> tools -> loop back.
+// maxReasoningLen bounds how much of a thinking block is stored, so a runaway
+// reasoning stream can't flood the DB or the UI.
+const maxReasoningLen = 50_000
+
 func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, agentName string, viewportWidth int, viewportHeight int) error {
 	agent := GetAgent(agentName)
 	// Read MaxSteps into a local; never mutate the shared LoopRunner field. A
@@ -208,6 +213,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// this turn. Only ever set on endpoints that do not cache a repeated prefix,
 	// where re-sending the history costs full price on every step.
 	var watermark compactionWatermark
+
+	// How much file, search, and page content the agent has pulled into this turn,
+	// and whether that has reached the point of reminding it that compact_context
+	// exists. Sized against the same threshold the loop's own compaction uses, so
+	// the reminder means the same thing on a small local model and a large hosted one.
+	pressure := newReadPressure(compactionThreshold)
 	if sess != nil {
 		compactionSummary = sess.CompactionSummary
 	}
@@ -402,12 +413,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 		// Create new assistant message
 		assistantID := session.MessageID(id.NewMessageID())
+		// The message this turn is answering. Its CreatedAt is when the server
+		// accepted the prompt, which is where QueuedMs is measured from — from
+		// step 2 on that is the loop's own tool-result message, so QueuedMs then
+		// measures the gap between tool results and the next dispatch.
+		parentID, parentCreatedAt := lastUserMessageRef(messages)
 		assistantMsg := &session.MessageInfo{
 			ID:        assistantID,
 			SessionID: sessionID,
 			Role:      session.RoleAssistant,
 			Agent:     agent.ID,
-			ParentID:  lastUserMessageID(messages),
+			ParentID:  parentID,
 			CreatedAt: session.Now(),
 		}
 		if err := lr.Store.CreateMessage(assistantMsg); err != nil {
@@ -424,6 +440,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// invalidates the cached prefix, so the next request re-establishes the
 		// whole thing at full price. Withheld while the verdict is still unknown.
 		compactContextOffered := cacheObs.Verdict() == provider.CacheAbsent && canCompactContext(agent)
+		// The read-pressure reminder tells the agent to call compact_context, so it
+		// may only be attached on a step where the agent was actually handed it.
+		pressure.setOffered(compactContextOffered)
 		if compactContextOffered {
 			toolIDs = append(append([]string{}, toolIDs...), "compact_context")
 		}
@@ -467,7 +486,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if start := watermark.sliceStart(messages, 0); start > 0 {
 				visible = messages[start:]
 			}
-			modelMessages = toProviderMessages(visible, memoryText)
+			modelMessages = toProviderMessages(visible, memoryText, modelSupportsImages, modelID)
 		} else {
 			// Compaction path (memory disabled): automatic compaction operates on
 			// user-turn boundaries, not individual tool steps, so the current user
@@ -477,9 +496,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// prompt so the model never loses the thread of the session.
 			turnStartIdx := findLastTextUserMessageIndex(messages)
 			if turnStartIdx >= 0 && turnStartIdx < len(messages) {
-				modelMessages = toProviderMessages(messages[watermark.sliceStart(messages, turnStartIdx):], "")
+				modelMessages = toProviderMessages(messages[watermark.sliceStart(messages, turnStartIdx):], "", modelSupportsImages, modelID)
 			} else {
-				modelMessages = toProviderMessages(messages, "")
+				modelMessages = toProviderMessages(messages, "", modelSupportsImages, modelID)
 			}
 			if compactionSummary != "" {
 				systemPrompts = append(systemPrompts, compactionSummary)
@@ -562,6 +581,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			System:   systemPrompts,
 			Messages: modelMessages,
 			Tools:    providerTools,
+			// The agent loop is the one caller that asks for thinking. Providers
+			// that have no reasoning mode, and models that would need a
+			// configuration ogcode cannot size safely, ignore it.
+			Thinking: true,
 		}
 
 		compactionCount := 0
@@ -591,6 +614,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			slog.Info("proactive compaction: request tokens exceed threshold", "session", sessionID, "estimatedTokens", requestTokens, "reportedInputTokens", lastInputTokens, "thresholdTokens", maxRequestTokens, "contextWindow", modelContextWindow, "messages", before)
 			compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
 			compactionCount++
+			// The reported count describes the request that was just discarded.
+			// effectiveRequestTokens takes the LARGER of estimate and reported, so
+			// leaving it set would keep sizing every remaining step of the turn
+			// against history that is no longer being sent.
+			lastInputTokens = 0
 			slog.Info("proactive compaction completed", "session", sessionID, "before", before, "after", len(streamReq.Messages), "newEstimatedTokens", estimateRequestTokens(streamReq))
 			requestTokens = effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
 		}
@@ -610,8 +638,28 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			// Stamped per attempt, not once before the loop: a retry can sleep
+			// for seconds of backoff, and billing that to the model would make
+			// TTFT describe ogcode's retry schedule instead of the model.
+			dispatchedAt := session.Now()
 			streamCh, streamErr = p.StreamChat(streamCtx, streamReq)
 			if streamErr == nil {
+				// StreamChat returns only once the provider has answered 200, so
+				// reaching here is the moment the request is known to have landed
+				// at the model — the double tick, and the start of TTFT.
+				assistantMsg.Delivery = &session.Delivery{
+					DispatchedAt: dispatchedAt,
+					ConnectedAt:  session.Now(),
+					QueuedMs:     dispatchedAt - parentCreatedAt,
+					Attempts:     attempt,
+				}
+				if parentCreatedAt == 0 {
+					assistantMsg.Delivery.QueuedMs = 0
+				}
+				if err := lr.Store.UpdateMessage(assistantMsg); err != nil {
+					slog.Warn("persist delivery on stream connect", "session", sessionID, "err", err)
+				}
+				lr.Bus.Publish("message.updated", assistantMsg)
 				break
 			}
 			// Stream was cancelled by mid-loop guidance (the stream child context
@@ -644,6 +692,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				slog.Info("context length exceeded, using LLM to compact history", "session", sessionID, "messages", before)
 				compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
 				compactionCount++
+				// Same reason as the proactive path: the reported count belongs to
+				// the oversized request that just failed.
+				lastInputTokens = 0
 				slog.Info("llm-compacted context", "session", sessionID, "before", before, "after", len(streamReq.Messages))
 				attempt-- // don't count compaction as a retry attempt
 				continue
@@ -678,6 +729,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			finish := "error"
 			assistantMsg.Finish = &finish
 			assistantMsg.Interrupted = classifyInterruption(streamErr, step)
+			// When the model rejects an image it does not support, invalidate the
+			// cached capability so the next run (or resume) re-probes and resolves
+			// to false — convertMessages then strips tool-result images and the
+			// retried request succeeds.
+			if assistantMsg.Interrupted != nil && assistantMsg.Interrupted.Reason == session.InterruptModelCapability {
+				if derr := session.DeleteModelCapability(lr.Store.DB(), modelID); derr != nil {
+					slog.Warn("invalidate model capability after image rejection", "model", modelID, "err", derr)
+				} else {
+					slog.Info("invalidated model image capability after rejection", "model", modelID)
+				}
+			}
 			lr.Store.UpdateMessage(assistantMsg)
 			lr.Bus.Publish("message.updated", assistantMsg)
 			// Close any tool call this turn left unanswered before leaving. A
@@ -695,6 +757,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			finish := "error"
 			assistantMsg.Finish = &finish
 			assistantMsg.Interrupted = classifyInterruption(streamErr, step)
+			if assistantMsg.Interrupted != nil && assistantMsg.Interrupted.Reason == session.InterruptModelCapability {
+				if derr := session.DeleteModelCapability(lr.Store.DB(), modelID); derr != nil {
+					slog.Warn("invalidate model capability after image rejection", "model", modelID, "err", derr)
+				}
+			}
 			lr.Store.UpdateMessage(assistantMsg)
 			lr.Bus.Publish("message.updated", assistantMsg)
 			if _, rerr := lr.ReconcileSession(sessionID); rerr != nil {
@@ -710,6 +777,31 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		var pendingToolCalls []pendingToolCall
 		var finishReason string
 		var streamUsage *provider.TokenUsage
+
+		// markFirstToken records when the model started answering, whatever it
+		// chose to say first. Text, reasoning and a tool call all count: on a
+		// thinking model reasoning is what arrives first, and waiting for text
+		// would report the entire thinking phase as time-to-first-token.
+		//
+		// Delivery is nil when the stream never opened — the guidance-cancel path
+		// substitutes a pre-closed channel — and FirstTokenAt is written once,
+		// because a turn has exactly one first token.
+		markFirstToken := func(kind string) {
+			if assistantMsg.Delivery == nil || assistantMsg.Delivery.FirstTokenAt != 0 {
+				return
+			}
+			now := session.Now()
+			assistantMsg.Delivery.FirstTokenAt = now
+			assistantMsg.Delivery.TTFTMs = now - assistantMsg.Delivery.DispatchedAt
+			assistantMsg.Delivery.FirstTokenKind = kind
+			if err := lr.Store.UpdateMessage(assistantMsg); err != nil {
+				slog.Warn("persist delivery on first token", "session", sessionID, "err", err)
+			}
+			lr.Bus.Publish("message.updated", assistantMsg)
+			slog.Info("first token", "session", sessionID, "step", step, "model", modelID,
+				"kind", kind, "ttftMs", assistantMsg.Delivery.TTFTMs,
+				"queuedMs", assistantMsg.Delivery.QueuedMs, "attempts", assistantMsg.Delivery.Attempts)
+		}
 
 		// Streaming text part: created on first delta and flushed to DB periodically
 		// so the UI shows live output instead of waiting for the full response.
@@ -732,11 +824,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 			text := currentReasoning.String()
 			// Truncate extremely long reasoning to avoid flooding DB and UI
-			const maxReasoningLen = 50_000
 			if len(text) > maxReasoningLen {
 				text = text[:maxReasoningLen] + "\n... (truncated)"
 			}
-			reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text, Signature: currentReasoningSignature})
+			reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text, Signature: currentReasoningSignature, Model: modelID})
 			streamReasoningPart.Data = reasonData
 			streamReasoningPart.UpdatedAt = session.Now()
 			lr.Store.UpdatePart(streamReasoningPart)
@@ -745,6 +836,37 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				"sessionId": string(sessionID),
 				"partId":    string(streamReasoningPart.ID),
 			})
+		}
+
+		// createReasoningPart stores one thinking block as a part of its own.
+		// Blocks are kept separate because the API compares the sequence it
+		// receives on replay against what it generated: concatenating two blocks,
+		// or dropping one that carried no text, breaks the round-trip.
+		createReasoningPart := func(data session.ReasoningPartData) *session.Part {
+			data.Model = modelID
+			if len(data.Text) > maxReasoningLen {
+				data.Text = data.Text[:maxReasoningLen] + "\n... (truncated)"
+			}
+			raw, _ := json.Marshal(data)
+			part := &session.Part{
+				ID:        session.PartID(id.NewPartID()),
+				MessageID: assistantID,
+				SessionID: sessionID,
+				Type:      session.PartReasoning,
+				Data:      raw,
+				CreatedAt: session.Now(),
+				UpdatedAt: session.Now(),
+			}
+			if err := lr.Store.CreatePart(part); err != nil {
+				slog.Error("create reasoning part", "err", err)
+				return nil
+			}
+			lastReasoningFlush = time.Now()
+			lr.Bus.Publish("message.part.updated", map[string]string{
+				"sessionId": string(sessionID),
+				"partId":    string(part.ID),
+			})
+			return part
 		}
 
 		flushTextPart := func(final bool) {
@@ -804,6 +926,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 			switch evt.Type {
 			case provider.EventTextDelta:
+				markFirstToken("text")
 				currentText.WriteString(evt.Text)
 				if streamTextPart == nil {
 					// Create the part in DB on first delta so the client can see text arriving
@@ -838,6 +961,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				}
 
 			case provider.EventToolCallStart:
+				markFirstToken("tool")
 				tc := pendingToolCall{
 					CallID: evt.ToolCallID,
 					Name:   evt.ToolName,
@@ -845,12 +969,28 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				}
 				pendingToolCalls = append(pendingToolCalls, tc)
 
-				// Create tool part
-				toolInput := evt.ToolInput
-				if len(toolInput) == 0 {
-					toolInput = json.RawMessage("{}")
+				// Create tool part.
+				//
+				// The arguments are whatever the provider sent, and not every
+				// provider sends valid JSON — a proxy that streams incomplete
+				// tool-call deltas will hand over a truncated object. Marshalling
+				// validates any json.RawMessage it contains, so an unchecked
+				// error here writes a part with nil Data, and that one part then
+				// breaks two things far from this line: the UI renders it as
+				// "malformed", and the request builder cannot pair it with
+				// anything, because the call id was lost along with the rest of
+				// the record. Anthropic then rejects every later request in the
+				// session with `unknown variant ` + "`tool`" + `.
+				//
+				// Coerce instead of dropping. The call id is what history needs
+				// to stay valid; a tool invoked with {} fails in a way the model
+				// can read and retry.
+				toolInput := validToolInput(evt.ToolInput)
+				if len(evt.ToolInput) > 0 && !bytes.Equal(toolInput, evt.ToolInput) {
+					slog.Warn("tool call arguments were not valid JSON; recording an empty object",
+						"session", sessionID, "tool", evt.ToolName, "callId", evt.ToolCallID)
 				}
-				toolData, _ := json.Marshal(session.ToolPartData{
+				toolData, err := json.Marshal(session.ToolPartData{
 					Tool:   evt.ToolName,
 					CallID: evt.ToolCallID,
 					State: session.ToolState{
@@ -858,6 +998,16 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 						Input:  toolInput,
 					},
 				})
+				if err != nil {
+					// Belt and braces: never persist a part that cannot be read
+					// back. Keeping the id matters more than keeping the input.
+					slog.Error("marshal tool part; falling back to an empty input", "err", err, "callId", evt.ToolCallID)
+					toolData, _ = json.Marshal(session.ToolPartData{
+						Tool:   evt.ToolName,
+						CallID: evt.ToolCallID,
+						State:  session.ToolState{Status: session.ToolPending, Input: json.RawMessage("{}")},
+					})
+				}
 				toolPart := &session.Part{
 					ID:        session.PartID(id.NewPartID()),
 					MessageID: assistantID,
@@ -896,34 +1046,24 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					}
 				}
 
+			case provider.EventReasoningStart:
+				// A thinking block opened. Close the one before it so each block
+				// keeps its own text and its own signature instead of being merged
+				// into its neighbour.
+				markFirstToken("reasoning")
+				flushReasoningPart(true)
+				streamReasoningPart = nil
+				currentReasoning.Reset()
+				currentReasoningSignature = ""
+
 			case provider.EventReasoning:
+				markFirstToken("reasoning")
 				currentReasoning.WriteString(evt.Text)
 				if streamReasoningPart == nil {
-					text := currentReasoning.String()
-					const maxReasoningLen = 50_000
-					if len(text) > maxReasoningLen {
-						text = text[:maxReasoningLen] + "\n... (truncated)"
-					}
-					reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text, Signature: currentReasoningSignature})
-					newReasoningPart := &session.Part{
-						ID:        session.PartID(id.NewPartID()),
-						MessageID: assistantID,
-						SessionID: sessionID,
-						Type:      session.PartReasoning,
-						Data:      reasonData,
-						CreatedAt: session.Now(),
-						UpdatedAt: session.Now(),
-					}
-					if err := lr.Store.CreatePart(newReasoningPart); err != nil {
-						slog.Error("create streaming reasoning part", "err", err)
-					} else {
-						streamReasoningPart = newReasoningPart
-						lastReasoningFlush = time.Now()
-						lr.Bus.Publish("message.part.updated", map[string]string{
-							"sessionId": string(sessionID),
-							"partId":    string(newReasoningPart.ID),
-						})
-					}
+					streamReasoningPart = createReasoningPart(session.ReasoningPartData{
+						Text:      currentReasoning.String(),
+						Signature: currentReasoningSignature,
+					})
 				} else {
 					flushReasoningPart(false)
 				}
@@ -933,20 +1073,45 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				// back to the API on subsequent turns. Without the signature,
 				// multi-turn thinking breaks with an API error.
 				currentReasoningSignature = evt.Signature
-				// If a reasoning part was already created (e.g. by an empty
-				// EventReasoning from a redacted_thinking block, or a prior
-				// thinking_delta), update it now with the signature. This
-				// ensures redacted_thinking blocks — which carry only a
-				// signature and no text deltas — persist their signature.
-				if streamReasoningPart != nil {
-					reasonData, _ := json.Marshal(session.ReasoningPartData{
+				if streamReasoningPart == nil {
+					// No part yet means the block produced no text: `display` is
+					// "omitted" (the default on current models), so the signature
+					// that arrives just before the block closes is the only evidence
+					// it existed. Store it — an empty-text block still has to be
+					// replayed exactly as received, and a missing one fails the turn.
+					markFirstToken("reasoning")
+					streamReasoningPart = createReasoningPart(session.ReasoningPartData{
 						Text:      currentReasoning.String(),
 						Signature: currentReasoningSignature,
+					})
+				} else {
+					text := currentReasoning.String()
+					if len(text) > maxReasoningLen {
+						text = text[:maxReasoningLen] + "\n... (truncated)"
+					}
+					reasonData, _ := json.Marshal(session.ReasoningPartData{
+						Text:      text,
+						Signature: currentReasoningSignature,
+						Model:     modelID,
 					})
 					streamReasoningPart.Data = reasonData
 					streamReasoningPart.UpdatedAt = session.Now()
 					lr.Store.UpdatePart(streamReasoningPart)
 				}
+
+			case provider.EventReasoningRedacted:
+				// A safety-redacted block is a content block of its own, with an
+				// opaque payload and no text. Close whatever thinking block was
+				// streaming and store this one separately, so the sequence replays
+				// in the order the model produced it — the API compares the blocks
+				// coming back against what it generated and rejects a resequenced
+				// or partial one.
+				markFirstToken("reasoning")
+				flushReasoningPart(true)
+				streamReasoningPart = nil
+				currentReasoning.Reset()
+				currentReasoningSignature = ""
+				createReasoningPart(session.ReasoningPartData{RedactedData: evt.RedactedData})
 
 			case provider.EventFinish:
 				if evt.FinishReason != nil {
@@ -1007,24 +1172,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if streamReasoningPart != nil {
 				flushReasoningPart(true)
 			} else {
-				text := currentReasoning.String()
-				const maxReasoningLen = 50_000
-				if len(text) > maxReasoningLen {
-					text = text[:maxReasoningLen] + "\n... (truncated)"
-				}
-				reasonData, _ := json.Marshal(session.ReasoningPartData{Text: text, Signature: currentReasoningSignature})
-				reasonPart := &session.Part{
-					ID:        session.PartID(id.NewPartID()),
-					MessageID: assistantID,
-					SessionID: sessionID,
-					Type:      session.PartReasoning,
-					Data:      reasonData,
-					CreatedAt: session.Now(),
-					UpdatedAt: session.Now(),
-				}
-				if err := lr.Store.CreatePart(reasonPart); err != nil {
-					slog.Error("create reasoning part", "err", err)
-				}
+				createReasoningPart(session.ReasoningPartData{
+					Text:      currentReasoning.String(),
+					Signature: currentReasoningSignature,
+				})
 			}
 		}
 
@@ -1169,7 +1320,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// model calling something it was never given, and compact_context is
 			// added per step by cache verdict. Passing the static agent here would
 			// reject every compaction as a disallowed tool.
-			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, workDir, modelSupportsImages, modelID)
+			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, workDir, modelSupportsImages, modelID, pressure)
 			if aborted {
 				exitReason = "aborted"
 				return ctx.Err()
@@ -1196,6 +1347,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					continue
 				}
 				if watermark.set(assistantID, summary, messages) {
+					// The next step sends the summary plus a short tail, but the
+					// reported count still describes the full pre-compaction
+					// request. Since effectiveRequestTokens prefers the larger of
+					// the two, keeping it would floor the output budget for the
+					// rest of the turn and could trigger an LLM-driven compaction
+					// of an already-tiny request — the exact expense compact_context
+					// exists to avoid on these endpoints.
+					lastInputTokens = 0
+					// The agent just did what the read-pressure reminder asks for.
+					// Start counting again from what it kept.
+					pressure.reset()
 					slog.Info("in-turn context compacted", "session", sessionID, "step", step,
 						"messagesInWorkingSet", len(messages), "summaryChars", len(summary))
 				}
@@ -1347,11 +1509,7 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 		// tool_use arguments on the resumed request; strict OpenAI-compatible
 		// endpoints reject or stall on invalid JSON. Coerce any non-object /
 		// invalid input to an empty object so the resumed request stays valid.
-		callInput := tc.Input
-		var obj map[string]json.RawMessage
-		if len(callInput) == 0 || json.Unmarshal(callInput, &obj) != nil {
-			callInput = json.RawMessage("{}")
-		}
+		callInput := validToolInput(tc.Input)
 		errStr := "Cancelled by mid-loop guidance"
 		toolData.State = session.ToolState{
 			Status: session.ToolError,
@@ -1360,7 +1518,15 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 			Title:  &tc.Name,
 			Time:   toolData.State.Time,
 		}
-		updatedData, _ := json.Marshal(toolData)
+		// Never replace a readable record with an unreadable one. callInput is
+		// coerced above so this cannot fail today, but a part with nil Data is
+		// the failure that costs a whole session, and skipping the write is
+		// always the better half of that trade.
+		updatedData, merr := json.Marshal(toolData)
+		if merr != nil {
+			slog.Error("marshal cancelled tool part; leaving it as it was", "err", merr, "callId", toolData.CallID)
+			continue
+		}
 		part.Data = updatedData
 		part.UpdatedAt = session.Now()
 		if err := lr.Store.UpdatePart(part); err != nil {
@@ -1680,7 +1846,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 // executeReadyToolCalls runs every ready call and returns each one's result
 // keyed by call ID, so the caller can act on what a tool actually did rather
 // than on the fact that it was invoked.
-func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID string) (results map[string]tool.Result, loopAborted bool) {
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID string, pressure *readPressure) (results map[string]tool.Result, loopAborted bool) {
 	if len(readyCalls) > 1 {
 		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
 	}
@@ -1700,9 +1866,8 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 	execInfos := make([]toolExecInfo, len(readyCalls))
 	for i, tc := range readyCalls {
 		part, _ := lr.Store.GetPart(tc.PartID)
-		if part != nil {
-			var toolData session.ToolPartData
-			json.Unmarshal(part.Data, &toolData)
+		var toolData session.ToolPartData
+		if part != nil && json.Unmarshal(part.Data, &toolData) == nil {
 			toolData.State = session.ToolState{
 				Status: session.ToolRunning,
 				Input:  toolData.State.Input,
@@ -1711,10 +1876,13 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 					Start: session.Now(),
 				},
 			}
-			updatedData, _ := json.Marshal(toolData)
-			part.Data = updatedData
-			part.UpdatedAt = session.Now()
-			lr.Store.UpdatePart(part)
+			if updatedData, merr := json.Marshal(toolData); merr == nil {
+				part.Data = updatedData
+				part.UpdatedAt = session.Now()
+				lr.Store.UpdatePart(part)
+			} else {
+				slog.Error("marshal running tool part", "err", merr, "callId", toolData.CallID)
+			}
 			lr.Bus.Publish("message.part.updated", map[string]string{
 				"sessionId": string(sessionID),
 				"partId":    string(part.ID),
@@ -1764,6 +1932,19 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		}(i)
 	}
 	wg.Wait()
+
+	// Fold this step's reading into the turn's running total and, if a reminder is
+	// due, append it below the first content-returning result. This has to happen
+	// before the results are written to the store: the model-facing history is
+	// rebuilt from the stored output on every later step, so text that is not part
+	// of that output is text the model never sees.
+	for i := range execInfos {
+		if execInfos[i].err != nil {
+			continue
+		}
+		pressure.observe(execInfos[i].tc.Name, &execInfos[i].result)
+	}
+	pressure.endStep()
 
 	results = make(map[string]tool.Result, len(execInfos))
 	for _, info := range execInfos {
@@ -1855,7 +2036,11 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 			}
 		}
 
-		updatedData, _ := json.Marshal(toolData)
+		updatedData, merr := json.Marshal(toolData)
+		if merr != nil {
+			slog.Error("marshal tool result part; leaving it as it was", "err", merr, "callId", toolData.CallID)
+			continue
+		}
 		part.Data = updatedData
 		part.UpdatedAt = session.Now()
 		if err := lr.Store.UpdatePart(part); err != nil {
@@ -2304,14 +2489,19 @@ func shouldBreak(messages []*session.MessageWithParts) bool {
 	return false
 }
 
-func lastUserMessageID(messages []*session.MessageWithParts) *session.MessageID {
+// lastUserMessageRef returns the id of the most recent user-role message and
+// the time it was created. The id becomes the assistant message's ParentID; the
+// timestamp is where QueuedMs is measured from. Both are zero when the session
+// has no user message yet, which a caller must treat as "unknown" rather than
+// as an epoch timestamp.
+func lastUserMessageRef(messages []*session.MessageWithParts) (*session.MessageID, int64) {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Info.Role == session.RoleUser {
 			id := messages[i].Info.ID
-			return &id
+			return &id, messages[i].Info.CreatedAt
 		}
 	}
-	return nil
+	return nil, 0
 }
 
 // findLastTextUserMessageIndex scans backwards for the most recent user
@@ -2334,7 +2524,7 @@ func findLastTextUserMessageIndex(messages []*session.MessageWithParts) int {
 	return -1
 }
 
-func toProviderMessages(messages []*session.MessageWithParts, memoryText string) []provider.ModelMessage {
+func toProviderMessages(messages []*session.MessageWithParts, memoryText string, modelSupportsImages bool, modelID string) []provider.ModelMessage {
 	// When memory is active, filter to only the last user message and everything after.
 	// This replaces full history with the compressed <prior_context> block.
 	if memoryText != "" {
@@ -2362,7 +2552,7 @@ func toProviderMessages(messages []*session.MessageWithParts, memoryText string)
 			filtered := messages[lastUserIdx:]
 
 			// Prepend <prior_context> to the first user message
-			result := convertMessages(filtered)
+			result := convertMessages(filtered, modelSupportsImages, modelID)
 
 			// Find the first user message and prepend context
 			for i, msg := range result {
@@ -2383,10 +2573,65 @@ func toProviderMessages(messages []*session.MessageWithParts, memoryText string)
 
 	// No memory: send the full conversation history and let the model's context
 	// window be the limit. Memory mode is the right solution for long sessions.
-	return convertMessages(messages)
+	return convertMessages(messages, modelSupportsImages, modelID)
 }
 
-func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessage {
+// replayableReasoning decides whether an assistant message's stored thinking
+// blocks may be sent back to modelID.
+//
+// Thinking blocks are tied to the model that produced them. Replayed to any
+// other model they are silently ignored but still billed as input, and an
+// unsigned block — what an OpenAI-family model stores, since it keeps its
+// reasoning server-side and returns only the text — has nothing to verify it
+// with and is rejected outright. A session whose model is switched mid-flight
+// therefore carries blocks the new model cannot use, and forwarding them costs
+// tokens at best and a 400 at worst.
+//
+// The decision is all-or-nothing per message: the API compares the sequence of
+// thinking blocks coming back against what it generated, so dropping some and
+// keeping others is itself a 400. Anything unrecognised drops the whole set —
+// replay is only *required* within a tool-use turn, where the blocks were
+// produced by the model that is about to be called again.
+func replayableReasoning(parts []session.ReasoningPartData, modelID string) []provider.ReasoningPart {
+	if len(parts) == 0 || modelID == "" {
+		return nil
+	}
+	out := make([]provider.ReasoningPart, 0, len(parts))
+	for _, d := range parts {
+		// Parts stored before the origin was recorded have unknown provenance.
+		if d.Model != modelID {
+			return nil
+		}
+		if d.Signature == "" && d.RedactedData == "" {
+			return nil
+		}
+		out = append(out, provider.ReasoningPart{
+			Text:         d.Text,
+			Signature:    d.Signature,
+			RedactedData: d.RedactedData,
+		})
+	}
+	return out
+}
+
+// validToolInput returns tool-call arguments that are safe to persist and to
+// replay, substituting an empty object for anything that is not a JSON object.
+//
+// Not every provider sends valid JSON: a proxy that forwards a truncated
+// tool-call delta as a complete one produces arguments that stop mid-string.
+// Persisting those is worse than losing them, because marshalling a
+// json.RawMessage validates it — an unchecked error there writes a part with no
+// data at all, and the call id goes with it. The id is what keeps the
+// conversation valid; the arguments are something the model can supply again.
+func validToolInput(raw json.RawMessage) json.RawMessage {
+	var obj map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &obj) != nil {
+		return json.RawMessage("{}")
+	}
+	return raw
+}
+
+func convertMessages(messages []*session.MessageWithParts, modelSupportsImages bool, modelID string) []provider.ModelMessage {
 	var result []provider.ModelMessage
 	for _, m := range messages {
 		// Collect text, tool, and reasoning parts
@@ -2394,7 +2639,7 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 		var toolCallParts []session.ToolPartData
 		var toolResultParts []session.ToolPartData
 		var imageParts []session.ImagePartData
-		var reasoningParts []provider.ReasoningPart
+		var reasoningData []session.ReasoningPartData
 
 		for _, p := range m.Parts {
 			switch p.Type {
@@ -2412,7 +2657,24 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 				}
 			case session.PartTool:
 				var data session.ToolPartData
-				json.Unmarshal(p.Data, &data)
+				// A tool part with no usable call id cannot be paired with its
+				// counterpart on any provider: OpenAI rejects an empty
+				// tool_call_id, and Anthropic rejects both a tool_use with no id
+				// and a tool_result whose tool_use_id answers nothing.
+				//
+				// Drop it from the request instead of sending it. The call side
+				// and the result side are dropped by the same rule, and the
+				// result copies its id from the call it answers, so a valid call
+				// never loses its result and a malformed one takes its own
+				// orphan with it. Without this, a single malformed part makes
+				// every later request in that session invalid — the session is
+				// bricked, and no amount of retrying or resuming clears it.
+				if err := json.Unmarshal(p.Data, &data); err != nil || data.CallID == "" {
+					slog.Warn("dropping unpairable tool part from request",
+						"session", m.Info.SessionID, "message", m.Info.ID,
+						"part", p.ID, "tool", data.Tool, "err", err)
+					continue
+				}
 				if m.Info.Role == session.RoleAssistant {
 					toolCallParts = append(toolCallParts, data)
 				} else {
@@ -2421,12 +2683,11 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 			case session.PartReasoning:
 				var data session.ReasoningPartData
 				json.Unmarshal(p.Data, &data)
-				reasoningParts = append(reasoningParts, provider.ReasoningPart{
-					Text:      data.Text,
-					Signature: data.Signature,
-				})
+				reasoningData = append(reasoningData, data)
 			}
 		}
+
+		reasoningParts := replayableReasoning(reasoningData, modelID)
 
 		if m.Info.Role == session.RoleAssistant && len(toolCallParts) > 0 {
 			// Assistant message with tool calls: emit as a single message with tool_calls array
@@ -2481,7 +2742,7 @@ func convertMessages(messages []*session.MessageWithParts) []provider.ModelMessa
 					ToolCallID: tr.CallID,
 					Name:       tr.Tool,
 				}
-				if tr.State.Image != nil {
+				if tr.State.Image != nil && modelSupportsImages {
 					msg.Images = []provider.MessageImage{{
 						MediaType: tr.State.Image.MediaType,
 						Data:      tr.State.Image.Data,
@@ -2536,17 +2797,28 @@ func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMD
 // buildSystemPromptEntries returns the system-prompt entries in wire order:
 //
 //	[0]  the static base — agent instructions, project context, memory guidance.
-//	     Providers attach the cache breakpoint here, so it MUST NOT contain
-//	     anything that varies within a session.
+//	     Providers attach the cache breakpoint here, so nothing that changes
+//	     between the steps of a turn may go in it.
+//
+//	     Two things in it do change *across* turns, and knowingly: AGENT.md and
+//	     MEMORY.md are re-read once per turn (RunLoop, top), and the prompt
+//	     actively tells the agent to write to MEMORY.md as it works. Each such
+//	     edit makes the next turn a cache write rather than a cache read. That is
+//	     the price of having the project's own knowledge inside the cached prefix
+//	     where it is cheapest to re-send on every step of every other turn; it is
+//	     paid once per edit, not per step. Anything that varies more often than
+//	     that — the viewport, the index status, the date, the skill list, the
+//	     compaction offer — belongs in the entries below.
 //	[1:] per-turn dynamic content: the rendering viewport (the browser resends
 //	     its window size with every prompt), the project index status, and the
 //	     current date.
 //	last the agent's FinalInstruction, kept adjacent to the model's response.
 //
 // Putting the viewport in [0] would invalidate the cached tools+system prefix
-// every time the user resized their window — the same reason the date lives out
-// here rather than in the base. The index status is out here for the same
-// reason: a user can build the index while the session is open.
+// every time the user resized their window — several times a turn, not once —
+// which is the same reason the date lives out here rather than in the base. The
+// index status is out here for the same reason: a user can build the index
+// while the session is open.
 //
 // indexedFiles < 0 means no count was reported and the status line is omitted.
 func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string, indexedFiles int) []string {
@@ -2619,7 +2891,12 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// inside memoryMDPrompt so the section never points at a tag that the
 		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
-		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
+		// The agentic-memory comparison is gated on the same condition as the
+		// paragraph below: the recall tools are only registered when memory is
+		// initialised, so describing them otherwise names a call the agent will
+		// never be offered.
+		hasRecall := memoryEnabled && a.HasTool("memory_recall")
+		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "", hasRecall)
 	}
 
 	// Only advertise agentic memory to agents that actually have the memory_recall
@@ -2650,7 +2927,7 @@ project_memory_recall also accepts scope: "session", which runs that same dated,
 	// too — and it sits last because it is the rule most likely to be tested by
 	// the very next thing the agent reads.
 	canAct := a.HasTool("bash") || a.HasTool("write") || a.HasTool("edit")
-	prompt += "\n\n" + untrustedContentPrompt(canAct)
+	prompt += "\n\n" + untrustedContentPrompt(canAct, agentMDContent != "", a.HasTool("skill"))
 
 	return prompt
 }
@@ -2788,8 +3065,10 @@ func isContextLengthError(err error) bool {
 		// the model's context window. The error format is "ollama API error 400: "
 		// (with empty body after the colon-space) — treat this as context length
 		// exceeded rather than a generic client error. We check for the empty body
-		// specifically to avoid matching other 400 errors that have error details.
-		(strings.Contains(lower, "api error 400") && strings.HasSuffix(strings.TrimSpace(lower), "400:"))
+		// specifically to avoid matching other 400 errors that have error details,
+		// and for the ollama prefix so a body-less 400 from some other provider is
+		// not relabelled as an overflow it never was.
+		(strings.Contains(lower, "ollama api error 400") && strings.HasSuffix(strings.TrimSpace(lower), "400:"))
 }
 
 // retryAfterFromError returns the server-provided Retry-After hint carried by a
@@ -3021,10 +3300,11 @@ func compactMessagesTruncate(messages []provider.ModelMessage) []provider.ModelM
 	return result
 }
 
-// subagentMaxSteps caps a delegated sub-agent's loop. A read-only investigation
-// reads and searches many files but should converge well within this; the cap is
-// a backstop against a misbehaving child spinning forever.
-const subagentMaxSteps = 40
+// subagentMaxSteps caps a delegated sub-agent's loop. 0 means "use the main
+// agent default" (RunLoop maps 0 → 1000), so the sub-agent gets the same step
+// budget as the interactive main agent. The cap is still a backstop against a
+// misbehaving child spinning forever.
+const subagentMaxSteps = 0
 
 // RunTaskSession creates an ephemeral read-only sub-agent session, runs the full
 // loop for a delegated investigation, and returns the sub-agent's final written

@@ -781,18 +781,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	}
 	httpReq.ContentLength = int64(len(jsonBody))
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		token := p.apiKey
-		if !strings.Contains(token, " ") {
-			token = "Bearer " + token
-		}
-		httpReq.Header.Set("Authorization", token)
-	}
-	if p.id == "openrouter" {
-		httpReq.Header.Set("HTTP-Referer", "https://ogcode.xyz")
-		httpReq.Header.Set("X-Title", "ogcode")
-	}
+	p.setChatHeaders(httpReq)
 
 	client := streamHTTPClient
 
@@ -810,13 +799,16 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 				shouldRetry = true
 			} else if resp.StatusCode == http.StatusBadRequest {
 				// Retry transient "failed to read request body" errors from cloud providers.
+				// Inspecting the body consumes it, so put it back unconditionally: the
+				// generic error path below reads it to build the APIError, and a body
+				// lost here surfaces as a bare "API error 400: " that hides the
+				// provider's actual complaint — and reads as a context overflow.
 				bodyBytes, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
+				resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 				if strings.Contains(string(bodyBytes), "failed to read request body") {
 					slog.Warn("transient request body error, retrying", "provider", p.id, "attempt", attempt+1)
 					shouldRetry = true
-					// Reconstruct resp.Body so the generic error path can read it if all retries fail.
-					resp = &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(bytes.NewReader(bodyBytes))}
 				}
 			}
 		}
@@ -837,18 +829,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 			return nil, fmt.Errorf("create retry request: %w", err)
 		}
 		httpReq.ContentLength = int64(len(jsonBody))
-		httpReq.Header.Set("Content-Type", "application/json")
-		if p.apiKey != "" {
-			token := p.apiKey
-			if !strings.Contains(token, " ") {
-				token = "Bearer " + token
-			}
-			httpReq.Header.Set("Authorization", token)
-		}
-		if p.id == "openrouter" {
-			httpReq.Header.Set("HTTP-Referer", "https://ogcode.xyz")
-			httpReq.Header.Set("X-Title", "ogcode")
-		}
+		p.setChatHeaders(httpReq)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -863,6 +844,35 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	streamStarted = true
 	go p.streamEvents(resp.Body, ch, reqCancel, toolNames)
 	return ch, nil
+}
+
+// isOpenRouter reports whether this provider's endpoint is OpenRouter. The gate
+// is the base URL rather than the provider id because OpenRouter is reached
+// under three different ids: the user's own "openrouter", the community free
+// pool's "ogcode-openrouter", and a generic "openai" provider pointed at
+// openrouter.ai by custom base URL. Keying on id attributed only the first.
+func (p *OpenAIProvider) isOpenRouter() bool {
+	return strings.Contains(strings.ToLower(p.baseURL), "openrouter.ai")
+}
+
+// setChatHeaders applies the headers every /chat/completions request needs. The
+// initial attempt and each retry build a fresh *http.Request, so this lives in
+// one place to keep those copies from drifting apart.
+func (p *OpenAIProvider) setChatHeaders(req *http.Request) {
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		token := p.apiKey
+		if !strings.Contains(token, " ") {
+			token = "Bearer " + token
+		}
+		req.Header.Set("Authorization", token)
+	}
+	if p.isOpenRouter() {
+		// OpenRouter credits an app for its traffic via these headers. Without
+		// them the request is anonymous on the dashboard and the leaderboard.
+		req.Header.Set("HTTP-Referer", "https://ogcode.xyz")
+		req.Header.Set("X-Title", "ogcode")
+	}
 }
 
 // idleTimeout is how long this endpoint may go silent before its stream is
@@ -923,17 +933,7 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 		// in the final SSE chunk and may have zero choices. Surface them as
 		// a separate event before the stream closes.
 		if evt.Usage != nil {
-			usage := &TokenUsage{
-				InputTokens:  evt.Usage.PromptTokens,
-				OutputTokens: evt.Usage.CompletionTokens,
-			}
-			if evt.Usage.PromptTokensDetails != nil {
-				usage.CacheReadTokens = evt.Usage.PromptTokensDetails.CachedTokens
-			}
-			if evt.Usage.CompletionTokensDetails != nil {
-				usage.ReasoningTokens = evt.Usage.CompletionTokensDetails.ReasoningTokens
-			}
-			ch <- StreamEvent{Type: EventUsage, Usage: usage}
+			ch <- StreamEvent{Type: EventUsage, Usage: usageFromOAI(evt.Usage)}
 		}
 
 		if len(evt.Choices) == 0 {
@@ -1176,6 +1176,40 @@ type oaiPromptTokensDetails struct {
 
 type oaiCompletionTokenDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// usageFromOAI converts OpenAI-shaped usage into the provider-neutral TokenUsage.
+//
+// The one thing it exists to get right: OpenAI nests cached_tokens INSIDE
+// prompt_tokens, whereas Anthropic reports input_tokens exclusive of its cache
+// fields. Callers sum InputTokens + CacheReadTokens + CacheWriteTokens, so the
+// cached portion is subtracted out here and InputTokens means the same thing on
+// every provider — input the model actually re-read.
+//
+// Reporting the raw prompt_tokens instead makes a well-cached step look up to
+// twice its true size, which floors the output budget (truncating long tool
+// arguments mid-write) and trips proactive compaction at half its threshold.
+func usageFromOAI(u *oaiUsage) *TokenUsage {
+	if u == nil {
+		return nil
+	}
+	usage := &TokenUsage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+	}
+	if u.PromptTokensDetails != nil {
+		usage.CacheReadTokens = u.PromptTokensDetails.CachedTokens
+		usage.InputTokens -= usage.CacheReadTokens
+		// A server that reports cached_tokens exclusive of prompt_tokens, or
+		// simply reports the two inconsistently, must not drive input negative.
+		if usage.InputTokens < 0 {
+			usage.InputTokens = 0
+		}
+	}
+	if u.CompletionTokensDetails != nil {
+		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+	return usage
 }
 
 type oaiChoice struct {

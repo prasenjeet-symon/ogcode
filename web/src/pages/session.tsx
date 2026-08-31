@@ -6,6 +6,7 @@ import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
 import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
+import ResourcePill from '../components/resource-pill';
 import MemoryDialog from '../components/memory-dialog';
 import SubagentIndicator from '../components/subagent-indicator';
 import { getProviderPricing } from '../api/client';
@@ -99,6 +100,7 @@ function ChatContent() {
           <div class="flex items-center gap-1.5 shrink-0">
             <SubagentIndicator />
             <TokenPill />
+            <ResourcePill />
             <Show when={session.activeSession()?.model}>
               <span
                 class="text-micro text-[color:var(--text-secondary)] bg-[color:var(--bg-elevated)] h-7 inline-flex items-center px-2 rounded-md border border-[color:var(--border-subtle)] font-medium max-w-[11rem] truncate"

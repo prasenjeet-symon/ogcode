@@ -71,6 +71,39 @@ func TestSearchAgent_ExcludedFromFileMap(t *testing.T) {
 	}
 }
 
+// HasTool must honour "*" globs the same way Registry.ForAgent does. The coding
+// agents list "mcp_*", which ForAgent expands to offer "mcp_penpot_execute_code"
+// (etc.) to the model — but executeTool guards each call with HasTool. If HasTool
+// only did an exact match, the offered tool would be rejected at call time as
+// "not available to the <agent> agent": offered but never callable. This pins the
+// two halves staying in sync.
+func TestHasTool_GlobAuthorizesAtCallTime(t *testing.T) {
+	for _, a := range []Agent{BuildAgent, TaskAgent} {
+		if !slices.Contains(a.Tools, "mcp_*") {
+			t.Errorf("%s: expected mcp_* in Tools (the glob the test is about)", a.Name)
+			continue
+		}
+		for _, id := range []string{
+			"mcp_penpot_execute_code",
+			"mcp_penpot_high_level_overview",
+			"mcp_github_create_issue",
+		} {
+			if !a.HasTool(id) {
+				t.Errorf("%s.HasTool(%q) = false; mcp_* glob must authorize any mcp_<server>_<tool> at call time", a.Name, id)
+			}
+		}
+	}
+	// Literal ids still match exactly, and unrelated ids still fail — the glob
+	// change must not loosen the guard for non-glob agents.
+	planAgentID := "mcp_penpot_execute_code"
+	if PlanAgent.HasTool(planAgentID) {
+		t.Errorf("PlanAgent.HasTool(%q) = true; PlanAgent has no mcp_* entry", planAgentID)
+	}
+	if !BuildAgent.HasTool("bash") {
+		t.Error("BuildAgent.HasTool(\"bash\") = false; exact match must still work")
+	}
+}
+
 // The prompt has to tell the agent how to spend the ranges file_map returns,
 // including the one detail that silently corrupts a read when got wrong.
 func TestProjectIndexPrompt_ExplainsFileMapRanges(t *testing.T) {

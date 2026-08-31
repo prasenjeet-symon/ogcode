@@ -8,14 +8,14 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 )
 
-// FetchPageTool retrieves the text content of a URL via the Playwright bridge.
+// FetchPageTool retrieves the text content of a URL via the configured search backend.
 type FetchPageTool struct {
-	Bridge *search.BridgeClient
+	Bridge search.Backend
 }
 
 func (FetchPageTool) ID() string { return "fetch_page" }
 func (FetchPageTool) Description() string {
-	return "Fetch a URL and return its readable text content. Handles JavaScript-rendered pages. Call multiple times in parallel for different URLs."
+	return "Fetch a URL and return its readable text content. Call multiple times in parallel for different URLs."
 }
 func (FetchPageTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{

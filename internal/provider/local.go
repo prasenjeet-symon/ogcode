@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/knights-analytics/hugot"
 	"github.com/knights-analytics/hugot/pipelines"
@@ -30,7 +32,7 @@ var httpClient = &http.Client{Timeout: 10 * time.Minute}
 // internal/provider/embedmodel) and lazily materialized to a cache directory
 // on first use. The large ONNX weight file (~133 MB) is downloaded from
 // Hugging Face on first use rather than embedded, so the distributable binary
-// stays small — mirroring ogcode's search-bridge download pattern.
+// stays small.
 //
 // It uses Hugot's pure-Go backend (GoMLX simplego), so the binary stays
 // CGO-free and self-contained. The default model is thenlper/gte-small,
@@ -40,11 +42,20 @@ type LocalEmbedder struct {
 	model   string
 	baseDir string // cache directory where the model is materialized
 
-	once     sync.Once
+	// mu serializes inference calls (the Go backend is not goroutine-safe) and
+	// guards the whole pipeline lifecycle below, so a reaper can never tear the
+	// model down underneath a running Embed.
+	mu       sync.Mutex
 	initErr  error
 	session  *hugot.Session
 	pipeline *pipelines.FeatureExtractionPipeline
-	mu       sync.Mutex // serializes inference calls (the Go backend is not goroutine-safe)
+	lastUsed time.Time
+	reaping  bool
+
+	// idleTimeout is per-embedder rather than a package global so tests can
+	// shrink it without racing a reaper still running from an earlier one. Set
+	// at construction and not written afterwards.
+	idleTimeout time.Duration
 }
 
 // EmbedModelID is the default model identifier returned by EmbedModel().
@@ -65,20 +76,102 @@ func NewLocalEmbedder(cacheDir string) *LocalEmbedder {
 		}
 	}
 	return &LocalEmbedder{
-		id:      localProviderID,
-		model:   embedmodel.ModelName,
-		baseDir: cacheDir,
+		id:          localProviderID,
+		model:       embedmodel.ModelName,
+		baseDir:     cacheDir,
+		idleTimeout: embedIdleTimeout,
 	}
 }
 
-// init materializes the embedded tokenizer assets to baseDir, ensures the ONNX
-// model is present (downloading it on first use), and builds the Hugot
-// pipeline. It is idempotent (guarded by once) and safe for concurrent use.
-func (e *LocalEmbedder) init(ctx context.Context) error {
-	e.once.Do(func() {
-		e.initErr = e.initLocked(ctx)
-	})
-	return e.initErr
+// ensureReadyLocked materializes the embedded tokenizer assets to baseDir,
+// ensures the ONNX model is present (downloading it on first use), and builds
+// the Hugot pipeline. Callers must hold mu.
+//
+// It is idempotent, and rebuilds the pipeline when a previous one was released
+// for being idle. A genuine init failure is remembered rather than retried on
+// every call: a missing model or absent network does not become fixable by
+// paying the download timeout again on the next embed.
+func (e *LocalEmbedder) ensureReadyLocked(ctx context.Context) error {
+	if e.pipeline != nil {
+		return nil
+	}
+	if e.initErr != nil {
+		return e.initErr
+	}
+	if err := e.initLocked(ctx); err != nil {
+		e.initErr = err
+		return err
+	}
+	e.startReaperLocked()
+	return nil
+}
+
+// embedIdleTimeout is how long the pipeline may sit unused before it is torn
+// down. The loaded model is the single largest thing ogcode holds — around
+// 300 MB of live Go heap for the life of the process — and a coding session can
+// go a long time between memory recalls. Rebuilding costs roughly 360 ms, which
+// is nothing next to the LLM turn that triggers it, so the memory is worth more
+// than the reload.
+const embedIdleTimeout = 5 * time.Minute
+
+// startReaperLocked launches the idle watcher, unless one is already running.
+// Callers must hold mu.
+func (e *LocalEmbedder) startReaperLocked() {
+	if e.reaping {
+		return
+	}
+	e.reaping = true
+	// The timeout is handed over rather than read from the goroutine, so the
+	// reaper never touches embedder state outside mu.
+	go e.reapWhenIdle(e.idleTimeout)
+}
+
+// reapWhenIdle releases the pipeline once it has gone unused for idleTimeout,
+// then exits. A new one is started by the next init.
+func (e *LocalEmbedder) reapWhenIdle(idleTimeout time.Duration) {
+	// Checking twice per timeout lands the release within half a period of the
+	// deadline without polling tightly for something that happens once.
+	ticker := time.NewTicker(idleTimeout / 2)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		e.mu.Lock()
+		if e.pipeline != nil && time.Since(e.lastUsed) < idleTimeout {
+			e.mu.Unlock()
+			continue
+		}
+		// Either it went idle, or Close already tore it down — nothing left to
+		// watch either way.
+		if e.pipeline != nil {
+			e.releaseLocked()
+		}
+		e.reaping = false
+		e.mu.Unlock()
+		return
+	}
+}
+
+// releaseLocked tears down the pipeline and hands its memory back. Callers must
+// hold mu.
+func (e *LocalEmbedder) releaseLocked() {
+	idleFor := time.Since(e.lastUsed)
+	if e.session != nil {
+		if err := e.session.Destroy(); err != nil {
+			slog.Warn("local embedder: destroying idle session", "err", err)
+		}
+	}
+	e.session = nil
+	e.pipeline = nil
+
+	// Dropping the references only makes the weights collectible. The point of
+	// releasing is to give the memory back, so ask for that explicitly rather
+	// than sitting on a 300 MB arena until some later allocation happens to want
+	// it. Off the critical path and off this goroutine: FreeOSMemory stops the
+	// world, and holding mu through it would block an Embed that arrives in the
+	// meantime.
+	go debug.FreeOSMemory()
+
+	slog.Info("local embedder: released idle model", "idleFor", idleFor.Round(time.Second))
 }
 
 // EnsureModelDownloaded guarantees the local embedder's model weights are
@@ -223,7 +316,15 @@ func (e *LocalEmbedder) ensureModel(ctx context.Context, modelPath string) error
 }
 
 func (e *LocalEmbedder) buildPipeline(ctx context.Context) error {
-	session, err := hugot.NewGoSession(ctx)
+	// The Hugot session outlives the call that happens to build it: it is
+	// created once and then serves every later Embed for the life of the
+	// process. Handing it the initializing caller's context ties the whole
+	// embedder's lifetime to that one request — and callers routinely cancel
+	// theirs (memory.WriteMemory gives each write a 120s context and cancels it
+	// on the way out), which killed every subsequent embedding in the process
+	// with "context canceled". Detach so cancellation of the first caller
+	// cannot poison the shared session; Close() still tears it down.
+	session, err := hugot.NewGoSession(context.WithoutCancel(ctx))
 	if err != nil {
 		return fmt.Errorf("local embedder: create session: %w", err)
 	}
@@ -243,22 +344,87 @@ func (e *LocalEmbedder) buildPipeline(ctx context.Context) error {
 	return nil
 }
 
+// maxEmbedTokens is gte-small's position-embedding limit. The tokenizer does
+// not truncate, so anything longer fails during graph compilation rather than
+// being clipped: "dimension of axis #1 doesn't match ... got shapes
+// [1 4502 384] and [1 512 384]". Two positions are reserved for [CLS]/[SEP].
+const maxEmbedTokens = 510
+
+// embedCharBudget is the initial per-input character cap, derived from measured
+// token density on real ogcode content (2.6-3.2 chars/token for prose and tool
+// traces). It is deliberately not worst-case: punctuation-dense JSON tokenizes
+// at ~1.0 chars/token, and sizing for that would throw away most of the signal
+// on ordinary text. Inputs that still overflow are caught by the halving retry
+// in Embed, which converges in a couple of attempts.
+const embedCharBudget = maxEmbedTokens * 5 / 2
+
+// embedRetries bounds the halving retry. Starting at embedCharBudget, four
+// halvings reach 79 chars — below the limit even at 1 char/token.
+const embedRetries = 4
+
+// clipEmbedInputs caps each input at budget characters, cutting on a UTF-8 rune
+// boundary. It reports whether anything was clipped.
+func clipEmbedInputs(inputs []string, budget int) ([]string, bool) {
+	out := make([]string, len(inputs))
+	clipped := false
+	for i, in := range inputs {
+		if len(in) <= budget {
+			out[i] = in
+			continue
+		}
+		cut := budget
+		for cut > 0 && !utf8.RuneStart(in[cut]) {
+			cut--
+		}
+		out[i] = in[:cut]
+		clipped = true
+	}
+	return out, clipped
+}
+
 // Embed returns embedding vectors for the given inputs. It lazily initializes
 // the model on first call. Inference is serialized because the pure-Go GoMLX
 // backend is not safe for concurrent use from multiple goroutines.
+//
+// Inputs longer than the model's 512-token window are clipped rather than
+// rejected: an over-long input is a caller passing more text than gte-small can
+// see, not an error, and returning a vector for the leading section beats
+// returning none at all. Because the exact token count is not knowable without
+// running the tokenizer, the character budget is a heuristic and the call is
+// retried at half the budget whenever inference still overflows.
 func (e *LocalEmbedder) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
 	if len(inputs) == 0 {
 		return nil, nil
 	}
-	if err := e.init(ctx); err != nil {
-		return nil, err
-	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	result, err := e.pipeline.RunPipeline(ctx, inputs)
-	if err != nil {
-		return nil, fmt.Errorf("local embedder: inference: %w", err)
+	if err := e.ensureReadyLocked(ctx); err != nil {
+		return nil, err
+	}
+	// Stamped on the way out, so the idle clock starts when the work finishes
+	// rather than when it began.
+	defer func() { e.lastUsed = time.Now() }()
+
+	var result *pipelines.FeatureExtractionOutput
+	var err error
+	budget := embedCharBudget
+	for attempt := 0; ; attempt++ {
+		batch, clipped := clipEmbedInputs(inputs, budget)
+		if clipped {
+			slog.Debug("local embedder: input clipped to fit model window",
+				"budget", budget, "attempt", attempt+1)
+		}
+		result, err = e.pipeline.RunPipeline(ctx, batch)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil || attempt >= embedRetries {
+			return nil, fmt.Errorf("local embedder: inference: %w", err)
+		}
+		budget /= 2
+		slog.Warn("local embedder: inference failed, retrying with a smaller input budget",
+			"newBudget", budget, "err", err)
 	}
 	vecs := make([][]float32, len(inputs))
 	for i, emb := range result.Embeddings {
@@ -294,8 +460,15 @@ func (e *LocalEmbedder) StreamChat(ctx context.Context, req StreamRequest) (<-ch
 // Close releases the Hugot session and model resources. Safe to call
 // multiple times.
 func (e *LocalEmbedder) Close() error {
-	if e.session != nil {
-		return e.session.Destroy()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.session == nil {
+		e.pipeline = nil
+		return nil
 	}
-	return nil
+	err := e.session.Destroy()
+	e.session = nil
+	e.pipeline = nil
+	return err
 }

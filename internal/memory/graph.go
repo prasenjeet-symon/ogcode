@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
-	"golang.org/x/sync/errgroup"
 )
 
 // ChatClient is the minimal interface the Graph needs to call an LLM.
@@ -136,7 +136,10 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 		Content:     "",
 		TopicName:   placement.Topic,
 	}
-	if placement.Concept == placement.Topic {
+	// A concept that just restates its topic adds a level with no information,
+	// and a blank one is a nameless node in every tree render. Neither is worth
+	// storing; the fact still hangs off the topic either way.
+	if placement.Concept == placement.Topic || strings.TrimSpace(placement.Concept) == "" {
 		conceptNode = nil
 	}
 	if conceptNode != nil {
@@ -165,48 +168,140 @@ func (g *Graph) AddFact(ctx context.Context, opts GraphOptions) (*Node, error) {
 		return nil, fmt.Errorf("add fact node: %w", err)
 	}
 
-	// Parallel: embed + infer labels/summary.
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		vecs, err := g.Embed.Embed(ctx, []string{content})
-		if err == nil && len(vecs) > 0 {
-			_ = g.Store.SetEmbedding(opts.SessionID, factNode.Key, vecs[0])
-		}
-		return nil // eat error; embedding failures shouldn't break storage
-	})
-	eg.Go(func() error {
-		if opts.Chat != nil {
-			labels, summary := g.inferLabelsAndSummary(ctx, opts.Question, opts.Response, placement.Topic, opts.Chat)
-			if labels != nil || summary != "" {
-				_ = g.Store.UpdateNodeEnrichment(opts.SessionID, factNode.Key, summary, labels)
+	// Enrichment before embedding, not alongside it: the summary is the best
+	// text to embed. A fact's raw content is the whole turn trace — tool calls,
+	// inputs and truncated outputs, averaging ~20 KB — and collapsing that into
+	// one 384-dim vector mostly averages the signal away, quite apart from
+	// overflowing the model's 512-token window. Five sentences of summary
+	// describe the same turn in a form the embedder can actually represent.
+	var summary string
+	if opts.Chat != nil {
+		labels, s := g.inferLabelsAndSummary(ctx, opts.Question, opts.Response, placement.Topic, opts.Chat)
+		summary = s
+		if labels != nil || summary != "" {
+			if err := g.Store.UpdateNodeEnrichment(opts.SessionID, factNode.Key, summary, labels); err != nil {
+				slog.Warn("memory: store enrichment failed", "session", opts.SessionID, "key", factNode.Key, "err", err)
 			}
 		}
-		return nil
-	})
-	_ = eg.Wait()
+	}
 
-	for _, rel := range related {
-		edge := Edge{
-			SessionID: opts.SessionID,
-			FromKey:   placement.Concept,
-			ToKey:     rel.ToConcept,
-			RelType:   "related",
-			Weight:    rel.Weight,
-		}
-		existingEdges, _ := g.Store.ListEdges(opts.SessionID)
-		exists := false
-		for _, e := range existingEdges {
-			if e.FromKey == edge.FromKey && e.ToKey == edge.ToKey {
-				exists = true
-				break
+	// An embedding failure must not lose the fact, so it stays non-fatal — but
+	// it is logged. Silently eating it is how 96% of a live graph ended up
+	// unembedded, and therefore invisible to every semantic recall, with nothing
+	// in the logs to say so.
+	embedText := factEmbedText(opts.Question, summary, content)
+	if vecs, err := g.Embed.Embed(ctx, []string{embedText}); err != nil {
+		slog.Warn("memory: embedding failed; fact stored but not semantically recallable",
+			"session", opts.SessionID, "key", factNode.Key, "chars", len(embedText), "err", err)
+	} else if len(vecs) == 0 || len(vecs[0]) == 0 {
+		slog.Warn("memory: embedder returned no vector; fact stored but not semantically recallable",
+			"session", opts.SessionID, "key", factNode.Key)
+	} else if err := g.Store.SetEmbedding(opts.SessionID, factNode.Key, vecs[0]); err != nil {
+		slog.Warn("memory: persisting embedding failed", "session", opts.SessionID, "key", factNode.Key, "err", err)
+	}
+
+	// Edges hang off a named concept; there is nothing to attach them to when
+	// the concept was folded into its topic above.
+	if conceptNode != nil && len(related) > 0 {
+		// Read the session's edges once. This used to re-read every edge in the
+		// session for each related concept, so a turn proposing five links did
+		// five full scans to write at most five rows.
+		existingEdges, err := g.Store.ListEdges(opts.SessionID)
+		if err != nil {
+			slog.Warn("memory: listing edges failed; skipping related links", "session", opts.SessionID, "err", err)
+		} else {
+			seen := make(map[[2]string]bool, len(existingEdges))
+			for _, e := range existingEdges {
+				seen[[2]string{e.FromKey, e.ToKey}] = true
 			}
-		}
-		if !exists {
-			_ = g.Store.AddEdge(edge)
+			for _, rel := range related {
+				pair := [2]string{placement.Concept, rel.ToConcept}
+				if seen[pair] {
+					continue
+				}
+				if err := g.Store.AddEdge(Edge{
+					SessionID: opts.SessionID,
+					FromKey:   placement.Concept,
+					ToKey:     rel.ToConcept,
+					RelType:   "related",
+					Weight:    rel.Weight,
+				}); err != nil {
+					slog.Warn("memory: adding edge failed", "session", opts.SessionID, "err", err)
+					continue
+				}
+				// Guard against duplicates inside this batch too.
+				seen[pair] = true
+			}
 		}
 	}
 
 	return factNode, nil
+}
+
+// traceProse pulls the assistant's own words out of a stored turn trace,
+// dropping the tool scaffolding around them.
+//
+// A fact's Response is the trace built by the agent loop: repeated
+// "--- Assistant iteration ---", "Tool: <name> (status)", "  Input: …",
+// "  Output: …" and "  Error: …" lines, with the assistant's prose on
+// "Text: …". That scaffolding is near-identical in every fact, so embedding
+// the raw trace puts every vector in the same place — measured on a real graph,
+// every fact scored 0.80-0.82 against any question, which is no ranking at all.
+// The prose is the part that actually distinguishes one turn from another.
+//
+// A "Text:" value can itself span lines (only the first carries the prefix), so
+// prose continues until the next scaffolding line.
+func traceProse(response string) string {
+	var out []string
+	inText := false
+	for _, line := range strings.Split(response, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "Text: "):
+			inText = true
+			if v := strings.TrimSpace(strings.TrimPrefix(trimmed, "Text: ")); v != "" {
+				out = append(out, v)
+			}
+		case strings.HasPrefix(trimmed, "Tool: "),
+			strings.HasPrefix(trimmed, "Input: "),
+			strings.HasPrefix(trimmed, "Output: "),
+			strings.HasPrefix(trimmed, "Error: "),
+			strings.HasPrefix(trimmed, "--- Assistant iteration ---"):
+			inText = false
+		case inText && trimmed != "":
+			out = append(out, trimmed)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// factEmbedText picks the text that represents a fact in vector space.
+//
+// The question comes first and is always included: it is the most
+// discriminative part of a turn and the thing a later recall query most
+// resembles. The body is, in order of preference, the LLM-written summary, the
+// assistant's prose recovered from the turn trace, and finally the raw content
+// — each fallback a step further from "what this turn was about" and closer to
+// "what the agent happened to run".
+//
+// No length cap is applied here. The embedder clips to its own window and
+// reports what it did; duplicating that budget in the caller would put the two
+// limits out of step the moment either model changes.
+func factEmbedText(question, summary, content string) string {
+	body := strings.TrimSpace(summary)
+	if body == "" {
+		body = traceProse(content)
+	}
+	if body == "" {
+		body = content
+	}
+	if strings.TrimSpace(question) == "" {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return question
+	}
+	return question + "\n\n" + body
 }
 
 type Placement struct {
@@ -217,6 +312,35 @@ type Placement struct {
 type RelatedConcept struct {
 	ToConcept string
 	Weight    float32
+}
+
+// fieldLine matches a "KEY: value" line the way an LLM actually emits it. The
+// prompts ask for bare "TOPIC:" lines, but models routinely dress them up as
+// "1. TOPIC:", "- TOPIC:", "**TOPIC:**" or "### TOPIC:" — and a strict
+// HasPrefix check silently drops every one of those, leaving the caller with
+// its zero values. That is how blank concept names reached the store.
+var fieldLine = regexp.MustCompile(`^\s*(?:[-*+>#]+\s*|\d+[.)]\s*)*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}\s*:\s*(.*)$`)
+
+// parseField returns the key and value of a "KEY: value" line, tolerating list
+// markers and bold. ok is false for lines that carry no field.
+func parseField(line string) (key, value string, ok bool) {
+	m := fieldLine.FindStringSubmatch(line)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], strings.TrimSpace(strings.Trim(strings.TrimSpace(m[2]), "*")), true
+}
+
+// conceptFromContent derives a readable concept name from a fact's own text,
+// used whenever the placement LLM is unavailable or unparseable. It must never
+// return "": a blank key is still written to the store as a node, producing a
+// nameless concept that shows up in every tree render.
+func conceptFromContent(content string) string {
+	concept := strings.TrimSpace(strings.Join(strings.Fields(content), " "))
+	if concept == "" {
+		return "Unlabelled"
+	}
+	return truncate(concept, 60)
 }
 
 func (g *Graph) inferLabelsAndSummary(ctx context.Context, question, response, topic string, chat ChatClient) ([]string, string) {
@@ -240,18 +364,32 @@ Respond with:
 
 	var labels []string
 	var summaryLines []string
+	// The summary is asked for as "up to 5 sentences" but arrives on one line as
+	// often as several, so once SUMMARY: is seen every following line belongs to
+	// it until another field starts. Collecting only the marker line dropped
+	// multi-line summaries entirely.
+	inSummary := false
 	for _, line := range strings.Split(strings.TrimSpace(resp), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "LABELS:") {
-			tags := strings.TrimPrefix(line, "LABELS:")
-			for _, l := range strings.Split(tags, ",") {
-				l = strings.TrimSpace(l)
-				if l != "" {
+		key, value, ok := parseField(line)
+		switch {
+		case ok && key == "LABELS":
+			inSummary = false
+			for _, l := range strings.Split(value, ",") {
+				if l = strings.TrimSpace(l); l != "" {
 					labels = append(labels, strings.ToLower(l))
 				}
 			}
-		} else if strings.HasPrefix(line, "SUMMARY:") {
-			summaryLines = append(summaryLines, strings.TrimPrefix(line, "SUMMARY:"))
+		case ok && key == "SUMMARY":
+			inSummary = true
+			if value != "" {
+				summaryLines = append(summaryLines, value)
+			}
+		case ok:
+			inSummary = false
+		case inSummary:
+			if t := strings.TrimSpace(line); t != "" {
+				summaryLines = append(summaryLines, t)
+			}
 		}
 	}
 	summary := strings.TrimSpace(strings.Join(summaryLines, " "))
@@ -269,11 +407,7 @@ func (g *Graph) inferPlacement(ctx context.Context, opts GraphOptions, topics []
 		if topic == "" {
 			topic = "General"
 		}
-		concept := makeKey(content)
-		if len(concept) > 60 {
-			concept = concept[:60]
-		}
-		return Placement{Topic: topic, Concept: concept}, nil, nil
+		return Placement{Topic: topic, Concept: conceptFromContent(content)}, nil, nil
 	}
 
 	var sb strings.Builder
@@ -328,7 +462,15 @@ Examples:
 
 	resp, err := chat.Chat(ctx, "", prompt)
 	if err != nil {
-		return Placement{Topic: "General", Concept: opts.UserTopic}, nil, nil
+		// No caller sets UserTopic, so this used to hand back a blank concept
+		// name — which AddFact then stored as a nameless concept node.
+		slog.Warn("memory: placement inference failed; filing under General",
+			"session", opts.SessionID, "err", err)
+		topic := opts.UserTopic
+		if topic == "" {
+			topic = "General"
+		}
+		return Placement{Topic: topic, Concept: conceptFromContent(content)}, nil, nil
 	}
 
 	text := strings.TrimSpace(resp)
@@ -336,37 +478,44 @@ Examples:
 	related := []RelatedConcept{}
 
 	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "TOPIC:") {
-			t := strings.TrimPrefix(line, "TOPIC:")
-			placement.Topic = strings.TrimSpace(t)
+		key, value, ok := parseField(line)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "TOPIC":
+			placement.Topic = value
 			if placement.Topic == "" {
 				placement.Topic = "General"
 			}
-		} else if strings.HasPrefix(line, "CONCEPT:") {
-			c := strings.TrimPrefix(line, "CONCEPT:")
-			placement.Concept = strings.TrimSpace(c)
-			if placement.Concept == "" {
-				placement.Concept = placement.Topic
+		case "CONCEPT":
+			placement.Concept = value
+		case "RELATED":
+			if value == "" || strings.EqualFold(value, "none") {
+				continue
 			}
-		} else if strings.HasPrefix(line, "RELATED:") {
-			r := strings.TrimPrefix(line, "RELATED:")
-			r = strings.TrimSpace(r)
-			if r != "" && r != "none" {
-				for _, part := range strings.Split(r, ",") {
-					part = strings.TrimSpace(part)
-					if part != "" && part != placement.Concept {
-						related = append(related, RelatedConcept{ToConcept: part, Weight: 0.5})
-					}
+			for _, part := range strings.Split(value, ",") {
+				if part = strings.TrimSpace(part); part != "" {
+					related = append(related, RelatedConcept{ToConcept: part, Weight: 0.5})
 				}
 			}
 		}
 	}
 
-	if len(placement.Concept) > 80 {
-		placement.Concept = placement.Concept[:80]
+	// Resolved after the loop, not inside it: CONCEPT may be parsed before
+	// TOPIC, and a self-referential RELATED entry can only be filtered once the
+	// concept name is final.
+	if placement.Concept == "" {
+		placement.Concept = conceptFromContent(content)
 	}
-	return placement, related, nil
+	placement.Concept = truncate(placement.Concept, 80)
+	kept := related[:0]
+	for _, r := range related {
+		if r.ToConcept != placement.Concept {
+			kept = append(kept, r)
+		}
+	}
+	return placement, kept, nil
 }
 
 // ──── Tree building ────
@@ -484,7 +633,28 @@ func (g *Graph) BuildLightweightTree(ctx context.Context, sessionID string, f No
 
 func buildTreeFromNodes(nodes []Node, edges []Edge) map[string]TopicTree {
 	tree := make(map[string]*TopicTree)
-	conceptMap := make(map[string]*ConceptTree)
+	// Concepts are addressed by (topic, index), never by pointer. Holding a
+	// *ConceptTree into a slice is only safe until the next append to that same
+	// slice reallocates it, after which every stored pointer writes into the
+	// abandoned array and the update is silently lost — facts vanishing from a
+	// topic that had more than one concept.
+	type conceptRef struct {
+		topic string
+		i     int
+	}
+	conceptIdx := make(map[string]conceptRef)
+
+	topicOf := func(parent string) *TopicTree {
+		if tree[parent] == nil {
+			tree[parent] = &TopicTree{Name: parent, Concepts: []ConceptTree{}}
+		}
+		return tree[parent]
+	}
+	addConcept := func(parent, name string) conceptRef {
+		tt := topicOf(parent)
+		tt.Concepts = append(tt.Concepts, ConceptTree{Name: name, Facts: []Node{}, RelatedConcepts: []string{}})
+		return conceptRef{topic: parent, i: len(tt.Concepts) - 1}
+	}
 
 	for _, n := range nodes {
 		if n.Type == TypeTopic {
@@ -493,24 +663,18 @@ func buildTreeFromNodes(nodes []Node, edges []Edge) map[string]TopicTree {
 	}
 
 	for _, n := range nodes {
-		if n.Type == TypeConcept {
-			parent := n.TopicName
-			if tree[parent] == nil {
-				tree[parent] = &TopicTree{Name: parent, Concepts: []ConceptTree{}}
+		switch n.Type {
+		case TypeConcept:
+			conceptIdx[n.Key] = addConcept(n.TopicName, n.Key)
+		case TypeFact:
+			factConceptName := n.TopicName + "-facts"
+			ref, ok := conceptIdx[factConceptName]
+			if !ok {
+				ref = addConcept(n.TopicName, factConceptName)
+				conceptIdx[factConceptName] = ref
 			}
-			tree[parent].Concepts = append(tree[parent].Concepts, ConceptTree{Name: n.Key, Facts: []Node{}, RelatedConcepts: []string{}})
-			conceptMap[n.Key] = &tree[parent].Concepts[len(tree[parent].Concepts)-1]
-		} else if n.Type == TypeFact {
-			parent := n.TopicName
-			if tree[parent] == nil {
-				tree[parent] = &TopicTree{Name: parent, Concepts: []ConceptTree{}}
-			}
-			factConceptName := parent + "-facts"
-			if conceptMap[factConceptName] == nil {
-				tree[parent].Concepts = append(tree[parent].Concepts, ConceptTree{Name: factConceptName, Facts: []Node{}, RelatedConcepts: []string{}})
-				conceptMap[factConceptName] = &tree[parent].Concepts[len(tree[parent].Concepts)-1]
-			}
-			conceptMap[factConceptName].Facts = append(conceptMap[factConceptName].Facts, n)
+			ct := &tree[ref.topic].Concepts[ref.i]
+			ct.Facts = append(ct.Facts, n)
 		}
 	}
 
@@ -521,9 +685,9 @@ func buildTreeFromNodes(nodes []Node, edges []Edge) map[string]TopicTree {
 				edgeMap[e.FromKey] = append(edgeMap[e.FromKey], e.ToKey)
 			}
 		}
-		for key, ct := range conceptMap {
+		for key, ref := range conceptIdx {
 			if rels, ok := edgeMap[key]; ok {
-				ct.RelatedConcepts = rels
+				tree[ref.topic].Concepts[ref.i].RelatedConcepts = rels
 			}
 		}
 	}
@@ -637,6 +801,16 @@ func (g *Graph) Recall(ctx context.Context, opts RecallOptions) (*RecallResult, 
 
 		resp, err := chat.Chat(ctx, "", prompt)
 		if err != nil {
+			// Rounds after the first only refine an answer that already exists.
+			// Failing the whole recall discards it, and the caller reports "no
+			// relevant past context found" — a false negative the model cannot
+			// tell apart from a genuine miss. Keep what converged so far.
+			if bestAnswer != "" {
+				slog.Warn("memory: recall refinement failed; returning the previous round's answer",
+					"round", round, "err", err)
+				round--
+				break
+			}
 			return nil, fmt.Errorf("recall round %d: %w", round, err)
 		}
 
@@ -861,7 +1035,8 @@ func lightweightTreeAsText(tree map[string]TopicTree, topFacts []Node, relevantK
 	}
 
 	var sb strings.Builder
-	for topic, tt := range tree {
+	for _, topic := range sortedTopics(tree) {
+		tt := tree[topic]
 		sb.WriteString("Topic: " + topic)
 		if labels := dedupSortMap(topicLabelMap[topic]); len(labels) > 0 {
 			sb.WriteString(" [labels: " + strings.Join(labels, ", ") + "]")
@@ -939,9 +1114,23 @@ func semanticTreeText(semanticTree map[string]TopicTree, topFacts []Node) string
 	return LightweightTreeAsTextWithHighlight(semanticTree, topFacts, relevantKeys)
 }
 
+// sortedTopics gives the tree renderers a stable order. Ranging a Go map
+// reshuffles topics on every call, so two identical recalls produced different
+// prompts, and the "chronological order" instruction had to fight a randomly
+// permuted topic list to be followed.
+func sortedTopics(tree map[string]TopicTree) []string {
+	out := make([]string, 0, len(tree))
+	for k := range tree {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func skeletonTreeText(tree map[string]TopicTree) string {
 	var sb strings.Builder
-	for topic, tt := range tree {
+	for _, topic := range sortedTopics(tree) {
+		tt := tree[topic]
 		sb.WriteString("Topic: " + topic + "\n")
 		for _, ct := range tt.Concepts {
 			sb.WriteString("  Concept: " + ct.Name + "\n")
@@ -1051,7 +1240,11 @@ type chatClient struct {
 func (c *chatClient) Chat(ctx context.Context, system, prompt string) (string, error) {
 	model := c.model
 	if model == "" {
-		model = c.provider.Models()[0].ID
+		models := c.provider.Models()
+		if len(models) == 0 {
+			return "", fmt.Errorf("memory: provider %q has no models to synthesize with", c.provider.ID())
+		}
+		model = models[0].ID
 	}
 	req := provider.StreamRequest{
 		Model:  model,

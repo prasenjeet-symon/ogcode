@@ -27,7 +27,7 @@
   <meta name="twitter:description" content="The coding agent with a memory. Remembers your project and decisions, costs about 70% less to run. Self-hosted, any model, MIT.">
   <meta name="twitter:image" content="http://ogcode.xyz/media/og.png">
 
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235e6ad2'/><path d='M55 30L35 54h13l-3 16 20-24H52l3-16z' fill='%23fff'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%235E6AD2'/><path d='M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33' transform='translate(9 9) scale(0.72)' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round'/></svg>">
   <link rel="apple-touch-icon" href="/media/logo.png">
 
   <link rel="preload" href="/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin>
@@ -753,8 +753,11 @@
     <div class="nav-inner">
       <a class="brand" href="/" aria-label="Ogcode home">
         <span class="brand-mark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          <!-- Small cut: the nav mark renders around 16px. See
+               assets/ogcode-mark.svg for the master. -->
+          <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+            <path d="M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33"
+                  stroke="#fff" stroke-width="8" stroke-linecap="round"/>
           </svg>
         </span>
         <span class="brand-name">ogcode</span>
@@ -1355,8 +1358,9 @@ ogcode
         <div class="footer-brand">
           <a class="brand" href="/" aria-label="Ogcode home">
             <span class="brand-mark">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                <path d="M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33"
+                      stroke="#fff" stroke-width="8" stroke-linecap="round"/>
               </svg>
             </span>
             <span class="brand-name">ogcode</span>

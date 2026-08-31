@@ -1,0 +1,14 @@
+<!-- ogcode lockup - mark plus wordmark, for README headers and docs nav.
+     The wordmark is set in a monospace stack rather than an embedded font, so
+     the file stays small and dependency-free; export to outlines if you need
+     it pixel-identical across machines. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64" width="260" height="64"
+     fill="none" role="img" aria-label="ogcode">
+  <g color="currentColor">
+    <path d="M55 32A23 23 0 0 0 32 9A23 23 0 0 0 9 32A23 23 0 0 0 32 55A15 15 0 0 0 45 32"
+          stroke="currentColor" stroke-width="6.5" stroke-linecap="round"/>
+  </g>
+  <text x="76" y="43" fill="currentColor"
+        font-family="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="34" font-weight="500" letter-spacing="-1.5">ogcode</text>
+</svg>

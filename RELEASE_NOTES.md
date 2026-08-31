@@ -1,3 +1,166 @@
+# Release Notes — v0.29.0
+
+## Minor: MCP Client with OAuth, Built-in Web Search, Prompt Caching, and Vision-Safe Sessions
+
+This release connects ogcode to the external tool ecosystem with a full
+**Model Context Protocol client** (stdio and HTTP transports, automatic OAuth),
+replaces the install-a-Node-server web search with a **built-in backend that
+presents a real browser's TLS fingerprint**, and lands a batch of session
+correctness work: Anthropic prompt caching, tool-result images that can no
+longer break a non-vision model, and redacted thinking blocks that survive a
+round trip.
+
+### Model Context Protocol (MCP) client
+
+ogcode now connects to MCP servers declared in `ogcode.json` under the new
+`"mcp"` key and exposes their tools to the coding agent alongside its own
+(`internal/mcp/`, `internal/config/config.go`):
+
+```json
+{
+  "mcp": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "calcom": { "url": "https://mcp.cal.com/mcp" }
+  }
+}
+```
+
+- **Transports** — a server is a local subprocess (`command` + `args` + `env`,
+  stdio) or a remote endpoint (`url`, streamable-http). `transport` is
+  inferred when omitted. Modern HTTP servers get **automatic OAuth**
+  (authorization code + PKCE + dynamic client registration): the first 401
+  opens the browser, tokens persist in `~/.ogcode/mcp-tokens/`, and restarts
+  refresh silently. A server configured with static `headers` keeps the
+  bearer-token path instead.
+- **Tools** — each server's tools are adapted into the registry as
+  `mcp_<server>/<tool>` and offered to the agent through a `mcp_*` glob;
+  `Registry.ForAgent` and `Agent.HasTool` both expand it, so a tool that is
+  offered is also authorized at call time. Image results are written to a
+  temp file with a `view_image` hint instead of being inlined into context.
+- **Lifecycle** — servers dial in parallel in a background goroutine after
+  the HTTP listener binds (the UI is live while an OAuth prompt waits), the
+  registry itself is mutex-guarded against that concurrent registration, and
+  every stdio subprocess is reaped on shutdown in both the server and the
+  headless `run` path.
+- Image-rejection 400s from a server are classified separately — see below.
+
+### Built-in web search (search bridge removed)
+
+The Node.js + Playwright `search-bridge` is gone — no install step, no
+Chromium, no extra process. The backend is compiled into the binary and
+**on by default** (`internal/search/`, `tools/search-bridge/` deleted):
+
+- **Native HTTP backend** — searches Google, DuckDuckGo, Brave, Bing and
+  Yahoo over plain HTTP (~1s), then fetches and extracts page text with
+  goquery + go-readability.
+- **Browser persona** — requests present a real browser's TLS ClientHello
+  via uTLS along with the matching User-Agent, client hints and header set,
+  a cookie jar, and referrer/randomised-pacing behaviour, because search
+  engines block clients that do not. This is what the old bridge existed to
+  provide.
+- **Safari fallback (macOS)** — when the fast path returns nothing (an engine
+  refusing the IP, a bot challenge, a script-only page), the query is retried
+  through a real Safari via AppleScript. It only runs after the HTTP path has
+  already failed, so a user who never hits a block is never asked for
+  Automation permission. Compile-time gated behind `//go:build darwin`.
+- `OGCODE_SEARCH_ENABLED` now wins in either direction for scripted/CI runs;
+  the settings toggle decides otherwise. The unused `use_real_profile`
+  setting is dropped from the stored config.
+
+### Anthropic prompt caching
+
+`internal/provider/anthropic.go` sends `cache_control: {type: "ephemeral"}`
+breakpoints — one on the last tool definition, one on the first (static)
+system block — so the tool schema and base system prompt stop being re-billed
+on every request. The system prompt is split so the cacheable prefix stays
+byte-identical across turns: the date, viewport and compaction summary ride
+in trailing dynamic blocks. Cache reads/writes are surfaced in the token
+usage the UI already shows.
+
+### Vision-safe sessions
+
+A tool result carrying an image used to be forwarded to the provider
+unconditionally, so a non-vision model (or an OpenRouter-routed endpoint that
+rejects tool-result images) would get a fatal 400. Now:
+
+- `convertMessages` strips tool-result images whenever the resolved model
+  lacks vision, for both the current turn and persisted history.
+- An image-rejection 400 is detected by body hints
+  (`APIError.IsImageRejection`) and classified as a new
+  `InterruptModelCapability` interruption — **resumable** instead of fatal.
+  Resuming invalidates the cached capability, re-probes, and retries without
+  the images.
+
+### Reasoning correctness
+
+- **Redacted thinking blocks** are rendered back with their own type and
+  `data` payload, not as a signed thinking block or dropped — the Anthropic
+  API checks the sequence against what the model generated and 400s otherwise
+  (`anthropicThinkingBlock`).
+- **Explicit thinking mode** is requested per model from the catalog
+  (`"adaptive"` for Claude 4.6+, nothing where a safe configuration cannot be
+  sized). Providers without a reasoning mode ignore it.
+- Stored reasoning blocks are bounded at 50k chars so a runaway thinking
+  stream cannot flood the DB or the UI.
+- A bare empty-body 400 now counts as context-overflow **only from Ollama**,
+  the one endpoint that answers overflow that way — other providers' 400s are
+  no longer mislabelled as "context too big".
+
+### Memory
+
+- **Enrichment before embedding** — a fact's summary is now the text that gets
+  embedded, not the raw ~20 KB turn trace, whose vector mostly averaged the
+  signal away and overflowed the embedder's window (`internal/memory/graph.go`).
+- **Failed lookups are no longer silent** — `RecallMemory` and
+  `RecallProjectMemory` return an error instead of an empty string, and the
+  tools tell the model "lookup failed" rather than "nothing found" — these
+  are different answers.
+- **RefreshAll is detached from the HTTP request** — re-embedding a large
+  graph takes minutes, and a browser that gave up first used to leave the
+  corpus half-embedded (`internal/server/memory_routes.go`).
+- The in-process **local embedder** serializes inference (the Go backend is
+  not goroutine-safe), releases the model after an idle window, and skips
+  nameless/blank concept nodes.
+- Tool-pairing integrity across compaction and interruption edges is pinned
+  by new tests; the read-pressure tracker nudges a long reading phase toward
+  `compact_context` on uncached endpoints.
+
+### Resource monitor and settings redesign
+
+- New `internal/resource` sampler reports the ogcode process's own CPU and
+  memory on a rolling four-minute window, served over `/api/resources` and
+  pushed as SSE control frames (not bus events — periodic telemetry must not
+  burn sequence numbers and force client resyncs).
+- **Skills settings page** lists installed skills with name, description and
+  source (`/api/skills`).
+- Settings screens are rebuilt on a shared iOS-style kit (`ui.tsx`):
+  models, about, and general pages included.
+- **Delivery ticks** on prompts — sent / delivered / answered, read from the
+  assistant message the loop created, plus TTFT moved ahead of the copy
+  button in the message footer.
+- Transcript scrolling now distinguishes the user's own scroll from trackpad
+  momentum and follows new content only while genuinely at the bottom.
+
+### Other
+
+- **`task` sub-agents no longer have a hard 300s wall clock** — cancellation
+  still propagates, and the timeout class of false-negative investigations is
+  gone.
+- `ogcode.json` is now ignored by this repo's own `.gitignore` (it holds
+  per-machine API keys), and the machine-local `MEMORY.md` is untracked —
+  it is re-sent in full on every model request, so a committed one becomes
+  every contributor's per-turn token cost.
+- The bundled `keys.json` free-pool file is unchanged. Installers and the
+  website drop the bridge install steps; the GoReleaser archive and Homebrew
+  caveats no longer mention Node.js.
+- `golang.org/x/oauth2`, uTLS, goquery, go-readability and the MCP Go SDK
+  (`v1.7.0`) land as direct dependencies.
+
+---
+
 # Release Notes — v0.28.0
 
 ## Minor: Auto-Mode Security Hardening, Denied-Tool Status, and UI Polish

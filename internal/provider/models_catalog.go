@@ -45,6 +45,17 @@ type CatalogModel struct {
 	// which the o-series and GPT-5 reasoning models reject in favour of
 	// `max_completion_tokens`, so those deliberately stay at 0.
 	MaxOutputTokens int
+	// Thinking names the reasoning mode to request for this model, for providers
+	// that must ask for it explicitly. "adaptive" is what Claude 4.6 and later
+	// accept: the model decides when and how deeply to think, and reasons
+	// between tool calls on its own with no beta header.
+	//
+	// Empty means no thinking configuration is sent. Claude 4.5 and earlier
+	// accept only a fixed `budget_tokens` that has to fit inside `max_tokens` —
+	// a tradeoff the agent loop does not currently make, since it leaves
+	// `max_tokens` at the provider default — and Haiku 4.5 cannot reason
+	// between tool calls at all, which is where an agent loop would spend it.
+	Thinking string
 }
 
 // AnthropicModels is the authoritative list of Anthropic models.
@@ -53,9 +64,9 @@ type CatalogModel struct {
 // All current Claude models expose a 200k-token context window by default.
 var AnthropicModels = []CatalogModel{
 	// ── Claude 4 family ──────────────────────────────────────────────────────
-	{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
-	{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
-	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ActiveByDefault: true, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000},
+	{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000, Thinking: "adaptive"},
+	{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ActiveByDefault: true, InputPricePerM: 15, OutputPricePerM: 75, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000, Thinking: "adaptive"},
+	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ActiveByDefault: true, InputPricePerM: 3, OutputPricePerM: 15, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 32000, Thinking: "adaptive"},
 	{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", ActiveByDefault: true, InputPricePerM: 0.80, OutputPricePerM: 4, SupportsImages: true, ContextWindow: 200000, MaxOutputTokens: 64000},
 
 	// ── Claude 4 intermediate releases ───────────────────────────────────────

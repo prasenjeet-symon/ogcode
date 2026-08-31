@@ -39,7 +39,11 @@ type MessageInfo struct {
 	// Interrupted is set when a loop stopped part-way through this turn rather
 	// than because the model finished. It is what a resume decides from.
 	Interrupted *Interruption `json:"interrupted,omitempty"`
-	CreatedAt   int64         `json:"createdAt"`
+	// Delivery records how far this turn got on its way to the model and how
+	// long the model took to start answering. Set on assistant messages only,
+	// and nil on any written before the field existed.
+	Delivery  *Delivery `json:"delivery,omitempty"`
+	CreatedAt int64     `json:"createdAt"`
 }
 
 // InterruptReason classifies why a turn stopped short.
@@ -60,6 +64,10 @@ const (
 	// InterruptContext is a request too large for the model's window that
 	// compaction could not bring back under it.
 	InterruptContext InterruptReason = "context"
+	// InterruptModelCapability is a 400 because the model lacks a capability the
+	// request used (e.g. image input). Resumable: resume strips the offending
+	// content and retries, or the user switches to a model that has the capability.
+	InterruptModelCapability InterruptReason = "model_capability"
 	// InterruptCrashed marks a turn found unfinished at startup: the process
 	// died mid-stream and never got to record anything about why.
 	InterruptCrashed InterruptReason = "crashed"
@@ -89,6 +97,42 @@ type Interruption struct {
 	RetryAfter int64 `json:"retryAfter,omitempty"`
 	// Step is the loop step the turn died on, for the UI to say how far it got.
 	Step int `json:"step,omitempty"`
+}
+
+// Delivery records how far a turn got on its way to the model, and how long the
+// model took to say its first word.
+//
+// It hangs off the assistant message rather than the prompt that caused it: the
+// loop owns that record from the moment it creates it, and ParentID already
+// points back at the prompt, so the pairing costs nothing. Only the first step
+// of a turn can point at a human prompt — from step 2 on, the preceding user
+// message is the tool-result message the loop wrote itself — so a client
+// reading Delivery through ParentID never has to reason about steps.
+type Delivery struct {
+	// DispatchedAt is when the StreamChat attempt that succeeded left for the
+	// provider. Re-stamped on every attempt so that retry backoff, which can run
+	// to seconds, never lands inside TTFTMs.
+	DispatchedAt int64 `json:"dispatchedAt,omitempty"`
+	// ConnectedAt is when the provider answered 200 and the stream opened. This
+	// is the moment the request is known to have reached the model.
+	ConnectedAt int64 `json:"connectedAt,omitempty"`
+	// FirstTokenAt is when the first content event of any kind arrived — text,
+	// reasoning or a tool call. Reasoning counts: on a thinking model it is what
+	// arrives first, and waiting for text instead would report the whole
+	// thinking phase as latency.
+	FirstTokenAt int64 `json:"firstTokenAt,omitempty"`
+	// TTFTMs is FirstTokenAt − DispatchedAt: time to first token, the model's
+	// own queue and prefill, free of ogcode's prompt building and of backoff.
+	TTFTMs int64 `json:"ttftMs,omitempty"`
+	// QueuedMs is DispatchedAt − the prompt's CreatedAt: everything ogcode did
+	// before the request left, which is prompt building, memory retrieval and
+	// compaction. Kept apart from TTFTMs so a slow turn can be attributed.
+	QueuedMs int64 `json:"queuedMs,omitempty"`
+	// Attempts is how many StreamChat tries the connection took. Above 1 means
+	// the stream was opened more than once before it held.
+	Attempts int `json:"attempts,omitempty"`
+	// FirstTokenKind is what opened the response: "text", "reasoning" or "tool".
+	FirstTokenKind string `json:"firstTokenKind,omitempty"`
 }
 
 // FinishedNaturally reports whether a finish reason means the model was done.
@@ -208,6 +252,17 @@ type ToolTime struct {
 type ReasoningPartData struct {
 	Text      string `json:"text"`
 	Signature string `json:"signature,omitempty"`
+	// RedactedData is the opaque payload of an Anthropic redacted_thinking
+	// block. Such a block has no readable text, and dropping it — or replaying
+	// it as an ordinary thinking block — breaks the round-trip the API
+	// requires within a tool-use turn.
+	RedactedData string `json:"redactedData,omitempty"`
+	// Model is the model that produced this block. Thinking blocks are tied to
+	// the model that generated them: replayed to any other model they are
+	// silently ignored but still billed as input, and an unsigned block from an
+	// OpenAI-family model is rejected outright. Recording the origin lets the
+	// conversion drop what the current model cannot use.
+	Model string `json:"model,omitempty"`
 }
 
 func Now() int64 {

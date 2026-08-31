@@ -322,6 +322,8 @@ func TestClassifyInterruption(t *testing.T) {
 		{"bad key", &provider.APIError{StatusCode: http.StatusUnauthorized}, session.InterruptAuth, true},
 		{"no balance", &provider.APIError{StatusCode: http.StatusPaymentRequired}, session.InterruptAuth, true},
 		{"malformed request", &provider.APIError{StatusCode: http.StatusBadRequest, Body: "unknown field"}, session.InterruptFatal, false},
+		{"image rejection", &provider.APIError{StatusCode: http.StatusBadRequest, Body: "this model does not support image input"}, session.InterruptModelCapability, true},
+		{"vision rejection", &provider.APIError{StatusCode: http.StatusBadRequest, Body: "model lacks vision modality"}, session.InterruptModelCapability, true},
 		{"dropped connection", errors.New("read tcp: connection reset by peer"), session.InterruptNetwork, true},
 		{"unrecognised", errors.New("something nobody predicted"), session.InterruptServerError, true},
 	} {

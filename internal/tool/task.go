@@ -13,9 +13,10 @@ import (
 type TaskFunc func(ctx context.Context, description, prompt, dir, model string) (string, error)
 
 // taskTimeout bounds the total time a delegated sub-agent may run so a
-// misbehaving child can't burn tokens forever. Read-only investigations read and
-// search a lot of files (and may deep_search the web), so this is generous.
-const taskTimeout = 300 * time.Second
+// misbehaving child can't burn tokens forever. 0 means no wall-clock bound —
+// the sub-agent inherits the main agent's timeout behaviour (none), and
+// cancellation still propagates via the parent tool-execution context.
+const taskTimeout = 0 * time.Second
 
 // TaskTool lets a coding/planning agent delegate a focused, self-contained
 // investigation to an autonomous read-only sub-agent. The sub-agent explores the
@@ -76,7 +77,15 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 	// Bound the sub-agent with its own timeout so it doesn't run unbounded under
 	// the parent loop. Cancellation still propagates: taskCtx derives from the
 	// parent tool-execution context, so a parent abort/guidance-cancel stops it.
-	taskCtx, cancel := context.WithTimeout(ctx, taskTimeout)
+	// A zero taskTimeout disables the wall-clock bound (matching the main agent)
+	// while still inheriting parent cancellation through ctx.
+	var taskCtx context.Context = ctx
+	var cancel context.CancelFunc
+	if taskTimeout > 0 {
+		taskCtx, cancel = context.WithTimeout(ctx, taskTimeout)
+	} else {
+		taskCtx, cancel = ctx, context.CancelFunc(func() {})
+	}
 	defer cancel()
 
 	answer, err := t.Run(taskCtx, input.Description, input.Prompt, tctx.SessionDir, tctx.Model)

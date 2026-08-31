@@ -7,7 +7,7 @@ import (
 )
 
 func TestMemoryMDPrompt_CanWrite(t *testing.T) {
-	prompt := memoryMDPrompt(true, true)
+	prompt := memoryMDPrompt(true, true, true)
 
 	if !strings.Contains(prompt, "### How to maintain MEMORY.md") {
 		t.Error("expected 'How to maintain' heading when canWriteFiles=true")
@@ -18,13 +18,13 @@ func TestMemoryMDPrompt_CanWrite(t *testing.T) {
 	if !strings.Contains(prompt, "Use the write tool only") {
 		t.Error("expected write tool mention when canWriteFiles=true")
 	}
-	if strings.Contains(prompt, "you are a read-only agent") {
-		t.Error("did not expect read-only wording when canWriteFiles=true")
+	if strings.Contains(prompt, "Do not modify MEMORY.md") {
+		t.Error("did not expect the do-not-modify rule when canWriteFiles=true")
 	}
 }
 
 func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
-	prompt := memoryMDPrompt(false, true)
+	prompt := memoryMDPrompt(false, true, true)
 
 	if !strings.Contains(prompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading when canWriteFiles=false")
@@ -35,20 +35,20 @@ func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
 	if strings.Contains(prompt, "Use the write tool") {
 		t.Error("did not expect write tool mention when canWriteFiles=false")
 	}
-	if !strings.Contains(prompt, "you are a read-only agent") {
-		t.Error("expected read-only wording when canWriteFiles=false")
+	if !strings.Contains(prompt, "Do not modify MEMORY.md") {
+		t.Error("expected the do-not-modify rule when canWriteFiles=false")
 	}
 }
 
 func TestMemoryMDPrompt_CommonSections(t *testing.T) {
 	// Both variants should include these common sections
 	for _, canWrite := range []bool{true, false} {
-		prompt := memoryMDPrompt(canWrite, true)
+		prompt := memoryMDPrompt(canWrite, true, true)
 		for _, sub := range []string{
 			"### Purpose",
 			"### What belongs in MEMORY.md",
 			"### What does NOT belong in MEMORY.md",
-			"### How it differs from AGENT.md and agentic memory",
+			"### How it differs from AGENT.md",
 		} {
 			if !strings.Contains(prompt, sub) {
 				t.Errorf("expected section %q in prompt (canWrite=%v)", sub, canWrite)
@@ -220,7 +220,7 @@ func TestViewportPrompt(t *testing.T) {
 }
 
 func TestParallelToolCallsPrompt(t *testing.T) {
-	prompt := parallelToolCallsPrompt(true)
+	prompt := parallelToolCallsPrompt(true, true)
 	if !strings.Contains(prompt, "Parallel tool calls") {
 		t.Error("expected 'Parallel tool calls' heading")
 	}
@@ -235,7 +235,7 @@ func TestParallelToolCallsPrompt(t *testing.T) {
 // before it has decided anything, and name the case where batching corrupts
 // work rather than merely wasting a round trip.
 func TestParallelToolCallsPrompt_PushesBatchingAsTheDefault(t *testing.T) {
-	prompt := parallelToolCallsPrompt(true)
+	prompt := parallelToolCallsPrompt(true, true)
 
 	for _, want := range []string{
 		"Batching is the default", // the framing, not a permission
@@ -255,7 +255,7 @@ func TestParallelToolCallsPrompt_PushesBatchingAsTheDefault(t *testing.T) {
 // place this advice can cause damage rather than save time, so the prompt has
 // to carve it out explicitly.
 func TestParallelToolCallsPrompt_WarnsAboutSameFileEdits(t *testing.T) {
-	prompt := parallelToolCallsPrompt(true)
+	prompt := parallelToolCallsPrompt(true, true)
 
 	if !strings.Contains(prompt, "Never batch two edits to the same file") {
 		t.Error("prompt does not warn against batching edits to one file")
@@ -271,7 +271,7 @@ func TestParallelToolCallsPrompt_WarnsAboutSameFileEdits(t *testing.T) {
 // code-facing agent actually holds — otherwise the guidance points at something
 // ForAgent never offers, which fails silently.
 func TestParallelToolCallsPrompt_ReadOnlyVariantOmitsEditAdvice(t *testing.T) {
-	readOnly := parallelToolCallsPrompt(false)
+	readOnly := parallelToolCallsPrompt(false, true)
 
 	for _, unwanted := range []string{"old_string", "check_syntax", "edits to the same file"} {
 		if strings.Contains(readOnly, unwanted) {
@@ -777,6 +777,146 @@ func TestCodingAgentHardRules_ForbidSameFileEditBatching(t *testing.T) {
 	for _, a := range []Agent{PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent} {
 		if strings.Contains(a.System, "two edits to the same file in one response block") {
 			t.Errorf("%s: cannot edit, so the rule is noise in its prompt", a.Name)
+		}
+	}
+}
+
+// A skill body is instructions, and it arrives through a tool. The
+// instruction-source boundary says everything a tool returns is data and must
+// not be obeyed, so without an explicit carve-out the two rules contradict each
+// other: either the model refuses the skill it was just told to load, or it
+// learns that "data, not instructions" bends when convenient — and that is the
+// rule least able to afford being read as negotiable.
+func TestUntrustedContentPrompt_NamesSkillsAsTheOneException(t *testing.T) {
+	withSkill := untrustedContentPrompt(true, true, true)
+	if !strings.Contains(withSkill, "One exception, and only one") {
+		t.Error("boundary does not carve out skills for an agent holding the skill tool")
+	}
+	if !strings.Contains(withSkill, `"skill" tool`) {
+		t.Error("carve-out does not name the tool it applies to")
+	}
+	// The exception has to stay bounded, or it becomes a way in.
+	for _, want := range []string{"reaches beyond its own subject", "downloaded from a configured URL"} {
+		if !strings.Contains(withSkill, want) {
+			t.Errorf("carve-out missing its limit: %q", want)
+		}
+	}
+
+	// An agent without the tool must not be told about the exception at all —
+	// it can only widen what that agent will accept from a tool result.
+	if strings.Contains(untrustedContentPrompt(true, true, false), "One exception") {
+		t.Error("agent without the skill tool was given the skill carve-out")
+	}
+}
+
+// Search and Index are not project-scoped, and a project may simply have no
+// AGENT.md. Naming it as a source the agent should be following describes
+// something that is not in its prompt.
+func TestUntrustedContentPrompt_OnlyClaimsAgentMDWhenPresent(t *testing.T) {
+	if !strings.Contains(untrustedContentPrompt(false, true, false), "project's own AGENT.md") {
+		t.Error("expected AGENT.md named as a source when it is in the prompt")
+	}
+	if strings.Contains(untrustedContentPrompt(false, false, false), "AGENT.md") {
+		t.Error("named AGENT.md as an instruction source when none was supplied")
+	}
+}
+
+// The markdown section is built once at package init, so it cannot know whether
+// this client reported a viewport. It used to end by pointing at "the viewport
+// dimensions provided below" — a section that only exists when one was
+// reported, leaving the model chasing a block that was never in the prompt.
+func TestMarkdownCapabilities_DoesNotPointAtAnAbsentViewport(t *testing.T) {
+	if strings.Contains(markdownCapabilitiesPrompt(true, false), "viewport dimensions provided below") {
+		t.Error("markdown section still points at a viewport section that may not exist")
+	}
+	// The guidance itself must survive, in the block that only renders with the
+	// numbers it refers to.
+	vp := viewportPrompt(1440, 900)
+	if !strings.Contains(vp, "responsive") || !strings.Contains(vp, "HTML") {
+		t.Error("viewport section lost the responsive-design guidance")
+	}
+
+	// End to end: a client that reports no viewport gets neither.
+	bare := strings.Join(buildSystemPromptEntries(BuildAgent, "/proj", false, "", "", 0, 0, "", -1), "\n\n")
+	if strings.Contains(bare, "viewport dimensions provided below") {
+		t.Error("assembled prompt references viewport dimensions that were never supplied")
+	}
+}
+
+// Plan, Note and Breakdown hold bash while being read-only by policy, and
+// nothing below the prompt enforces that — permission.go has no mode handling
+// and bash_safety.go only blocks catastrophic commands. So the shell paragraph
+// must not hand them the mutating uses.
+func TestProjectIndexPrompt_ShellRuleMatchesWhetherTheAgentMayWrite(t *testing.T) {
+	build := projectIndexPrompt("build", true, true)
+	if !strings.Contains(build, "builds, tests, linters, formatters, git") {
+		t.Error("write-capable agent lost the full shell guidance")
+	}
+
+	for _, role := range []string{"plan", "note", "breakdown"} {
+		readOnly := projectIndexPrompt(role, true, true)
+		if !strings.Contains(readOnly, "inspect, never to change") {
+			t.Errorf("%s: shell paragraph does not restrict the shell to inspection", role)
+		}
+		if !strings.Contains(readOnly, `no "sed -i", no formatter, generator, or build step that rewrites sources`) {
+			t.Errorf("%s: shell paragraph does not close the routes around read-only", role)
+		}
+		if strings.Contains(readOnly, "builds, tests, linters, formatters, git") {
+			t.Errorf("%s: shell paragraph still suggests commands that rewrite files", role)
+		}
+	}
+
+	// An agent with no shell is told nothing about one either way.
+	if strings.Contains(projectIndexPrompt("subagent", false, true), "Not The Shell") {
+		t.Error("shell-less agent was given the shell paragraph")
+	}
+}
+
+// The recall tools are registered only when memory is initialised, and Note and
+// Breakdown never hold them at all — but both are project-scoped, so both
+// receive the MEMORY.md section. Describing a tool there sends the model after a
+// call it will never be offered, which is the failure this file gates against
+// everywhere else.
+func TestMemoryMDPrompt_OnlyExplainsRecallToAgentsThatHaveIt(t *testing.T) {
+	if !strings.Contains(memoryMDPrompt(true, true, true), "memory_recall") {
+		t.Error("agent holding the recall tools lost the comparison that distinguishes them")
+	}
+	without := memoryMDPrompt(false, true, false)
+	for _, unwanted := range []string{"memory_recall", "project_memory_recall", "<prior_context>"} {
+		if strings.Contains(without, unwanted) {
+			t.Errorf("MEMORY.md section names %q to an agent that cannot call it", unwanted)
+		}
+	}
+
+	// End to end: Note is project-scoped and holds neither tool.
+	note := strings.Join(buildSystemPromptEntries(NoteAgent, "/proj", true, "", "", 0, 0, "", -1), "\n\n")
+	if strings.Contains(note, "memory_recall") {
+		t.Error("assembled Note prompt names a recall tool it does not have")
+	}
+}
+
+// The batching examples were written from file_map and glob, which every agent
+// exploring a codebase holds. SearchAgent explores the web — web_search,
+// fetch_page, read, grep — so those two bullets named calls it will never be
+// offered.
+func TestParallelToolCallsPrompt_ExamplesMatchTheAgentsTools(t *testing.T) {
+	web := parallelToolCallsPrompt(false, false)
+	for _, unwanted := range []string{"file_map", "glob"} {
+		if strings.Contains(web, unwanted) {
+			t.Errorf("web-facing variant names %q, which SearchAgent does not have", unwanted)
+		}
+	}
+	for _, want := range []string{"web_search", "fetch_page", "Batching is the default"} {
+		if !strings.Contains(web, want) {
+			t.Errorf("web-facing variant missing %q", want)
+		}
+	}
+
+	// End to end, against the agent that actually takes this branch.
+	assembled := strings.Join(buildSystemPromptEntries(SearchAgent, "/proj", true, "", "", 0, 0, "", -1), "\n\n")
+	for _, unwanted := range []string{"file_map", `"glob"`} {
+		if strings.Contains(assembled, unwanted) {
+			t.Errorf("assembled Search prompt names %q, which it cannot call", unwanted)
 		}
 	}
 }

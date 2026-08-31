@@ -166,15 +166,24 @@ func describeStreamReadError(err error, idleFired bool, idleTimeout time.Duratio
 type StreamEventType string
 
 const (
-	EventTextDelta          StreamEventType = "text-delta"
-	EventToolCallStart      StreamEventType = "tool-call-start"
-	EventToolCallDelta      StreamEventType = "tool-call-delta"
-	EventToolCallEnd        StreamEventType = "tool-call-end"
+	EventTextDelta     StreamEventType = "text-delta"
+	EventToolCallStart StreamEventType = "tool-call-start"
+	EventToolCallDelta StreamEventType = "tool-call-delta"
+	EventToolCallEnd   StreamEventType = "tool-call-end"
+	// EventReasoningStart opens a thinking block. It carries no content: it
+	// marks the boundary between one block and the next, so blocks are stored
+	// and replayed separately rather than concatenated.
+	EventReasoningStart     StreamEventType = "reasoning-start"
 	EventReasoning          StreamEventType = "reasoning"
 	EventReasoningSignature StreamEventType = "reasoning-signature"
-	EventFinish             StreamEventType = "finish"
-	EventUsage              StreamEventType = "usage"
-	EventError              StreamEventType = "error"
+	// EventReasoningRedacted carries a safety-redacted thinking block. It has
+	// no readable text — only an opaque payload that must be round-tripped
+	// verbatim as a redacted_thinking block, so it is its own event rather
+	// than a signature on an empty reasoning block.
+	EventReasoningRedacted StreamEventType = "reasoning-redacted"
+	EventFinish            StreamEventType = "finish"
+	EventUsage             StreamEventType = "usage"
+	EventError             StreamEventType = "error"
 )
 
 // TokenUsage carries per-message token accounting from a provider.
@@ -191,6 +200,7 @@ type StreamEvent struct {
 	Type         StreamEventType `json:"type"`
 	Text         string          `json:"text,omitempty"`
 	Signature    string          `json:"signature,omitempty"`
+	RedactedData string          `json:"redactedData,omitempty"`
 	ToolCallID   string          `json:"toolCallId,omitempty"`
 	ToolName     string          `json:"toolName,omitempty"`
 	ToolInput    json.RawMessage `json:"toolInput,omitempty"`
@@ -234,6 +244,10 @@ type ModelMessage struct {
 type ReasoningPart struct {
 	Text      string `json:"text"`
 	Signature string `json:"signature,omitempty"`
+	// RedactedData is the opaque payload of a redacted_thinking block. When
+	// set, the block carries no readable text and must be re-sent as a
+	// redacted_thinking block rather than a thinking block.
+	RedactedData string `json:"redactedData,omitempty"`
 }
 
 type ToolDefinition struct {
@@ -249,6 +263,12 @@ type StreamRequest struct {
 	Tools       []ToolDefinition `json:"tools"`
 	Temperature float64          `json:"temperature,omitempty"`
 	MaxTokens   int              `json:"maxTokens,omitempty"`
+	// Thinking asks for the model's reasoning mode, where the provider and the
+	// model support one. Only the agent loop sets it. The short utility calls —
+	// titles, the auto-mode risk gate, compaction — run on tight max_tokens
+	// budgets that thinking would spend before reaching an answer, and none of
+	// them is the kind of work reasoning improves.
+	Thinking bool `json:"thinking,omitempty"`
 }
 
 type ModelInfo struct {

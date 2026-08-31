@@ -47,6 +47,32 @@ func TestStaticCacheVerdict(t *testing.T) {
 			newFake("ollama"),
 			CacheAbsent,
 		},
+		{
+			// Ollama's OpenAI-compatible endpoint configured in the generic
+			// "openai" slot: the ID switch never fires, and Ollama reports no
+			// cached-token field, so without the port check the observer would
+			// burn its whole window to reach the answer we already know.
+			"ollama in the openai slot is recognised by its port",
+			fakeURLProvider{newFake("openai"), "http://localhost:11434/v1"},
+			CacheAbsent,
+		},
+		{
+			"ollama in the openai slot on another host",
+			fakeURLProvider{newFake("openai"), "http://192.168.1.20:11434/v1"},
+			CacheAbsent,
+		},
+		{
+			// The supplement must stay narrow: a real OpenAI-shaped endpoint is
+			// still resolved by observation, never assumed either way.
+			"a genuine openai endpoint stays unknown",
+			fakeURLProvider{newFake("openai"), "https://api.openai.com/v1"},
+			CacheUnknown,
+		},
+		{
+			"openrouter is still resolved by observation",
+			fakeURLProvider{newFake("openrouter"), "https://openrouter.ai/api/v1"},
+			CacheUnknown,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
