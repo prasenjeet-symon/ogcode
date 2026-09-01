@@ -21,8 +21,10 @@ func NewMemoryRecallTool(mem *memory.Memory, registry *provider.Registry) Memory
 	return MemoryRecallTool{Memory: mem, Registry: registry}
 }
 
-func (t MemoryRecallTool) ID() string        { return "memory_recall" }
-func (t MemoryRecallTool) Description() string { return "Search the agentic memory graph for past facts, context, and prior reasoning relevant to a specific question. Use this when you need precise historical details (e.g., exact config values, file paths, decisions made earlier) that may be summarized too coarsely in <prior_context>." }
+func (t MemoryRecallTool) ID() string { return "memory_recall" }
+func (t MemoryRecallTool) Description() string {
+	return "Search the agentic memory graph for past facts, context, and prior reasoning relevant to a specific question. Use this when you need precise historical details (e.g., exact config values, file paths, decisions made earlier) that may be summarized too coarsely in <prior_context>."
+}
 
 func (t MemoryRecallTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{

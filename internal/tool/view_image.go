@@ -7,16 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	_ "image/gif" // register GIF decoder
 	"image/jpeg"
-	_ "image/gif"  // register GIF decoder
-	_ "image/png"  // register PNG decoder
 	_ "image/jpeg" // register JPEG decoder
+	_ "image/png"  // register PNG decoder
 	"os"
 	"path/filepath"
 
-	_ "golang.org/x/image/bmp"  // register BMP decoder
-	_ "golang.org/x/image/webp" // register WebP decoder
+	_ "golang.org/x/image/bmp" // register BMP decoder
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp" // register WebP decoder
 )
 
 // viewMaxLongEdgePx caps the long edge of returned images. Vision models

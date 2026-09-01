@@ -5,15 +5,15 @@ ogcode
 # Data directory
 .ogcode/
 
-# Downloaded embedding model cache (one-time download of ~86 MB ONNX weights)
-embed-model/
-
 # Web build artifacts
 # Dependencies
 node_modules/
 web/dist/
 web/build/
 web/.solid/
+
+# Release build output (GoReleaser's default work dir — it archives the repo)
+/dist/
 
 # Environment
 .env
@@ -33,10 +33,16 @@ manifests/
 # Claude Code CLI
 .claude/
 
-# Local scratch documents
+# Local scratch documents — planning notes kept machine-local; untracked now.
+# (GIT_DIFF_PLAN.md was previously listed; the other three are still tracked,
+# so their rules only take effect if they are ever git rm --cached'd.)
 exponential_equations.tex
 polynomial_equations.pdf
 GIT_DIFF_PLAN.md
+MCP_IMPLEMENTATION_PLAN.md
+MCP_OAUTH_PLAN.md
+SKILL_FEATURE_IMPLEMENTATION.md
+
 # Project long-term memory — machine-local working notes, loaded at runtime by
 # LoadMemoryMD from whatever directory ogcode is opened in. Never tracked: it is
 # personal to a checkout, and it is re-sent in full on every model request, so a

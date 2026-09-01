@@ -95,4 +95,3 @@ func (GlobTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		Output: strings.Join(matches, "\n"),
 	}, nil
 }
-
