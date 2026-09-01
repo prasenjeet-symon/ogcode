@@ -69,7 +69,11 @@ type LoopRunner struct {
 // reasoning stream can't flood the DB or the UI.
 const maxReasoningLen = 50_000
 
-func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, agentName string, viewportWidth int, viewportHeight int) error {
+// The error is named so the deferred loop.done publish can report it. Every
+// `return someErr` in the body assigns to it regardless of how `err` is shadowed
+// in inner scopes, which is why the publish can stay a single defer up here
+// rather than being threaded through a dozen exit paths.
+func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, agentName string, viewportWidth int, viewportHeight int) (runErr error) {
 	agent := GetAgent(agentName)
 	// Read MaxSteps into a local; never mutate the shared LoopRunner field. A
 	// deep_search call runs a nested RunLoop concurrently with the parent loop,
@@ -82,12 +86,65 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// Always notify the frontend when the loop exits, regardless of reason.
 	// Without this, any early return (DB error, stream error, panic recovery)
 	// leaves the client in a permanently-stuck loading state.
+	//
+	// The reason alone is not enough. Several exit paths fail before an
+	// assistant message exists to carry the error — get session, load messages,
+	// create assistant message — and their error used to reach nothing but a
+	// slog line in the server's stdout. The client saw a loop that stopped for
+	// no stated reason. Carry the text so it has something to show.
 	exitReason := "error"
 	defer func() {
-		lr.Bus.Publish("loop.done", map[string]string{
+		payload := map[string]string{
 			"sessionId": string(sessionID),
 			"reason":    exitReason,
-		})
+		}
+		if runErr != nil {
+			payload["error"] = runErr.Error()
+		}
+		lr.Bus.Publish("loop.done", payload)
+	}()
+
+	// Registered after the publish defer, so it runs BEFORE it (LIFO) and the
+	// publish above reports the panic instead of a bare "error".
+	//
+	// Tool execution already recovers (see executeReadyToolCalls) and the task
+	// runner recovers around its own RunLoop call, but the interactive loop had
+	// no recover anywhere on the path: a panic in prompt assembly, message
+	// conversion or compaction took the whole server down with it, which the
+	// user experiences as every session going silent at once. Recovering here
+	// covers every caller rather than one route.
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		runErr = fmt.Errorf("agent loop panicked: %v", r)
+		exitReason = "panic"
+		slog.Error("agent loop panicked",
+			"session", sessionID, "agent", agentName,
+			"panic", r, "stack", string(debug.Stack()))
+
+		// A panic mid-turn can leave the assistant message holding a tool_use
+		// with no matching tool_result. Every other abnormal exit reconciles
+		// (see the stream-error paths below); skipping it here would make the
+		// crash keep costing turns after it was survived, because the next
+		// prompt builds a request the provider rejects with a 400.
+		//
+		// Guarded on its own: the store is a plausible cause of the panic being
+		// recovered, and a second panic raised inside this deferred function
+		// would escape it and take down the process — which is the one outcome
+		// this whole block exists to prevent.
+		func() {
+			defer func() {
+				if rr := recover(); rr != nil {
+					slog.Error("agent loop: reconcile after panic panicked too",
+						"session", sessionID, "panic", rr)
+				}
+			}()
+			if _, rerr := lr.ReconcileSession(sessionID); rerr != nil {
+				slog.Warn("reconcile after panic", "session", sessionID, "err", rerr)
+			}
+		}()
 	}()
 
 	// Resolve provider based on session's model

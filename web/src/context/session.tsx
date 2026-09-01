@@ -55,6 +55,14 @@ export interface PendingPermission {
   input: string;
 }
 
+/** Why the agent loop stopped, when nothing in the transcript says so. */
+export type LoopFailure = {
+  /** The loop's exit reason: "error", "panic", or any non-clean finish. */
+  reason: string;
+  /** The server-side error text, when there was one. */
+  message: string;
+};
+
 interface SessionContextValue {
   sessions: () => Session[];
   activeSession: () => Session | null;
@@ -66,6 +74,9 @@ interface SessionContextValue {
   hasRunningTools: () => boolean;
   compacted: () => boolean;
   guidanceActive: () => boolean;
+  /** Set when the agent loop ended in a way nothing in the transcript explains. */
+  loopError: () => LoopFailure | null;
+  dismissLoopError: () => void;
   pendingPermissions: () => PendingPermission[];
   respondPermission: (permissionId: string, response: PermissionResponse) => Promise<void>;
   models: () => ModelInfo[];
@@ -206,6 +217,11 @@ export const SessionProvider: ParentComponent = (props) => {
     }
     return false;
   };
+
+  // The loop ended abnormally and no message carries the reason. Sticky, not
+  // transient: a failure the user never saw is the bug this exists to fix, so
+  // it clears only when they start another turn or dismiss it.
+  const [loopError, setLoopError] = createSignal<LoopFailure | null>(null);
 
   // Transient flag: true for 5 s after the server auto-compacts the context window
   const [compacted, setCompacted] = createSignal(false);
@@ -486,6 +502,7 @@ export const SessionProvider: ParentComponent = (props) => {
       stopPolling();
       setLoadingSessionId('');
       setCompacted(false);
+      setLoopError(null);
       if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
       // Clear any lingering guidance indicator — guidance is per-session and
       // must not leak into the destination session's UI.
@@ -587,6 +604,7 @@ export const SessionProvider: ParentComponent = (props) => {
     stopPolling();
     setLoadingSessionId('');
     setCompacted(false);
+    setLoopError(null);
     if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
     const session = await createSession(server.directory(), model || selectedModel());
     setSessions((prev) => [session, ...prev]);
@@ -748,6 +766,7 @@ export const SessionProvider: ParentComponent = (props) => {
     const session = activeSession();
     if (!session) return;
     setLoadingSessionId(session.id);
+    setLoopError(null);
 
     // One id for the message and every part of it. Recomputing 'temp-' + Date.now()
     // per part let the clock tick between them, so a part could end up pointing at
@@ -811,6 +830,7 @@ export const SessionProvider: ParentComponent = (props) => {
     const session = activeSession();
     if (!session) return { resumed: false };
     setLoadingSessionId(session.id);
+    setLoopError(null);
     try {
       const result = await resumeSession(session.id);
       if (!result?.resumed) {
@@ -899,6 +919,8 @@ export const SessionProvider: ParentComponent = (props) => {
         // Clear any lingering guidance indicator — the loop is done.
         if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
         setGuidanceActive(false);
+        const reason = last.properties?.reason || '';
+        const errText = last.properties?.error || '';
         // Fetch final messages then clear loading
         getMessages(sess.id).then((msgs) => {
           if (activeSession()?.id !== sess.id) return;
@@ -906,11 +928,41 @@ export const SessionProvider: ParentComponent = (props) => {
           lastSSEUpdate = Date.now();
           setLoadingSessionId('');
           stopFastPoll(); // background poll keeps running
+          // Surface the failure only when the transcript does not already
+          // explain it. The stream-error and connection-dropped paths write
+          // error/interrupted onto the assistant message and render their own
+          // banner there; repeating it here would report one stop twice.
+          //
+          // The last message is not necessarily the assistant's — a turn that
+          // died after its tool results were written ends on a user-role
+          // message — so scan back for the assistant turn that would be
+          // carrying the explanation.
+          if (errText) {
+            let explained = false;
+            for (let i = msgs.length - 1; i >= 0; i--) {
+              if (msgs[i].info.role !== 'assistant') continue;
+              // finish==='aborted' renders its own "Generation cancelled"
+              // notice on the message, so it explains the stop just as much as
+              // error/interrupted do. Without it a cancelled turn drew both
+              // banners for one event.
+              const info = msgs[i].info;
+              explained = !!(info.error || info.interrupted || info.finish === 'aborted');
+              break;
+            }
+            if (!explained) setLoopError({ reason: reason || 'error', message: errText });
+          }
         }).catch((e) => {
           console.error('loop.done refresh failed:', e);
           // Clear loading even on fetch failure — the loop IS done
           setLoadingSessionId('');
           stopFastPoll(); // background poll keeps running
+          // Without this the refetch failing would swallow the very failure
+          // this handler exists to surface: the loop stops, the spinner clears
+          // and nothing says why — the original bug, back again on the one
+          // path that cannot check whether a message already explains it.
+          if (errText && activeSession()?.id === sess.id) {
+            setLoopError({ reason: reason || 'error', message: errText });
+          }
         });
       }
       return;
@@ -1087,6 +1139,8 @@ export const SessionProvider: ParentComponent = (props) => {
     hasRunningTools,
     compacted,
     guidanceActive,
+    loopError,
+    dismissLoopError: () => setLoopError(null),
     pendingPermissions,
     respondPermission,
     models,

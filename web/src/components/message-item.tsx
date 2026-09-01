@@ -710,6 +710,18 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
           {(interrupted) => <ResumeBanner interruption={interrupted()} />}
         </Show>
 
+        {/* The model hit its output ceiling mid-answer. The loop treats this as
+            a terminal state and stops, which without a notice reads as the
+            answer simply ending — the reply is truncated, not complete. */}
+        <Show when={props.msg.info.finish === 'length' || props.msg.info.finish === 'max_tokens'}>
+          <div class="mt-2 text-meta text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-1.5 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <span>Response truncated — the model hit its output token limit. Ask it to continue.</span>
+          </div>
+        </Show>
+
         <Show when={props.msg.info.finish === 'aborted'}>
           <div class="mt-2 text-meta text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded-md px-3 py-1.5 flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
