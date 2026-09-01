@@ -920,3 +920,49 @@ func TestParallelToolCallsPrompt_ExamplesMatchTheAgentsTools(t *testing.T) {
 		}
 	}
 }
+
+// codebase_map returns one directory level per call. An agent told only to
+// "call codebase_map first" sees a handful of folder names, concludes the index
+// is unhelpful and falls back to grep — having paid for the call and discarded
+// the labels that were the answer. The prompt has to teach the descent.
+func TestProjectIndexPromptTeachesTheDescent(t *testing.T) {
+	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+		prompt := projectIndexPrompt(role, true, true)
+
+		for _, want := range []string{
+			"one directory level per call", // what a single call actually returns
+			"Navigate by the labels",       // how to choose where to go next
+			`subdir`,                       // the mechanism
+			"repeat until",                 // that it takes more than one call
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("projectIndexPrompt(%q) missing %q — the descent is not taught", role, want)
+			}
+		}
+
+		// The workflow must show more than one map call, or it reads as
+		// "map once, then read" and the descent never happens.
+		if n := strings.Count(prompt, "codebase_map(subdir="); n < 2 {
+			t.Errorf("projectIndexPrompt(%q) shows %d subdir calls in the workflow, want at least 2", role, n)
+		}
+
+		// Stale claims from the threshold design must not come back.
+		for _, gone := range []string{"large folders are summarized", "labeled tree of the project"} {
+			if strings.Contains(prompt, gone) {
+				t.Errorf("projectIndexPrompt(%q) still claims %q, which no longer describes the tool", role, gone)
+			}
+		}
+	}
+}
+
+// The index-status line is the first thing said about the tool in an indexed
+// project, so it must not contradict the descent the main section teaches.
+func TestIndexStatusPromptPointsAtTheDescent(t *testing.T) {
+	live := indexStatusPrompt(237)
+	if !strings.Contains(live, "subdir") {
+		t.Errorf("indexed status line does not mention subdir: %q", live)
+	}
+	if strings.Contains(indexStatusPrompt(0), "descend") {
+		t.Errorf("the empty-index line should not send the agent descending: %q", indexStatusPrompt(0))
+	}
+}

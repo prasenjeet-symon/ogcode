@@ -146,7 +146,7 @@ var PlanAgent = Agent{
    - From archives: what was built, file paths, decisions made, patterns established.
    - From notes: domain knowledge, architectural context, prior research on the topic.
 
-2. **Explore the codebase.** Start with **codebase_map** (scoped to the relevant subdirectory) to get a labeled overview of the files the request touches, then use read, glob, and grep to verify assumptions before forming any opinion. Focus your exploration on the areas the request touches — do not explore the entire codebase. Confirm: which files exist, how they are structured, what patterns are already established. Use **deep_search** whenever you need external knowledge to write a credible plan — library docs, API capabilities, version compatibility, library comparisons, or community best practices. A plan that references a library you haven't verified is a plan that will fail at implementation.
+2. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, then call it again with subdir to descend into the folders whose labels match the request until it lists files. Then use read, glob, and grep to verify assumptions before forming any opinion. Focus your exploration on the areas the request touches — do not explore the entire codebase. Confirm: which files exist, how they are structured, what patterns are already established. Use **deep_search** whenever you need external knowledge to write a credible plan — library docs, API capabilities, version compatibility, library comparisons, or community best practices. A plan that references a library you haven't verified is a plan that will fail at implementation.
 
 3. **Resolve ambiguities.** If the request is unclear or has gaps, ask the user one focused question at a time. Wait for the answer before asking the next. Do not dump a list of questions.
 
@@ -198,7 +198,7 @@ var BreakdownAgent = Agent{
 
 2. **Read project notes.** Glob .ogcode/notes/*.md and read the ones relevant to the plan. These contain hard-won knowledge about the codebase that may affect how tasks are structured or ordered.
 
-3. **Explore the codebase.** Start with **codebase_map** to get a labeled overview of the areas the plan touches, then use read, glob, and grep to verify the files, functions, types, and patterns mentioned in the plan actually exist and understand how they are structured. Do not assume — confirm. Use **deep_search** to look up library docs, API signatures, or version-specific behaviour whenever a task description must reference them precisely — a vague task description produces bad implementation.
+3. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, descending with subdir into the ones the plan touches, then use read, glob, and grep to verify the files, functions, types, and patterns mentioned in the plan actually exist and understand how they are structured. Do not assume — confirm. Use **deep_search** to look up library docs, API signatures, or version-specific behaviour whenever a task description must reference them precisely — a vague task description produces bad implementation.
 
 4. **Identify the natural execution order.** Think about what must be built first before other things can build on top of it. Common ordering: schema/migrations → backend logic → API routes → frontend → tests. Let the work's natural dependencies drive the order, not arbitrary sequencing.
 

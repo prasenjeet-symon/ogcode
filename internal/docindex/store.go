@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/db"
@@ -95,15 +97,37 @@ func (s *Store) UpdateLabels(docPath string, pageNum int, labels []string) error
 	return err
 }
 
-// ListDocsSummary returns one DocSummary per unique doc_path whose path starts
-// with dirPrefix. It aggregates in a single query and does not load per-page
+// dirPrefixFilter returns the SQL LIKE pattern that matches all entries whose
+// doc_path lies inside dirPrefix itself, not just under a sibling whose name
+// shares the same string prefix — "/proj/internal/tool" must not also match
+// "/proj/internal/toolbox". doc_path values are stored as filesystem paths
+// (filepath.Join output), so the directory boundary is the OS separator. The
+// root prefix "/proj" needs no boundary and must keep matching "/proj/x": a
+// separator is appended only when dirPrefix is not already the filesystem
+// root. An empty prefix falls back to "%", matching everything, as before.
+// LIKE wildcards in real paths ("my_dir", "a%b") are escaped so a folder name
+// can never widen the match.
+func dirPrefixFilter(dirPrefix string) string {
+	if dirPrefix == "" {
+		return "%" // preserve the old behaviour: an empty prefix matches everything
+	}
+	like := dirPrefix
+	if !os.IsPathSeparator(dirPrefix[len(dirPrefix)-1]) {
+		like += string(os.PathSeparator)
+	}
+	like = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(like)
+	return like + "%"
+}
+
+// ListDocsSummary returns one DocSummary per unique doc_path whose path is
+// under dirPrefix. It aggregates in a single query and does not load per-page
 // label data — callers that need full pages should use GetByDoc.
 func (s *Store) ListDocsSummary(dirPrefix string) ([]*DocSummary, error) {
 	rows, err := s.db.Query(
 		`SELECT doc_path, COUNT(*) AS page_count, MAX(indexed_at) AS indexed_at
-		 FROM doc_page_index WHERE doc_path LIKE ?
+		 FROM doc_page_index WHERE doc_path LIKE ? ESCAPE '\'
 		 GROUP BY doc_path ORDER BY doc_path`,
-		dirPrefix+"%",
+		dirPrefixFilter(dirPrefix),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list docs summary: %w", err)
@@ -122,15 +146,16 @@ func (s *Store) ListDocsSummary(dirPrefix string) ([]*DocSummary, error) {
 }
 
 // ListTextFiles returns all indexed non-PDF, non-DOCX entries whose doc_path
-// starts with dirPrefix, ordered by path. Each text/code file has exactly one
-// entry (page 1).
+// is under dirPrefix (the boundary is the directory separator, so a sibling
+// folder sharing the prefix never matches), ordered by path. Each text/code
+// file has exactly one entry (page 1).
 func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
 		 FROM doc_page_index
-		 WHERE doc_path LIKE ? AND LOWER(doc_path) NOT LIKE '%.pdf' AND LOWER(doc_path) NOT LIKE '%.docx'
+		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) NOT LIKE '%.pdf' AND LOWER(doc_path) NOT LIKE '%.docx'
 		 ORDER BY doc_path ASC`,
-		dirPrefix+"%",
+		dirPrefixFilter(dirPrefix),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list text files: %w", err)
@@ -148,16 +173,17 @@ func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 	return entries, rows.Err()
 }
 
-// ListPDFFiles returns all indexed PDF entries (page-level) whose doc_path
-// starts with dirPrefix, ordered by path then page number. Each PDF document
+// ListPDFFiles returns all indexed PDF entries (page-level) whose doc_path is
+// under dirPrefix (directory-boundary semantics, see dirPrefixFilter), ordered
+// by path then page number. Each PDF document
 // will have one entry per page; callers group them by DocPath.
 func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
 		 FROM doc_page_index
-		 WHERE doc_path LIKE ? AND LOWER(doc_path) LIKE '%.pdf'
+		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) LIKE '%.pdf'
 		 ORDER BY doc_path ASC, page_num ASC`,
-		dirPrefix+"%",
+		dirPrefixFilter(dirPrefix),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list pdf files: %w", err)
@@ -176,15 +202,16 @@ func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
 }
 
 // ListDocxFiles returns all indexed DOCX entries (page-level) whose doc_path
-// starts with dirPrefix, ordered by path then page number. Each DOCX document
+// is under dirPrefix (directory-boundary semantics, see dirPrefixFilter),
+// ordered by path then page number. Each DOCX document
 // will have one entry per pseudo-page; callers group them by DocPath.
 func (s *Store) ListDocxFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
 		 FROM doc_page_index
-		 WHERE doc_path LIKE ? AND LOWER(doc_path) LIKE '%.docx'
+		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) LIKE '%.docx'
 		 ORDER BY doc_path ASC, page_num ASC`,
-		dirPrefix+"%",
+		dirPrefixFilter(dirPrefix),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list docx files: %w", err)
@@ -214,13 +241,13 @@ func (s *Store) IsDocIndexed(docPath string) (bool, error) {
 	return count > 0, nil
 }
 
-// ListDocPaths returns the distinct doc_path values whose path starts with
-// dirPrefix. It is used by the indexer to detect stale entries for files that
-// no longer exist on disk.
+// ListDocPaths returns the distinct doc_path values under dirPrefix (directory
+// boundary semantics, see dirPrefixFilter). It is used by the indexer to detect
+// stale entries for files that no longer exist on disk.
 func (s *Store) ListDocPaths(dirPrefix string) ([]string, error) {
 	rows, err := s.db.Query(
-		`SELECT DISTINCT doc_path FROM doc_page_index WHERE doc_path LIKE ? ORDER BY doc_path`,
-		dirPrefix+"%",
+		`SELECT DISTINCT doc_path FROM doc_page_index WHERE doc_path LIKE ? ESCAPE '\' ORDER BY doc_path`,
+		dirPrefixFilter(dirPrefix),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list doc paths: %w", err)
@@ -238,9 +265,10 @@ func (s *Store) ListDocPaths(dirPrefix string) ([]string, error) {
 	return paths, rows.Err()
 }
 
-// DeleteAllByPrefix deletes all entries for docs whose path starts with dirPrefix.
+// DeleteAllByPrefix deletes all entries for docs under dirPrefix (directory
+// boundary semantics, see dirPrefixFilter).
 func (s *Store) DeleteAllByPrefix(dirPrefix string) error {
-	_, err := s.db.Exec(`DELETE FROM doc_page_index WHERE doc_path LIKE ?`, dirPrefix+"%")
+	_, err := s.db.Exec(`DELETE FROM doc_page_index WHERE doc_path LIKE ? ESCAPE '\'`, dirPrefixFilter(dirPrefix))
 	return err
 }
 

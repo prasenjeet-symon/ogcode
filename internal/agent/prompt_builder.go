@@ -17,6 +17,12 @@ import (
 // agent can make changes (build) or is read-only (plan, note). Agents that have
 // the codebase_map tool must use it before any file exploration.
 //
+// The codebase_map paragraph has to teach the descent, not just name the tool.
+// The map returns one directory level per call, so an agent told only "call
+// codebase_map first" sees a handful of folder names, concludes the index holds
+// nothing useful, and falls back to grep — having paid for the call and thrown
+// away the labels that were the answer.
+//
 // It also carries the file_map step. The two tools answer different questions —
 // codebase_map which file, file_map where inside it — and file_map deliberately
 // does not depend on the index, so it still applies in projects where
@@ -82,7 +88,11 @@ Use the shell to inspect, never to change: running tests, "git status"/"log"/"di
 
 	return `## Mandatory: Use Project Index Before Exploration
 
-**Rule:** When the project has been indexed, you **MUST** call "codebase_map" first — before reading any file or guessing at project structure. It returns a labeled tree of every indexed file, with topic labels that tell you which ones are relevant before you open them; "subdir" scopes it to one area, which matters on a large project.
+**Rule:** When the project has been indexed, you **MUST** call "codebase_map" first — before reading any file or guessing at project structure.
+
+It shows **one directory level per call**. Every folder on that level is a single line carrying its most common topic labels and how many files it holds; files sitting directly on that level are listed with their own labels. Nothing deeper is shown — a folder line is a door, not a listing.
+
+**Navigate by the labels.** Pick the folder whose labels match your task, call "codebase_map" again with "subdir" set to that folder's path, and repeat until the files you want are listed — usually one to three calls. This is the point of the tool: a folder whose labels have nothing to do with your task is an entire branch you never open. Do not stop at the top level and conclude the index is unhelpful because it only named folders; descending is how you use it.
 
 If it comes back empty, the project has not been indexed: stop calling it this session and use glob and grep instead. Use those too when the index does not cover what you need — unindexed files, binary patterns. codebase_map is your **first** exploration step whenever an index exists, never a blocker on getting the work done.
 
@@ -91,9 +101,11 @@ If it comes back empty, the project has not been indexed: stop calling it this s
 ### Workflow
 
 Task received
-  → codebase_map(subdir=...)          ← MANDATORY FIRST STEP: which files matter
-  → file_map(path)                    ← MANDATORY before reading an unfamiliar file: where things are inside it
-  → read(path, start_line, end_line)  ← only the region you need
+  → codebase_map()                        ← MANDATORY FIRST STEP: top level, every folder one labeled line
+  → codebase_map(subdir="internal")       ← descend into the folder whose labels match the task
+  → codebase_map(subdir="internal/tool")  ← repeat until the files you want are listed
+  → file_map(path)                        ← MANDATORY before reading an unfamiliar file: where things are inside it
+  → read(path, start_line, end_line)      ← only the region you need
   → ` + finalStep + `
 
 ## Mandatory: Map a File Before Reading It
@@ -138,7 +150,7 @@ func indexStatusPrompt(indexedFiles int) string {
 	case indexedFiles == 0:
 		return "Project index: empty — this project has not been indexed. Do not call codebase_map this session; explore with glob and grep instead. file_map is unaffected: it parses files directly and works here as it does anywhere."
 	default:
-		return fmt.Sprintf("Project index: %d files indexed. codebase_map is live — start there, and scope it with subdir.", indexedFiles)
+		return fmt.Sprintf("Project index: %d files indexed. codebase_map is live — start at the project root, then descend one level at a time with subdir.", indexedFiles)
 	}
 }
 
