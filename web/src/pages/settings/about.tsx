@@ -55,7 +55,7 @@ const LINKS = [
   {
     title: 'ogcode.xyz',
     helper: 'Install script and documentation.',
-    href: 'http://ogcode.xyz',
+    href: 'https://ogcode.xyz',
     icon: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3 7.5 7.03 7.5 12s2.015 9 4.5 9zm-8.716-5.25h17.432M3.284 8.25h17.432',
   },
 ];

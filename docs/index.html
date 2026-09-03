@@ -5,27 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ogcode — the coding agent that compounds</title>
   <meta name="description" content="Ogcode remembers what it learns — every decision, every dead end, every why — and brings back only what each turn needs. Sessions run longer, bills stay flat, nothing leaves your machine. One Go binary, any model, MIT.">
-  <!-- NOTE: these are http:// because GitHub Pages has not yet issued a TLS
-       certificate for ogcode.xyz (it currently serves its default *.github.io
-       cert). Once the custom domain is re-saved in Settings → Pages and
-       "Enforce HTTPS" is on, flip every ogcode.xyz URL in docs/ to https://. -->
-  <link rel="canonical" href="http://ogcode.xyz/">
+  <link rel="canonical" href="https://ogcode.xyz/">
   <meta name="theme-color" content="#09090b">
   <meta name="color-scheme" content="dark">
 
   <!-- Social cards -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Ogcode">
-  <meta property="og:url" content="http://ogcode.xyz/">
+  <meta property="og:url" content="https://ogcode.xyz/">
   <meta property="og:title" content="Ogcode — the coding agent that compounds">
   <meta property="og:description" content="Ogcode remembers what it learns — every decision, every dead end, every why — and brings back only what each turn needs. Sessions run longer, bills stay flat.">
-  <meta property="og:image" content="http://ogcode.xyz/media/og.png">
+  <meta property="og:image" content="https://ogcode.xyz/media/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Ogcode — the coding agent that compounds">
   <meta name="twitter:description" content="The coding agent that remembers. Sessions run longer, bills stay flat. Self-hosted, any model, MIT.">
-  <meta name="twitter:image" content="http://ogcode.xyz/media/og.png">
+  <meta name="twitter:image" content="https://ogcode.xyz/media/og.png">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%235E6AD2'/><path d='M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33' transform='translate(9 9) scale(0.72)' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round'/></svg>">
   <link rel="apple-touch-icon" href="/media/logo.png">
@@ -1605,7 +1601,7 @@
             <button class="dl-tab" type="button" role="tab" data-os="win" aria-selected="false" tabindex="-1">Windows</button>
           </div>
           <div class="dl-cmd" role="tabpanel" id="dlPane">
-            <code id="dlCmd">curl -fsSL http://ogcode.xyz/install.sh | sh</code>
+            <code id="dlCmd">curl -fsSL https://ogcode.xyz/install.sh | sh</code>
             <button class="dl-copy" type="button" id="dlCopy">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2.4"/><path stroke-linecap="round" d="M5.5 15H4.6A1.6 1.6 0 0 1 3 13.4V4.6A1.6 1.6 0 0 1 4.6 3h8.8A1.6 1.6 0 0 1 15 4.6v.9"/></svg>
               <span id="dlCopyLabel">Copy</span>
@@ -2259,7 +2255,7 @@
           </details>
           <details>
             <summary>Does it work on Windows?</summary>
-            <div class="ans">Yes — <code>irm http://ogcode.xyz/install.ps1 | iex</code> in PowerShell, or run the Docker image. Opening PRs automatically needs the <a href="https://cli.github.com" target="_blank" rel="noopener">GitHub CLI</a> authenticated.</div>
+            <div class="ans">Yes — <code>irm https://ogcode.xyz/install.ps1 | iex</code> in PowerShell, or run the Docker image. Opening PRs automatically needs the <a href="https://cli.github.com" target="_blank" rel="noopener">GitHub CLI</a> authenticated.</div>
           </details>
           <details>
             <summary>Can I run it on a server and use it from my laptop?</summary>
@@ -2351,7 +2347,7 @@
     "name": "Ogcode",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Linux, Windows",
-    "url": "http://ogcode.xyz/",
+    "url": "https://ogcode.xyz/",
     "description": "A self-hosted coding agent that remembers what it learns — every decision, every dead end, every why — and brings back only what each turn needs. Sessions run longer, bills stay flat.",
     "license": "https://opensource.org/licenses/MIT",
     "isAccessibleForFree": true,
@@ -2388,20 +2384,20 @@
     var INSTALL = {
       mac: {
         cmd: 'brew tap prasenjeet-symon/tap && brew install ogcode',
-        alt: 'or curl -fsSL http://ogcode.xyz/install.sh | sh'
+        alt: 'or curl -fsSL https://ogcode.xyz/install.sh | sh'
       },
       linux: {
-        cmd: 'curl -fsSL http://ogcode.xyz/install.sh | sh',
+        cmd: 'curl -fsSL https://ogcode.xyz/install.sh | sh',
         alt: 'or go install github.com/prasenjeet-symon/ogcode@latest'
       },
       win: {
-        cmd: 'irm http://ogcode.xyz/install.ps1 | iex',
+        cmd: 'irm https://ogcode.xyz/install.ps1 | iex',
         alt: 'or winget install prasenjeet-symon.ogcode'
       }
     };
     var INSTALL_CMD = HOST_OS === 'win'
-      ? 'irm http://ogcode.xyz/install.ps1 | iex'
-      : 'curl -fsSL http://ogcode.xyz/install.sh | sh';
+      ? 'irm https://ogcode.xyz/install.ps1 | iex'
+      : 'curl -fsSL https://ogcode.xyz/install.sh | sh';
 
     /* ── Copy ─────────────────────────────────────────────── */
     function flash(btn, label, text) {

@@ -256,7 +256,7 @@ func detectInstallCommand() string {
 		return "cargo install ogcode --force"
 	default:
 		// For manual installs, use the curl install script
-		return "curl -fsSL http://ogcode.xyz/install.sh | sh"
+		return "curl -fsSL https://ogcode.xyz/install.sh | sh"
 	}
 }
 

@@ -1589,12 +1589,12 @@ screen. It shows the slot number badge, provider color dot, model name, and an
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
@@ -1668,12 +1668,12 @@ back to the API.
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
@@ -1722,12 +1722,12 @@ HTML code blocks (rendered in sandboxed iframes) now default to a dark color sch
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
@@ -1773,12 +1773,12 @@ using Ollama-compatible proxies that emit malformed or incomplete tool-call data
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
@@ -1853,12 +1853,12 @@ wants to add their own provider keys.
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
@@ -1907,12 +1907,12 @@ they discover during exploration.
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
@@ -1999,12 +1999,12 @@ plus server-side lifecycle events from the Go backend.
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
@@ -2068,12 +2068,12 @@ re-processed every call.
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 ---
@@ -2130,12 +2130,12 @@ PDFs are now part of the `codebase_map` project tree instead of being separate:
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**

@@ -127,7 +127,7 @@ Ogcode is an agentic coding assistant that runs entirely on your machine — a s
 Unlike IDE-locked assistants (Cursor, Copilot) or cloud-only services (Claude Code), Ogcode is **browser-native, self-hosted, and model-agnostic**. Use Claude, GPT, OpenRouter, or local Ollama models, and switch anytime from the UI. No subscriptions. No vendor lock-in. Nothing leaves your machine except the prompts you send to your chosen provider.
 
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh && ogcode
+curl -fsSL https://ogcode.xyz/install.sh | sh && ogcode
 ```
 
 ---
@@ -197,7 +197,7 @@ Ogcode is the only agentic coding assistant that combines a **browser-native UI*
 
 ```bash
 # macOS / Linux — one-line install
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 
 # Set your API key (or use Ollama for local models)
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -367,7 +367,7 @@ brew install ogcode
 Via curl (one-liner):
 
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 Auto-detects your platform, downloads the latest release, and installs to `/usr/local/bin`.
@@ -375,7 +375,7 @@ Auto-detects your platform, downloads the latest release, and installs to `/usr/
 ### Windows
 
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 Downloads the latest release, extracts to `%LOCALAPPDATA%\ogcode`, and adds it to your PATH.

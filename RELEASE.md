@@ -32,12 +32,12 @@ This release adds **codebase-wide source code indexing** — the indexer now wal
 
 **macOS/Linux:**
 ```bash
-curl -fsSL http://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.xyz/install.sh | sh
 ```
 
 **Windows:**
 ```powershell
-irm http://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.xyz/install.ps1 | iex
 ```
 
 **Homebrew:**
