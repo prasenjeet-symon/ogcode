@@ -1,3 +1,58 @@
+# Release Notes — v0.31.0
+
+## Minor: HTML & CSS Codemap Support, Bounded codebase_map Output, Exit-Reason Surfacing
+
+This release widens the codemap's language coverage to **HTML and CSS** —
+file_map and codebase_map now parse stylesheets and markup the way they parse
+Go, TypeScript and Swift — and bounds codebase_map's output so a big repository
+renders a few KB instead of tens of KB per call. The release pipeline also
+switches its Linux cross-builds to a pinned zig toolchain.
+
+### HTML and CSS in the codemap
+
+Two new tree-sitter grammars (`internal/codemap/queries/html.scm`,
+`internal/codemap/queries/css.scm`, backed by the new
+`tree-sitter-html`/`tree-sitter-css` packages) extend symbol extraction:
+
+- **HTML**: elements are named by `id` attribute → first class word → tag name,
+  so `<div class="card">` is indexed as a `card` symbol and repeated matches
+  are deduplicated.
+- **CSS**: rules are indexed by their collapsed selector text; `@keyframes`
+  blocks by their name; `@media`/`@supports`/`@import` by the first word of
+  their first line. Patterns are deliberately unanchored so rules nested
+  inside media or keyframes blocks still surface.
+- Comments immediately above an element or rule become its doc line, matching
+  the behavior of every other supported language.
+
+`file_map` and `codebase_map` pick both languages up automatically — no
+configuration change. Coverage is pinned by `TestFileMapDescription_NamesEveryParsedLanguage`.
+
+### codebase_map: folder-aggregated summaries
+
+Directories with more than ten indexed files now render as a single line —
+top labels by frequency plus a file count — instead of listing every file.
+Drilling in with `subdir` expands one level at a time. On a 332-file tree the
+map output dropped from ~13 KB to ~1.2 KB, and a 2,000-file repository now
+renders a few KB bounded by its folder count rather than its file count.
+
+### Agent-loop exit reasons surfaced
+
+Interruptions and exits that were previously logged only on the agent side now
+propagate a structured reason to the client, so a failed run is diagnosable
+from the session record instead of a silent stop.
+
+### Release toolchain
+
+`.github/workflows/release.yml` Linux builds now cross-compile C with zig
+0.16.0 (sha256-pinned) instead of `gcc-aarch64-linux-gnu`, covering all
+architecture pairs with one toolchain. Untracked `docs/` fonts and media are
+also now tracked so the docs site ships complete.
+
+### Migration
+
+None. Codemap additions are opt-in by file extension, `codebase_map` output is
+informational, and no configuration keys changed.
+
 # Release Notes — v0.30.0
 
 ## Minor: Relative Relevance Selection for Semantic Memory Recall
