@@ -666,7 +666,7 @@ Batch aggressively:
 	if canWriteFiles {
 		prompt += `
 
-**Never batch two edits to the same file.** Calls in one block run concurrently in an unspecified order, so the second edit's "old_string" may no longer match by the time it runs, or may match the wrong place. Edits to different files are fine together; edits to one file go one per block. Verification batches freely — "check_syntax" on every file you touched belongs in a single block.`
+**Same-file edits can batch when their anchors don't overlap.** The runtime serializes mutations to the same path — the second "edit" re-reads the file after the first has applied — so batching several "edit" calls to one file is safe as long as each "old_string" targets a different region (different functions, different sections). Overlapping anchors fail cleanly rather than corrupting: the losing edit reports "old_string not found" — re-issue it one per block after seeing the result. **Never batch a "write" with an "edit" to the same file** — order is unspecified, so the edit can anchor against content the write replaces. Verification batches freely — "check_syntax" on every file you touched belongs in a single block.`
 	}
 
 	return prompt

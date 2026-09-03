@@ -31,6 +31,24 @@ func signatureFor(node *ts.Node, src []byte, kind string, names []string, lang *
 		}
 		return capSig(trimOpenBrace(collapse(firstLine(sliceOf(node, src, node.EndByte())))))
 
+	case "rule":
+		// The selectors are the rule's signature — its name is already those
+		// selectors, and repeating them adds nothing.
+		if len(names) > 0 {
+			return names[0]
+		}
+		return capSig(trimOpenBrace(collapse(firstLine(sliceOf(node, src, node.EndByte())))))
+
+	case "element", "script", "style":
+		// The opening tag is the signature: it is what the element is, and it
+		// already carries the id and class the name came from. Slicing the
+		// start_tag node itself is what bounds the signature — the element's
+		// own text would run to the closing tag.
+		if tag := firstChildOfKind(node, []string{"start_tag", "self_closing_tag"}); tag != nil {
+			return capSig(collapse(tag.Utf8Text(src)))
+		}
+		return capSig(trimOpenBrace(collapse(firstLine(sliceOf(node, src, node.EndByte())))))
+
 	default:
 		if end, ok := bodyStart(node, lang); ok {
 			// The body is where the slice stops, so the whole signature is safe

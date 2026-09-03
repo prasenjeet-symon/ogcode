@@ -125,10 +125,14 @@ func TestWrite_SilentOnAValidFile(t *testing.T) {
 
 // Writing prose, config, or any file type with no grammar must never produce a
 // note — there is nothing to check, and a warning would be a lie either way.
+//
+// None of these extensions may be a registered grammar: style.css was here
+// until CSS gained one, and the write tool grew a syntax verdict it cannot
+// honestly give.
 func TestWrite_SilentOnUncheckableTypes(t *testing.T) {
 	dir := t.TempDir()
 
-	for _, name := range []string{"notes.md", "conf.yaml", "data.json", "style.css"} {
+	for _, name := range []string{"notes.md", "conf.yaml", "data.json", "config.toml"} {
 		res := writeFile(t, dir, name, "key: [unclosed\n{{{ not valid anything\n")
 		if strings.Contains(res.Output, "SYNTAX") {
 			t.Errorf("%s: unparseable-by-no-grammar file produced a note:\n%s", name, res.Output)

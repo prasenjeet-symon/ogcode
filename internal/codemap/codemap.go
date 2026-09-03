@@ -182,9 +182,34 @@ func parseSymbols(src []byte, lang *language) ([]*Symbol, bool, error) {
 	}
 
 	sortByPosition(symbols)
+	symbols = dedupSymbols(symbols)
 	symbols = mergeImports(symbols)
 	assignDepth(symbols)
 	return symbols, root.HasError(), nil
+}
+
+// dedupSymbols drops consecutive symbols that describe the same declaration
+// twice, keeping the first.
+//
+// A pattern can bind the same node several times — the HTML element query
+// matches once per attribute, so `<nav id="main" class="nav">` arrives as two
+// identical captures. Sorting puts those duplicates adjacent, which is what
+// makes comparing against the last kept symbol sufficient; a non-adjacent
+// duplicate would be two declarations in different places and must stay.
+func dedupSymbols(symbols []*Symbol) []*Symbol {
+	out := symbols[:0]
+	for _, s := range symbols {
+		if n := len(out); n > 0 &&
+			out[n-1].Kind == s.Kind &&
+			out[n-1].StartLine == s.StartLine &&
+			out[n-1].EndLine == s.EndLine &&
+			out[n-1].Name == s.Name &&
+			out[n-1].Signature == s.Signature {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // buildSymbol renders one captured declaration node into a Symbol.
@@ -515,6 +540,12 @@ func docAnchor(node *ts.Node) *ts.Node {
 // text. Every block comment ends with such a line, so the wrong order puts a
 // stray slash on the end of every docblock — which PHP and JSDoc use
 // throughout.
+//
+// HTML's <!-- --> is checked after the others: its markers are whole words a
+// doc rarely begins or ends with mid-block, so a suffix trim is safe, and
+// putting it earlier would let a CSS "*/"-style line rule it out. Without this
+// a `<!-- primary nav -->` above a nav element keeps its markers and reads as
+// markup rather than as the description it is.
 func firstDocLine(raw string) string {
 	s := strings.TrimSpace(raw)
 	if rest, ok := strings.CutPrefix(s, "//"); ok {
@@ -532,6 +563,8 @@ func firstDocLine(raw string) string {
 	s = strings.TrimPrefix(s, "!")
 	s = strings.TrimSuffix(s, "*/")
 	s = strings.TrimPrefix(s, "*")
+	s = strings.TrimPrefix(s, "<!--")
+	s = strings.TrimSuffix(s, "-->")
 	return strings.TrimSpace(s)
 }
 
@@ -631,6 +664,38 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 		}
 	}
 
+	// HTML and CSS bind no name field anywhere. Each kind below is unique to
+	// its grammar, so matching on the kind alone is unambiguous — the same call
+	// the impl_item and Dart cases above make.
+	//
+	// An element is named by the id or the class its author gave it, and only
+	// falls back to the tag name when it has neither — but the query only
+	// captures elements that carry one of the two, so the tag fallback fires
+	// for script and style, whose tag is the only name they have.
+	switch node.Kind() {
+	case "element", "script_element", "style_element":
+		if name := htmlElementName(node, src); name != "" {
+			return []string{name}
+		}
+	case "rule_set":
+		if name := cssRuleName(node, src); name != "" {
+			return []string{name}
+		}
+	case "keyframes_statement":
+		if n := firstChildOfKind(node, []string{"keyframes_name"}); n != nil {
+			return []string{n.Utf8Text(src)}
+		}
+	case "media_statement", "supports_statement", "at_rule":
+		// None of these binds a name, and media and supports carry no
+		// at_keyword child at all — their query parses as feature_query or
+		// binary_query. The first word of the statement is what a reader
+		// calls the block: the "@media" in "@media (max-width: 600px)".
+		// The signature beside it carries the query itself.
+		if word := strings.Fields(firstLine(node.Utf8Text(src))); len(word) > 0 {
+			return []string{word[0]}
+		}
+	}
+
 	// The rest bind their names one level down, through specs or declarators —
 	// Go's `const ( A = 1; B = 2 )`, TypeScript's `const a = 1, b = 2`. Listing
 	// them is what makes a grouped declaration worth a line, since its own
@@ -702,6 +767,104 @@ func namesByKind(node *ts.Node, src []byte) []string {
 		}
 	}
 	return names
+}
+
+// htmlElementName names an element the way its author refers to it.
+//
+// The id is the strongest signal — it is unique in the document and it is what
+// CSS and JS reach for — so it wins over class, which then wins over the tag
+// name. The class takes its first whitespace-separated word, because the
+// outline is one line per element and a utility-class soup ("card mt-4 p-2")
+// reads best by its first, authoring name.
+//
+// The value is found by kind rather than by field: the HTML grammar names no
+// fields at all, and an attribute_value sits directly under the attribute or
+// one level down inside a quoted_attribute_value — a shape firstDescendantOfKind
+// already reconciles.
+func htmlElementName(node *ts.Node, src []byte) string {
+	var tagNode *ts.Node
+	classValue := ""
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		switch child.Kind() {
+		case "start_tag", "self_closing_tag":
+			if tagNode == nil {
+				tagNode = child
+			}
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				attr := child.NamedChild(j)
+				if attr == nil || attr.Kind() != "attribute" {
+					continue
+				}
+				attrName := firstDescendantOfKind(attr, []string{"attribute_name"})
+				if attrName == nil {
+					continue
+				}
+				name := strings.ToLower(attrName.Utf8Text(src))
+				if name != "id" && name != "class" {
+					continue
+				}
+				val := firstDescendantOfKind(attr, []string{"attribute_value"})
+				if val == nil {
+					continue
+				}
+				value := val.Utf8Text(src)
+				if name == "id" {
+					return value
+				}
+				if classValue == "" {
+					classValue = value
+				}
+			}
+		}
+	}
+	if classValue != "" {
+		if field := strings.Fields(classValue); len(field) > 0 {
+			return field[0]
+		}
+	}
+	if tagNode != nil {
+		if n := firstDescendantOfKind(tagNode, []string{"tag_name"}); n != nil {
+			return n.Utf8Text(src)
+		}
+	}
+	return ""
+}
+
+// cssRuleName names a rule by its selectors text, collapsed to one line.
+//
+// A rule declares nothing it could be called by — the selector is the identity,
+// and it is exactly what a reader scans a stylesheet for. A multi-line selector
+// list folds onto one line so the outline stays tabular.
+func cssRuleName(node *ts.Node, src []byte) string {
+	sel := firstChildOfKind(node, []string{"selectors"})
+	if sel == nil {
+		return ""
+	}
+	return collapse(sel.Utf8Text(src))
+}
+
+// firstDescendantOfKind returns the first node of any of kinds found in a
+// depth-first walk from node, or nil when none exists. firstChildOfKind only
+// scans direct named children, which is not enough where a grammar nests the
+// node one level down — HTML's attribute_value inside quoted_attribute_value.
+func firstDescendantOfKind(node *ts.Node, kinds []string) *ts.Node {
+	for _, want := range kinds {
+		if node.Kind() == want {
+			return node
+		}
+	}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if child := node.NamedChild(i); child != nil {
+			if found := firstDescendantOfKind(child, kinds); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
 }
 
 func countLines(src []byte) int {

@@ -249,19 +249,28 @@ func TestParallelToolCallsPrompt_PushesBatchingAsTheDefault(t *testing.T) {
 	}
 }
 
-// Tool calls in one block run concurrently in an unspecified order, so two
-// edits to the same file are not slow-but-safe — the second edit's old_string
-// may no longer match, or may match somewhere it should not. That is the one
-// place this advice can cause damage rather than save time, so the prompt has
-// to carve it out explicitly.
-func TestParallelToolCallsPrompt_WarnsAboutSameFileEdits(t *testing.T) {
+// The runtime serializes same-file mutations behind a per-path mutex
+// (internal/tool/pathlock.go): the second edit re-reads fresh content after the
+// first applies, and an overlapping anchor fails cleanly ("old_string not
+// found") instead of corrupting the file. So batching disjoint edits to one
+// file is safe and the prompt must say so — the old blanket prohibition was
+// stricter than the runtime and cost a round trip for nothing. The prompt still
+// has to describe what actually breaks: write-vs-edit on one file, whose order
+// is unspecified, and the clean-failure message the model should re-issue from.
+func TestParallelToolCallsPrompt_SameFileEditGuidance(t *testing.T) {
 	prompt := parallelToolCallsPrompt(true, true)
 
-	if !strings.Contains(prompt, "Never batch two edits to the same file") {
-		t.Error("prompt does not warn against batching edits to one file")
+	for _, want := range []string{
+		"serializes mutations to the same path",    // the runtime contract the permission rests on
+		"old_string not found",                     // the clean-failure message and how to recover
+		"Never batch a \"write\" with an \"edit\"", // the one combination still forbidden
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
 	}
 	if !strings.Contains(prompt, "old_string") {
-		t.Error("prompt does not say what actually breaks when same-file edits are batched")
+		t.Error("prompt does not say what anchors the same-file edits")
 	}
 }
 
@@ -756,26 +765,29 @@ func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
 	}
 }
 
-// The same-file edit rule is stated twice on purpose: once where batching is
-// explained, and once in Hard rules. It is the only piece of batching advice
-// whose cost is a corrupted file rather than a wasted round trip, and Hard
-// rules is where an agent looks for what it must not do — 60% into a prompt,
-// inside a section about efficiency, is not.
+// The same-file edit guidance is stated twice on purpose: once where batching
+// is explained, and once in Hard rules. It is the only piece of batching advice
+// whose cost when wrong is a corrupted file rather than a wasted round trip,
+// and Hard rules is where an agent looks for what it must not do — 60% into a
+// prompt, inside a section about efficiency, is not.
 //
 // Only the write-capable agents carry it, because only they can commit the
 // mistake.
-func TestCodingAgentHardRules_ForbidSameFileEditBatching(t *testing.T) {
+func TestCodingAgentHardRules_SameFileEditBatching(t *testing.T) {
 	for _, a := range []Agent{BuildAgent, TaskAgent} {
 		hard := a.System[strings.Index(a.System, "## Hard rules"):]
-		if !strings.Contains(hard, "two edits to the same file in one response block") {
-			t.Errorf("%s: Hard rules does not forbid batching edits to one file", a.Name)
-		}
-		if !strings.Contains(hard, "old_string") {
-			t.Errorf("%s: Hard rules does not say what breaks", a.Name)
+		for _, want := range []string{
+			"Same-file \"edit\" calls may batch",       // the permission, stated in Hard rules too
+			"serializes mutations to the same path",    // why the permission is safe
+			"Never batch a \"write\" with an \"edit\"", // the combination still forbidden
+		} {
+			if !strings.Contains(hard, want) {
+				t.Errorf("%s: Hard rules missing %q", a.Name, want)
+			}
 		}
 	}
 	for _, a := range []Agent{PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent} {
-		if strings.Contains(a.System, "two edits to the same file in one response block") {
+		if strings.Contains(a.System, "serializes mutations to the same path") {
 			t.Errorf("%s: cannot edit, so the rule is noise in its prompt", a.Name)
 		}
 	}

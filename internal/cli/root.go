@@ -187,11 +187,15 @@ func setupLogging() {
 	var handler slog.Handler
 	opts := &slog.HandlerOptions{Level: level, AddSource: level <= slog.LevelDebug}
 
+	// Logs go to stderr, never stdout. PersistentPreRun calls this before any
+	// command runs, so a log line on stdout would land ahead of the command's
+	// real output — which silently corrupted `run --output-format json`, whose
+	// stdout is a single JSON document a caller parses.
 	switch format {
 	case "json":
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		handler = slog.NewJSONHandler(os.Stderr, opts)
 	default:
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		handler = slog.NewTextHandler(os.Stderr, opts)
 	}
 
 	slog.SetDefault(slog.New(handler))

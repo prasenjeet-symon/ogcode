@@ -286,7 +286,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		select {
 		case evt, ok := <-events:
 			if !ok {
-				return printResult(&fullText, sess.ID, runOutputFormat)
+				return printResult(&fullText, store, sess.ID, runModel, runOutputFormat)
 			}
 			switch evt.Type {
 			case "message.part.updated":
@@ -321,30 +321,138 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 					continue
 				}
 				if props.SessionID == string(sess.ID) {
-					return printResult(&fullText, sess.ID, runOutputFormat)
+					return printResult(&fullText, store, sess.ID, runModel, runOutputFormat)
 				}
 			}
 		case err := <-loopDone:
 			if err != nil {
 				return err
 			}
-			return printResult(&fullText, sess.ID, runOutputFormat)
+			return printResult(&fullText, store, sess.ID, runModel, runOutputFormat)
 		}
 	}
 }
 
-func printResult(text *strings.Builder, sessionID session.SessionID, format string) error {
+// runTokens is the token breakdown a run reports, summed over every assistant
+// turn. The JSON names are fixed independently of session.TokenCounts so an
+// external harness parsing this output does not break if the internal struct
+// is renamed.
+type runTokens struct {
+	Input      int `json:"input"`
+	Output     int `json:"output"`
+	Reasoning  int `json:"reasoning"`
+	CacheRead  int `json:"cache_read"`
+	CacheWrite int `json:"cache_write"`
+	Total      int `json:"total"`
+}
+
+// runResult is the JSON document `--output-format json` prints.
+type runResult struct {
+	Result    string    `json:"result"`
+	SessionID string    `json:"session_id"`
+	Model     string    `json:"model,omitempty"`
+	NumTurns  int       `json:"num_turns"`
+	Finish    string    `json:"finish,omitempty"`
+	Tokens    runTokens `json:"tokens"`
+	// CostUSD is null rather than 0 when it cannot be established, so a
+	// consumer can tell "not priced" from "free".
+	CostUSD *float64 `json:"cost_usd"`
+}
+
+// Cache-token prices as a multiple of the model's base input price. The
+// catalog stores one input price per model, and both providers it covers bill
+// cache traffic off that number: Anthropic charges 1.25x to write an entry and
+// 0.1x to read one, and the OpenAI models listed discount cached input to 0.1x
+// while never billing a write separately (their cache write count stays 0).
+const (
+	cacheWriteMultiplier = 1.25
+	cacheReadMultiplier  = 0.10
+)
+
+// allTurnsLimit is a ceiling, not a page size — every message of the session is
+// wanted. No agent loop approaches it: MaxSteps caps a run far below.
+const allTurnsLimit = 1_000_000
+
+// collectUsage sums the per-turn counts the loop recorded on assistant
+// messages and returns the last finish reason, which distinguishes a run that
+// stopped because the model was done from one that hit --max-turns.
+func collectUsage(store *session.Store, sessionID session.SessionID) (tokens runTokens, turns int, finish string) {
+	msgs, err := store.GetMessages(sessionID, "", allTurnsLimit)
+	if err != nil {
+		slog.Warn("usage: could not read messages", "err", err)
+		return tokens, 0, ""
+	}
+	for _, m := range msgs {
+		if m.Info.Role != session.RoleAssistant {
+			continue
+		}
+		turns++
+		if m.Info.Finish != nil {
+			finish = *m.Info.Finish
+		}
+		t := m.Info.Tokens
+		if t == nil {
+			continue
+		}
+		tokens.Input += t.Input
+		tokens.Output += t.Output
+		tokens.Reasoning += t.Reasoning
+		tokens.CacheRead += t.CacheRead
+		tokens.CacheWrite += t.CacheWrite
+		tokens.Total += t.Total
+	}
+	return tokens, turns, finish
+}
+
+// estimateCost prices a run against the static catalog, or returns nil when it
+// cannot: with no --model the provider applies its own default and the CLI
+// never learns which model answered, and a dynamic provider's models are not in
+// the catalog at all. Reasoning tokens are not added separately — providers
+// bill them inside the output count, which is why TokenCounts.Total excludes
+// them too.
+func estimateCost(t runTokens, modelID string) *float64 {
+	if modelID == "" {
+		return nil
+	}
+	m, ok := provider.CatalogModelByID(modelID)
+	if !ok || (m.InputPricePerM == 0 && m.OutputPricePerM == 0) {
+		return nil
+	}
+	const perMillion = 1_000_000.0
+	cost := (float64(t.Input)*m.InputPricePerM +
+		float64(t.CacheWrite)*m.InputPricePerM*cacheWriteMultiplier +
+		float64(t.CacheRead)*m.InputPricePerM*cacheReadMultiplier +
+		float64(t.Output)*m.OutputPricePerM) / perMillion
+	return &cost
+}
+
+func printResult(text *strings.Builder, store *session.Store, sessionID session.SessionID, modelID, format string) error {
+	tokens, turns, finish := collectUsage(store, sessionID)
+	cost := estimateCost(tokens, modelID)
+
 	switch format {
 	case "json":
-		out := map[string]any{
-			"result":     text.String(),
-			"session_id": string(sessionID),
-		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(out)
+		return enc.Encode(runResult{
+			Result:    text.String(),
+			SessionID: string(sessionID),
+			Model:     modelID,
+			NumTurns:  turns,
+			Finish:    finish,
+			Tokens:    tokens,
+			CostUSD:   cost,
+		})
 	default: // text
 		fmt.Println() // trailing newline after streamed output
+		// Summary goes to stderr: stdout is the agent's answer, and a caller
+		// piping it should not have to strip this off.
+		costStr := "n/a"
+		if cost != nil {
+			costStr = fmt.Sprintf("$%.4f", *cost)
+		}
+		fmt.Fprintf(os.Stderr, "turns=%d finish=%s in=%d out=%d cache_read=%d cache_write=%d total=%d cost=%s\n",
+			turns, finish, tokens.Input, tokens.Output, tokens.CacheRead, tokens.CacheWrite, tokens.Total, costStr)
 		return nil
 	}
 }

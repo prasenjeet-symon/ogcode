@@ -20,9 +20,14 @@ env:
   RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
   GO_VERSION: "1.26.1"
   NODE_VERSION: "20"
+  # Zig is the C cross-compiler for the Linux builds. See build-linux for why.
+  ZIG_VERSION: "0.16.0"
+  ZIG_SHA256: "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"
 
 jobs:
-  # ── Build each target natively with CGO so go-fitz links libmupdf statically.
+  # ── Build every target with CGO so go-fitz links libmupdf statically. macOS
+  #    and Windows build natively on their own runners; Linux cross-compiles
+  #    both architectures with zig so the binaries are static (see build-linux).
   #    Binaries are staged at prebuilt/ogcode_<goos>_<goarch>/ogcode[.exe] and
   #    consumed by the release job via the GoReleaser gobinary shim.
   build-linux:
@@ -39,8 +44,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Install aarch64 cross toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install zig (C cross-compiler for both Linux targets)
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          curl -fsSL "$url" -o /tmp/zig.tar.xz
+          echo "${ZIG_SHA256}  /tmp/zig.tar.xz" | sha256sum -c -
+          mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+          echo "/opt/zig" >> "$GITHUB_PATH"
       - name: Build web UI
         run: cd web && npm install --legacy-peer-deps && npm run build
       - name: Build binaries
@@ -51,10 +63,36 @@ jobs:
             -X github.com/prasenjeet-symon/ogcode/internal/version.Version=${RELEASE_REF} \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Commit=$(git rev-parse HEAD) \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # Link fully statically against musl rather than dynamically against
+          # the runner's glibc. Building natively on ubuntu-latest made the
+          # binaries require the runner's glibc symbol versions (GLIBC_2.38 as
+          # of Ubuntu 24.04), so they refused to start on Debian 12, Ubuntu
+          # 22.04 LTS, RHEL 9 and Amazon Linux 2023 with
+          #   version `GLIBC_2.38' not found (required by ogcode)
+          # A static musl binary depends on no libc at all and runs on every
+          # distro, glibc and musl alike. zig supplies the C cross-compiler for
+          # both architectures, so one runner covers amd64 and arm64.
+          #
+          # -tags musl is what go-fitz needs to select its bundled
+          # libmupdf_linux_<arch>_musl.a; without it the musl link fails.
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-            go build -trimpath -ldflags "$LD" -o prebuilt/ogcode_linux_amd64/ogcode .
-          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
-            go build -trimpath -ldflags "$LD" -o prebuilt/ogcode_linux_arm64/ogcode .
+            CC="zig cc -target x86_64-linux-musl" \
+            CXX="zig c++ -target x86_64-linux-musl" \
+            go build -tags musl -trimpath -ldflags "$LD -extldflags '-static'" \
+              -o prebuilt/ogcode_linux_amd64/ogcode .
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 \
+            CC="zig cc -target aarch64-linux-musl" \
+            CXX="zig c++ -target aarch64-linux-musl" \
+            go build -tags musl -trimpath -ldflags "$LD -extldflags '-static'" \
+              -o prebuilt/ogcode_linux_arm64/ogcode .
+          # Fail the release rather than ship a binary that needs a libc.
+          for f in prebuilt/ogcode_linux_amd64/ogcode prebuilt/ogcode_linux_arm64/ogcode; do
+            if readelf -d "$f" | grep -q NEEDED; then
+              echo "ERROR: $f is dynamically linked; expected a static binary" >&2
+              readelf -d "$f" | grep NEEDED >&2
+              exit 1
+            fi
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: prebuilt-linux

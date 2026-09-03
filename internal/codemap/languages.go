@@ -11,7 +11,9 @@ import (
 	tsdart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
 	ts "github.com/tree-sitter/go-tree-sitter"
 	tscs "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
+	tscss "github.com/tree-sitter/tree-sitter-css/bindings/go"
 	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
+	tshtml "github.com/tree-sitter/tree-sitter-html/bindings/go"
 	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
 	tsphp "github.com/tree-sitter/tree-sitter-php/bindings/go"
 	tspy "github.com/tree-sitter/tree-sitter-python/bindings/go"
@@ -120,6 +122,20 @@ type language struct {
 // Java is the same shape as Swift and needs nothing beyond the two comment
 // kinds: its annotations also live in a (modifiers) node inside the
 // declaration.
+//
+// HTML captures by attribute rather than by declaration kind: an element is
+// worth an outline line only when it carries an id or a class, the two
+// attributes authors put on a region worth jumping to. script and style
+// elements are captured unconditionally, since their bodies parse as a
+// raw_text leaf that no other query can see into. Names come from the id, the
+// class, or the tag, in that order — markup names itself by role, not by
+// syntax.
+//
+// CSS names a rule by the selectors text itself: there is nothing else to
+// name it by, and a collapsed selector line is exactly what a reader scans a
+// stylesheet for. Its patterns stay unanchored because rules nest inside the
+// blocks of other rules — anchoring under the stylesheet would hide a media
+// query's rules, the bulk of most real stylesheets.
 var registry = map[string]*language{
 	".go": {
 		name:         "go",
@@ -155,6 +171,11 @@ var registry = map[string]*language{
 	".swift": swift(),
 
 	".java": java(),
+
+	".html": html(),
+	".htm":  html(),
+
+	".css": css(),
 }
 
 // LanguageNames returns the name of every language a real grammar covers, sorted
@@ -313,6 +334,34 @@ func java() *language {
 		newLang:      func() *ts.Language { return ts.NewLanguage(tsjava.Language()) },
 		queryFile:    "queries/java.scm",
 		commentKinds: []string{"line_comment", "block_comment"},
+	}
+}
+
+// html builds a fresh language value per extension, for the same
+// once-per-entry reason as typescript and tsx above.
+//
+// .html and .htm share one builder and one query. The capture side — which
+// elements earn a line — lives entirely in the query's id/class predicate and
+// the unconditional script/style patterns, so neither accommodation beyond
+// commentKinds is needed: comments attach through the standard sibling walk.
+func html() *language {
+	return &language{
+		name:         "html",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tshtml.Language()) },
+		queryFile:    "queries/html.scm",
+		commentKinds: []string{"comment"},
+	}
+}
+
+// css builds the stylesheet entry, for the same once-per-entry reason as
+// typescript and tsx above. Declarations are left to the rule that contains
+// them, so the outline stays one line per selector.
+func css() *language {
+	return &language{
+		name:         "css",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tscss.Language()) },
+		queryFile:    "queries/css.scm",
+		commentKinds: []string{"comment"},
 	}
 }
 

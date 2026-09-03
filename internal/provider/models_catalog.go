@@ -108,3 +108,19 @@ var OpenAIModels = []CatalogModel{
 	{ID: "o1", Name: "o1", ActiveByDefault: false, InputPricePerM: 15, OutputPricePerM: 60, SupportsImages: true, ContextWindow: 200000},
 	{ID: "o1-mini", Name: "o1 Mini", ActiveByDefault: false, InputPricePerM: 1.50, OutputPricePerM: 6, ContextWindow: 128000},
 }
+
+// CatalogModelByID finds a model across the static catalogs above.
+//
+// Only Anthropic and OpenAI are covered. OpenRouter and Ollama discover their
+// model lists at runtime and carry no pricing here, so callers must treat a
+// false return as "unknown", not "free".
+func CatalogModelByID(id string) (CatalogModel, bool) {
+	for _, list := range [][]CatalogModel{AnthropicModels, OpenAIModels} {
+		for _, m := range list {
+			if m.ID == id {
+				return m, true
+			}
+		}
+	}
+	return CatalogModel{}, false
+}

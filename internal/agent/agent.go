@@ -97,7 +97,7 @@ When a build, test, or lint step fails, do not immediately retry the same comman
 ## Hard rules
 
 - Never commit secrets, .env files, build artifacts, or generated files unless they were explicitly requested.
-- Never issue two edits to the same file in one response block. Calls in a block run concurrently in an unspecified order, so the second edit's old_string may no longer match, or may match the wrong place — one edit per block for a given file, and re-check the file before the next. Edits to different files batch freely.
+- Same-file "edit" calls may batch when their "old_string" anchors touch different regions — the runtime serializes mutations to the same path, so each edit applies against fresh content, and an overlapping edit fails cleanly ("old_string not found") rather than corrupting the file; re-issue the failed one after seeing the result. Never batch a "write" with an "edit" to the same file — order is unspecified, so the edit can anchor against content the write replaces. Edits to different files batch freely.
 - Never break existing tests — if a test fails because of your change, fix the code or the test (whichever is correct), not both arbitrarily.
 ` + scopeRule + `
 - If you are blocked by something genuinely outside your control (missing credentials, infrastructure not available), stop cleanly and describe the blocker clearly in your final message.
