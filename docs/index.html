@@ -1524,6 +1524,15 @@
     }
   </style>
   <script>document.documentElement.classList.add('js');</script>
+  <!-- PostHog — analytics for this website only (ogcode.xyz). The ogcode
+       product itself ships telemetry-free; this measures the marketing page. -->
+  <script>
+    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagResult isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+    posthog.init('phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z', {
+        api_host: 'https://us.i.posthog.com',
+        defaults: '2026-05-30',
+    })
+  </script>
 </head>
 <body>
   <div class="ambient" aria-hidden="true"></div>
@@ -2363,6 +2372,19 @@
     var REPO = 'prasenjeet-symon/ogcode';
     var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    /* ── Analytics ────────────────────────────────────────────
+       PostHog is loaded in <head>. Its loader stubs capture()
+       synchronously, so this is callable from the first handler;
+       the guard just keeps a blocked or failed loader from ever
+       throwing into the page's own code. */
+    function phEvent(name, props) {
+      try {
+        if (window.posthog && typeof window.posthog.capture === 'function') {
+          window.posthog.capture(name, props || {});
+        }
+      } catch (err) { /* analytics must never break the page */ }
+    }
+
     /* ── Year ─────────────────────────────────────────────── */
     document.getElementById('year').textContent = new Date().getFullYear();
 
@@ -2450,7 +2472,10 @@
       selectOS(HOST_OS, false);
 
       dlTabs.forEach(function (t) {
-        t.addEventListener('click', function () { selectOS(t.dataset.os, false); });
+        t.addEventListener('click', function () {
+          phEvent('install_tab_select', { platform: t.dataset.os });
+          selectOS(t.dataset.os, false);
+        });
       });
       // Arrow keys walk the tablist, as a tablist is expected to.
       dlPanel.querySelector('.dl-tabs').addEventListener('keydown', function (e) {
@@ -2466,10 +2491,13 @@
         var open = dlPanel.hasAttribute('hidden');
         dlToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
         if (open) dlPanel.removeAttribute('hidden'); else dlPanel.setAttribute('hidden', '');
+        if (open) phEvent('download_open');
       });
 
       var dlCopy = document.getElementById('dlCopy');
       dlCopy.addEventListener('click', function () {
+        var sel = dlPanel.querySelector('.dl-tab[aria-selected="true"]');
+        phEvent('install_command_copy', { platform: sel ? sel.dataset.os : HOST_OS });
         copy(dlCopy, document.getElementById('dlCopyLabel'), dlCmd.textContent);
       });
     }
@@ -2682,6 +2710,36 @@
         if (d && d.tag_name) document.getElementById('versionPill').textContent = d.tag_name;
       })
       .catch(function () { /* keep the hardcoded fallback */ });
+
+    /* ── Outbound link + FAQ tracking ────────────────────────
+       Autocapture logs raw clicks; these name the handful of
+       actions worth reading as first-class events. One delegated
+       listener covers every external link wherever it sits. */
+    function sectionOf(a) {
+      var s = a.closest('section, header, footer');
+      if (!s) return 'page';
+      if (s.id) return s.id;
+      return (s.className || '').trim().split(/\s+/)[0] || 'page';
+    }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a) return;
+      var href = a.getAttribute('href') || '';
+      if (href.indexOf('https://github.com/prasenjeet-symon/ogcode') === 0) {
+        phEvent('github_link_click', { href: href, location: sectionOf(a) });
+      } else if (href.indexOf('https://discord.gg/') === 0) {
+        phEvent('discord_link_click', { href: href, location: sectionOf(a) });
+      }
+    });
+
+    document.querySelectorAll('.faq details').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return; // toggle fires on close too; only opens count
+        var s = d.querySelector('summary');
+        phEvent('faq_expand', { question: s ? s.textContent.trim() : '' });
+      });
+    });
 
   })();
   </script>
