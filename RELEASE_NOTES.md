@@ -1,3 +1,50 @@
+# Release Notes — v0.31.1
+
+## Patch: PostHog Analytics on the Website, Nav-Tool Output Disclosure Fix
+
+A small, focused release: the marketing site (ogcode.xyz) gains product
+analytics via PostHog, and the web UI stops offering a dead disclosure control
+on agent-navigation tool output.
+
+### PostHog on the marketing site
+
+`docs/index.html` now loads the official PostHog JS snippet — the same project
+token as the app, `api_host: 'https://us.i.posthog.com'`, defaults snapshot
+`2026-05-30` (autocapture on, pageleave, pageviews). One PostHog project, two
+surfaces: site traffic is separable in PostHog by filtering `$current_url` to
+`ogcode.xyz`.
+
+The product itself remains telemetry-free; the snippet measures the marketing
+site only, and a comment at the snippet states this explicitly.
+
+Named events instrumented via an ES5-safe `phEvent()` helper (try/catch +
+type-guarded so a blocked loader can never throw into page code):
+
+| Event | Properties | Trigger |
+|---|---|---|
+| `download_open` | — | Download panel opened |
+| `install_tab_select` | `platform` | mac/linux/win install tab |
+| `install_command_copy` | `platform` | Install command copy button |
+| `faq_expand` | `question` | FAQ entry opened (close ignored) |
+| `github_link_click` / `discord_link_click` | `href`, `location` | Delegated click listener; `location` is the containing section |
+
+Verified end-to-end in headless Chrome: snippet loads, all six named events
+fire with the exact expected properties, autocapture fires on outbound links,
+zero console errors.
+
+### Web UI: nav-tool output no longer offers a dead disclosure
+
+`codebase_map` and `file_map` output is how the agent orients itself in the
+codebase — dense labeled trees, not prose a user reads. The tool status row for
+these two tools keeps its duration/line-count summary but no longer renders a
+chevron or accepts clicks to expand a disclosure that would only bury the
+summary under the full tree. Output is still fully available to the agent.
+
+### Migration
+
+None. Analytics affect only the static docs site, and the UI change is a
+read-only rendering tweak for two tool kinds.
+
 # Release Notes — v0.31.0
 
 ## Minor: HTML & CSS Codemap Support, Bounded codebase_map Output, Exit-Reason Surfacing
