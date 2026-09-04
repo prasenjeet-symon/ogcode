@@ -84,6 +84,12 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
 
   // File-editing tools render a GitHub-style before/after diff instead of raw input.
   const isFileEdit = () => tool() === 'edit' || tool() === 'write';
+
+  // Agent navigation aids (codebase_map, file_map): their dense labeled
+  // tree/outline output is how the agent orients itself in the codebase, not
+  // something the user reads. Keep the collapsed status row, but never offer
+  // disclosure into input/output.
+  const isAgentNavTool = () => tool() === 'codebase_map' || tool() === 'file_map';
   const fileDiff = createMemo((): { oldText: string; newText: string; mode: 'create' | 'edit' | 'overwrite'; omitted: boolean } | null => {
     if (!isFileEdit()) return null;
     const input = state().input || {};
@@ -163,21 +169,24 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     <div class="my-1.5">
       <button
         type="button"
-        aria-expanded={expanded()}
+        disabled={isAgentNavTool()}
+        aria-expanded={isAgentNavTool() ? undefined : expanded()}
         onClick={() => setExpanded(!expanded())}
         class={`flex items-center gap-2 w-full text-left text-meta h-7 px-2 rounded-md border
                transition-colors
-               ${expanded()
+               ${!isAgentNavTool() && expanded()
                  ? 'bg-[color:var(--bg-elevated)] border-[color:var(--border-default)]'
-                 : 'bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)] hover:bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-default)]'
+                 : `bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)]${isAgentNavTool() ? '' : ' hover:bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-default)]'}`
                }`}
       >
-        <svg
-          class={`w-2.5 h-2.5 shrink-0 text-[color:var(--text-muted)] transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Show when={!isAgentNavTool()}>
+          <svg
+            class={`w-2.5 h-2.5 shrink-0 text-[color:var(--text-muted)] transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </Show>
         <div class={`flex-shrink-0 ${statusColor()}`}>
           <Show when={status() === 'running'}>
             <div class="w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
@@ -242,14 +251,14 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
             {durationLabel()}
           </span>
         </Show>
-        <Show when={hasOutput() && !expanded() && !isFileEdit()}>
+        <Show when={hasOutput() && (isAgentNavTool() || !expanded()) && !isFileEdit()}>
           <span class="text-micro text-[color:var(--text-muted)] font-mono shrink-0 tabular-nums">
             {outputLineCount()} {outputLineCount() === 1 ? 'line' : 'lines'}
           </span>
         </Show>
       </button>
 
-      <Show when={expanded()}>
+      <Show when={!isAgentNavTool() && expanded()}>
         {/* .reveal animates the disclosure open from zero height without a
             magic max-height, so long outputs and one-liners open alike. */}
         <div class="reveal">
