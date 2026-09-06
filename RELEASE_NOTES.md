@@ -1,3 +1,87 @@
+# Release Notes — v0.32.0
+
+## Minor: Switchable Web Search Provider (Tavily), Tolerant Tool Arguments, Custom-Model Vision, Global Model Settings
+
+This release adds a **switchable web search provider** — keep the built-in
+native engine, or route `web_search` and `fetch_page` through your own **Tavily**
+account with automatic fallback to native so search never goes dark. Tool calls
+that emit an integer argument in float notation (`100.0`, `1e2`) no longer fail
+the turn; custom OpenAI/Anthropic-slot models are now probed for image support
+instead of silently losing it; and model and search settings move to a global
+config store so they persist across projects.
+
+### Switchable web search: native or Tavily
+
+Settings → General gains a **Search provider** control:
+
+- **Native (built-in)** — the default. The HTTP engine chain that ships inside
+  ogcode; nothing to install, no key, and unchanged for existing installs.
+- **Tavily** — routes `web_search` and `fetch_page` through the Tavily API
+  (`https://api.tavily.com`) using your own `tvly-…` key. Tavily authenticates
+  with a static API key, so there is no sign-in to complete.
+
+The key is stored in the config DB (masked to `__SET__` in API responses) or
+read from the `TAVILY_API_KEY` environment variable; the settings page shows
+which is in effect and offers a one-click **test** that reports whether Tavily
+accepts the key. Selecting Tavily composes it as `NewFallbackBackend(tavily,
+native)`: when a Tavily call fails — a bad key, an exhausted quota, a network
+blip — the request transparently falls back to the native engine rather than
+erroring.
+
+Provider changes **apply immediately — no restart**: a `SwitchableBackend` swaps
+the live backend under a read-write lock, so the tools and the deep-research
+pipeline pick up the change on their next call. Every result and fetched page now
+carries a `provider` attribution stamp, so "did Tavily answer, or did the native
+chain rescue the call?" — including nested cases such as `safari (tavily
+fallback)` — is recorded rather than guessed.
+
+### Tolerant tool-argument decoding
+
+Integer tool parameters are declared `"type": "integer"`, but some models ignore
+the hint and emit them in float notation (`{"offset": 100.0}`, `1e2`). Go's JSON
+decoder rejects a number carrying a decimal point or exponent into an `int` field
+even when the value is mathematically whole, so the call failed with `cannot
+unmarshal number 100.0 into Go struct field … of type int` — an error models
+often retried verbatim, burning the rest of the turn.
+
+A new `DecodeArgs` helper (`internal/tool/args.go`) now backs every tool. Before
+decoding, it rewrites integral float literals to plain integers at the byte level
+— string-aware, and only for values an `int64` can hold exactly. Genuinely
+fractional values, quoted numbers and out-of-range magnitudes are left untouched
+so a truly wrong argument still fails loudly. The `number`→`integer` schema hints
+on the affected params (bash `timeout`, read `start_line`/`end_line`/`offset`/
+`limit`, and others) were tightened to match.
+
+### Vision for custom models
+
+A custom model added under the OpenAI or Anthropic slot is not in the curated
+capability catalog, so the image-support short-circuit resolved it to "no image
+support" and disabled image tools for it. `Registry.IsCustomModel` now gates that
+short-circuit: custom models are probed for image support like any other dynamic
+model, and the probed capability is surfaced through the models API and the
+settings UI. Pinned by `internal/agent/image_support_test.go`.
+
+### Global model and search settings
+
+Model preferences and search configuration now live in the **global config DB**
+(shared across projects) rather than a per-project database, so a model you
+enable or a search provider you pick persists across every project and checkout.
+Settings → Models is reworked around per-provider slots with in-place model
+search/filter, custom-model management, applied-state feedback, and image
+capability shown per model.
+
+### Web UI
+
+A mobile navigation drawer, keyboard-navigation helpers, and an extracted sidebar
+shell, with responsive styling across the pages and settings screens.
+
+### Migration
+
+`035_search_provider.sql` adds `provider` and `tavily_api_key` columns to
+`search_config`, both defaulting to the native provider so existing installs are
+unaffected. The down migration is a no-op: older SQLite's `DROP COLUMN` support
+is unreliable, so the columns are left in place.
+
 # Release Notes — v0.31.1
 
 ## Patch: PostHog Analytics on the Website, Nav-Tool Output Disclosure Fix
