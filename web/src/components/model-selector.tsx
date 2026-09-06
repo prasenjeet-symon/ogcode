@@ -100,8 +100,12 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
 
   // Open the dropdown as a viewport-fixed, clamped popover anchored to the trigger
   // so it stays fully visible — even inside a right-edge drawer or near a screen edge.
+  // On phones (<640px) the .model-dropdown CSS in index.css overrides the inline
+  // coordinates into a bottom sheet; the math below is skipped there because
+  // !important wins over inline styles anyway and computing it is wasted work.
   const toggleOpen = () => {
     if (open()) { setOpen(false); return; }
+    if (window.matchMedia('(max-width: 640px)').matches) { setOpen(true); return; }
     const r = triggerRef?.getBoundingClientRect();
     if (r) {
       const W = 384, GAP = 6, M = 8; // dropdown width (w-96), gap, viewport margin
@@ -170,7 +174,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
         <Portal>
           <div class="fixed inset-0 z-[210]" onClick={() => setOpen(false)} />
           <div
-            class="fixed w-96 bg-[color:var(--bg-overlay)] border border-[color:var(--border-default)] rounded-xl shadow-[0_16px_40px_rgba(0,0,0,0.5)] z-[211] py-1 overflow-y-auto"
+            class="model-dropdown fixed w-96 bg-[color:var(--bg-overlay)] border border-[color:var(--border-default)] rounded-xl shadow-[0_16px_40px_rgba(0,0,0,0.5)] z-[211] py-1 overflow-y-auto"
             style={{
               left: `${pos()?.left ?? 0}px`,
               ...(pos()?.top !== undefined ? { top: `${pos()!.top}px` } : { bottom: `${pos()?.bottom ?? 0}px` }),

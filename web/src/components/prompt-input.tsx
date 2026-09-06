@@ -4,6 +4,7 @@ import { type ImagePartData } from '../api/client';
 import ModelSelector from './model-selector';
 import PermissionPrompt from './permission-prompt';
 import PermissionModeToggle from './permission-mode-toggle';
+import { trackKeyboardInset } from '../lib/keyboard';
 
 // Maximum image file size: 10 MB
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
@@ -305,13 +306,16 @@ export default function PromptInput() {
 
   onMount(() => {
     document.addEventListener('keydown', handleGlobalKeyDown);
+    // Publishes --kb-inset on <html> so this composer (and any other) can
+    // pad above the on-screen keyboard. Idempotent across mounts.
+    trackKeyboardInset();
   });
   onCleanup(() => {
     document.removeEventListener('keydown', handleGlobalKeyDown);
   });
 
   return (
-    <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-3">
+    <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-3 composer-safe">
       <form onSubmit={handleSubmit} class="chat-col px-4 md:px-8 pb-3">
         <div
           class="composer relative rounded-[1.25rem] border bg-[color:var(--bg-surface)] transition-[border-color,box-shadow] duration-200"
@@ -393,8 +397,9 @@ export default function PromptInput() {
                    min-h-[2.25rem] max-h-[13.75rem] leading-[1.6]"
           />
 
-          {/* Toolbar */}
-          <div class="flex items-center gap-1.5 px-2 pb-2 pt-0.5">
+          {/* Toolbar. flex-wrap so a 320px viewport can stack the selector
+              row and the send controls rather than overflow. */}
+          <div class="flex flex-wrap items-center gap-1.5 px-2 pb-2 pt-0.5">
             <ModelSelector />
 
             {/* Approval mode: Ask (default) vs Auto (risk-gated) */}
@@ -438,7 +443,7 @@ export default function PromptInput() {
                   the current generation/tool finish naturally — the guidance still
                   applies on the next iteration. */}
               <label
-                class="flex items-center gap-1.5 text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] cursor-pointer select-none transition-colors h-8 px-1.5 rounded-lg hover:bg-[color:var(--bg-hover)]"
+                class="hide-below-md flex items-center gap-1.5 text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] cursor-pointer select-none transition-colors h-8 px-1.5 rounded-lg hover:bg-[color:var(--bg-hover)]"
                 title={cancelTool() ? 'The running LLM stream and tools will be cancelled when you send guidance' : 'The current generation/tool will be allowed to finish before guidance is applied'}
               >
                 <input
@@ -499,8 +504,10 @@ export default function PromptInput() {
             One fixed-height row that swaps content instead of two stacked
             rows: the keyboard hints are only useful while you are typing, and
             the caveat is only worth reading when you are not. Reserving the
-            height keeps the composer from shifting on focus. */}
-        <div class="mt-1.5 h-4 flex items-center justify-center text-micro text-[color:var(--text-muted)]">
+            height keeps the composer from shifting on focus. The whole row
+            is display:none on touch (see .composer-hints in index.css) —
+            touch keyboards have their own return key. */}
+        <div class="composer-hints mt-1.5 h-4 flex items-center justify-center text-micro text-[color:var(--text-muted)]">
           <Show
             when={focused() || isRunning()}
             fallback={<span>ogcode may make mistakes — verify important output.</span>}

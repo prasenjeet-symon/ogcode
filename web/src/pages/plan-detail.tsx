@@ -12,6 +12,7 @@ import NotificationBell from '../components/notification-bell';
 import TokenPill from '../components/token-pill';
 import ResourcePill from '../components/resource-pill';
 import MemoryDialog from '../components/memory-dialog';
+import { DrawerToggle } from '../components/sidebar-shell';
 import { NotFoundPanel } from './not-found';
 
 function getModelLabel(model: string | undefined): string {
@@ -82,7 +83,7 @@ function PlanDetailContent() {
   };
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <PlanSidebar />
 
       <Show
@@ -97,8 +98,11 @@ function PlanDetailContent() {
         }
       >
       <div class="flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
-        {/* Header */}
-        <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-4 backdrop-blur-sm" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(17,17,20,0.8)', 'z-index': 100 }}>
+        {/* Header. The tab toggle moves to the far right on phones and the
+            ambient pills (model, token, resource, memory) collapse away —
+            the tab switch and the two action buttons are what matter. */}
+        <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-4 backdrop-blur-sm" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(17,17,20,0.8)', 'z-index': 100, [ 'padding-top']: 'env(safe-area-inset-top)' }}>
+          <DrawerToggle drawer="plans" label="Open plans" />
           <div class="flex items-center gap-2 min-w-0 flex-1">
             <Breadcrumb items={breadcrumbs()} />
             <Show when={plan.activePlan()?.status === 'locked'}>
@@ -106,7 +110,7 @@ function PlanDetailContent() {
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
-                Locked
+                <span class="hidden sm:inline">Locked</span>
               </span>
             </Show>
             <Show when={plan.loading()}>
@@ -119,35 +123,37 @@ function PlanDetailContent() {
 
           <div class="flex items-center gap-2 shrink-0">
             <Show when={plan.activePlan()?.model}>
-              <span class="text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium">
+              <span class="text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium hide-below-md">
                 {getModelLabel(plan.activePlan()?.model)}
               </span>
             </Show>
 
-            <TokenPill messages={plan.messages} />
-            <ResourcePill />
+            <div class="hide-below-lg flex items-center gap-2">
+              <TokenPill messages={plan.messages} />
+              <ResourcePill />
 
-            <Show when={server.memoryEnabled()}>
-              <MemoryDialog
-                savedTokens={plan.memorySavedTokens()}
-                totalTokens={planTotalTokens()}
-                model={plan.activePlan()?.model ?? ''}
-                dynamicPrices={dynamicPrices()}
-                models={models()}
-              />
-            </Show>
+              <Show when={server.memoryEnabled()}>
+                <MemoryDialog
+                  savedTokens={plan.memorySavedTokens()}
+                  totalTokens={planTotalTokens()}
+                  model={plan.activePlan()?.model ?? ''}
+                  dynamicPrices={dynamicPrices()}
+                  models={models()}
+                />
+              </Show>
+            </div>
 
             {/* Tab toggle for narrow screens */}
             <div class="flex rounded-lg border border-[color:var(--border-default)] overflow-hidden lg:hidden">
               <button
                 onClick={() => setActiveTab('conversation')}
-                class={`px-2.5 py-1 text-[11px] font-medium transition ${activeTab() === 'conversation' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-400 hover:text-zinc-200'}`}
+                class={`px-3 py-1.5 text-[11px] font-medium transition ${activeTab() === 'conversation' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-400 hover:text-zinc-200'}`}
               >
                 Chat
               </button>
               <button
                 onClick={() => setActiveTab('tasks')}
-                class={`px-2.5 py-1 text-[11px] font-medium transition ${activeTab() === 'tasks' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-400 hover:text-zinc-200'}`}
+                class={`px-3 py-1.5 text-[11px] font-medium transition ${activeTab() === 'tasks' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-400 hover:text-zinc-200'}`}
               >
                 Tasks
               </button>
@@ -159,8 +165,9 @@ function PlanDetailContent() {
                 const p = plan.activePlan();
                 if (p) downloadPlanExport(p.id).catch(console.error);
               }}
-              class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition"
+              class="w-8 h-8 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition"
               title="Export as Markdown"
+              aria-label="Export as Markdown"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -169,8 +176,9 @@ function PlanDetailContent() {
             <button
               type="button"
               onClick={() => navigate('/settings', { state: { from: location.pathname } })}
-              class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition"
+              class="w-8 h-8 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition"
               title="Settings"
+              aria-label="Settings"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />

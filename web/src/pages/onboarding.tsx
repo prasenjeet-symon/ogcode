@@ -253,8 +253,9 @@ export default function Onboarding() {
   };
 
   return (
-    <div class="flex h-screen w-full items-center justify-center bg-[color:var(--bg-base)] px-6">
-      <div class="w-full max-w-lg rounded-2xl border border-zinc-800 bg-[color:var(--bg-elevated,#18181b)] p-8 shadow-xl">
+    <div class="flex h-dvh w-full items-center justify-center bg-[color:var(--bg-base)] px-4 py-6 overflow-y-auto"
+         style={{ 'padding-top': 'max(1.5rem, env(safe-area-inset-top))', 'padding-bottom': 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+      <div class="w-full max-w-lg rounded-2xl border border-zinc-800 bg-[color:var(--bg-elevated,#18181b)] p-5 sm:p-8 shadow-xl my-auto">
         {/* Header + step indicator */}
         <div class="mb-6 text-center">
           <h1 class="text-2xl font-semibold text-zinc-100">Welcome to Ogcode</h1>

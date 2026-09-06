@@ -3,6 +3,7 @@ import { createSignal, createEffect, For, Show, onMount } from 'solid-js';
 import { useSession } from '../context/session';
 import { useServer } from '../context/server';
 import SessionSidebar from '../components/session-sidebar';
+import { DrawerToggle } from '../components/sidebar-shell';
 import ModelSelector from '../components/model-selector';
 import Logo from '../components/logo';
 
@@ -149,7 +150,7 @@ function HomeContent() {
   };
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <SessionSidebar />
 
       <div class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
@@ -166,9 +167,11 @@ function HomeContent() {
 
         <div class="relative flex-1 overflow-y-auto">
           {/* ── Nav bar ─────────────────────────────────────────── */}
-          <header class="sticky top-0 z-20 flex items-center justify-between px-6 py-4
-                          backdrop-blur-md bg-[color:var(--bg-base)]/70 border-b border-[color:var(--border-subtle)]">
+          <header class="sticky top-0 z-20 flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4
+                          backdrop-blur-md bg-[color:var(--bg-base)]/70 border-b border-[color:var(--border-subtle)]"
+                  style={{ 'padding-top': 'max(0.75rem, env(safe-area-inset-top))' }}>
             <div class="flex items-center gap-2.5">
+              <DrawerToggle drawer="sessions" label="Open sessions" />
               <div class="w-7 h-7 rounded-lg bg-[color:var(--accent)] flex items-center justify-center shadow-md shadow-[color:var(--accent)]/20 ring-1 ring-white/10">
                 <Logo class="w-3.5 h-3.5 text-[color:var(--on-primary)]" small />
               </div>
@@ -203,12 +206,12 @@ function HomeContent() {
           </header>
 
           {/* ── Hero ───────────────────────────────────────────── */}
-          <section class="relative flex flex-col items-center pt-20 pb-10 px-6">
+          <section class="relative flex flex-col items-center pt-10 sm:pt-20 pb-10 px-4 sm:px-6">
             {/* Badge */}
             <div class="mb-7 animate-fade-in-up flex items-center gap-2 px-3 py-1.5 rounded-full
                         border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]/60
-                        text-[11px] text-zinc-400">
-              <span class="relative flex h-1.5 w-1.5">
+                        text-[11px] text-zinc-400 text-center">
+              <span class="relative flex h-1.5 w-1.5 shrink-0">
                 <span class="absolute inline-flex h-full w-full rounded-full bg-[color:var(--accent)] opacity-60 animate-ping" />
                 <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]" />
               </span>
@@ -216,7 +219,7 @@ function HomeContent() {
             </div>
 
             {/* Headline */}
-            <h1 class="text-center text-[42px] md:text-[54px] font-bold tracking-tight text-zinc-50 leading-[1.05]
+            <h1 class="text-center text-[32px] sm:text-[42px] md:text-[54px] font-bold tracking-tight text-zinc-50 leading-[1.05]
                        animate-fade-in-up max-w-3xl" style={{ 'animation-delay': '40ms' }}>
               Where everyone is a
               <span class="block mt-1 bg-gradient-to-r from-[color:var(--accent)] via-[#8b9cf7] to-[color:var(--accent)]
@@ -236,7 +239,7 @@ function HomeContent() {
           </section>
 
           {/* ── Prompt input ────────────────────────────────────── */}
-          <section class="relative flex flex-col items-center px-6 pb-2">
+          <section class="relative flex flex-col items-center px-4 sm:px-6 pb-2">
             <form onSubmit={handleSubmit} class="w-full max-w-2xl animate-fade-in-up" style={{ 'animation-delay': '120ms' }}>
               <div class="rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]
                           shadow-lg shadow-black/30 transition-all var(--spring-md) focus-within:border-[color:var(--accent)]/50
@@ -304,8 +307,8 @@ function HomeContent() {
               </For>
             </div>
 
-            {/* Keyboard hint + workspace path */}
-            <div class="mt-5 flex items-center justify-center gap-3 text-[10.5px] text-zinc-600">
+            {/* Keyboard hint + workspace path. Hint keys are desktop-only. */}
+            <div class="mt-5 flex items-center justify-center gap-3 text-[10.5px] text-zinc-600 composer-hints">
               <span class="flex items-center gap-1">
                 <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">↵</kbd>
                 send
@@ -315,13 +318,14 @@ function HomeContent() {
                 <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">⇧ ↵</kbd>
                 newline
               </span>
-              <Show when={server.directory()}>
-                <span class="text-zinc-700">·</span>
-                <span class="font-mono text-zinc-600 truncate max-w-[280px]">
+            </div>
+            <Show when={server.directory()}>
+              <div class="mt-3 flex items-center justify-center max-w-full px-4">
+                <span class="font-mono text-[10.5px] text-zinc-600 truncate max-w-[280px]">
                   {server.directory()}
                 </span>
-              </Show>
-            </div>
+              </div>
+            </Show>
           </section>
 
           {/* ── Value pillars ───────────────────────────────────── */}

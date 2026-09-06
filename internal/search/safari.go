@@ -168,6 +168,9 @@ func NewSafariBackend() *SafariBackend {
 
 var _ Backend = (*SafariBackend)(nil)
 
+// Name reports the provider name stamped on this backend's results.
+func (s *SafariBackend) Name() string { return ProviderSafari }
+
 // safariEngines are the engines the browser path drives. They are the same ones
 // the native path uses, reached through the same URL builders and read by the
 // same parsers — only the transport differs.
@@ -324,6 +327,7 @@ func (s *SafariBackend) Search(ctx context.Context, query string, limit int) ([]
 			continue
 		}
 		if results := e.parse(doc, limit); len(results) > 0 {
+			withProvider(results, ProviderSafari)
 			s.searchCache.set(key, results)
 			return results, nil
 		}
@@ -362,7 +366,7 @@ func (s *SafariBackend) FetchPage(ctx context.Context, rawURL string) (PageConte
 		return PageContent{}, fmt.Errorf("safari: no readable content extracted from %s", rawURL)
 	}
 	text, truncated := truncateChars(text, nativePageChars)
-	page := PageContent{URL: rawURL, Title: title, Text: text, Truncated: truncated}
+	page := PageContent{URL: rawURL, Title: title, Text: text, Truncated: truncated, Provider: ProviderSafari}
 	s.fetchCache.set(rawURL, page)
 	return page, nil
 }

@@ -1808,9 +1808,15 @@ func (lr *LoopRunner) resolveImageSupport(ctx context.Context, p provider.Provid
 
 	// Anthropic and OpenAI ship a curated catalog with known capabilities — trust
 	// it directly rather than spending a probe call. Dynamic providers fall through.
-	switch p.ID() {
-	case "anthropic", "openai":
-		return lr.Registry.ModelSupportsImages(modelID)
+	// A *custom* model added under the anthropic/openai slot is NOT in that catalog,
+	// so it must be probed like any dynamic model; only short-circuit for genuine
+	// catalog models. Without this, custom OpenAI models never probe and always
+	// resolve to false (not found in the catalog), disabling image tools for them.
+	if !lr.Registry.IsCustomModel(modelID) {
+		switch p.ID() {
+		case "anthropic", "openai":
+			return lr.Registry.ModelSupportsImages(modelID)
+		}
 	}
 
 	pctx, cancel := context.WithTimeout(ctx, probeImageTimeout)

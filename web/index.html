@@ -2,8 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- viewport-fit=cover extends the page under the notch/home indicator; the
+       safe-area insets in styles/index.css then pad the chrome away from them.
+       interactive-widget=resizes-content makes Android Chrome shrink the layout
+       viewport for the keyboard (iOS gets the same effect via the visualViewport
+       listener in lib/keyboard.ts). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#09090b" />
   <title>ogcode</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <!-- Fetch the UI typeface alongside the bundle rather than after the CSS

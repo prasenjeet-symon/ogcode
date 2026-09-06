@@ -9,6 +9,7 @@ import TokenPill from '../components/token-pill';
 import ResourcePill from '../components/resource-pill';
 import MemoryDialog from '../components/memory-dialog';
 import SubagentIndicator from '../components/subagent-indicator';
+import { DrawerToggle } from '../components/sidebar-shell';
 import { getProviderPricing } from '../api/client';
 import { NotFoundPanel } from './not-found';
 
@@ -66,7 +67,7 @@ function ChatContent() {
   }));
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <SessionSidebar />
       <Show
         when={!session.sessionMissing()}
@@ -78,8 +79,11 @@ function ChatContent() {
         }
       >
       <div class="page-enter flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
-        {/* Header */}
-        <header class="h-11 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-3.5 gap-3 backdrop-blur-md overflow-visible" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(15,15,18,0.82)', 'z-index': 100 }}>
+        {/* Header. On phones the ambient pills (resource sparkline, token
+            breakdown) collapse into what fits; everything keeps the same
+            order so muscle memory transfers. */}
+        <header class="h-11 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-3.5 gap-2 backdrop-blur-md overflow-visible" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(15,15,18,0.82)', 'z-index': 100, [ 'padding-top']: 'env(safe-area-inset-top)' }}>
+          <DrawerToggle drawer="sessions" label="Open sessions" />
           <div class="flex items-baseline gap-2.5 min-w-0 flex-1">
             <h2 class="text-ui font-medium text-[color:var(--text-primary)] truncate">
               {session.activeSession()?.title || 'New session'}
@@ -103,7 +107,7 @@ function ChatContent() {
             <ResourcePill />
             <Show when={session.activeSession()?.model}>
               <span
-                class="text-micro text-[color:var(--text-secondary)] bg-[color:var(--bg-elevated)] h-7 inline-flex items-center px-2 rounded-md border border-[color:var(--border-subtle)] font-medium max-w-[11rem] truncate"
+                class="text-micro text-[color:var(--text-secondary)] bg-[color:var(--bg-elevated)] h-7 inline-flex items-center px-2 rounded-md border border-[color:var(--border-subtle)] font-medium max-w-[11rem] truncate hide-below-md"
                 title={session.activeSession()?.model}
               >
                 {getModelLabel(session.activeSession()?.model)}

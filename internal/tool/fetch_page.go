@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 )
@@ -34,7 +35,7 @@ func (t FetchPageTool) Execute(ctx context.Context, args json.RawMessage, _ Cont
 	var input struct {
 		URL string `json:"url"`
 	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 	if input.URL == "" {
@@ -43,10 +44,21 @@ func (t FetchPageTool) Execute(ctx context.Context, args json.RawMessage, _ Cont
 
 	page, err := t.Bridge.FetchPage(ctx, input.URL)
 	if err != nil {
+		// The bridge name is who was asked first; the server log carries the
+		// per-hop story when a fallback chain is wired.
+		slog.Info("fetch_page: fetch failed", "provider", t.Bridge.Name(), "url", input.URL, "err", err)
 		return Result{Output: fmt.Sprintf("Fetch failed for %s: %s", input.URL, err)}, nil
 	}
+	// The stamp on the page is who actually answered — with a fallback chain
+	// wired that can differ from the configured provider, and surfacing that
+	// difference is the point.
+	provider := page.Provider
+	if provider == "" {
+		provider = t.Bridge.Name()
+	}
+	slog.Info("fetch_page: page served", "provider", provider, "url", input.URL, "chars", len(page.Text))
 
-	output := fmt.Sprintf("# %s\nURL: %s\n\n%s", page.Title, page.URL, page.Text)
+	output := fmt.Sprintf("# %s\nURL: %s\nProvider: %s\n\n%s", page.Title, page.URL, provider, page.Text)
 	if page.Truncated {
 		output += "\n\n[content truncated at 14,000 characters]"
 	}

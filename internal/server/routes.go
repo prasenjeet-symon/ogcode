@@ -63,6 +63,7 @@ func (s *Server) routes() http.Handler {
 
 		r.Get("/search/config", s.handleGetSearchConfig)
 		r.Post("/search/config", s.handleSetSearchConfig)
+		r.Post("/search/config/validate", s.handleValidateSearchKey)
 
 		r.Get("/providers/config", s.handleGetProviderConfigs)
 		r.Post("/providers/config/{id}", s.handleSetProviderConfig)

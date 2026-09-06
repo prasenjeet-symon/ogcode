@@ -63,7 +63,7 @@ func (LatexToPdfTool) Execute(ctx context.Context, args json.RawMessage, tctx Co
 		Source   string `json:"source"`
 		Filename string `json:"filename"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse latex_to_pdf args: %w", err)
 	}
 	if params.Source == "" {

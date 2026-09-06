@@ -8,6 +8,7 @@ import NoteEditor from '../components/note-editor';
 import ModelSelector from '../components/model-selector';
 import SessionSidebar from '../components/session-sidebar';
 import PlanSidebar from '../components/plan-sidebar';
+import { DrawerToggle } from '../components/sidebar-shell';
 
 function Sidebar() {
   const server = useServer();
@@ -40,6 +41,7 @@ function formatDateShort(ts: number): string {
 export default function NoteDetailPage() {
   const params = useParams<{ id: string }>();
   const noteCtx = useNote();
+  const server = useServer();
   const navigate = useNavigate();
   const [note, setNote] = createSignal<Note | null>(null);
   const [notFound, setNotFound] = createSignal(false);
@@ -174,7 +176,7 @@ export default function NoteDetailPage() {
   const displayContent = () => previewVersion()?.content ?? currentNote()?.content ?? '';
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <Sidebar />
 
       <div class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
@@ -191,8 +193,11 @@ export default function NoteDetailPage() {
           {/* Header */}
           <div class="shrink-0 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)]">
 
-            {/* Top bar: breadcrumb + actions */}
-            <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+            {/* Top bar: breadcrumb + actions. On phones the badges wrap below
+                the breadcrumb rather than crowding it. */}
+            <div class="flex flex-wrap items-center gap-2 px-3 sm:px-4 pt-3 pb-2"
+                 style={{ 'padding-top': 'max(0.75rem, env(safe-area-inset-top))' }}>
+              <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
               <button
                 onClick={() => navigate('/notes')}
                 class="flex items-center gap-1.5 text-[12px] text-zinc-500 hover:text-zinc-200 transition shrink-0"

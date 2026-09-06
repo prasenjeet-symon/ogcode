@@ -3,6 +3,7 @@ import { usePlan } from '../context/plan';
 import { useServer } from '../context/server';
 import type { Plan } from '../api/client';
 import { createSignal, createMemo, For, Show } from 'solid-js';
+import SidebarShell from './sidebar-shell';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -27,7 +28,17 @@ function shortenPath(path: string): string {
   return `${collapsed.startsWith('~') ? '~' : ''}/…/${segments.slice(-2).join('/')}`;
 }
 
+// The sidebar itself. Exported wrapped in SidebarShell so every page that
+// renders <PlanSidebar /> gets the drawer behaviour below lg for free.
 export default function PlanSidebar() {
+  return (
+    <SidebarShell drawer="plans">
+      <PlanSidebarInner />
+    </SidebarShell>
+  );
+}
+
+function PlanSidebarInner() {
   const plan = usePlan();
   const server = useServer();
   const navigate = useNavigate();
@@ -277,7 +288,7 @@ export default function PlanSidebar() {
                       </svg>
                     </Show>
                   </span>
-                  <span class={`text-[10.5px] tabular-nums shrink-0 transition ${isActive() ? 'text-zinc-500' : 'text-zinc-600'} group-hover:opacity-0`}>
+                  <span class={`text-[10.5px] tabular-nums shrink-0 transition max-md:hidden ${isActive() ? 'text-zinc-500' : 'text-zinc-600'} group-hover:opacity-0`}>
                     {formatTime(p.updatedAt)}
                   </span>
                   <button

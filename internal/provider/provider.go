@@ -433,6 +433,17 @@ func (r *Registry) UnregisterCustomModel(modelID string) {
 	r.customMu.Unlock()
 }
 
+// IsCustomModel reports whether modelID was registered as a user-added custom
+// model (rather than a built-in catalog or dynamically-fetched model). Custom
+// models are not present in any provider's curated catalog, so capability
+// lookups that trust the catalog must treat them as unknown and probe instead.
+func (r *Registry) IsCustomModel(modelID string) bool {
+	r.customMu.RLock()
+	defer r.customMu.RUnlock()
+	_, ok := r.customModels[modelID]
+	return ok
+}
+
 func (r *Registry) ResolveProvider(modelID string) Provider {
 	// Check custom model routing first
 	r.customMu.RLock()

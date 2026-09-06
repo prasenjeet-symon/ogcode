@@ -47,7 +47,7 @@ func (t MemoryRecallTool) Execute(ctx context.Context, args json.RawMessage, tct
 	var params struct {
 		Question string `json:"question"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, err
 	}
 	if params.Question == "" {

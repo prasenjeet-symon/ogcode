@@ -4,6 +4,7 @@ import { usePlan } from '../context/plan';
 import { useServer } from '../context/server';
 import PlanSidebar from '../components/plan-sidebar';
 import ModelSelector from '../components/model-selector';
+import { DrawerToggle } from '../components/sidebar-shell';
 
 const SUGGESTIONS: string[] = [
   'Plan a REST API',
@@ -79,13 +80,23 @@ function PlanListContent() {
   const canSend = () => !submitting() && text().trim().length > 0;
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <PlanSidebar />
 
       <div class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
+        {/* Floating drawer toggle: this page has no header bar, and below lg
+            the plan sidebar (plans/notes/docindex navigation) is a drawer —
+            without this a phone has no way off the page. Pinned outside the
+            scroll container so it stays put while the hero scrolls. */}
+        <div
+          class="lg:hidden absolute top-0 left-0 z-30 p-2"
+          style={{ 'padding-top': 'max(0.5rem, env(safe-area-inset-top))' }}
+        >
+          <DrawerToggle drawer="plans" label="Open navigation" />
+        </div>
 
         <div class="relative flex-1 overflow-y-auto flex flex-col">
-          <div class="flex-1 flex flex-col items-center justify-center w-full max-w-2xl mx-auto px-6 pb-24">
+          <div class="flex-1 flex flex-col items-center justify-center w-full max-w-2xl mx-auto px-4 sm:px-6 pb-24">
             {/* Brand */}
             <div class="mb-8 flex flex-col items-center animate-scale-in">
               <div class="w-11 h-11 rounded-xl bg-[color:var(--accent)] flex items-center justify-center shadow-md shadow-[color:var(--accent)]/15 ring-1 ring-white/10 mb-4">
@@ -93,7 +104,7 @@ function PlanListContent() {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <h1 class="text-[26px] md:text-[28px] font-semibold tracking-tight text-zinc-50 text-center">
+              <h1 class="text-[22px] sm:text-[26px] md:text-[28px] font-semibold tracking-tight text-zinc-50 text-center">
                 What would you like to build?
               </h1>
             </div>
@@ -235,8 +246,8 @@ function PlanListContent() {
             </div>
           </div>
 
-          {/* Footer */}
-          <div class="relative pb-5 px-6 flex items-center justify-center gap-3 text-[10.5px] text-zinc-600">
+          {/* Footer. Keyboard hints are desktop-only. */}
+          <div class="relative pb-5 px-6 composer-hints flex items-center justify-center gap-3 text-[10.5px] text-zinc-600">
             <span class="flex items-center gap-1">
               <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">↵</kbd>
               send
@@ -246,13 +257,14 @@ function PlanListContent() {
               <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">⇧ ↵</kbd>
               newline
             </span>
-            <Show when={server.directory()}>
-              <span class="text-zinc-700">·</span>
-              <span class="font-mono text-zinc-600 truncate max-w-[280px]">
+          </div>
+          <Show when={server.directory()}>
+            <div class="relative pb-5 px-6 flex items-center justify-center">
+              <span class="font-mono text-[10.5px] text-zinc-600 truncate max-w-[280px]">
                 {server.directory()}
               </span>
-            </Show>
-          </div>
+            </div>
+          </Show>
         </div>
       </div>
     </div>

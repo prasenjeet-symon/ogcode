@@ -77,7 +77,16 @@ type Server struct {
 
 	// searchBackend is the active web-search backend, or nil when the user has
 	// turned search off. It is compiled in, so there is no process to manage.
+	// When search is on this is a *search.SwitchableBackend (also held in
+	// searchSwitch) so the provider can be swapped live.
 	searchBackend search.Backend
+
+	// searchSwitch is the live handle onto the search backend, non-nil only while
+	// search is enabled. Changing the search provider or key in settings rebuilds
+	// the concrete backend and Sets it here, so the change applies without a
+	// restart. (The enable toggle still needs a restart — it changes which tools
+	// are registered.)
+	searchSwitch *search.SwitchableBackend
 
 	// PostHog analytics client (optional — enabled via the settings UI)
 	posthogClient *PostHogClient
@@ -268,12 +277,12 @@ func (s *Server) Start() error {
 	// scripted and CI runs), otherwise the settings-screen toggle decides. A
 	// database that cannot be read leaves search on rather than silently
 	// stripping the research tools.
-	searchEnabled := true
-	if dbSearchCfg, err := session.GetSearchConfig(globalDatabase); err != nil {
-		slog.Warn("failed to read search config from DB; leaving web search enabled", "err", err)
-	} else {
-		searchEnabled = dbSearchCfg.Enabled
+	searchCfg, err := session.GetSearchConfig(globalDatabase)
+	if err != nil {
+		slog.Warn("failed to read search config from DB; leaving web search enabled on the native engine", "err", err)
+		searchCfg = &session.SearchConfig{Enabled: true, Provider: session.SearchProviderNative}
 	}
+	searchEnabled := searchCfg.Enabled
 	if v := os.Getenv("OGCODE_SEARCH_ENABLED"); v != "" {
 		searchEnabled = strings.EqualFold(v, "true")
 	}
@@ -283,40 +292,19 @@ func (s *Server) Start() error {
 	// tools registered against it.
 	var searchBackend search.Backend
 	if searchEnabled {
-		native := search.NewNativeBackend()
+		// The concrete backend is chosen from config, then wrapped in a
+		// SwitchableBackend so a later provider change can be applied live. The
+		// tools and the deep-research pipeline hold the wrapper, not the concrete
+		// backend, so swapping it in place needs no re-registration.
+		sw := search.NewSwitchableBackend(buildSearchBackend(searchCfg))
+		s.searchSwitch = sw
+		searchBackend = sw
+		s.searchBackend = sw
 
-		// The HTTP path runs first and answers almost everything: it presents a
-		// real browser's TLS fingerprint, so the engines that used to refuse it
-		// no longer do, and it returns in about a second without touching the
-		// user's screen.
-		//
-		// Safari sits behind it for the cases that path cannot win — an engine
-		// that has started refusing this IP, a bot challenge, a page that only
-		// exists once its scripts have run. It costs several seconds and opens
-		// windows, so it runs when the fast path has produced nothing, not
-		// before. One pleasant consequence: someone who never hits a block is
-		// never asked for Automation permission, because the probe that raises
-		// that prompt only happens on first use.
-		//
-		// OGCODE_SEARCH_BROWSER picks a different arrangement:
-		//   native — HTTP only, for anyone who would rather no window ever opened
-		//   safari — browser first, for a network where the HTTP path is blocked
-		//            outright and trying it first is only latency
-		//
-		// On every OS but macOS the Safari constructor returns nil and the chain
-		// collapses to the native backend, so this reads the same everywhere.
-		switch strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_SEARCH_BROWSER"))) {
-		case "native":
-			searchBackend = native
-		case "safari":
-			searchBackend = search.NewFallbackBackend(search.NewSafariBackend(), native)
-		default:
-			searchBackend = search.NewFallbackBackend(native, search.NewSafariBackend())
-		}
-		s.searchBackend = searchBackend
-		toolRegistry.Register(tool.WebSearchTool{Bridge: searchBackend})
-		toolRegistry.Register(tool.FetchPageTool{Bridge: searchBackend})
-		slog.Info("web search enabled; web_search and fetch_page tools registered")
+		toolRegistry.Register(tool.WebSearchTool{Bridge: sw})
+		toolRegistry.Register(tool.FetchPageTool{Bridge: sw})
+		logSearchProvider("web search enabled", searchCfg)
+		slog.Info("web_search and fetch_page tools registered")
 	} else {
 		slog.Info("web search disabled by configuration")
 	}
@@ -340,8 +328,14 @@ func (s *Server) Start() error {
 	s.registry = registry
 	s.defaultProvider = defaultProvider
 
-	// Load custom model preferences from DB
-	prefs, err := session.GetModelPreferences(s.db)
+	// Custom model definitions and model enable/disable preferences live in the
+	// global config DB so they persist across every project/workspace (like
+	// provider credentials). Older builds stored them in the per-project DB, so
+	// first backfill any that predate the move (non-destructively).
+	s.migrateModelPreferencesToGlobal()
+
+	// Load custom model preferences from the global DB and register their routing.
+	prefs, err := session.GetModelPreferences(s.globalDB)
 	if err != nil {
 		slog.Warn("failed to load model preferences", "err", err)
 	} else {
@@ -772,6 +766,42 @@ func (s *Server) reloadProviders() {
 	slog.Info("reloaded provider registry", "providers", s.registry.List())
 }
 
+// migrateModelPreferencesToGlobal backfills the global config DB with any model
+// preferences an older build wrote to this workspace's per-project DB. It only
+// inserts IDs not already present globally, so it never clobbers a preference
+// the user has since changed, and it leaves the per-project rows untouched
+// (harmless once every read points at the global DB). Best-effort: a failure
+// here must never block startup.
+func (s *Server) migrateModelPreferencesToGlobal() {
+	local, err := session.GetModelPreferences(s.db)
+	if err != nil || len(local) == 0 {
+		return
+	}
+	global, err := session.GetModelPreferences(s.globalDB)
+	if err != nil {
+		slog.Warn("model-preference migration: read global DB", "err", err)
+		return
+	}
+	seen := make(map[string]bool, len(global))
+	for _, p := range global {
+		seen[p.ID] = true
+	}
+	migrated := 0
+	for _, p := range local {
+		if seen[p.ID] {
+			continue
+		}
+		if err := session.SetModelPreference(s.globalDB, p); err != nil {
+			slog.Warn("model-preference migration: write global DB", "id", p.ID, "err", err)
+			continue
+		}
+		migrated++
+	}
+	if migrated > 0 {
+		slog.Info("migrated model preferences to global config DB", "count", migrated)
+	}
+}
+
 // backfillMemoryProjects stamps project identity onto memory nodes written
 // before the memory store tracked projects. Without it, every fact recorded by
 // an older build is invisible to project-scoped recall.
@@ -834,4 +864,66 @@ func openBrowser(url string) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// buildSearchBackend constructs the concrete web-search backend for cfg. It is
+// the single source of truth for provider selection, called both at startup and
+// on a live provider change, so the two can never drift.
+//
+// The native engine chain runs the HTTP path first — it presents a real
+// browser's TLS fingerprint, so engines that once refused it no longer do, and
+// it answers in about a second without opening a window. Safari sits behind it
+// for the cases that path cannot win (an engine refusing this IP, a bot
+// challenge, a page that only exists once its scripts run); it costs seconds and
+// opens windows, so it runs only after the fast path finds nothing. On every OS
+// but macOS the Safari constructor returns nil and the chain collapses to the
+// native backend. OGCODE_SEARCH_BROWSER picks a different arrangement: "native"
+// is HTTP only, "safari" tries the browser first.
+//
+// When Tavily is selected with a usable key it runs in front of the native
+// chain, falling back to it on any failure (bad key, exhausted quota, network
+// error) so an answerable query is never lost to a provider outage. The key
+// comes from config, with TAVILY_API_KEY overriding it for scripted and CI runs.
+func buildSearchBackend(cfg *session.SearchConfig) search.Backend {
+	native := search.NewNativeBackend()
+
+	var nativeChain search.Backend
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_SEARCH_BROWSER"))) {
+	case "native":
+		nativeChain = native
+	case "safari":
+		nativeChain = search.NewFallbackBackend(search.NewSafariBackend(), native)
+	default:
+		nativeChain = search.NewFallbackBackend(native, search.NewSafariBackend())
+	}
+
+	if cfg.Provider == session.SearchProviderTavily {
+		if key := tavilyKeyFor(cfg); key != "" {
+			return search.NewFallbackBackend(search.NewTavilyBackend(key), nativeChain)
+		}
+	}
+	return nativeChain
+}
+
+// tavilyKeyFor returns the Tavily key in effect: the environment overrides the
+// stored value, mirroring the provider-key env overlay.
+func tavilyKeyFor(cfg *session.SearchConfig) string {
+	if env := strings.TrimSpace(os.Getenv("TAVILY_API_KEY")); env != "" {
+		return env
+	}
+	return strings.TrimSpace(cfg.TavilyAPIKey)
+}
+
+// logSearchProvider records which backend cfg resolves to, with a warning when
+// Tavily is selected but unusable (so it silently runs on native).
+func logSearchProvider(prefix string, cfg *session.SearchConfig) {
+	if cfg.Provider == session.SearchProviderTavily {
+		if tavilyKeyFor(cfg) != "" {
+			slog.Info(prefix + "; provider=tavily (native fallback)")
+			return
+		}
+		slog.Warn(prefix + "; provider=tavily but no API key is configured — using the native engine")
+		return
+	}
+	slog.Info(prefix + "; provider=native")
 }

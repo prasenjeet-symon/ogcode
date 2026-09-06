@@ -33,7 +33,7 @@ func (GrepTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		Path    string `json:"path"`
 		Include string `json:"include"`
 	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 

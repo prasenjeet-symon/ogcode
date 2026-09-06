@@ -152,11 +152,12 @@ export default function SettingsLayout(props: RouteSectionProps) {
 
   return (
     <SettingsShell.Provider value={{ query, setQuery, report: setReport }}>
-      <div class="h-screen w-full flex flex-col bg-[color:var(--bg-base)]">
+      <div class="h-dvh w-full flex flex-col bg-[color:var(--bg-base)]"
+           style={{ 'padding-top': 'env(safe-area-inset-top)', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
         {/* Nav bar. The page title is centred and the back control names its
             destination, so the bar reads the same whichever page is open. */}
         <header
-          class="h-12 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3
+          class="h-12 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-2 sm:px-3
                  bg-[color:var(--bg-surface)]/90 backdrop-blur-xl
                  border-b border-[color:var(--border-subtle)] z-10"
         >
@@ -222,26 +223,19 @@ export default function SettingsLayout(props: RouteSectionProps) {
           </div>
         </header>
 
-        <div class="flex-1 min-h-0 flex">
-          {/* Navigation drawer.
-              Deliberately quiet. Four destinations do not need coloured tiles,
-              chevrons and a caption to be legible — those read as decoration
-              at this size, and decoration is what makes a sidebar look like a
-              toy. What is left is a glyph, a word, and one number that is
-              worth knowing before you open the page.
-
-              The width is 260px to the pixel because that is what
-              SessionSidebar and PlanSidebar are: leaving settings sits behind
-              this column, and a column that changes width on the way out reads
-              as the whole app shifting. */}
+        <div class="flex-1 min-h-0 flex flex-col md:flex-row">
+          {/* Navigation. Desktop keeps the 260px column; phones get a compact
+              horizontal tab strip pinned under the header, which reads faster
+              than a drawer for a four-item nav and leaves the full height to
+              the settings content. */}
           <nav
-            class="w-[260px] shrink-0 flex flex-col py-2 border-r border-[color:var(--border-subtle)]"
+            class="md:w-[260px] md:shrink-0 md:flex md:flex-col md:py-2 md:border-r border-b md:border-b-0 border-[color:var(--border-subtle)]"
             style={{ background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-surface)' }}
             aria-label="Settings pages"
           >
             {/* A hair of space between rows, so an active or hovered row reads as
                 its own shape rather than merging with its neighbour. */}
-            <div class="flex-1 px-2 space-y-px overflow-y-auto">
+            <div class="flex-1 px-2 py-1 md:py-0 flex md:flex-col gap-1 md:gap-px overflow-x-auto hide-scrollbar">
               <For each={PAGES}>
                 {(page) => {
                   const active = () => page.match(location.pathname);
@@ -250,8 +244,8 @@ export default function SettingsLayout(props: RouteSectionProps) {
                       type="button"
                       onClick={() => navigate(page.href)}
                       aria-current={active() ? 'page' : undefined}
-                      class={`w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left
-                              transition-colors duration-150
+                      class={`flex items-center gap-2 md:w-full md:h-8 h-8 px-2.5 md:px-2 rounded-md text-left shrink-0
+                              transition-colors duration-150 whitespace-nowrap
                         ${active()
                           ? 'bg-[color:var(--bg-elevated)]/70 text-[color:var(--text-primary)] font-medium'
                           : 'text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
@@ -280,9 +274,10 @@ export default function SettingsLayout(props: RouteSectionProps) {
 
             {/* Which project these settings belong to. At the foot, where a
                 status line belongs, rather than taking the top of the column
-                from the navigation. */}
+                from the navigation. Hidden on phones, where the strip has no
+                foot and the workspace is named in General anyway. */}
             <div
-              class="mt-2 pt-2 mx-2 border-t border-[color:var(--border-subtle)]"
+              class="mt-2 pt-2 mx-2 border-t border-[color:var(--border-subtle)] hidden md:block"
               title={server.directory() || 'No workspace open'}
             >
               <div class="flex items-center gap-1.5 px-2">
@@ -314,8 +309,8 @@ export default function SettingsLayout(props: RouteSectionProps) {
             }}
             class="page-enter relative flex-1 min-w-0 overflow-y-auto"
           >
-            <div class="max-w-[52rem] mx-auto px-6 py-4 pb-28">
-              <h1 class="px-4 pb-2 text-[1.75rem] font-bold tracking-[-0.02em] text-[color:var(--text-primary)]">
+            <div class="max-w-[52rem] mx-auto px-3 sm:px-6 py-4 pb-28">
+              <h1 class="px-1 sm:px-4 pb-2 text-[1.4rem] sm:text-[1.75rem] font-bold tracking-[-0.02em] text-[color:var(--text-primary)]">
                 {currentPage().label}
               </h1>
               <Show when={query().trim()}>

@@ -4,9 +4,42 @@ import (
 	"context"
 	"testing"
 
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
+
+type scriptedSearchProvider struct {
+	events []provider.StreamEvent
+}
+
+func (p scriptedSearchProvider) ID() string { return "test" }
+func (p scriptedSearchProvider) Models() []provider.ModelInfo {
+	return []provider.ModelInfo{{ID: "test-model"}}
+}
+func (p scriptedSearchProvider) StreamChat(context.Context, provider.StreamRequest) (<-chan provider.StreamEvent, error) {
+	ch := make(chan provider.StreamEvent, len(p.events))
+	for _, evt := range p.events {
+		ch <- evt
+	}
+	close(ch)
+	return ch, nil
+}
+
+func TestOneShotLLMReturnsStreamErrors(t *testing.T) {
+	p := scriptedSearchProvider{events: []provider.StreamEvent{
+		{Type: provider.EventTextDelta, Text: "partial answer"},
+		{Type: provider.EventError, Error: "stream disconnected"},
+	}}
+
+	got, err := oneShotLLM(context.Background(), p, "test-model", "system", "user", 100)
+	if err == nil {
+		t.Fatalf("oneShotLLM returned partial output without an error: %q", got)
+	}
+	if got != "" {
+		t.Fatalf("oneShotLLM returned partial output on stream failure: %q", got)
+	}
+}
 
 func TestTuning(t *testing.T) {
 	// nil SearchParams → built-in defaults

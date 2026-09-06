@@ -15,6 +15,7 @@ import {
   listPendingPermissions,
   type PermissionResponse,
   getModels,
+  refreshModels as apiRefreshModels,
   updateSession,
   abortSession,
   resumeSession,
@@ -95,6 +96,8 @@ interface SessionContextValue {
   /** Restart the loop on a session whose last turn was interrupted. */
   resume: () => Promise<{ resumed: boolean; message?: string }>;
   refreshModels: () => Promise<void>;
+  /** Force a live re-fetch of provider catalogues (after a credential change). */
+  reloadModels: () => Promise<void>;
   toggleModel: (model: ModelInfo, enabled: boolean) => Promise<void>;
   addCustomModel: (id: string, providerId: string, displayName: string, collection?: string) => Promise<void>;
   removeCustomModel: (id: string) => Promise<void>;
@@ -427,9 +430,28 @@ export const SessionProvider: ParentComponent = (props) => {
     }
   }
 
+  // Force a live re-fetch of every provider's catalogue from its endpoint
+  // (POST /models/refresh clears the server-side cache first), then swap in the
+  // result. Used after a credential or base-URL change so the provider's models
+  // appear immediately, no restart. Unlike refreshModels — which just re-reads
+  // the cached list — this guarantees a fresh fetch, and it rethrows so the
+  // caller can tell "saved but could not fetch" apart from "could not save".
+  async function reloadModels() {
+    const list = await apiRefreshModels();
+    setModels(list || []);
+  }
+
   async function toggleModel(model: ModelInfo, enabled: boolean) {
+    // Optimistic and identity-preserving: replace only the toggled model's
+    // object, leaving every other model's reference intact. The settings list
+    // then reconciles to a single-row update instead of re-mounting — no
+    // flicker, no scroll jump. The server returns the full list, but we don't
+    // swap it in: for an enable/disable it only ever differs in this one flag,
+    // and a fresh all-new array is exactly what forced the re-mount before.
+    const prev = models();
+    setModels(prev.map((m) => (m.id === model.id ? { ...m, enabled } : m)));
     try {
-      const updated = await setModelPreference({
+      await setModelPreference({
         id: model.id,
         providerId: model.providerId,
         displayName: model.name,
@@ -437,8 +459,8 @@ export const SessionProvider: ParentComponent = (props) => {
         isCustom: model.isCustom,
         collection: model.collection,
       });
-      setModels(updated || []);
     } catch (e) {
+      setModels(prev); // restore the exact prior objects on failure
       console.error('toggle model failed:', e);
     }
   }
@@ -1157,6 +1179,7 @@ export const SessionProvider: ParentComponent = (props) => {
     abort,
     resume,
     refreshModels,
+    reloadModels,
     toggleModel,
     addCustomModel,
     removeCustomModel,

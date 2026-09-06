@@ -1,4 +1,4 @@
-import { createMemo, Show } from 'solid-js';
+import { createMemo, createSignal, Show } from 'solid-js';
 import { useServer } from '../context/server';
 import type { ResourceSample, ResourceActivity } from '../api/client';
 
@@ -64,6 +64,12 @@ function sparklinePoints(samples: ResourceSample[]): string {
 export default function ResourcePill() {
   const server = useServer();
 
+  // Hover shows the breakdown on desktop; a tap toggles it on touch.
+  const isCoarse = () => window.matchMedia('(hover: none)').matches;
+  const [hovered, setHovered] = createSignal(false);
+  const [pinned, setPinned] = createSignal(false);
+  const showBreakdown = () => pinned() || (!isCoarse() && hovered());
+
   const samples = createMemo(() => server.resources());
   const latest = createMemo<ResourceSample | undefined>(() => {
     const all = samples();
@@ -74,7 +80,12 @@ export default function ResourcePill() {
   return (
     <Show when={latest()}>
       {(sample) => (
-        <div class="group relative flex items-center gap-1.5 h-7 px-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] cursor-default select-none overflow-visible">
+        <div
+          class="group relative flex items-center gap-1.5 h-7 px-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] cursor-default select-none overflow-visible"
+          onClick={() => { if (isCoarse()) setPinned((v) => !v); }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
           <svg
             class="w-10 h-4 shrink-0 text-zinc-500"
             viewBox="0 0 100 24"
@@ -115,10 +126,13 @@ export default function ResourcePill() {
             )}
           </Show>
 
-          {/* Hover breakdown */}
+          {/* Hover/tap breakdown */}
           <div
-            class="absolute top-full right-0 mt-1.5 w-64 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl
-                   opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition"
+            class="absolute top-full right-0 mt-1.5 w-64 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl transition"
+            classList={{
+              'opacity-0 pointer-events-none': !showBreakdown(),
+              'opacity-100 pointer-events-auto': showBreakdown(),
+            }}
             style={{ 'z-index': 9999 }}
           >
             <div class="text-micro uppercase tracking-wider text-zinc-500 font-semibold mb-2">

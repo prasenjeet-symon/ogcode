@@ -59,7 +59,7 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 		Description string `json:"description"`
 		Prompt      string `json:"prompt"`
 	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 	if input.Prompt == "" {

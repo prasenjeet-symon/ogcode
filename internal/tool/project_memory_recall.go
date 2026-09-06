@@ -69,7 +69,7 @@ func (t ProjectMemoryRecallTool) Execute(ctx context.Context, args json.RawMessa
 		Topic     string `json:"topic"`
 		Scope     string `json:"scope"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, err
 	}
 	if params.Question == "" {

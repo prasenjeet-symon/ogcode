@@ -267,6 +267,9 @@ func (e searchEngine) searchURL(query string, limit int) string {
 //   - Ecosia — answers 403 regardless.
 //   - Mojeek — answers, but with a CAPTCHA rather than results.
 
+// Name reports the provider name stamped on this backend's results.
+func (n *NativeBackend) Name() string { return ProviderNative }
+
 // Search queries each engine in turn and returns the first non-empty result set.
 func (n *NativeBackend) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
@@ -306,6 +309,10 @@ func (n *NativeBackend) Search(ctx context.Context, query string, limit int) ([]
 			continue
 		}
 		n.health.recover(e.name)
+		// Stamp before the results go into the cache: everything handed out
+		// from here on — this call and every cache hit — must carry the
+		// attribution, and the cache is shared between readers.
+		withProvider(results, ProviderNative)
 		n.rememberReferer(results, e.searchURL(query, limit))
 		n.searchCache.set(cacheKey, results)
 		return results, nil
@@ -362,7 +369,7 @@ func (n *NativeBackend) FetchPage(ctx context.Context, rawURL string) (PageConte
 	text, truncated := truncateChars(text, nativePageChars)
 	// Report the requested URL, not the post-redirect one, so the caller's
 	// dedup keys and citations line up with the URL it asked for.
-	page := PageContent{URL: rawURL, Title: title, Text: text, Truncated: truncated}
+	page := PageContent{URL: rawURL, Title: title, Text: text, Truncated: truncated, Provider: ProviderNative}
 	n.fetchCache.set(rawURL, page)
 	return page, nil
 }

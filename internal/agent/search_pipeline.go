@@ -377,12 +377,16 @@ func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user st
 			streamErr = evt.Error
 		}
 	}
+	// A provider can emit useful-looking partial text before the connection or
+	// idle watchdog fails. Treat that as a failed call rather than presenting a
+	// truncated answer as a successful research result; the caller can then use
+	// its fallback or report the failure clearly.
+	if streamErr != "" {
+		return "", fmt.Errorf("%s", streamErr)
+	}
 	out := strings.TrimSpace(text.String())
 	if out == "" {
 		out = strings.TrimSpace(reasoning.String())
-	}
-	if out == "" && streamErr != "" {
-		return "", fmt.Errorf("%s", streamErr)
 	}
 	return out, nil
 }

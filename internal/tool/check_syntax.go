@@ -54,7 +54,7 @@ func (CheckSyntaxTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 	var params struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse check_syntax args: %w", err)
 	}
 	if params.Path == "" {

@@ -56,7 +56,7 @@ func (FileMapTool) Execute(_ context.Context, args json.RawMessage, tctx Context
 	var params struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse file_map args: %w", err)
 	}
 	if params.Path == "" {

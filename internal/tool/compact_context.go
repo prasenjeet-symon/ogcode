@@ -52,7 +52,7 @@ func ParseCompactContextArgs(raw json.RawMessage) (string, error) {
 	var params struct {
 		Summary string `json:"summary"`
 	}
-	if err := json.Unmarshal(raw, &params); err != nil {
+	if err := DecodeArgs(raw, &params); err != nil {
 		return "", err
 	}
 	summary := strings.TrimSpace(params.Summary)

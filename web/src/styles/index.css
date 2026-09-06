@@ -1180,3 +1180,260 @@ textarea.auto-resize {
 .slider-ios:disabled {
   opacity: 0.5;
 }
+
+/* ============================================================
+   Mobile pass
+   Two ideas run through this whole section:
+   1. Viewport reality — dvh instead of 100vh so iOS Safari's URL bar
+      stops hiding the composer; safe-area insets so content clears
+      the notch and home indicator; a --kb-inset variable fed by the
+      visualViewport listener (lib/keyboard.ts) so the on-screen
+      keyboard never covers the input.
+   2. Touch reality — @media (hover: none) un-hides every hover-only
+      affordance; pointer sizes meet the 44px floor where it matters.
+   The app stays desktop-first: everything here is additive, and the
+   layouts only change below lg (1024px).
+   ============================================================ */
+
+/* The app shell and every page column use h-dvh (Tailwind) so the layout
+   tracks the visual viewport. For anything that hardcodes a vh height,
+   this swaps it for dvh where supported. */
+@supports (height: 100dvh) {
+  html, body, #root {
+    height: 100dvh;
+  }
+}
+
+/* Tabular numbers and 16px inputs: iOS Safari zooms any form field whose
+   font-size is under 16px when it takes focus. The composer textarea reads
+   at text-chat (15px ≈ 0.9375rem); bumping it to 1rem on coarse pointers
+   kills the zoom-jump without changing the desktop design. */
+@media (pointer: coarse) {
+  textarea, input, select {
+    font-size: max(1rem, 1em);
+  }
+}
+
+/* Viewport height correction for the overflow-x-auto sheets (kanban board,
+   markdown previews): -webkit-overflow-scrolling momentum is default now. */
+
+/* Safe-area padding. Applied to the app's fixed chrome: the top headers and
+   the bottom composer/footers. On desktop the env() values are all 0, so
+   these are no-ops — one rule set, every platform. */
+.px-safe {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+/* Tap highlight: iOS flashes a translucent gray box on every tap, which
+   reads as broken over the dark theme's carefully tuned hover states. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The drawer ------------------------------------------------------------
+   Below lg the 260px sidebars become overlay drawers: fixed to the left
+   edge, 82% of the viewport (max 320px), sliding in over a dimmed,
+   blurred backdrop. On lg+ the shell renders its children inline and the
+   drawer CSS is inert. The slide animation pairs with the app's spring
+   easing rather than a linear wipe. */
+.sidebar-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 60;
+  width: min(82vw, 320px);
+  transform: translateX(-102%);
+  transition: transform var(--spring-md);
+  box-shadow: none;
+  will-change: transform;
+}
+.sidebar-drawer.is-open {
+  transform: translateX(0);
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.55);
+}
+.sidebar-drawer.is-open .sidebar-drawer-scrim {
+  opacity: 1;
+}
+.sidebar-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--spring-md);
+}
+.sidebar-drawer.is-open .sidebar-drawer-scrim.is-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The drawer's inner column keeps the sidebar's own width so the app
+   shell markup is unchanged; the drawer just repositions it. */
+.sidebar-drawer-viewport {
+  height: 100%;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+}
+
+/* Drawer geometry, desktop-neutral: the same min(82vw, 320px) cap makes the
+   drawer narrow enough that the page behind stays visible on tablets in
+   landscape, where users swipe rather than tap the scrim. */
+
+/* A drawer must never scroll the page behind it while open — iOS rubber-
+   bands the whole document otherwise. Applied to <body> by the shell. */
+body.drawer-open {
+  overflow: hidden;
+}
+
+/* Touch sizing ----------------------------------------------------------
+   On touch, un-hide every hover-gated action. These mirror the specific
+   class pairs used by the app (opacity-0 group-hover:*). Using CSS rather
+   than a Tailwind `pointer-coarse:opacity-100` on each element keeps the
+   rule in one place; new hover-only controls are picked up for free. */
+@media (hover: none) {
+  /* Generic hover-gated rows: sidebar rename/delete, task start, notes delete,
+     file-tree unindexed dot, code-block bar. */
+  [class*="group-hover:opacity-0"],
+  [class*="group-hover:opacity-100"],
+  [class*="group-hover/row:opacity-0"],
+  [class*="group-hover/row:opacity-100"],
+  [class*="group-hover/row:hidden"],
+  [class*="hidden group-hover/row:flex"] {
+    opacity: 1 !important;
+  }
+  [class*="group-hover/row:hidden"] {
+    display: none !important;
+  }
+  [class*="hidden group-hover/row:flex"] {
+    display: flex !important;
+  }
+  .code-block-bar {
+    opacity: 1;
+  }
+  /* The 44px touch floor: bump hit areas of ghost icon buttons and key
+     composer controls without changing their visual size — padding eats
+     the space, the glyph stays centered. */
+  .icon-btn {
+    height: 2.25rem;
+    min-width: 2.25rem;
+  }
+  .send-btn {
+    height: 2.5rem;
+    width: 2.5rem;
+  }
+  /* Sidebar row actions (rename/delete) and plan-row delete are 20-24px
+     squares; give them a real touch target. The rows themselves also grow
+     from 28px to ~36px so a thumb can hit them precisely. */
+  [class*="group/row"] button {
+    min-width: 1.75rem;
+    min-height: 1.75rem;
+  }
+  /* The list rows: 28px is a mouse target, not a thumb target. */
+  [class*="group/row"].h-7 {
+    height: 2.25rem;
+  }
+}
+
+/* Composer ---------------------------------------------------------------
+   The bottom sheet of the chat: lifts above the keyboard on iOS via
+   --kb-inset (visualViewport listener) and above the home indicator via
+   env(safe-area-inset-bottom). --kb-inset is 0 on desktop, so the padding
+   collapses to just the safe area. */
+.composer-safe {
+  padding-bottom: max(var(--kb-inset, 0px), env(safe-area-inset-bottom, 0px));
+}
+
+/* Keyboard hints (↵ send · ⇧↵ newline) are desktop-only affordances —
+   touch keyboards have their own return key. Free the vertical space. */
+@media (hover: none), (max-width: 767px) {
+  .composer-hints {
+    display: none;
+  }
+}
+
+/* Model dropdown on phones: the fixed 384px popover cannot fit a 390px
+   viewport. On narrow screens it becomes a bottom sheet anchored by the
+   same JS-computed coordinates (left/top still apply but are overridden). */
+@media (max-width: 640px) {
+  .model-dropdown {
+    left: 0.5rem !important;
+    right: 0.5rem !important;
+    top: auto !important;
+    bottom: max(0.5rem, env(safe-area-inset-bottom, 0px)) !important;
+    max-height: 70dvh !important;
+    width: auto !important;
+  }
+  /* Rows need real touch height inside the sheet. */
+  .model-dropdown button {
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
+}
+
+/* Task drawer on phones: min-width beats max-width in CSS, so the old
+   w-[40vw] min-w-[420px] drawer overflowed a 390px screen by 30px. On
+   small screens it goes full-width. */
+@media (max-width: 640px) {
+  .task-drawer {
+    left: 0 !important;
+    width: 100vw !important;
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Vertical rhythm on phones: the reading column's 2rem side padding and the
+   transcript's px-4 gutter compress so a 390px screen spends its width on
+   content, not margins. Applied only under md. */
+@media (max-width: 767px) {
+  .chat-col {
+    padding-inline: 0.5rem;
+  }
+  .page-gutter {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+/* Header pills -----------------------------------------------------------
+   The session header stacks six controls. On phones the ambient ones
+   (resource sparkline, memory chip text) collapse; the classes below hide
+   what the markup keeps. Hidden at <lg where the header is tightest. */
+@media (max-width: 1023px) {
+  .hide-below-lg {
+    display: none !important;
+  }
+}
+@media (max-width: 767px) {
+  .hide-below-md {
+    display: none !important;
+  }
+}
+
+/* Settings search input and home hero path shrink on phones */
+@media (max-width: 767px) {
+  .settings-search {
+    width: 10rem;
+  }
+}
+
+/* The transcript code blocks: pre blocks scroll horizontally already; this
+   just rounds their edge into the message bubble on narrow screens. */
+@media (max-width: 767px) {
+  .prose-chat pre {
+    max-width: calc(100vw - 5.5rem);
+  }
+  .code-view pre {
+    max-width: 100%;
+  }
+}

@@ -4,6 +4,7 @@ import { useNote } from '../context/note';
 import { useServer } from '../context/server';
 import SessionSidebar from '../components/session-sidebar';
 import PlanSidebar from '../components/plan-sidebar';
+import { DrawerToggle } from '../components/sidebar-shell';
 import type { Note } from '../api/client';
 
 function Sidebar() {
@@ -172,6 +173,7 @@ function NoteCard(props: { note: Note; onDelete: (e: MouseEvent) => void; onClic
 
 export default function NotesPage() {
   const noteCtx = useNote();
+  const server = useServer();
   const navigate = useNavigate();
   const [search, setSearch] = createSignal('');
   const [creatingManual, setCreatingManual] = createSignal(false);
@@ -204,23 +206,28 @@ export default function NotesPage() {
   };
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <Sidebar />
 
       <div class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
 
-        {/* Header */}
-        <div class="shrink-0 border-b border-[color:var(--border-subtle)] px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 class="text-[15px] font-semibold text-zinc-100">Project Notes</h1>
-            <p class="text-[11px] text-zinc-500 mt-0.5">
-              {noteCtx.notes().length > 0
-                ? `${noteCtx.notes().length} note${noteCtx.notes().length === 1 ? '' : 's'}`
-                : 'Write notes manually or save from chat'}
-            </p>
+        {/* Header. On phones the search drops under the title row rather than
+            squeezing beside it. */}
+        <div class="shrink-0 border-b border-[color:var(--border-subtle)] px-3 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-2"
+             style={{ 'padding-top': 'max(0.75rem, env(safe-area-inset-top))' }}>
+          <div class="flex items-center gap-1 min-w-0">
+            <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
+            <div class="min-w-0">
+              <h1 class="text-[15px] font-semibold text-zinc-100">Project Notes</h1>
+              <p class="text-[11px] text-zinc-500 mt-0.5">
+                {noteCtx.notes().length > 0
+                  ? `${noteCtx.notes().length} note${noteCtx.notes().length === 1 ? '' : 's'}`
+                  : 'Write notes manually or save from chat'}
+              </p>
+            </div>
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 ml-auto">
             {/* New Note button */}
             <button
               onClick={handleNewNote}
@@ -248,7 +255,7 @@ export default function NotesPage() {
                 value={search()}
                 onInput={(e) => setSearch(e.currentTarget.value)}
                 placeholder="Search notes…"
-                class="h-8 w-48 pl-8 pr-3 bg-[color:var(--bg-surface)] border border-[color:var(--border-subtle)] rounded-md
+                class="h-8 w-40 sm:w-48 pl-8 pr-3 bg-[color:var(--bg-surface)] border border-[color:var(--border-subtle)] rounded-md
                        text-[12px] text-zinc-200 placeholder-zinc-600
                        focus:outline-none focus:border-[color:var(--border-default)] transition"
               />
@@ -257,7 +264,7 @@ export default function NotesPage() {
         </div>
 
         {/* Notes list */}
-        <div class="flex-1 overflow-y-auto px-6 py-5 flex flex-col">
+        <div class="flex-1 overflow-y-auto px-3 sm:px-6 py-5 flex flex-col">
           <Show when={filtered().length === 0}>
             <div class="flex flex-col items-center justify-center h-64 text-center gap-3">
               <svg class="w-10 h-10 text-zinc-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2">

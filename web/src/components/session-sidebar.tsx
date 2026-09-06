@@ -4,6 +4,7 @@ import { useServer } from '../context/server';
 import { createSignal, createMemo, For, Show } from 'solid-js';
 import { deleteSession } from '../api/client';
 import Logo from './logo';
+import SidebarShell from './sidebar-shell';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -28,7 +29,17 @@ function shortenPath(path: string): string {
   return `${collapsed.startsWith('~') ? '~' : ''}/…/${segments.slice(-2).join('/')}`;
 }
 
+// The sidebar itself. Exported wrapped in SidebarShell so every page that
+// renders <SessionSidebar /> gets the drawer behaviour below lg for free.
 export default function SessionSidebar() {
+  return (
+    <SidebarShell drawer="sessions">
+      <SessionSidebarInner />
+    </SidebarShell>
+  );
+}
+
+function SessionSidebarInner() {
   const session = useSession();
   const server = useServer();
   const navigate = useNavigate();

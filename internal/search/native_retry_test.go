@@ -267,3 +267,46 @@ func TestSearxngEngine_BuildsCleanEndpoint(t *testing.T) {
 		t.Errorf("requested %q, want format=json", got)
 	}
 }
+
+// The provider stamp must survive the real Search/FetchPage paths — not just
+// the constructors' intent — because web_search and fetch_page read it to say
+// which backend answered. A stub SearxNG (the opt-in engine that goes first)
+// drives the native backend end to end without touching the network.
+func TestNativeBackend_StampsProvider(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/fetch" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<html><head><title>Fetched</title></head><body><p>Readable body text.</p></body></html>")
+			return
+		}
+		fmt.Fprint(w, `{"results":[{"url":"https://go.dev/doc","title":"Docs","content":"The Go docs"}]}`)
+	}))
+	defer srv.Close()
+
+	t.Setenv(searxngEnv, srv.URL)
+	n := NewNativeBackend()
+	if n.Name() != ProviderNative {
+		t.Errorf("Name() = %q, want %q", n.Name(), ProviderNative)
+	}
+
+	results, err := n.Search(context.Background(), "go context", 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("got no results from the stub engine")
+	}
+	for i, r := range results {
+		if r.Provider != ProviderNative {
+			t.Errorf("result %d provider = %q, want %q", i, r.Provider, ProviderNative)
+		}
+	}
+
+	page, err := n.FetchPage(context.Background(), srv.URL+"/fetch")
+	if err != nil {
+		t.Fatalf("FetchPage: %v", err)
+	}
+	if page.Provider != ProviderNative {
+		t.Errorf("page provider = %q, want %q", page.Provider, ProviderNative)
+	}
+}

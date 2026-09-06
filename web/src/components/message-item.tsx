@@ -544,7 +544,7 @@ function UserMessage(props: { msg: MessageWithParts }) {
 
   return (
     <div data-role="user" class="flex justify-end animate-msg-in group">
-      <div class="max-w-[82%] flex flex-col items-end min-w-0">
+      <div class="max-w-[92%] sm:max-w-[82%] flex flex-col items-end min-w-0">
         <div class="relative min-w-0 max-w-full">
           <div
             ref={contentRef}
@@ -590,7 +590,8 @@ function UserMessage(props: { msg: MessageWithParts }) {
             framed by a row of buttons competing with the message itself. */}
         <div class="flex items-center justify-end gap-0.5 mt-0.5 -mr-1 h-7">
           <div class="flex items-center gap-0.5
-                      opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+                      opacity-0 group-hover:opacity-100 focus-within:opacity-100
+                      pointer-coarse:opacity-100 transition-opacity duration-200">
           <Show when={userText()}>
             <button
               type="button"
@@ -761,7 +762,8 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
               )}
             </Show>
             <div class="flex items-center gap-0.5
-                        opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+                        opacity-0 group-hover:opacity-100 focus-within:opacity-100
+                        pointer-coarse:opacity-100 transition-opacity duration-200">
             <button
               type="button"
               onClick={handleCopy}

@@ -13,9 +13,18 @@ type fakeBackend struct {
 	results []SearchResult
 	page    PageContent
 	err     error
+	// name is what Name reports; empty means "fake".
+	name string
 
 	searches atomic.Int32
 	fetches  atomic.Int32
+}
+
+func (f *fakeBackend) Name() string {
+	if f.name != "" {
+		return f.name
+	}
+	return "fake"
 }
 
 func (f *fakeBackend) Search(context.Context, string, int) ([]SearchResult, error) {
@@ -172,5 +181,91 @@ func TestFallbackBackend_NilSecondaryCollapses(t *testing.T) {
 	}
 	if got := NewFallbackBackend(nil, primary); got != Backend(primary) {
 		t.Errorf("a nil primary should yield the secondary unchanged, got %T", got)
+	}
+}
+
+// The attribution on an answer has to name the backend that actually produced
+// it: the primary's own stamp passes through untouched, and a rescue by the
+// secondary is labelled as a rescue of the primary — which is the whole
+// question the provider header in the tool output exists to answer.
+func TestFallbackBackend_AttributesPrimaryAnswer(t *testing.T) {
+	primary := &fakeBackend{name: ProviderTavily, results: withProvider(oneResult(), ProviderTavily)}
+	secondary := &fakeBackend{results: withProvider(oneResult(), ProviderNative)}
+
+	got, err := NewFallbackBackend(primary, secondary).Search(context.Background(), "q", 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	for i, r := range got {
+		if r.Provider != ProviderTavily {
+			t.Errorf("result %d provider = %q, want %q", i, r.Provider, ProviderTavily)
+		}
+	}
+
+	primary.page = PageContent{URL: "https://example.com", Text: "body", Provider: ProviderTavily}
+	page, err := NewFallbackBackend(primary, secondary).FetchPage(context.Background(), "https://example.com")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if page.Provider != ProviderTavily {
+		t.Errorf("page provider = %q, want %q", page.Provider, ProviderTavily)
+	}
+}
+
+func TestFallbackBackend_AttributesFallbackAnswer(t *testing.T) {
+	primary := &fakeBackend{name: ProviderTavily, err: errors.New("tavily: the API key was rejected (status 401)")}
+	secondary := &fakeBackend{results: withProvider(oneResult(), ProviderNative)}
+
+	got, err := NewFallbackBackend(primary, secondary).Search(context.Background(), "q", 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	for i, r := range got {
+		if r.Provider != "native (tavily fallback)" {
+			t.Errorf("result %d provider = %q, want %q", i, r.Provider, "native (tavily fallback)")
+		}
+	}
+
+	page, err := NewFallbackBackend(primary, &fakeBackend{
+		page: PageContent{URL: "https://example.com", Text: "body", Provider: ProviderNative},
+	}).FetchPage(context.Background(), "https://example.com")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if page.Provider != "native (tavily fallback)" {
+		t.Errorf("page provider = %q, want %q", page.Provider, "native (tavily fallback)")
+	}
+}
+
+// A secondary that is itself a chain (the real wiring: tavily → native →
+// safari) stamps its leaf on the data. The label must keep that leaf and add
+// only one parenthetical — "safari (tavily fallback)", not "safari (native
+// (tavily fallback))" — and a secondary that stamps nothing falls back to its
+// Name.
+func TestFallbackBackend_AttributionComposesNestedChains(t *testing.T) {
+	primary := &fakeBackend{name: ProviderTavily, err: errors.New("tavily: rate limited (status 429)")}
+
+	nested := NewFallbackBackend(
+		&fakeBackend{err: errors.New("all search engines failed")},
+		&fakeBackend{results: withProvider(oneResult(), ProviderSafari)},
+	)
+	got, err := NewFallbackBackend(primary, nested).Search(context.Background(), "q", 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if got[0].Provider != "safari (tavily fallback)" {
+		t.Errorf("provider = %q, want %q", got[0].Provider, "safari (tavily fallback)")
+	}
+
+	unstamped := NewFallbackBackend(
+		&fakeBackend{err: errors.New("all search engines failed")},
+		&fakeBackend{results: oneResult()}, // no stamp — Name() must be used
+	)
+	got, err = NewFallbackBackend(primary, unstamped).Search(context.Background(), "q", 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if got[0].Provider != "fake (tavily fallback)" {
+		t.Errorf("provider = %q, want %q", got[0].Provider, "fake (tavily fallback)")
 	}
 }

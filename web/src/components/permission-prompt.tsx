@@ -77,34 +77,36 @@ export default function PermissionPrompt() {
               </Show>
             </div>
 
-            {/* Row 2 — actions */}
+            {/* Row 2 — actions. The h-8 (32px) buttons sit below the 44px
+                touch guideline, so on coarse pointers they grow to h-10 —
+                approvals are the one tap that must not be missed. */}
             <div class="mt-2 flex items-center gap-1.5">
               <button
                 ref={allowBtn}
                 type="button"
                 onClick={() => session.respondPermission(req().permissionId, 'once')}
-                class="inline-flex h-7 items-center gap-1.5 rounded-md bg-[color:var(--accent)] px-2.5 text-meta font-medium text-[color:var(--on-primary)] transition-all hover:bg-[color:var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] active:scale-[0.97]"
+                class="inline-flex h-8 pointer-coarse:h-10 pointer-coarse:flex-1 items-center justify-center gap-1.5 rounded-md bg-[color:var(--accent)] px-2.5 text-meta font-medium text-[color:var(--on-primary)] transition-all hover:bg-[color:var(--accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] active:scale-[0.97]"
               >
                 Allow
-                <kbd class="rounded border border-white/30 px-1 font-mono text-[9.5px] leading-[14px] opacity-80">↵</kbd>
+                <kbd class="hidden sm:inline rounded border border-white/30 px-1 font-mono text-[9.5px] leading-[14px] opacity-80">↵</kbd>
               </button>
               <button
                 type="button"
                 onClick={() => session.respondPermission(req().permissionId, 'always')}
-                class="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-meta font-medium text-[color:var(--text-secondary)] transition-all hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)] active:scale-[0.97]"
+                class="inline-flex h-8 pointer-coarse:h-10 pointer-coarse:flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-meta font-medium text-[color:var(--text-secondary)] transition-all hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)] active:scale-[0.97]"
                 title={`Always allow ${req().tool} for this session`}
               >
                 Always
-                <kbd class="rounded border border-current px-1 font-mono text-[9.5px] leading-[14px] opacity-55">A</kbd>
+                <kbd class="hidden sm:inline rounded border border-current px-1 font-mono text-[9.5px] leading-[14px] opacity-55">A</kbd>
               </button>
-              <div class="flex-1" />
+              <div class="flex-1 sm:block hidden" />
               <button
                 type="button"
                 onClick={() => session.respondPermission(req().permissionId, 'reject')}
-                class="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-meta font-medium text-[color:var(--text-tertiary)] transition-all hover:bg-red-500/10 hover:text-red-300 active:scale-[0.97]"
+                class="inline-flex h-8 pointer-coarse:h-10 items-center gap-1.5 rounded-md px-2.5 text-meta font-medium text-[color:var(--text-tertiary)] transition-all hover:bg-red-500/10 hover:text-red-300 active:scale-[0.97]"
               >
                 Reject
-                <kbd class="rounded border border-current px-1 font-mono text-[9.5px] leading-[14px] opacity-55">esc</kbd>
+                <kbd class="hidden sm:inline rounded border border-current px-1 font-mono text-[9.5px] leading-[14px] opacity-55">esc</kbd>
               </button>
             </div>
           </div>

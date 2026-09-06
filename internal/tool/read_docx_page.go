@@ -42,7 +42,7 @@ func (ReadDocxPageTool) Execute(_ context.Context, args json.RawMessage, tctx Co
 		Path string `json:"path"`
 		Page int    `json:"page"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse read_docx_page args: %w", err)
 	}
 	if params.Path == "" {

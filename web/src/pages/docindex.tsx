@@ -8,6 +8,7 @@ import CodeViewer, { formatBytes } from '../components/code-viewer';
 import GitDiff from '../components/git-diff';
 import IndexScopeDialog from '../components/index-scope-dialog';
 import IndexRunDialog from '../components/index-run-dialog';
+import { DrawerToggle } from '../components/sidebar-shell';
 import {
   buildTree, flattenTree, allDirIds, defaultExpanded,
   basename, fileExt, relPath, langColor, tint, TreeRow, type TreeNode,
@@ -36,6 +37,13 @@ export default function DocIndexPage() {
   const [copied, setCopied] = createSignal(false);
 
   onMount(() => {
+    // The DocIndex store lives above the router and persists across navigation,
+    // so its file/doc list is only pulled on directory change, SSE reconnect or
+    // a build event — none of which fire on a plain navigation back to this
+    // screen. Without this, returning here shows a stale tree (files added or
+    // removed on disk since the last visit are missing). Refresh on entry so the
+    // list always reflects the project as it is now.
+    docIndex.refresh();
     docIndex.loadExcludes();
     // Pre-fetch git status so the changed-files badge on the toolbar
     // populates without needing to open the changes panel first.
@@ -154,6 +162,13 @@ export default function DocIndexPage() {
     window.addEventListener('pointerup', onDragEnd);
   };
   onCleanup(onDragEnd);
+
+  // The saved/derived pane width is right for a desktop window. On a phone it
+  // would leave the viewer ~50px, so below md the pane is capped at 45vw —
+  // enough for file names, still half the screen for content. The resize
+  // handle is hidden there too (touch users drag nothing by 4px).
+  const isNarrow = () => window.innerWidth < 768;
+  const effectiveTreeWidth = () => (isNarrow() ? Math.min(treeWidth(), Math.round(window.innerWidth * 0.45)) : treeWidth());
 
   // ---- git changes ------------------------------------------------------
 
@@ -311,12 +326,14 @@ export default function DocIndexPage() {
     'min-w-[15px] h-[15px] px-1 rounded text-[9.5px] font-medium tabular-nums flex items-center justify-center bg-[color:var(--accent-soft)] text-[color:var(--accent)]';
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <Sidebar />
 
       <div class="flex-1 flex flex-col overflow-hidden bg-[color:var(--bg-base)]">
         {/* ---- Header ---- */}
-        <header class="shrink-0 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] pl-3 pr-2.5 h-12 flex items-center gap-3">
+        <header class="shrink-0 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] pl-2 pr-2 sm:pl-3 sm:pr-2.5 h-12 flex items-center gap-2 sm:gap-3"
+                style={{ [ 'padding-top']: 'env(safe-area-inset-top)' }}>
+          <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="w-6 h-6 rounded-md bg-[color:var(--accent-soft)] flex items-center justify-center shrink-0">
               <svg class="w-3.5 h-3.5 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -385,7 +402,7 @@ export default function DocIndexPage() {
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" />
               </svg>
-              Scope
+              <span class="hidden md:inline">Scope</span>
               <Show when={docIndex.excludes().length > 0}>
                 <span class={toolCount}>{docIndex.excludes().length}</span>
               </Show>
@@ -402,7 +419,7 @@ export default function DocIndexPage() {
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
                 </svg>
-                Rebuild
+                <span class="hidden md:inline">Rebuild</span>
               </button>
             </Show>
           </div>
@@ -523,7 +540,7 @@ export default function DocIndexPage() {
           <Show when={showChanges()}>
             <div
               class="shrink-0 flex flex-col border-r border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)]/40 min-w-0"
-              style={{ width: `${treeWidth()}px` }}
+              style={{ width: `${effectiveTreeWidth()}px` }}
             >
               {/* Header: back + mode toggle + refresh */}
               <div class="shrink-0 px-2.5 py-2 border-b border-[color:var(--border-subtle)] flex items-center gap-1.5">
@@ -711,10 +728,10 @@ export default function DocIndexPage() {
                   />
                   <button
                     onClick={handleCommit}
-                    disabled={commitBusy || !commitMessage().trim()}
+                    disabled={commitBusy() || !commitMessage().trim()}
                     class="h-7 rounded-md text-[12px] font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:bg-[color:var(--accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition"
                   >
-                    {commitBusy ? 'Committing…' : 'Commit staged'}
+                    {commitBusy() ? 'Committing…' : 'Commit staged'}
                   </button>
                 </div>
               </Show>
@@ -731,7 +748,7 @@ export default function DocIndexPage() {
             <Show when={!showChanges()}>
             <div
               class="shrink-0 flex flex-col border-r border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)]/40 min-w-0"
-              style={{ width: `${treeWidth()}px` }}
+              style={{ width: `${effectiveTreeWidth()}px` }}
             >
               {/* Tree toolbar */}
               <div class="shrink-0 px-2.5 py-2 border-b border-[color:var(--border-subtle)] flex items-center gap-1.5">
@@ -823,10 +840,11 @@ export default function DocIndexPage() {
             </div>
             </Show>
 
-            {/* Resize handle */}
+            {/* Resize handle — desktop affordance; touch screens get the
+                capped pane width instead. */}
             <div
               onPointerDown={startDrag}
-              class="shrink-0 w-1 -ml-px cursor-col-resize hover:bg-[color:var(--accent)]/40 active:bg-[color:var(--accent)]/60 transition-colors z-10"
+              class="hidden md:block shrink-0 w-1 -ml-px cursor-col-resize hover:bg-[color:var(--accent)]/40 active:bg-[color:var(--accent)]/60 transition-colors z-10"
             />
 
             {/* File viewer / Diff viewer */}

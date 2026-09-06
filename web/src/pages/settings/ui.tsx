@@ -495,7 +495,7 @@ export function Chip(props: {
       onClick={() => props.onClick?.()}
       title={props.title}
       aria-pressed={props.active}
-      class={`inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-meta font-medium border transition-colors
+      class={`inline-flex shrink-0 items-center gap-1.5 h-7 px-3 rounded-full text-meta font-medium border transition-colors
         ${props.active
           ? 'border-[color:var(--accent)] text-[color:var(--accent)]'
           : 'border-[color:var(--border-default)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]'

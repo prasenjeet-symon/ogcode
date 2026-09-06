@@ -59,7 +59,7 @@ export default function PlanPromptInput() {
   });
 
   return (
-    <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-4">
+    <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-4 composer-safe">
       <Show when={plan.lockError()}>
         <div class="max-w-3xl mx-auto px-4 md:px-6 mb-2">
           <div class="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-[12px] text-red-300">
@@ -162,7 +162,8 @@ export default function PlanPromptInput() {
           </div>
         </div>
 
-        <div class="mt-2 flex items-center justify-center gap-4 text-[10.5px] text-zinc-600">
+        {/* Keyboard hints are desktop-only; touch keyboards have their own. */}
+        <div class="mt-2 flex items-center justify-center gap-4 text-[10.5px] text-zinc-600 composer-hints">
           <span class="flex items-center gap-1">
             <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">↵</kbd>
             send

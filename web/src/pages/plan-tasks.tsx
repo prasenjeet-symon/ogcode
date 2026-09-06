@@ -136,9 +136,11 @@ function TaskDrawer(props: { task: Task | null; onClose: () => void }) {
         />
       </Show>
 
-      {/* Drawer */}
+      {/* Drawer. Full-width below 640px via .task-drawer in index.css — the
+          old min-w-[420px] overflowed a 390px phone by 30px because min-width
+          beats max-width in CSS. */}
       <div
-        class={`fixed top-0 right-0 h-full z-50 w-[40vw] min-w-[420px] max-w-[95vw] flex flex-col
+        class={`task-drawer fixed top-0 right-0 h-full z-50 w-[40vw] min-w-[420px] max-w-[95vw] flex flex-col
                 border-l border-[color:var(--border-subtle)] shadow-2xl
                 transition-transform duration-250 ease-out
                 ${t() ? 'translate-x-0' : 'translate-x-full'}`}
@@ -675,7 +677,7 @@ export default function PlanTasksPage() {
 
   if (plan.planMissing()) {
     return (
-      <div class="flex h-screen w-full">
+      <div class="flex h-dvh w-full">
         <NotFoundPanel
           title="Plan not found"
           message="This plan no longer exists, so it has no tasks to show."
@@ -687,7 +689,7 @@ export default function PlanTasksPage() {
   }
 
   return (
-    <div class="flex flex-col h-screen w-full min-w-0 bg-[color:var(--bg-base)]">
+    <div class="flex flex-col h-dvh w-full min-w-0 bg-[color:var(--bg-base)]">
 
       {/* ── header ── */}
       <header
@@ -782,14 +784,16 @@ export default function PlanTasksPage() {
         </div>
       </Show>
 
-      {/* ── kanban ── */}
+      {/* ── kanban. Columns keep a 260px floor on phones and the row scrolls
+          horizontally — a 4-column board cannot stack on a phone without
+          burying three of them. */}
       <div class="flex-1 overflow-x-auto overflow-y-hidden">
-        <div class="flex h-full gap-5 px-5 py-4 w-full">
+        <div class="flex h-full gap-4 sm:gap-5 px-3 sm:px-5 py-4 w-max sm:w-full min-w-full">
           <For each={COLUMNS}>
             {(col) => {
               const colTasks = () => byStatus(col.status);
               return (
-                <div class="flex flex-col gap-2 flex-1 min-w-[280px]">
+                <div class="flex flex-col gap-2 flex-1 min-w-[260px] sm:min-w-[280px]">
                   {/* Column header — icon, name, plain muted count (Linear style) */}
                   <div class="flex items-center gap-2 h-7 px-0.5 shrink-0">
                     <StatusIcon status={col.status} size={14} />

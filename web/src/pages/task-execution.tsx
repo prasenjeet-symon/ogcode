@@ -6,6 +6,7 @@ import { createEffect, on, createSignal, Show, onCleanup } from 'solid-js';
 import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
 import Breadcrumb from '../components/breadcrumb';
+import { DrawerToggle } from '../components/sidebar-shell';
 import { getTask, isNotFoundError } from '../api/client';
 import { NotFoundPanel } from './not-found';
 
@@ -174,33 +175,34 @@ function TaskExecutionContent() {
   };
 
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <div class="flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
         {/* Header */}
-        <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-4 backdrop-blur-sm" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(17,17,20,0.8)', 'z-index': 100 }}>
+        <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-4 backdrop-blur-sm" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(17,17,20,0.8)', 'z-index': 100, [ 'padding-top']: 'env(safe-area-inset-top)' }}>
+          <DrawerToggle drawer="plans" label="Open plans" />
           <div class="flex items-center gap-2 min-w-0 flex-1">
             <Breadcrumb items={breadcrumbs()} />
 
             <Show when={taskData()}>
-              <span class={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${STATUS_STYLES[taskData()?.status] || STATUS_STYLES.pending}`}>
+              <span class={`text-[10px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${STATUS_STYLES[taskData()?.status] || STATUS_STYLES.pending}`}>
                 {taskData()?.status?.replace('_', ' ')}
               </span>
-              <span class={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${EFFORT_COLORS[taskData()?.effort] || EFFORT_COLORS.M}`}>
+              <span class={`hidden sm:inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded border ${EFFORT_COLORS[taskData()?.effort] || EFFORT_COLORS.M}`}>
                 {taskData()?.effort}
               </span>
             </Show>
 
             <Show when={session.loading() || session.hasRunningTools()}>
-              <span class="flex items-center gap-1 text-[11px] text-[color:var(--accent)] ml-1">
+              <span class="flex items-center gap-1 text-[11px] text-[color:var(--accent)] ml-1 shrink-0">
                 <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse" />
-                {session.hasRunningTools() ? 'running tools' : 'generating'}
+                <span class="hidden sm:inline">{session.hasRunningTools() ? 'running tools' : 'generating'}</span>
               </span>
             </Show>
           </div>
 
           <div class="flex items-center gap-2 shrink-0">
             <Show when={session.activeSession()?.model}>
-              <span class="text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium">
+              <span class="hidden sm:inline-block text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium max-w-[9rem] truncate">
                 {getModelLabel(session.activeSession()?.model)}
               </span>
             </Show>

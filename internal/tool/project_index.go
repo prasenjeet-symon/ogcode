@@ -133,7 +133,7 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 		Subdir string `json:"subdir"`
 	}
 	if args != nil {
-		_ = json.Unmarshal(args, &params)
+		_ = DecodeArgs(args, &params)
 	}
 
 	prefix := tctx.SessionDir

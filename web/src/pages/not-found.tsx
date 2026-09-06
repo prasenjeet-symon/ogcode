@@ -67,7 +67,7 @@ export function NotFoundPanel(props: NotFoundPanelProps) {
 // Catch-all route target for any URL the router doesn't match.
 export default function NotFound() {
   return (
-    <div class="flex h-screen w-full">
+    <div class="flex h-dvh w-full">
       <Sidebar />
       <NotFoundPanel />
     </div>

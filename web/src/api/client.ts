@@ -459,6 +459,13 @@ export function getModels(): Promise<ModelInfo[]> {
   return fetchAPI('/models');
 }
 
+// Force the server to clear each provider's cached catalogue and re-fetch it
+// live from the endpoint, returning the updated list. Used after a credential
+// or base-URL change so new models appear without restarting ogcode.
+export function refreshModels(): Promise<ModelInfo[]> {
+  return fetchAPI('/models/refresh', { method: 'POST' });
+}
+
 export interface ModelPreference {
   id: string;
   providerId: string;
@@ -875,8 +882,19 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 }
 
 // Search Config API
+export type SearchProvider = 'native' | 'tavily';
+
 export interface SearchConfig {
   enabled: boolean;
+  // Which search backend answers web_search/fetch_page: the built-in native
+  // engine, or a third-party provider (Tavily).
+  provider: SearchProvider;
+  // Tavily API key. On read it is the sentinel '__SET__' when a key is stored
+  // (never the real value) or '' when none is. On write, echo '__SET__' back to
+  // keep the stored key untouched.
+  tavilyApiKey: string;
+  // True when TAVILY_API_KEY is set in the server's environment (read-only hint).
+  tavilyEnvKeySet?: boolean;
   // Deep-research pipeline tuning (see settings → web search).
   fetchTopK: number;
   pageChars: number;
@@ -887,10 +905,22 @@ export function getSearchConfig(): Promise<SearchConfig> {
   return fetchAPI('/search/config');
 }
 
-export function setSearchConfig(cfg: Omit<SearchConfig, 'updatedAt'>): Promise<SearchConfig> {
+export function setSearchConfig(
+  cfg: Omit<SearchConfig, 'updatedAt' | 'tavilyEnvKeySet'>,
+): Promise<SearchConfig> {
   return fetchAPI('/search/config', {
     method: 'POST',
     body: JSON.stringify(cfg),
+  });
+}
+
+// validateSearchKey tests a third-party search key without persisting it. Send
+// '__SET__' (or '') to test the already-stored key. Always resolves with the
+// outcome; it does not throw on an invalid key.
+export function validateSearchKey(tavilyApiKey: string): Promise<{ ok: boolean; error?: string }> {
+  return fetchAPI('/search/config/validate', {
+    method: 'POST',
+    body: JSON.stringify({ tavilyApiKey }),
   });
 }
 

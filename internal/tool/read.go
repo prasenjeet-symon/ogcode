@@ -36,10 +36,10 @@ func (ReadTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File or directory path"},
-			"start_line": {"type": "number", "description": "First line to read, 1-based and inclusive. Pass a range printed by file_map here as-is. Defaults to 1 when only end_line is given."},
-			"end_line": {"type": "number", "description": "Last line to read, 1-based and inclusive. If given without start_line, reads from line 1 through end_line. If start_line is given without end_line, defaults to start_line plus 2000 lines."},
-			"offset": {"type": "number", "description": "Line offset to start reading from (0-based). For paging; ignored when start_line is set."},
-			"limit": {"type": "number", "description": "Maximum number of lines to read (default 2000)"}
+			"start_line": {"type": "integer", "description": "First line to read, 1-based and inclusive. Pass a range printed by file_map here as-is. Defaults to 1 when only end_line is given."},
+			"end_line": {"type": "integer", "description": "Last line to read, 1-based and inclusive. If given without start_line, reads from line 1 through end_line. If start_line is given without end_line, defaults to start_line plus 2000 lines."},
+			"offset": {"type": "integer", "description": "Line offset to start reading from (0-based). For paging; ignored when start_line is set."},
+			"limit": {"type": "integer", "description": "Maximum number of lines to read (default 2000)"}
 		},
 		"required": ["path"]
 	}`)
@@ -53,7 +53,7 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		StartLine int    `json:"start_line"`
 		EndLine   int    `json:"end_line"`
 	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 

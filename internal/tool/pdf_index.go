@@ -42,7 +42,7 @@ func (t PdfIndexTool) Execute(_ context.Context, args json.RawMessage, tctx Cont
 	var params struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse pdf_index args: %w", err)
 	}
 	if params.Path == "" {

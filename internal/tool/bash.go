@@ -24,7 +24,7 @@ func (BashTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"command": {"type": "string", "description": "The shell command to execute"},
-			"timeout": {"type": "number", "description": "Timeout in seconds (default 120)"}
+			"timeout": {"type": "integer", "description": "Timeout in seconds (default 120)"}
 		},
 		"required": ["command"]
 	}`)
@@ -35,7 +35,7 @@ func (BashTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
 	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 

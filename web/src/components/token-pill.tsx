@@ -1,4 +1,4 @@
-import { createMemo, Show } from 'solid-js';
+import { createMemo, createSignal, Show } from 'solid-js';
 import { useSession } from '../context/session';
 import type { MessageWithParts } from '../api/client';
 
@@ -22,6 +22,13 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
   const session = useSession();
   const getMessages = () => props.messages ? props.messages() : session.messages();
 
+  // Hover shows the breakdown on desktop; touch has no hover, so a tap
+  // toggles it there. The two paths drive the same popover.
+  const isCoarse = () => window.matchMedia('(hover: none)').matches;
+  const [hovered, setHovered] = createSignal(false);
+  const [pinned, setPinned] = createSignal(false);
+  const showBreakdown = () => pinned() || (!isCoarse() && hovered());
+
   const totals = createMemo<Totals>(() => {
     const out: Totals = {
       input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0,
@@ -44,19 +51,29 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
 
   return (
     <Show when={hasData()}>
-      <div class="group relative flex items-center gap-1.5 h-7 px-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] cursor-default select-none overflow-visible">
+      <div
+        class="group relative flex items-center gap-1.5 h-7 px-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] cursor-default select-none overflow-visible"
+        onClick={() => { if (isCoarse()) setPinned((v) => !v); }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         <svg class="w-3 h-3 text-zinc-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6a2 2 0 012-2h2a2 2 0 012 2v6m-6 0h6m-9 0h12M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
         </svg>
         <span class="text-micro font-medium text-zinc-300 tabular-nums">
           {formatTokens(totals().total)}
         </span>
-        <span class="text-micro text-zinc-500">tokens</span>
+        <span class="text-micro text-zinc-500 hidden sm:inline">tokens</span>
 
-        {/* Hover breakdown */}
-        <div class="absolute top-full right-0 mt-1.5 w-56 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl
-                    opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition"
-             style={{ 'z-index': 9999 }}>
+        {/* Hover/tap breakdown */}
+        <div
+          class="absolute top-full right-0 mt-1.5 w-56 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl transition"
+          classList={{
+            'opacity-0 pointer-events-none': !showBreakdown(),
+            'opacity-100 pointer-events-auto': showBreakdown(),
+          }}
+          style={{ 'z-index': 9999 }}
+        >
           <div class="text-micro uppercase tracking-wider text-zinc-500 font-semibold mb-2">Session usage</div>
           <Row label="Input" value={totals().input} dot="bg-[color:var(--accent)]" />
           <Row label="Output" value={totals().output} dot="bg-emerald-400" />

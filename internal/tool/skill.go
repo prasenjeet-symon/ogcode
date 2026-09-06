@@ -49,7 +49,7 @@ func (t SkillTool) Execute(ctx context.Context, args json.RawMessage, tctx Conte
 	var input struct {
 		Name string `json:"name"`
 	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 	name := strings.TrimSpace(input.Name)

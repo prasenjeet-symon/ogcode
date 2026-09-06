@@ -78,7 +78,7 @@ type BreakdownInput struct {
 
 func (t BreakdownTool) Execute(_ context.Context, args json.RawMessage, _ Context) (Result, error) {
 	var input BreakdownInput
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse breakdown input: %w", err)
 	}
 	if len(input.Tasks) == 0 {

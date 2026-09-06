@@ -69,7 +69,7 @@ function AppWrapper(props: { children?: any }) {
                   <DocIndexProvider>
                     <NotificationProvider>
                       <OnboardingGate />
-                      <div class="flex h-screen bg-[color:var(--bg-base)] text-zinc-100 antialiased">
+                      <div class="flex h-dvh bg-[color:var(--bg-base)] text-zinc-100 antialiased">
                         {props.children}
                       </div>
                       <UpdateNotification />

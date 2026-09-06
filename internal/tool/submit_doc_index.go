@@ -72,7 +72,7 @@ func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ C
 			Labels  []string `json:"labels"`
 		} `json:"pages"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse submit_doc_index args: %w", err)
 	}
 	if params.DocPath == "" {

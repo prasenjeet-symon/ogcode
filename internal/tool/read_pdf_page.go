@@ -47,7 +47,7 @@ func (ReadPdfPageTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 		Path string `json:"path"`
 		Page int    `json:"page"`
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
+	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse read_pdf_page args: %w", err)
 	}
 	if params.Path == "" {

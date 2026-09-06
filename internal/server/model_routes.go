@@ -52,7 +52,9 @@ func (s *Server) handleSetModelPreference(w http.ResponseWriter, r *http.Request
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := session.SetModelPreference(s.db, pref); err != nil {
+	// Model preferences (custom definitions + enable/disable) are stored in the
+	// global config DB so a custom model added in one project is available in all.
+	if err := session.SetModelPreference(s.globalDB, pref); err != nil {
 		slog.Error("set model preference", "err", err)
 		http.Error(w, "failed to save preference", http.StatusInternalServerError)
 		return
@@ -66,7 +68,7 @@ func (s *Server) handleDeleteModelPreference(w http.ResponseWriter, r *http.Requ
 	id := chi.URLParam(r, "id")
 
 	// Only allow deleting custom models
-	prefs, _ := session.GetModelPreferences(s.db)
+	prefs, _ := session.GetModelPreferences(s.globalDB)
 	var isCustom bool
 	for _, p := range prefs {
 		if p.ID == id {
@@ -79,7 +81,7 @@ func (s *Server) handleDeleteModelPreference(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := session.DeleteModelPreference(s.db, id); err != nil {
+	if err := session.DeleteModelPreference(s.globalDB, id); err != nil {
 		slog.Error("delete model preference", "err", err)
 		http.Error(w, "failed to delete preference", http.StatusInternalServerError)
 		return

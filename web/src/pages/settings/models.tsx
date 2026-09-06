@@ -1,4 +1,4 @@
-import { For, Show, createSignal, createMemo, createEffect, untrack, onMount, type JSX } from 'solid-js';
+import { For, Index, Show, createSignal, createMemo, createEffect, untrack, onMount, type JSX } from 'solid-js';
 import { useSession } from '../../context/session';
 import type { ModelInfo, ProviderConfig } from '../../api/client';
 import { getProviderConfigs, setProviderConfig } from '../../api/client';
@@ -15,6 +15,7 @@ import {
   TextField,
   EmptyState,
   Mono,
+  Spinner,
   fieldClass,
   matches,
   useShell,
@@ -81,21 +82,30 @@ export default function ModelsSettings() {
   // The page always shows the four real slots, plus the free pool and any
   // unexpected provider id that turns up in the catalogue — a model the user
   // can see in the picker must be reachable here, whatever its provider.
-  const slots = createMemo<Slot[]>(() => {
-    const base: Slot[] = PROVIDER_DEFS.map((def) => ({ id: def.id, label: def.label, def }));
-    const known = new Set(base.map((s) => s.id));
-    const extra = new Set<string>();
-    for (const m of session.models()) {
-      const slot = slotOf(m);
-      if (!known.has(slot)) extra.add(slot);
-    }
-    if (extra.has(FREE_POOL)) {
-      base.push({ id: FREE_POOL, label: 'ogcode free pool', readOnly: true });
-      extra.delete(FREE_POOL);
-    }
-    for (const id of [...extra].sort()) base.push({ id, label: id, readOnly: true });
-    return base;
-  });
+  const slots = createMemo<Slot[]>(
+    () => {
+      const base: Slot[] = PROVIDER_DEFS.map((def) => ({ id: def.id, label: def.label, def }));
+      const known = new Set(base.map((s) => s.id));
+      const extra = new Set<string>();
+      for (const m of session.models()) {
+        const slot = slotOf(m);
+        if (!known.has(slot)) extra.add(slot);
+      }
+      if (extra.has(FREE_POOL)) {
+        base.push({ id: FREE_POOL, label: 'ogcode free pool', readOnly: true });
+        extra.delete(FREE_POOL);
+      }
+      for (const id of [...extra].sort()) base.push({ id, label: id, readOnly: true });
+      return base;
+    },
+    [] as Slot[],
+    // Toggling a model rebuilds this list, but the set of provider slots almost
+    // never changes as a result. Returning the previous array when the slot ids
+    // still match keeps <For> from re-mounting every ProviderSection on each
+    // toggle — the re-mount is what reset the scroll position and flashed the
+    // whole page.
+    { equals: (a, b) => a.length === b.length && a.every((s, i) => s.id === b[i].id) },
+  );
 
   const modelsFor = (slotId: string) =>
     session
@@ -136,6 +146,7 @@ export default function ModelsSettings() {
             config={configs()[slot.id]}
             loadingConfig={loadingConfigs()}
             onSaved={(c) => setConfigs({ ...configs(), [slot.id]: c })}
+            onApplied={() => session.reloadModels()}
             onToggle={(m) => session.toggleModel(m, !m.enabled)}
             onRemove={async (m) => {
               if (!confirm(`Remove "${m.name}"? This deletes the custom model.`)) return;
@@ -181,6 +192,7 @@ function ProviderSection(props: {
   config: ProviderConfig | undefined;
   loadingConfig: boolean;
   onSaved: (c: ProviderConfig) => void;
+  onApplied: () => Promise<void>;
   onToggle: (m: ModelInfo) => void | Promise<void>;
   onRemove: (m: ModelInfo) => void;
   onAdd: (id: string, name: string, collection: string) => Promise<void>;
@@ -224,7 +236,13 @@ function ProviderSection(props: {
       }
     >
       <Show when={props.slot.def && !props.loadingConfig}>
-        <Credentials def={props.slot.def!} config={props.config} onSaved={props.onSaved} hide={hideRow} />
+        <Credentials
+          def={props.slot.def!}
+          config={props.config}
+          onSaved={props.onSaved}
+          onApplied={props.onApplied}
+          hide={hideRow}
+        />
       </Show>
 
       <Row
@@ -259,13 +277,19 @@ function Credentials(props: {
   def: ProviderDef;
   config: ProviderConfig | undefined;
   onSaved: (c: ProviderConfig) => void;
+  onApplied: () => Promise<void>;
   hide: (...terms: string[]) => boolean;
 }) {
   const [apiKey, setApiKey] = createSignal('');
   const [baseURL, setBaseURL] = createSignal('');
   const [saving, setSaving] = createSignal(false);
+  // Set while the freshly-saved credentials are being applied and the provider's
+  // catalogue re-fetched. Drives the "Fetching models…" indicator.
+  const [refreshing, setRefreshing] = createSignal(false);
   const [saved, setSaved] = createSignal(false);
   const [error, setError] = createSignal('');
+  // The form is locked through both the save and the follow-up catalogue fetch.
+  const busy = () => saving() || refreshing();
   let baseRef: HTMLInputElement | undefined;
 
   const guide = () => PROVIDER_GUIDE[props.def.id];
@@ -311,19 +335,33 @@ function Credentials(props: {
     setSaved(false);
     setSaving(true);
     const typed = apiKey().trim();
+    let result: ProviderConfig;
     try {
-      const result = await setProviderConfig(props.def.id, {
+      result = await setProviderConfig(props.def.id, {
         apiKey: typed === '' && dbKeySet() ? '__SET__' : typed,
         baseUrl: baseURL().trim(),
       });
-      props.onSaved(result);
-      setApiKey('');
+    } catch {
+      setError('Could not save. Is the ogcode server still running?');
+      setSaving(false);
+      return;
+    }
+    props.onSaved(result);
+    setApiKey('');
+    setSaving(false);
+    // The server applies credentials the moment they are saved (it reloads its
+    // providers in place), so pull the freshly-fetched catalogue rather than ask
+    // for a restart. A failure past this point is a fetch failure, not a save
+    // failure — the key is stored either way, so say which.
+    setRefreshing(true);
+    try {
+      await props.onApplied();
       setSaved(true);
       setTimeout(() => setSaved(false), 4000);
     } catch {
-      setError('Could not save. Is the ogcode server still running?');
+      setError('Saved, but the model list could not be fetched. Check the key or endpoint, then Save again.');
     } finally {
-      setSaving(false);
+      setRefreshing(false);
     }
   };
 
@@ -333,14 +371,26 @@ function Credentials(props: {
     if (!confirm(`Remove the stored ${props.def.label} API key from ogcode?`)) return;
     setError('');
     setSaving(true);
+    let result: ProviderConfig;
     try {
-      const result = await setProviderConfig(props.def.id, { apiKey: '', baseUrl: baseURL().trim() });
-      props.onSaved(result);
-      setApiKey('');
+      result = await setProviderConfig(props.def.id, { apiKey: '', baseUrl: baseURL().trim() });
     } catch {
       setError('Could not remove the key.');
-    } finally {
       setSaving(false);
+      return;
+    }
+    props.onSaved(result);
+    setApiKey('');
+    setSaving(false);
+    // Removing the key unregisters the provider server-side, so refresh to drop
+    // its models from the list without a restart.
+    setRefreshing(true);
+    try {
+      await props.onApplied();
+    } catch {
+      // The key is gone regardless; a stale row corrects on the next refresh.
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -351,7 +401,7 @@ function Credentials(props: {
         helper={
           <Show
             when={dbKeySet()}
-            fallback={<>Read from <Mono>{guide()?.envKey}</Mono> if that variable is set. Applies after ogcode restarts.</>}
+            fallback={<>Read from <Mono>{guide()?.envKey}</Mono> if that variable is set. Applies as soon as you save.</>}
           >
             <>
               Leave blank to keep the stored key.
@@ -372,7 +422,7 @@ function Credentials(props: {
               value={apiKey()}
               onInput={setApiKey}
               onEnter={commit}
-              disabled={saving()}
+              disabled={busy()}
               ariaLabel={`${props.def.label} API key`}
               placeholder={
                 dbKeySet() ? 'leave blank to keep the saved key'
@@ -381,14 +431,20 @@ function Credentials(props: {
               }
             />
           </div>
-          <Button onClick={commit} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
+          <Button onClick={commit} disabled={busy()}>{saving() ? 'Saving…' : refreshing() ? 'Fetching…' : 'Save'}</Button>
         </div>
         <div class="mt-2 flex items-center gap-3 flex-wrap">
           <Show when={keyState()}>
             <StatusChip tone="ok">{keyState()}</StatusChip>
           </Show>
-          <Show when={saved()}>
-            <span class="text-micro" style={{ color: 'var(--success)' }}>Saved — restart ogcode to apply.</span>
+          <Show when={refreshing()}>
+            <span class="inline-flex items-center gap-1.5 text-micro text-[color:var(--text-muted)]">
+              <Spinner class="w-3 h-3" />
+              Fetching models…
+            </span>
+          </Show>
+          <Show when={saved() && !refreshing()}>
+            <span class="text-micro" style={{ color: 'var(--success)' }}>Applied — models updated.</span>
           </Show>
           <Show when={error()}>
             <span class="text-micro" style={{ color: 'var(--danger)' }}>{error()}</span>
@@ -422,12 +478,12 @@ function Credentials(props: {
                 value={baseURL()}
                 onInput={setBaseURL}
                 onEnter={commit}
-                disabled={saving()}
+                disabled={busy()}
                 ariaLabel={`${props.def.label} base URL`}
                 placeholder={guide()?.defaultBaseURL ?? ''}
               />
             </div>
-            <Button onClick={commit} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
+            <Button onClick={commit} disabled={busy()}>{saving() ? 'Saving…' : refreshing() ? 'Fetching…' : 'Save'}</Button>
           </div>
           <Show when={endpointOverridden()}>
             <div class="mt-1.5">
@@ -452,7 +508,10 @@ function Credentials(props: {
           stacked
           hidden={props.hide('Point at', 'gemini deepseek groq together vendor preset compatible')}
         >
-          <div class="flex flex-wrap gap-2">
+          {/* One scrolling row rather than wrapping to two: the vendor list keeps
+              growing, and a single lane reads as a picker. hide-scrollbar +
+              shrink-0 chips match the settings tab rail. */}
+          <div class="flex flex-nowrap gap-2 overflow-x-auto hide-scrollbar">
             <Chip active={!collectionForBaseURL(baseURL())} onClick={() => setBaseURL('')}>
               OpenAI
             </Chip>
@@ -497,13 +556,25 @@ function ModelList(props: {
   const [enabledOnly, setEnabledOnly] = createSignal(false);
   const [bulkBusy, setBulkBusy] = createSignal(false);
   const [expanded, setExpanded] = createSignal(false);
+  // Per-provider model search. OpenRouter alone lists hundreds of models, so each
+  // catalogue gets its own filter box rather than leaning on the page-wide search.
+  const [query, setQuery] = createSignal('');
 
-  const rows = createMemo(() => props.visible.filter((m) => !enabledOnly() || m.enabled));
+  const rows = createMemo(() => {
+    const q = query().trim();
+    return props.visible.filter(
+      (m) => (!enabledOnly() || m.enabled) && (q === '' || modelMatches(m, q)),
+    );
+  });
+
+  // A live search — this box or the page-wide one — means the user is after
+  // something specific, so show every match instead of the first LIMIT.
+  const isFiltering = () => props.filtering || query().trim() !== '';
 
   // A provider with hundreds of models (OpenRouter) would otherwise put its
   // whole catalogue into a page that already holds four other providers.
   const LIMIT = 20;
-  const capped = createMemo(() => (expanded() || props.filtering ? rows() : rows().slice(0, LIMIT)));
+  const capped = createMemo(() => (expanded() || isFiltering() ? rows() : rows().slice(0, LIMIT)));
   const hiddenCount = () => rows().length - capped().length;
 
   // Sequential, not a parallel fan-out. Each toggle POSTs one preference and
@@ -535,6 +606,45 @@ function ModelList(props: {
 
   return (
     <div>
+      <Show when={props.all.length > 5}>
+        <div class="relative mb-1.5">
+          <svg
+            class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[color:var(--text-muted)]"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={query()}
+            onInput={(e) => setQuery(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setQuery('');
+            }}
+            placeholder={`Search ${props.slot.label} models…`}
+            aria-label={`Search ${props.slot.label} models`}
+            spellcheck={false}
+            class={`${fieldClass} w-full pl-7 ${query() ? 'pr-7' : ''} text-meta`}
+          />
+          <Show when={query()}>
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Clear model search"
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded
+                     text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)] transition-colors"
+            >
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </Show>
+        </div>
+      </Show>
+
       <Show when={props.all.length > 0}>
         <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
           <Chip active={enabledOnly()} onClick={() => setEnabledOnly(!enabledOnly())}>
@@ -542,30 +652,45 @@ function ModelList(props: {
           </Chip>
           <Chip onClick={() => setAll(true)}>{bulkBusy() ? 'Working…' : 'Enable all'}</Chip>
           <Chip onClick={() => setAll(false)}>Disable all</Chip>
+          <Show when={query().trim() && rows().length > 0}>
+            <span class="ml-0.5 text-micro tabular-nums text-[color:var(--text-muted)]">
+              {rows().length} match{rows().length === 1 ? '' : 'es'}
+            </span>
+          </Show>
         </div>
       </Show>
 
       <Show when={rows().length > 0}>
         <div class="border-t border-[color:var(--border-subtle)]">
-          <For each={sections()}>
-            {([collection, models]) => (
-              <>
-                <Show when={collection && sections().length > 1}>
-                  <div class="flex items-center gap-2 pt-3 pb-1">
-                    <span class="text-micro font-medium uppercase tracking-[0.06em] text-[color:var(--text-muted)]">
-                      {collection}
-                    </span>
-                    <span class="text-micro tabular-nums text-[color:var(--text-muted)]">{models.length}</span>
-                  </div>
-                </Show>
-                <For each={models}>
-                  {(m) => (
-                    <ModelItem model={m} onToggle={() => props.onToggle(m)} onRemove={() => props.onRemove(m)} />
-                  )}
-                </For>
-              </>
-            )}
-          </For>
+          {/* <Index>, not <For>: sections() yields fresh tuples on every toggle,
+              which a reference-keyed <For> would treat as new — re-mounting the
+              whole list and flashing it. <Index> keys by position, so the section
+              wrappers persist and the inner <For> (keyed by the model objects,
+              whose identity toggleModel preserves) updates only the one row that
+              actually changed. */}
+          <Index each={sections()}>
+            {(section) => {
+              const collection = () => section()[0];
+              const models = () => section()[1];
+              return (
+                <>
+                  <Show when={collection() && sections().length > 1}>
+                    <div class="flex items-center gap-2 pt-3 pb-1">
+                      <span class="text-micro font-medium uppercase tracking-[0.06em] text-[color:var(--text-muted)]">
+                        {collection()}
+                      </span>
+                      <span class="text-micro tabular-nums text-[color:var(--text-muted)]">{models().length}</span>
+                    </div>
+                  </Show>
+                  <For each={models()}>
+                    {(m) => (
+                      <ModelItem model={m} onToggle={() => props.onToggle(m)} onRemove={() => props.onRemove(m)} />
+                    )}
+                  </For>
+                </>
+              );
+            }}
+          </Index>
         </div>
       </Show>
 
@@ -579,21 +704,21 @@ function ModelList(props: {
         </button>
       </Show>
 
-      {/* An empty list is nearly always a missing credential or a pending
-          restart, so say which — "no models" alone leaves nothing to act on. */}
+      {/* An empty list is nearly always a search with no hits or a missing
+          credential, so say which — "no models" alone leaves nothing to act on. */}
       <Show when={rows().length === 0}>
         <p class="text-meta text-[color:var(--text-tertiary)] leading-[1.6]">
-          {props.filtering
+          {isFiltering()
             ? 'No models here match the search.'
             : enabledOnly()
             ? 'Every model from this provider is currently disabled.'
             : props.configured
             ? props.slot.id === 'ollama'
-              ? 'Connected, but the catalogue is empty. Pull a model with `ollama pull qwen2.5-coder`, then restart ogcode.'
-              : 'Connected, but the catalogue is empty. Restart ogcode to refresh it, or add a model ID by hand below.'
+              ? 'Connected, but the catalogue is empty. Pull a model with `ollama pull qwen2.5-coder`, then Save the endpoint again to refresh.'
+              : 'Connected, but the catalogue is empty. Save again to re-fetch, or add a model ID by hand below.'
             : props.slot.id === 'ollama'
             ? 'Not connected. Install Ollama, pull a model, and point Base URL at it — no API key needed.'
-            : 'Not connected. Add an API key above and restart ogcode; its models then appear here.'}
+            : 'Not connected. Add an API key above; its models appear here the moment you save.'}
         </p>
       </Show>
 

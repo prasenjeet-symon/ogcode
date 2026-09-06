@@ -54,7 +54,7 @@ func (t DeepSearchTool) Execute(ctx context.Context, args json.RawMessage, tctx 
 		Query   string `json:"query"`
 		Context string `json:"context"`
 	}
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 	if input.Query == "" {

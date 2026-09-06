@@ -65,9 +65,11 @@ func (s *Server) handleOpenRouterPricing(w http.ResponseWriter, r *http.Request)
 	}
 	cache.mu.RUnlock()
 
-	// Resolve API key: DB config takes precedence over env var.
+	// Resolve API key: DB config takes precedence over env var. Provider configs
+	// are stored in the global config DB (shared across projects), so read there —
+	// s.db (per-project) never holds them.
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
-	if cfg, err := session.GetProviderConfig(s.db, "openrouter"); err == nil && cfg.APIKey != "" {
+	if cfg, err := session.GetProviderConfig(s.globalDB, "openrouter"); err == nil && cfg.APIKey != "" {
 		apiKey = cfg.APIKey
 	}
 
