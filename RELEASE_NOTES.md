@@ -1,6 +1,6 @@
 # Release Notes — v0.32.0
 
-## Minor: Switchable Web Search Provider (Tavily), Tolerant Tool Arguments, Custom-Model Vision, Global Model Settings
+## Minor: Switchable Web Search Provider (Tavily), Tolerant Tool Arguments, Desktop Notifications, Geist UI, Deployment Fixes
 
 This release adds a **switchable web search provider** — keep the built-in
 native engine, or route `web_search` and `fetch_page` through your own **Tavily**
@@ -8,7 +8,12 @@ account with automatic fallback to native so search never goes dark. Tool calls
 that emit an integer argument in float notation (`100.0`, `1e2`) no longer fail
 the turn; custom OpenAI/Anthropic-slot models are now probed for image support
 instead of silently losing it; and model and search settings move to a global
-config store so they persist across projects.
+config store so they persist across projects. Around that: **desktop
+notifications** for finished loops and pending approvals, a crisper **Geist
+typeface** across the UI, and a set of **deployment and first-boot fixes** —
+the server binds its port before any background prefetch, a stopped Ollama no
+longer shadows usable providers, and the headless CLI gets the same zero-config
+free pool as the server.
 
 ### Switchable web search: native or Tavily
 
@@ -74,6 +79,86 @@ capability shown per model.
 
 A mobile navigation drawer, keyboard-navigation helpers, and an extracted sidebar
 shell, with responsive styling across the pages and settings screens.
+
+### Desktop notifications
+
+The web UI can now surface events through the **browser's native Notification
+API**, so a finished agent loop or a tool call waiting for permission reaches
+the OS notification center while the ogcode tab is in the background. Two
+events trigger: `loop.done` (a session's agent loop exited, finished or failed)
+and `permission.requested` (a tool call needs approval). Plan-task updates
+continue through the in-app bell; they also publish `loop.done`, so listening
+to only that event avoids double notifications.
+
+Three gates keep the feature quiet: the user must opt in via a banner (the
+permission prompt must run inside a user gesture, so the provider only checks
+state at boot and the banner is the opt-in surface — a dismissal is remembered
+across reloads, and the banner never shows on the onboarding wizard);
+notifications fire only while `document.hidden`, since a focused tab already
+covers the same events in-app; and a Web-Lock leader election (`ogcode-desktop-notifications`)
+ensures that with several ogcode tabs open, exactly one raises each
+notification. Clicking one focuses the session.
+
+### Geist typeface
+
+The UI font switches from Inter to **Geist** (and JetBrains Mono to **Geist
+Mono**) — variable woff2 files self-hosted with the binary as before, so an
+offline install never phones home and first paint never reflows. Geist was
+chosen for its open apertures and cleaner geometry at small sizes on dark
+backgrounds; true italics ship as separate variable faces for both families,
+and the dead Inter-era `cv01–cv11` font-feature settings on `body` were removed
+(Geist does not use them). Both faces preload in `index.html` alongside the
+bundle.
+
+### Deployment and first-boot fixes
+
+Aimed at Docker deployments and cold-cache first boots:
+
+- **Listener before preflight.** The local-embedder model download (~133 MB
+  ONNX, up to 5 minutes) used to run *before* `net.Listen`, so a first boot
+  with a cold cache bound the HTTP port ~40s late and container healthchecks
+  failed while the server was healthy but unreachable. The preflight now runs
+  in a background goroutine launched after the listener binds, and shutdown
+  cancels an in-flight download (`embedCancel`) next to the MCP cancel.
+- **Embedder download race fixed.** Two embedders created concurrently on a
+  cold cache (startup preflight + memory backfill) could both pass the marker
+  check and race on the shared `model.onnx.part` temp file. `prepareModel` now
+  holds a package-level mutex across the check→download→mark window and
+  re-checks the marker under the lock, so the loser skips the download.
+  Pinned by a concurrency test that asserts exactly one download across four
+  goroutines.
+- **A stopped Ollama no longer shadows usable providers.** `Registry.DefaultUsable`
+  is the new default-provider walk: a registered ollama whose daemon is down
+  (and `OLLAMA_API_KEY` unset) no longer outranks the community free pool and
+  user keys by mere installation; a live daemon or an API key keeps ollama's
+  seat, and ollama-only users still get their provider with the real
+  connection error. Server, headless CLI and the settings model list all
+  resolve defaults through it.
+- **Free pool in the headless CLI.** `ogcode run` and `ogcode index` now
+  provision the community free-tier providers exactly like the server
+  (`AddFreePoolProviders`), so a zero-config `ogcode run "…"` works out of the
+  box; the error text when nothing is usable names the free pool.
+- **Docker: git + healthcheck + `latest` tag.** The image installs `git` (the
+  agent shells out to git; without it every workspace reports "not a git
+  repository"), gains a `HEALTHCHECK` probing `/api/config` with a 120s
+  `--start-period` for cold-cache boots, and the workflow now publishes the
+  `ghcr.io/.../ogcode:latest` tag the README references.
+- **README Compose example fixed.** The example now mounts the project into
+  `/workspace` and sets `working_dir` there — ogcode's file tools resolve
+  paths against the working directory, so a container without the workspace
+  mount starts up fine but can only see itself.
+- **Tool-title cleanup.** `file_map` and the oversized-read file map no longer
+  append a symbol count that arrived before truncation could drop entries.
+
+### Benchmark harness
+
+A new `bench/` directory with adapters that run ogcode under third-party SWE
+harnesses without changing ogcode itself: a **Pier** adapter for DeepSWE (with
+a network allowlist for the release download and the inference endpoint), a
+**Harbor** adapter for Terminal-Bench, and a standalone runner for the Aider
+polyglot exercises following the published protocol. `bench/README.md` covers
+setup, the `provider/model` slot mapping, and the caveats of routing through a
+local Ollama router (no prompt caching, `cost_usd: null`).
 
 ### Migration
 
