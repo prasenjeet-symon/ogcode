@@ -71,6 +71,9 @@ type Server struct {
 	// mcpCancel cancels the lazy-connect context on shutdown so an in-flight
 	// OAuth/dial does not block past the server's lifetime.
 	mcpCancel context.CancelFunc
+	// embedCancel cancels the background local-embedder model download on
+	// shutdown so an in-flight ~133 MB fetch does not outlive the server.
+	embedCancel context.CancelFunc
 
 	// Version check manager
 	versionManager *version.Manager
@@ -311,15 +314,10 @@ func (s *Server) Start() error {
 
 	// memory_recall will be registered below after mem is initialized
 
-	// Determine default provider with stable priority
-	var defaultProvider provider.Provider
-	priority := []string{"anthropic", "openai", "openrouter", "ollama"}
-	for _, id := range priority {
-		if p := registry.Get(id); p != nil {
-			defaultProvider = p
-			break
-		}
-	}
+	// Determine default provider. DefaultUsable applies the stable priority but
+	// skips an installed-but-stopped Ollama so the community free pool and the
+	// user's own keys are preferred over a daemon that would just refuse.
+	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
 		slog.Warn("no LLM provider configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, OLLAMA_API_KEY, or install Ollama")
 		defaultProvider = provider.NewAnthropicProvider()
@@ -398,19 +396,10 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Eagerly download the inbuilt local embedder's model weights (the default
-	// embedding backend) before the server accepts requests. The local embedder
-	// is the default and may be enabled at runtime via the settings UI without a
-	// restart, so we always run this preflight regardless of whether agentic
-	// memory is configured yet — it ensures the one-time ~133 MB download is out
-	// of the way. Subsequent LocalEmbedder instances share the cache directory
-	// and skip the download entirely. Errors are non-fatal: the next Embed call
-	// retries, so we log and continue rather than refusing to start.
-	dlCtx, dlCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	if err := provider.EnsureLocalEmbedderModel(dlCtx); err != nil {
-		slog.Warn("local embedder: startup model download failed; will retry on first use", "err", err)
-	}
-	dlCancel()
+	// The eager local-embedder model download used to block here, before the
+	// HTTP listener bound — a cold-cache first boot stalled ~40s on the ~133 MB
+	// ONNX fetch while healthchecks hammered a dead port. It now runs in the
+	// background goroutine after the listener is up (see below).
 
 	s.permissions = permission.NewManager()
 	s.loopRunner = &agent.LoopRunner{
@@ -530,6 +519,23 @@ func (s *Server) Start() error {
 		go s.mcpConnect()
 	}
 
+	// Prefetch the inbuilt local embedder's model weights in the background,
+	// now that the listener is up. The local embedder is the default and may be
+	// enabled at runtime via the settings UI without a restart, so we always
+	// run this regardless of whether agentic memory is configured yet — it gets
+	// the one-time ~133 MB download out of the way. Errors are non-fatal: the
+	// next Embed call retries, so we log and continue rather than refusing to
+	// start. embedCancel aborts an in-flight download during shutdown.
+	embedCtx, embedCancel := context.WithCancel(context.Background())
+	s.embedCancel = embedCancel
+	go func() {
+		dlCtx, dlCancel := context.WithTimeout(embedCtx, 5*time.Minute)
+		defer dlCancel()
+		if err := provider.EnsureLocalEmbedderModel(dlCtx); err != nil {
+			slog.Warn("local embedder: startup model download failed; will retry on first use", "err", err)
+		}
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -567,6 +573,11 @@ func (s *Server) Start() error {
 	// that landed after this point.
 	if s.mcpCancel != nil {
 		s.mcpCancel()
+	}
+
+	// Abort the background embedder model download if it is still running.
+	if s.embedCancel != nil {
+		s.embedCancel()
 	}
 
 	// Close MCP server connections (terminates stdio subprocesses and HTTP
@@ -713,48 +724,11 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 	// (a public GitHub-hosted JSON of OpenAI-compatible provider keys). These
 	// give ogcode a zero-friction out-of-the-box experience: the user can start
 	// chatting immediately using a free model without configuring anything.
-	//
-	// Free providers are keyed "ogcode-<collection>" so they coexist as
-	// separately selectable instances. They never override a user's own
-	// first-party credentials — those are registered above under their
-	// canonical IDs ("openai", "anthropic", …). The fetch is best-effort and
-	// cached locally so offline launches still work.
-	freeCtx, freeCancel := context.WithTimeout(context.Background(), provider.FreePoolTimeout)
-	freeDefs, freeErr := provider.FetchFreePool(freeCtx)
-	freeCancel()
-	if freeErr != nil {
-		slog.Warn("free pool: unavailable (onboarding will require user-configured keys)", "err", freeErr)
-	} else {
-		for id, def := range freeDefs {
-			regID := "ogcode-" + id
-			if _, exists := providers[regID]; exists {
-				continue // already registered (e.g. env var override)
-			}
-			// Don't shadow a user-configured OpenAI provider pointing at the
-			// same collection's base URL.
-			if op, ok := providers["openai"].(*provider.OpenAIProvider); ok && op != nil {
-				if collectionFromBaseURLEq(op, def.BaseURL) {
-					continue
-				}
-			}
-			p, err := provider.NewFreePoolProvider(def)
-			if err != nil {
-				slog.Warn("free pool: skipping provider (no keys)", "id", id, "err", err)
-				continue
-			}
-			providers[regID] = p
-			slog.Info("registered free-tier provider", "id", regID, "collection", def.Collection, "baseURL", def.BaseURL)
-		}
-	}
+	// See AddFreePoolProviders for the collision rules; it mutates the map in
+	// place and is best-effort (bounded fetch, locally cached).
+	provider.AddFreePoolProviders(context.Background(), providers)
 
 	return providers
-}
-
-// collectionFromBaseURLEq reports whether an existing OpenAI provider's base URL
-// resolves to the same collection as the given base URL. Used to avoid
-// registering a free-pool provider that duplicates a user-configured endpoint.
-func collectionFromBaseURLEq(p *provider.OpenAIProvider, baseURL string) bool {
-	return p != nil && provider.CollectionFromBaseURL(p.BaseURL()) == provider.CollectionFromBaseURL(baseURL)
 }
 
 // credentials and swaps it into the running server in place, so credential

@@ -15,6 +15,10 @@ web/.solid/
 # Release build output (GoReleaser's default work dir — it archives the repo)
 /dist/
 
+# Python bytecode (bench harness)
+__pycache__/
+*.pyc
+
 # Environment
 .env
 

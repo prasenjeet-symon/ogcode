@@ -1774,7 +1774,7 @@ func (lr *LoopRunner) resolveRunModel(ctx context.Context, sess *session.Session
 		// Prefer the registry's current default so credential changes applied at
 		// runtime (onboarding/settings) take effect; fall back to the immutable
 		// startup default only when no provider is configured at all.
-		if dp := lr.Registry.Default(); dp != nil {
+		if dp := lr.Registry.DefaultUsable(); dp != nil {
 			p = dp
 		} else {
 			p = lr.DefaultProvider
@@ -2238,7 +2238,7 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, model, command s
 	}
 	p := lr.Registry.ResolveProvider(model)
 	if p == nil {
-		if dp := lr.Registry.Default(); dp != nil {
+		if dp := lr.Registry.DefaultUsable(); dp != nil {
 			p = dp
 		} else {
 			p = lr.DefaultProvider
@@ -3379,7 +3379,7 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 		dir = lr.Dir
 	}
 	if model == "" {
-		dp := lr.Registry.Default()
+		dp := lr.Registry.DefaultUsable()
 		if dp == nil {
 			dp = lr.DefaultProvider
 		}

@@ -22,7 +22,18 @@ RUN CGO_ENABLED=1 go build -tags musl -ldflags "-s -w -X github.com/prasenjeet-s
 
 # Final stage
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+# ca-certificates: outbound HTTPS (LLM APIs, model download). git: the agent
+# shells out to git for diff/status; without it every workspace reports
+# "not a git repository" and repo-aware features degrade.
+RUN apk --no-cache add ca-certificates git
+
+# Probe the HTTP API (not the TCP port) so the container reports healthy only
+# once the server actually answers requests. start-period gives a first boot
+# slack for port probe/backoff loops and DB migration; the ~133 MB embedder
+# model download no longer blocks serving (it runs in the background).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:9595/api/config >/dev/null || exit 1
+
 WORKDIR /root/
 COPY --from=go-builder /app/ogcode /usr/local/bin/ogcode
 EXPOSE 9595

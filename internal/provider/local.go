@@ -225,6 +225,13 @@ func (e *LocalEmbedder) initLocked(ctx context.Context) error {
 // reused both by the lazy init path (which then builds the pipeline) and by the
 // startup preflight (which only needs the file on disk). Idempotent: a sidecar
 // marker records the verified hash so subsequent calls skip the download.
+// modelDownloadMu serializes the "check marker → download → write marker"
+// window in prepareModel across all LocalEmbedder instances in the process.
+// The startup preflight and the memory backfill can both create an embedder
+// on a cold cache; without the lock both would pass the marker check, then
+// race on the same model.onnx.part temp file and rename over each other.
+var modelDownloadMu sync.Mutex
+
 func (e *LocalEmbedder) prepareModel(ctx context.Context) error {
 	if err := os.MkdirAll(e.baseDir, 0o755); err != nil {
 		return fmt.Errorf("local embedder: create cache dir: %w", err)
@@ -246,6 +253,15 @@ func (e *LocalEmbedder) prepareModel(ctx context.Context) error {
 	// full-file hash check.
 	modelPath := filepath.Join(e.baseDir, embedmodel.ModelFileName)
 	markerPath := filepath.Join(e.baseDir, ".ogcode-model.sha256")
+
+	// Hold modelDownloadMu across the whole check→download→mark window so
+	// concurrent embedders sharing this cache directory queue instead of
+	// racing on the shared .part temp file. The marker is re-checked under
+	// the lock: the loser of the queue finds the winner's marker and skips
+	// the download entirely.
+	modelDownloadMu.Lock()
+	defer modelDownloadMu.Unlock()
+
 	if existing, err := os.ReadFile(markerPath); err == nil &&
 		string(existing) == embedmodel.ModelSHA256 {
 		if _, statErr := os.Stat(modelPath); statErr == nil {

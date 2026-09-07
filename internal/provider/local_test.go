@@ -2,9 +2,15 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider/embedmodel"
@@ -125,6 +131,69 @@ func TestLocalEmbedderEnsureModelDownloadedCached(t *testing.T) {
 	}
 	if err := EnsureLocalEmbedderModel(context.Background()); err != nil {
 		t.Fatalf("EnsureLocalEmbedderModel with warm cache: %v", err)
+	}
+}
+
+// TestEnsureModelDownloaded_ConcurrentCallersDownloadOnce pins the download
+// race fix: the startup preflight and the memory backfill can both create an
+// embedder on a cold cache, and every caller must share ONE download instead
+// of racing on the shared model.onnx.part temp file. The payload is small
+// (~1 MB) and served from an httptest server by redirecting the module-level
+// ModelURL/ModelSHA256 vars.
+func TestEnsureModelDownloaded_ConcurrentCallersDownloadOnce(t *testing.T) {
+	dir := setCacheDir(t)
+
+	payload := make([]byte, 1024*1024)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	sum := sha256.Sum256(payload)
+	wantSHA := hex.EncodeToString(sum[:])
+
+	var downloads atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			downloads.Add(1)
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	origURL, origSHA := embedmodel.ModelURL, embedmodel.ModelSHA256
+	embedmodel.ModelURL = srv.URL
+	embedmodel.ModelSHA256 = wantSHA
+	t.Cleanup(func() {
+		embedmodel.ModelURL = origURL
+		embedmodel.ModelSHA256 = origSHA
+	})
+
+	const callers = 4
+	errs := make([]error, callers)
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = NewLocalEmbedder(dir).EnsureModelDownloaded(context.Background())
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d: EnsureModelDownloaded: %v", i, err)
+		}
+	}
+	if got := downloads.Load(); got != 1 {
+		t.Errorf("model downloads = %d, want exactly 1 (concurrent callers must share one fetch)", got)
+	}
+
+	marker, err := os.ReadFile(filepath.Join(dir, ".ogcode-model.sha256"))
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if string(marker) != wantSHA {
+		t.Errorf("marker = %q, want %q", marker, wantSHA)
 	}
 }
 

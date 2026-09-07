@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -565,6 +566,79 @@ func (r *Registry) Default() Provider {
 		return p
 	}
 	return nil
+}
+
+// DefaultUsable returns the provider a fresh prompt should run on, applying the
+// same priority as Default but refusing to hand back an installed-but-stopped
+// Ollama when anything else is available. A registered ollama provider only
+// means "the binary exists (or a base URL was saved)" — if the daemon is down
+// and OLLAMA_API_KEY is unset, the first prompt would die with connection
+// refused, and ollama's presence in ProviderPriority would otherwise shadow the
+// community free pool and every usable provider behind it.
+//
+// An ollama provider is considered usable when OLLAMA_API_KEY is set or the
+// daemon answers a probe. Non-ollama providers are always considered usable;
+// unknown ollama implementations are assumed usable, while the concrete
+// *OpenAIProvider is probed. When ollama is the only registered provider it is
+// returned even if unreachable — ollama-only users otherwise lose their only
+// option, and the provider surfaces the real connection error itself.
+func (r *Registry) DefaultUsable() Provider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Priority walk, mirroring Default: first registered non-ollama wins; a
+	// registered ollama is remembered as the default-candidate and only
+	// returned if nothing usable outranks it (or it proves usable itself).
+	var ollama Provider
+	for _, id := range ProviderPriority {
+		if p, ok := r.providers[id]; ok {
+			if id == "ollama" {
+				ollama = p
+				break
+			}
+			return p
+		}
+	}
+	if ollama == nil {
+		// Default's fallback: the first map entry. Skip ollama there too so a
+		// non-priority provider outranks a stopped daemon.
+		for _, p := range r.providers {
+			if p.ID() == "ollama" {
+				ollama = p
+				continue
+			}
+			return p
+		}
+	}
+	if ollama == nil {
+		return nil // empty registry
+	}
+
+	// The default resolved to ollama. Unknown implementations are assumed
+	// usable; the concrete *OpenAIProvider is probed.
+	o, isOpenAI := ollama.(*OpenAIProvider)
+	if !isOpenAI || o == nil {
+		return ollama
+	}
+	if os.Getenv("OLLAMA_API_KEY") != "" || OllamaRunning(o.BaseURL()) {
+		return ollama
+	}
+
+	// Daemon down and unauthenticated: yield to the next usable provider.
+	for _, id := range ProviderPriority {
+		if id == "ollama" {
+			continue
+		}
+		if p, ok := r.providers[id]; ok {
+			return p
+		}
+	}
+	for _, p := range r.providers {
+		if p.ID() != "ollama" {
+			return p
+		}
+	}
+	return ollama
 }
 
 // ReplaceProviders atomically swaps the set of registered providers. Custom

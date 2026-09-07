@@ -118,7 +118,7 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model st
 // the default provider's first model so the pipeline always has something to run.
 func (lr *LoopRunner) resolveSearchProvider(model string) (provider.Provider, string) {
 	if model == "" {
-		dp := lr.Registry.Default()
+		dp := lr.Registry.DefaultUsable()
 		if dp == nil {
 			dp = lr.DefaultProvider
 		}
@@ -133,7 +133,7 @@ func (lr *LoopRunner) resolveSearchProvider(model string) (provider.Provider, st
 		p = lr.Registry.ResolveProvider(model)
 	}
 	if p == nil {
-		if dp := lr.Registry.Default(); dp != nil {
+		if dp := lr.Registry.DefaultUsable(); dp != nil {
 			p = dp
 		} else {
 			p = lr.DefaultProvider

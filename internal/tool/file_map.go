@@ -87,7 +87,7 @@ func (FileMapTool) Execute(_ context.Context, args json.RawMessage, tctx Context
 	}
 
 	return Result{
-		Title:  fmt.Sprintf("File Map / %s (%d symbols)", filepath.Base(path), len(fm.Symbols)),
+		Title:  fmt.Sprintf("File Map / %s", filepath.Base(path)),
 		Output: codemap.Render(fm),
 	}, nil
 }

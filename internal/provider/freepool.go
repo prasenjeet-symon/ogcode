@@ -297,6 +297,50 @@ func FreeProviderIDs(defs map[string]FreeProviderDef) []string {
 	return out
 }
 
+// AddFreePoolProviders provisions free-tier providers from the shared community
+// key pool (a public GitHub-hosted JSON of OpenAI-compatible provider keys)
+// into the given provider map, keyed "ogcode-<collection>". It gives ogcode a
+// zero-friction out-of-the-box experience: the user can start chatting
+// immediately on a free model without configuring anything.
+//
+// Free providers never override a user's own credentials: entries already
+// present in the map are skipped, and a user-configured "openai" provider
+// pointing at the same collection's base URL suppresses its free duplicate.
+// The fetch is best-effort (bounded by FreePoolTimeout) and cached locally, so
+// offline launches still work; a failed fetch logs and leaves the map alone.
+//
+// Both the server (loadProviderMap) and the headless CLI (run/index) call this
+// so the free pool is available everywhere prompts can run.
+func AddFreePoolProviders(ctx context.Context, providers map[string]Provider) {
+	fetchCtx, cancel := context.WithTimeout(ctx, FreePoolTimeout)
+	freeDefs, err := FetchFreePool(fetchCtx)
+	cancel()
+	if err != nil {
+		slog.Warn("free pool: unavailable (onboarding will require user-configured keys)", "err", err)
+		return
+	}
+	for id, def := range freeDefs {
+		regID := "ogcode-" + id
+		if _, exists := providers[regID]; exists {
+			continue // already registered (e.g. env var override)
+		}
+		// Don't shadow a user-configured OpenAI provider pointing at the
+		// same collection's base URL.
+		if op, ok := providers["openai"].(*OpenAIProvider); ok && op != nil {
+			if CollectionFromBaseURL(op.BaseURL()) == CollectionFromBaseURL(def.BaseURL) {
+				continue
+			}
+		}
+		p, err := NewFreePoolProvider(def)
+		if err != nil {
+			slog.Warn("free pool: skipping provider (no keys)", "id", id, "err", err)
+			continue
+		}
+		providers[regID] = p
+		slog.Info("registered free-tier provider", "id", regID, "collection", def.Collection, "baseURL", def.BaseURL)
+	}
+}
+
 // ResetFreePoolForTest clears the singleton free pool state. Test-only — used
 // to isolate server/provider tests from the global pool so they don't pick up
 // providers loaded by the freepool unit tests in the same process.

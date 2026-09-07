@@ -154,15 +154,17 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	var defaultProvider provider.Provider
-	for _, pid := range []string{"anthropic", "openai", "openrouter", "ollama"} {
-		if p := registry.Get(pid); p != nil {
-			defaultProvider = p
-			break
-		}
+	// Headless runs deserve the same zero-config experience as the server: pull
+	// in the community free-tier providers when no user credentials exist.
+	freeProviders := make(map[string]provider.Provider)
+	provider.AddFreePoolProviders(context.Background(), freeProviders)
+	for _, p := range freeProviders {
+		registry.Register(p)
 	}
+
+	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
-		return fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL")
+		return fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL (the community free pool was unreachable)")
 	}
 
 	// Tool registry (same as server, minus BreakdownTool which is a no-op for standalone runs)

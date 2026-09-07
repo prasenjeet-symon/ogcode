@@ -43,11 +43,14 @@ const ModelFileName = "model.onnx"
 
 // ModelURL is the canonical download URL for the ONNX weights. The file is
 // fetched on first use when it is not already present in the cache directory.
-const ModelURL = "https://huggingface.co/thenlper/gte-small/resolve/main/onnx/model.onnx"
+// It is a variable so tests can redirect the download to a local server
+// (production never mutates it).
+var ModelURL = "https://huggingface.co/thenlper/gte-small/resolve/main/onnx/model.onnx"
 
 // ModelSHA256 is the expected SHA-256 of the downloaded ONNX file, used to
-// verify integrity and detect partial/corrupt downloads.
-const ModelSHA256 = "0b01312b59bec0a2558a626f2937be4cbe4bb16d1511560153f598cec488f1f8"
+// verify integrity and detect partial/corrupt downloads. A variable for the
+// same reason as ModelURL — tests point it at their fixture payload.
+var ModelSHA256 = "0b01312b59bec0a2558a626f2937be4cbe4bb16d1511560153f598cec488f1f8"
 
 // EmbeddingDim is the dimensionality of the vectors produced by the model.
 const EmbeddingDim = 384

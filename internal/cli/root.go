@@ -129,16 +129,17 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		registry.Register(p)
 	}
 
-	var defaultProvider provider.Provider
-	priority := []string{"anthropic", "openai", "openrouter", "ollama"}
-	for _, pid := range priority {
-		if p := registry.Get(pid); p != nil {
-			defaultProvider = p
-			break
-		}
+	// Headless runs deserve the same zero-config experience as the server: pull
+	// in the community free-tier providers when no user credentials exist.
+	freeProviders := make(map[string]provider.Provider)
+	provider.AddFreePoolProviders(context.Background(), freeProviders)
+	for _, p := range freeProviders {
+		registry.Register(p)
 	}
+
+	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
-		return fmt.Errorf("no LLM provider configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_API_KEY")
+		return fmt.Errorf("no LLM provider configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_API_KEY (the community free pool was unreachable)")
 	}
 
 	toolRegistry := tool.NewRegistry()

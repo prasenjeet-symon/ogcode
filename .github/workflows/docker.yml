@@ -36,6 +36,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
 
       # Build a single-arch image locally and actually run it, so a binary that
       # panics on startup (e.g. CGO misconfigured) fails the workflow before we

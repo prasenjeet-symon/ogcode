@@ -645,12 +645,16 @@ Access via `https://ogcode.yourdomain.com` — encrypted and clean.
 services:
   ogcode:
     image: ghcr.io/prasenjeet-symon/ogcode:latest
+    working_dir: /workspace          # agent operates on the mounted project
     volumes:
-      - ~/.ogcode:/root/.ogcode
+      - ~/.ogcode:/root/.ogcode      # sessions, settings, credentials
+      - ./:/workspace                # your project — the directory Compose runs from
     ports:
       - "127.0.0.1:9595:9595"   # only localhost — nginx handles public access
     restart: unless-stopped
 ```
+
+The container must run with `working_dir: /workspace` and your project mounted there — ogcode's file tools resolve paths against the working directory, so a container without the workspace mount starts up fine but can only see its own filesystem.
 
 ### Security considerations
 

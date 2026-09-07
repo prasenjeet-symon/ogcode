@@ -13,7 +13,7 @@ type fakeProvider struct {
 }
 
 func (f *fakeProvider) ID() string          { return f.id }
-func (f *fakeProvider) Models() []ModelInfo  { return f.models }
+func (f *fakeProvider) Models() []ModelInfo { return f.models }
 func (f *fakeProvider) StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error) {
 	ch := make(chan StreamEvent)
 	close(ch)
@@ -87,6 +87,89 @@ func TestRegistryDefaultPriority(t *testing.T) {
 // TestRegistryConcurrentReplaceAndRead drives ReplaceProviders against the
 // lock-protected read paths concurrently. Run with -race, this fails if the
 // providers map is accessed without synchronization.
+// mustOllamaProvider builds a concrete ollama provider for DefaultUsable tests.
+// baseURL points the daemon probe wherever the subtest needs (live stub or dead
+// port). Type-checks the result so a change in NewProviderWithConfig's ollama
+// branch fails loudly here instead of silently changing DefaultUsable semantics.
+func mustOllamaProvider(t *testing.T, baseURL string) *OpenAIProvider {
+	t.Helper()
+	p, err := NewProviderWithConfig("ollama", "", baseURL)
+	if err != nil {
+		t.Fatalf("ollama provider: %v", err)
+	}
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("ollama provider is %T, want *OpenAIProvider", p)
+	}
+	return op
+}
+
+// TestRegistryDefaultUsable pins the default-provider contract: an
+// installed-but-stopped Ollama must not shadow usable providers behind it in
+// the priority walk, while a live daemon (or OLLAMA_API_KEY) keeps its seat.
+func TestRegistryDefaultUsable(t *testing.T) {
+	// Clear the key so "usable" is decided purely by the daemon probe; each
+	// subtest re-establishes whatever it needs.
+	t.Setenv("OLLAMA_API_KEY", "")
+
+	t.Run("down ollama yields to later priority provider", func(t *testing.T) {
+		r := NewRegistry()
+		r.Register(mustOllamaProvider(t, deadURL))
+		r.Register(newFake("ogcode-openrouter", "free/model"))
+		got := r.DefaultUsable()
+		if got == nil || got.ID() != "ogcode-openrouter" {
+			t.Fatalf("DefaultUsable() = %v, want ogcode-openrouter (stopped ollama must not shadow the free pool)", got)
+		}
+	})
+
+	t.Run("down ollama yields to non-priority registered provider", func(t *testing.T) {
+		r := NewRegistry()
+		r.Register(mustOllamaProvider(t, deadURL))
+		r.Register(newFake("custom-llama", "x/y"))
+		got := r.DefaultUsable()
+		if got == nil || got.ID() != "custom-llama" {
+			t.Fatalf("DefaultUsable() = %v, want custom-llama", got)
+		}
+	})
+
+	t.Run("live ollama keeps default", func(t *testing.T) {
+		r := NewRegistry()
+		r.Register(mustOllamaProvider(t, liveOllama(t)+"/v1"))
+		r.Register(newFake("ogcode-openrouter", "free/model"))
+		got := r.DefaultUsable()
+		if got == nil || got.ID() != "ollama" {
+			t.Fatalf("DefaultUsable() = %v, want ollama (daemon answers, it stays default)", got)
+		}
+	})
+
+	t.Run("ollama with API key stays default even when daemon is down", func(t *testing.T) {
+		t.Setenv("OLLAMA_API_KEY", "test-key")
+		r := NewRegistry()
+		r.Register(mustOllamaProvider(t, deadURL))
+		r.Register(newFake("ogcode-openrouter", "free/model"))
+		got := r.DefaultUsable()
+		if got == nil || got.ID() != "ollama" {
+			t.Fatalf("DefaultUsable() = %v, want ollama (keyed remote endpoint counts as usable)", got)
+		}
+	})
+
+	t.Run("lone down ollama is still returned", func(t *testing.T) {
+		r := NewRegistry()
+		r.Register(mustOllamaProvider(t, deadURL))
+		got := r.DefaultUsable()
+		if got == nil || got.ID() != "ollama" {
+			t.Fatalf("DefaultUsable() = %v, want ollama (only option; provider surfaces the error itself)", got)
+		}
+	})
+
+	t.Run("empty registry returns nil", func(t *testing.T) {
+		r := NewRegistry()
+		if got := r.DefaultUsable(); got != nil {
+			t.Fatalf("DefaultUsable() = %v, want nil", got)
+		}
+	})
+}
+
 func TestRegistryConcurrentReplaceAndRead(t *testing.T) {
 	r := NewRegistry()
 	r.Register(newFake("anthropic", "claude-x"))

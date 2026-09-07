@@ -263,7 +263,7 @@ func mapInsteadOfWholeFile(path string, totalLines int, rangeRequested bool) (Re
 		totalLines)
 
 	return Result{
-		Title:     fmt.Sprintf("File Map / %s (%d symbols)", filepath.Base(path), len(fm.Symbols)),
+		Title:     fmt.Sprintf("File Map / %s", filepath.Base(path)),
 		Output:    b.String(),
 		Truncated: true,
 	}, true

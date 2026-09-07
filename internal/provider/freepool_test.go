@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -227,6 +228,80 @@ func TestLoadFreePoolFromNetwork(t *testing.T) {
 	if len(defs) != 2 {
 		t.Fatalf("defs = %d, want 2", len(defs))
 	}
+}
+
+// TestAddFreePoolProvidersProvisions covers the happy path: the pool fetch
+// succeeds and each definition lands in the map under its "ogcode-<id>"
+// registry key. Uses loadFreePool (not FetchFreePool) via AddFreePoolProviders
+// with a fresh singleton so other tests' cached pools don't leak in.
+func TestAddFreePoolProvidersProvisions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(sampleFreePoolJSON()))
+	}))
+	defer srv.Close()
+
+	t.Setenv("OGCODE_FREE_KEYS_URL", srv.URL)
+	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	ResetFreePoolForTest()
+	t.Cleanup(ResetFreePoolForTest)
+
+	providers := make(map[string]Provider)
+	AddFreePoolProviders(t.Context(), providers)
+
+	if len(providers) != 2 {
+		t.Fatalf("providers = %d (%v), want 2", len(providers), providerIDsOf(providers))
+	}
+	for _, want := range []string{"ogcode-cerebras", "ogcode-github_models"} {
+		if _, ok := providers[want]; !ok {
+			t.Fatalf("missing free provider %q; got %v", want, providerIDsOf(providers))
+		}
+	}
+}
+
+// TestAddFreePoolProvidersDoesNotShadowUserOpenAI pins the collision rule: a
+// user-configured "openai" provider pointing at the same collection's base URL
+// suppresses its free duplicate instead of being overridden by it.
+func TestAddFreePoolProvidersDoesNotShadowUserOpenAI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(sampleFreePoolJSON()))
+	}))
+	defer srv.Close()
+
+	t.Setenv("OGCODE_FREE_KEYS_URL", srv.URL)
+	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	ResetFreePoolForTest()
+	t.Cleanup(ResetFreePoolForTest)
+
+	// The sample pool serves Cerebras at https://api.cerebras.ai/v1; a user's
+	// own OpenAI-compatible provider pointed at the same base URL must suppress
+	// its free duplicate — while unrelated collections still get added.
+	op, err := NewProviderWithConfig("openai", "sk-user-key", "https://api.cerebras.ai/v1")
+	if err != nil {
+		t.Fatalf("seed user openai provider: %v", err)
+	}
+	providers := map[string]Provider{"openai": op}
+	AddFreePoolProviders(t.Context(), providers)
+
+	if _, ok := providers["ogcode-cerebras"]; ok {
+		t.Error("free ogcode-cerebras registered; must not shadow user openai at the same base URL")
+	}
+	if _, ok := providers["ogcode-github_models"]; !ok {
+		t.Error("unrelated free collection ogcode-github_models missing; only the colliding one is suppressed")
+	}
+	if _, ok := providers["openai"]; !ok {
+		t.Error("user openai provider was dropped")
+	}
+}
+
+func providerIDsOf(m map[string]Provider) []string {
+	ids := make([]string, 0, len(m))
+	for _, p := range m {
+		ids = append(ids, p.ID())
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func TestLoadFreePoolFallsBackToCache(t *testing.T) {

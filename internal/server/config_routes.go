@@ -133,9 +133,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	// deterministic. Every provider's Models() flags its own default model, which
 	// would otherwise surface several "default" models and a nondeterministic
 	// pick in the UI. Keep the flag only on the highest-priority registered
-	// provider's default (see provider.ProviderPriority / Registry.Default).
+	// provider's default (see provider.ProviderPriority / Registry.DefaultUsable).
 	defaultProviderID := ""
-	if d := s.registry.Default(); d != nil {
+	if d := s.registry.DefaultUsable(); d != nil {
 		defaultProviderID = d.ID()
 	}
 	for i := range result {
