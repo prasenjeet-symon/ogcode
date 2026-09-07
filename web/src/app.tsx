@@ -7,9 +7,11 @@ import { PlanProvider } from './context/plan';
 import { NoteProvider } from './context/note';
 import { DocIndexProvider } from './context/docindex';
 import { NotificationProvider } from './context/notification';
+import { DesktopNotificationProvider } from './context/desktop-notification';
 import { ThemeProvider } from './context/theme';
 import UpdateNotification from './components/update-notification';
 import GitSyncBanner from './components/git-sync-banner';
+import DesktopNotificationBanner from './components/desktop-notification-banner';
 import ModelSwitchPopup from './components/model-switch-popup';
 import Home from './pages/home';
 import Chat from './pages/session';
@@ -68,13 +70,16 @@ function AppWrapper(props: { children?: any }) {
               <NoteProvider>
                   <DocIndexProvider>
                     <NotificationProvider>
-                      <OnboardingGate />
-                      <div class="flex h-dvh bg-[color:var(--bg-base)] text-zinc-100 antialiased">
-                        {props.children}
-                      </div>
-                      <UpdateNotification />
-                      <GitSyncBanner />
-                      <ModelSwitchPopup />
+                      <DesktopNotificationProvider>
+                        <OnboardingGate />
+                        <div class="flex h-dvh bg-[color:var(--bg-base)] text-zinc-100 antialiased">
+                          {props.children}
+                        </div>
+                        <UpdateNotification />
+                        <GitSyncBanner />
+                        <DesktopNotificationBanner />
+                        <ModelSwitchPopup />
+                      </DesktopNotificationProvider>
                     </NotificationProvider>
                   </DocIndexProvider>
               </NoteProvider>

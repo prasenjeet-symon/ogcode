@@ -37,6 +37,7 @@ export interface Session {
   directory: string;
   title: string;
   model?: string;
+  sessionType?: string;
   permission?: string;
   compactionSummary?: string;
   memoryTokensSaved?: number;
