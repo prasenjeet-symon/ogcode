@@ -15,13 +15,6 @@ import MemoryDialog from '../components/memory-dialog';
 import { DrawerToggle } from '../components/sidebar-shell';
 import { NotFoundPanel } from './not-found';
 
-function getModelLabel(model: string | undefined): string {
-  if (!model) return '';
-  const parts = model.split('/');
-  const name = parts[parts.length - 1];
-  return name.replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-preview$/, '');
-}
-
 export default function PlanDetail() {
   return <PlanDetailContent />;
 }
@@ -122,12 +115,6 @@ function PlanDetailContent() {
           </div>
 
           <div class="flex items-center gap-2 shrink-0">
-            <Show when={plan.activePlan()?.model}>
-              <span class="text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium hide-below-md">
-                {getModelLabel(plan.activePlan()?.model)}
-              </span>
-            </Show>
-
             <div class="hide-below-lg flex items-center gap-2">
               <TokenPill messages={plan.messages} />
               <ResourcePill />

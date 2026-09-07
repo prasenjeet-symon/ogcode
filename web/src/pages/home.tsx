@@ -183,15 +183,6 @@ function HomeContent() {
             <div class="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => navigate('/plan')}
-                class="h-8 px-3.5 rounded-lg text-[12px] font-medium text-zinc-400 hover:text-zinc-100
-                       border border-[color:var(--border-default)] hover:border-[color:var(--border-strong)]
-                       bg-[color:var(--bg-surface)]/50 transition-all var(--spring-sm)"
-              >
-                Plan Mode
-              </button>
-              <button
-                type="button"
                 onClick={() => navigate('/settings', { state: { from: location.pathname } })}
                 class="h-8 w-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-200
                        border border-[color:var(--border-default)] hover:border-[color:var(--border-strong)]

@@ -10,13 +10,6 @@ import { DrawerToggle } from '../components/sidebar-shell';
 import { getTask, isNotFoundError } from '../api/client';
 import { NotFoundPanel } from './not-found';
 
-function getModelLabel(model: string | undefined): string {
-  if (!model) return '';
-  const parts = model.split('/');
-  const name = parts[parts.length - 1];
-  return name.replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-preview$/, '');
-}
-
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/20',
   in_progress: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
@@ -201,11 +194,6 @@ function TaskExecutionContent() {
           </div>
 
           <div class="flex items-center gap-2 shrink-0">
-            <Show when={session.activeSession()?.model}>
-              <span class="hidden sm:inline-block text-[11px] text-zinc-400 bg-[color:var(--bg-elevated)] px-2 py-1 rounded-md border border-[color:var(--border-subtle)] font-medium max-w-[9rem] truncate">
-                {getModelLabel(session.activeSession()?.model)}
-              </span>
-            </Show>
             <Show when={taskData()?.branchName}>
               <span
                 class="hidden sm:flex items-center gap-1.5 text-[11px] text-zinc-500 px-2 py-1 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] font-mono"

@@ -13,13 +13,6 @@ import { DrawerToggle } from '../components/sidebar-shell';
 import { getProviderPricing } from '../api/client';
 import { NotFoundPanel } from './not-found';
 
-function getModelLabel(model: string | undefined): string {
-  if (!model) return '';
-  const parts = model.split('/');
-  const name = parts[parts.length - 1];
-  return name.replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-preview$/, '');
-}
-
 export default function Chat() {
   return <ChatContent />;
 }
@@ -105,14 +98,6 @@ function ChatContent() {
             <SubagentIndicator />
             <TokenPill />
             <ResourcePill />
-            <Show when={session.activeSession()?.model}>
-              <span
-                class="text-micro text-[color:var(--text-secondary)] bg-[color:var(--bg-elevated)] h-7 inline-flex items-center px-2 rounded-md border border-[color:var(--border-subtle)] font-medium max-w-[11rem] truncate hide-below-md"
-                title={session.activeSession()?.model}
-              >
-                {getModelLabel(session.activeSession()?.model)}
-              </span>
-            </Show>
             <Show when={server.memoryEnabled()}>
               <MemoryDialog
                 savedTokens={session.memorySavedTokens()}
