@@ -3,23 +3,41 @@
 
 /* ============================================================
    Typefaces — self-hosted variable fonts
-   Inter powers the UI, JetBrains Mono every code/path/number run.
+   Geist powers the UI, Geist Mono every code/path/number run.
    Both ship with the binary (web/public/fonts), so the app keeps its
    promise of never phoning home: no Google Fonts request, no FOUT on
    an offline machine. `font-display: swap` keeps first paint instant.
+   Geist was chosen over Inter for its more open apertures and cleaner
+   geometry at small sizes on dark backgrounds; true italics ship as
+   separate variable files (wght-only axis), so each family declares
+   a normal and an italic face.
    ============================================================ */
 @font-face {
-  font-family: 'Inter';
-  src: url('/fonts/inter-var.woff2') format('woff2');
+  font-family: 'Geist';
+  src: url('/fonts/geist-var.woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: 'JetBrains Mono';
-  src: url('/fonts/jetbrains-mono-var.woff2') format('woff2');
-  font-weight: 100 800;
+  font-family: 'Geist';
+  src: url('/fonts/geist-italic-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/geist-mono-var.woff2') format('woff2');
+  font-weight: 100 900;
   font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/geist-mono-italic-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
   font-display: swap;
 }
 
@@ -116,8 +134,8 @@
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
   --shadow-glow: 0 0 16px -4px rgba(94, 106, 210, 0.25);
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* Reading column for the conversation. One token so the message list,
      the composer and the empty state can never drift out of alignment. */
@@ -165,7 +183,6 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   /* Body base as rem so it scales with the fluid root (≈13px at the 16px
      reference, growing gently on larger screens). Tight line-height and
      slight negative tracking preserved from the Linear-inspired design. */
