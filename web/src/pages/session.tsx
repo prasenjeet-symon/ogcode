@@ -7,10 +7,8 @@ import PromptInput from '../components/prompt-input';
 import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
 import ResourcePill from '../components/resource-pill';
-import MemoryDialog from '../components/memory-dialog';
 import SubagentIndicator from '../components/subagent-indicator';
 import { DrawerToggle } from '../components/sidebar-shell';
-import { getProviderPricing } from '../api/client';
 import { NotFoundPanel } from './not-found';
 
 export default function Chat() {
@@ -23,35 +21,6 @@ function ChatContent() {
   const params = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-
-  // Real-time pricing for OpenRouter and Ollama providers.
-  const [dynamicPrices, setDynamicPrices] = createSignal<Record<string, number>>({});
-
-  // Compute total tokens consumed this session (for MemoryDialog)
-  const sessionTotalTokens = createMemo(() => {
-    let total = 0;
-    for (const m of session.messages()) {
-      const t = m.info.tokens;
-      if (!t) continue;
-      total += (t.input ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.output ?? 0);
-    }
-    return total;
-  });
-
-  createEffect(on(
-    () => {
-      const model = session.activeSession()?.model;
-      const info = model ? session.models().find(m => m.id === model) : undefined;
-      return info?.providerId ?? '';
-    },
-    (provider) => {
-      if (provider === 'openrouter' || provider === 'ollama') {
-        getProviderPricing(provider)
-          .then(setDynamicPrices)
-          .catch(() => {});
-      }
-    }
-  ));
 
   createEffect(on(() => params.id, (id) => {
     if (id) {
@@ -98,15 +67,6 @@ function ChatContent() {
             <SubagentIndicator />
             <TokenPill />
             <ResourcePill />
-            <Show when={server.memoryEnabled()}>
-              <MemoryDialog
-                savedTokens={session.memorySavedTokens()}
-                totalTokens={sessionTotalTokens()}
-                model={session.activeSession()?.model ?? ''}
-                dynamicPrices={dynamicPrices()}
-                models={session.models()}
-              />
-            </Show>
             <button
               type="button"
               onClick={() => navigate('/settings', { state: { from: location.pathname } })}

@@ -1,9 +1,10 @@
 import { createSignal, Show, For, createMemo, createResource, createEffect, type JSX } from 'solid-js';
 import { useServer } from '../../context/server';
-import { listSkills, type Skill } from '../../api/client';
+import { listSkills, setSkillEnabled, type Skill } from '../../api/client';
 import {
   Group,
   Row,
+  Switch,
   Tag,
   LinkAction,
   EmptyState,
@@ -17,9 +18,12 @@ import {
 // Skills — the catalogue of capabilities the agent can reach for.
 //
 // It lives under Settings beside Models because it answers the same question:
-// what is available to the agent here, and where did it come from. The list is
-// read-only — skills are added by putting a SKILL.md on disk — so each card
-// leads with the directories it was read from.
+// what is available to the agent here, and where did it come from. Skills are
+// added by putting a SKILL.md on disk, so each card leads with the directories
+// it was read from — but each row also carries a switch. Turning one off writes
+// a "deny" rule into the project's ogcode.json, which drops the skill from the
+// agent's prompt entirely (its name and description stop being sent, saving the
+// tokens), while leaving the files in place so it can be turned back on.
 // ---------------------------------------------------------------------------
 
 interface SourceMeta {
@@ -117,38 +121,97 @@ function glyphFor(name: string) {
 
 /** A skill's description is its trigger — the sentence that decides whether the
  *  agent reaches for it — and they run long. Two lines by default, all of it on
- *  request, so the list stays scannable without hiding anything for good. */
-function SkillRow(props: { skill: Skill; hidden: boolean }) {
+ *  request, so the list stays scannable without hiding anything for good.
+ *
+ *  The switch on the right turns the skill off: a disabled skill dims and its
+ *  name and description stop reaching the agent. */
+function SkillRow(props: {
+  skill: Skill;
+  hidden: boolean;
+  busy: boolean;
+  onToggle: (next: boolean) => void;
+}) {
   const [open, setOpen] = createSignal(false);
   const long = () => props.skill.description.length > 140;
+  const enabled = () => props.skill.enabled;
   return (
     <Row
       icon={glyphFor(props.skill.name)}
       hidden={props.hidden}
       label={
-        <span class="font-mono text-meta text-[color:var(--text-primary)]">{props.skill.name}</span>
+        <span
+          class="font-mono text-meta"
+          classList={{
+            'text-[color:var(--text-primary)]': enabled(),
+            'text-[color:var(--text-muted)]': !enabled(),
+          }}
+        >
+          {props.skill.name}
+        </span>
       }
       helper={
-        <>
+        <span classList={{ 'opacity-60': !enabled() }}>
           <span class={open() || !long() ? 'block' : 'line-clamp-2'}>{props.skill.description}</span>
           <Show when={long()}>
             <span class="inline-block mt-1">
               <LinkAction onClick={() => setOpen(!open())}>{open() ? 'Show less' : 'Show more'}</LinkAction>
             </span>
           </Show>
-        </>
+        </span>
       }
-    />
+    >
+      <Switch
+        checked={enabled()}
+        disabled={props.busy}
+        onChange={(next) => props.onToggle(next)}
+        label={`${enabled() ? 'Disable' : 'Enable'} the ${props.skill.name} skill`}
+      />
+    </Row>
   );
 }
 
 export default function SkillsSettings() {
   const server = useServer();
   const shell = useShell();
-  const [skills] = createResource(server.directory, () => listSkills());
+  const [skills, { mutate }] = createResource(server.directory, () => listSkills());
 
   const all = () => skills() ?? [];
   createEffect(() => shell.report({ noun: 'skills' }));
+
+  // A skill name can appear under two sources (one shadowing the other), so a
+  // row is identified by name and source together — the same key the search
+  // uses below.
+  const skillKey = (s: Skill) => `${s.name} ${s.source}`;
+
+  // Names with a toggle request in flight, so their switch shows disabled and a
+  // double-click cannot race the server.
+  const [busy, setBusy] = createSignal<Set<string>>(new Set());
+  const setBusyFor = (key: string, on: boolean) =>
+    setBusy((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+
+  // Patch one skill in place in the resource so the switch flips at once,
+  // without refetching the whole list.
+  const patch = (key: string, changes: Partial<Skill>) =>
+    mutate((list) => list?.map((s) => (skillKey(s) === key ? { ...s, ...changes } : s)));
+
+  const toggle = async (skill: Skill, next: boolean) => {
+    const key = skillKey(skill);
+    setBusyFor(key, true);
+    patch(key, { enabled: next }); // optimistic
+    try {
+      const updated = await setSkillEnabled(skill.name, next);
+      patch(key, updated);
+    } catch {
+      patch(key, { enabled: !next }); // the server refused — put it back
+    } finally {
+      setBusyFor(key, false);
+    }
+  };
 
   const visible = createMemo(() => {
     const q = shell.query();
@@ -176,7 +239,7 @@ export default function SkillsSettings() {
 
   /** Keyed by name and source, because the same skill name can legitimately
    *  appear under two sources while one shadows the other. */
-  const shown = createMemo(() => new Set(visible().map((s) => `${s.name} ${s.source}`)));
+  const shown = createMemo(() => new Set(visible().map(skillKey)));
 
   return (
     <Show
@@ -233,7 +296,14 @@ export default function SkillsSettings() {
                   action={<Tag>{group.items.length}</Tag>}
                 >
                   <For each={group.items}>
-                    {(s) => <SkillRow skill={s} hidden={!shown().has(`${s.name} ${s.source}`)} />}
+                    {(s) => (
+                      <SkillRow
+                        skill={s}
+                        hidden={!shown().has(skillKey(s))}
+                        busy={busy().has(skillKey(s))}
+                        onToggle={(next) => toggle(s, next)}
+                      />
+                    )}
                   </For>
                 </Group>
               )}

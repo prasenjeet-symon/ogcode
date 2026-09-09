@@ -9,12 +9,10 @@ export type DrawerId = 'sessions' | 'plans';
 const [open, setOpen] = createSignal<DrawerId | null>(null);
 
 export function openDrawer(id: DrawerId): void {
-  console.log('[drawer] open', id, new Error('open').stack?.split('\n')[2]);
   setOpen(id);
 }
 
 export function closeDrawer(): void {
-  console.log('[drawer] close', new Error('close').stack?.split('\n').slice(2,4).join(' <- '));
   setOpen(null);
 }
 

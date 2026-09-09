@@ -45,6 +45,16 @@ type Loader struct {
 	mu     sync.Mutex
 	remote map[string][]string // skills url -> local skill directories
 
+	// perms is the skill permission ruleset. It is seeded from cfg at startup
+	// but, unlike Paths and URLs, is replaceable at runtime by SetPermissions —
+	// the UI toggle that disables a skill writes a "deny" rule and calls it, so
+	// the change takes effect on the next Load (the next turn of any session)
+	// without a restart, the same way an edited SKILL.md is picked up. Guarded
+	// by its own lock because Load reads it concurrently across sessions while
+	// the HTTP handler writes it.
+	permsMu sync.RWMutex
+	perms   map[string]string
+
 	// reported is the set of diagnostics already logged. Load runs on every
 	// turn — twice on a turn that uses the tool — so without this a single
 	// malformed SKILL.md would write the same warning to the log for as long as
@@ -71,8 +81,38 @@ func NewLoader(cfg Config) *Loader {
 		client:   &http.Client{Timeout: remoteTimeout},
 		cacheDir: cacheDir,
 		remote:   map[string][]string{},
+		perms:    clonePermissions(cfg.Permissions),
 		reported: map[string]bool{},
 	}
+}
+
+// SetPermissions replaces the loader's skill permission rules. The next Load —
+// the next turn of any session — resolves both the prompt listing (Visible) and
+// the skill tool's deny check against the new rules, so a skill switched off in
+// the UI drops out of the prompt without a restart. The map is copied, so the
+// caller may keep mutating its own.
+func (l *Loader) SetPermissions(perms map[string]string) {
+	l.permsMu.Lock()
+	defer l.permsMu.Unlock()
+	l.perms = clonePermissions(perms)
+}
+
+// permissions returns the live rules map. Callers treat it as read-only:
+// SetPermissions replaces the map wholesale rather than mutating it, so a
+// Registry built from the returned snapshot stays consistent even across a
+// concurrent SetPermissions.
+func (l *Loader) permissions() map[string]string {
+	l.permsMu.RLock()
+	defer l.permsMu.RUnlock()
+	return l.perms
+}
+
+func clonePermissions(p map[string]string) map[string]string {
+	out := make(map[string]string, len(p))
+	for k, v := range p {
+		out[k] = v
+	}
+	return out
 }
 
 // Load returns the skills in effect for a project directory.
@@ -87,11 +127,12 @@ func NewLoader(cfg Config) *Loader {
 // skills still load, because a broken skill file should not take the working
 // ones down with it.
 func (l *Loader) Load(dir string) *Registry {
-	reg := NewRegistry(l.cfg.Permissions)
+	perms := l.permissions()
+	reg := NewRegistry(perms)
 
-	for _, pattern := range Rules(l.cfg.Permissions).Invalid() {
+	for _, pattern := range Rules(perms).Invalid() {
 		l.warn(fmt.Sprintf("skills: permission rule %q is not usable as written (action %q); treating the skills it covers as ask",
-			pattern, l.cfg.Permissions[pattern]))
+			pattern, perms[pattern]))
 	}
 
 	builtin, errs := Embedded()

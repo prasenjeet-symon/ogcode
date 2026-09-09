@@ -12,8 +12,6 @@ interface ServerContextValue {
   ghInstalled: () => boolean;
   mode: () => 'build' | 'plan';
   connected: () => boolean;
-  memoryEnabled: () => boolean;
-  memoryProvider: () => string;
   searchRunning: () => boolean;
   // Rolling window of this process's own CPU/memory samples, oldest first, and
   // the context needed to read them (cadence, core count, process uptime).
@@ -50,8 +48,6 @@ export const ServerProvider: ParentComponent = (props) => {
   const [ghInstalled, setGhInstalled] = createSignal(true);
   const [mode, setMode] = createSignal<'build' | 'plan'>('build');
   const [connected, setConnected] = createSignal(false);
-  const [memoryEnabled, setMemoryEnabled] = createSignal(false);
-  const [memoryProvider, setMemoryProvider] = createSignal('');
   const [searchRunning, setSearchRunning] = createSignal(false);
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
@@ -98,8 +94,6 @@ export const ServerProvider: ParentComponent = (props) => {
   }).catch(() => { /* ignore */ });
 
   getConfig().then((config) => {
-    setMemoryEnabled(config.memoryEnabled);
-    setMemoryProvider(config.memoryProvider ?? '');
     setSearchRunning((config as any).searchRunning ?? false);
   }).catch(() => { /* ignore */ });
 
@@ -124,9 +118,6 @@ export const ServerProvider: ParentComponent = (props) => {
 
     if (event.type === 'server.connected') {
       setConnected(true);
-    } else if (event.type === 'server.config') {
-      setMemoryEnabled(!!event.properties?.memoryEnabled);
-      setMemoryProvider(event.properties?.memoryProvider ?? '');
     } else if (event.type === 'server.resources') {
       appendResourceSample(event.properties);
       // Deliberately does NOT bump eventTick: that counter is a re-fetch signal
@@ -179,8 +170,6 @@ export const ServerProvider: ParentComponent = (props) => {
     ghInstalled,
     mode,
     connected,
-    memoryEnabled,
-    memoryProvider,
     searchRunning,
     resources,
     resourceMeta,

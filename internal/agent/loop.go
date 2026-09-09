@@ -15,7 +15,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/id"
-	"github.com/prasenjeet-symon/ogcode/internal/memory"
+	"github.com/prasenjeet-symon/ogcode/internal/memfile"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/project"
@@ -35,8 +35,24 @@ type LoopRunner struct {
 	Tools           *tool.Registry
 	Dir             string
 	MaxSteps        int
-	Memory          *memory.Memory
-	NoteStore       *note.Store
+	// MaxAutoResumes lets a turn that exhausts its MaxSteps budget extend itself
+	// instead of stranding the user mid-task — "resetting the limit so it resumes
+	// working". The turn extends up to MaxAutoResumes times, for a hard ceiling of
+	// MaxSteps*(1+MaxAutoResumes) iterations, after which it stops but stays
+	// continuable (it ends on paired tool results, so a follow-up message or Resume
+	// picks up from there). 0 (the default) disables auto-extend, so headless CLI
+	// runs, the indexer, and sub-agents keep their exact MaxSteps cap. Only the
+	// interactive server sets it.
+	MaxAutoResumes int
+	// MemFiles is the per-turn markdown memory index. When TurnMemory is on and
+	// this is set, a completed turn is summarized to a dated markdown file and
+	// indexed here, and the recall tools read it via the memory-recall sub-agent.
+	// MemBarrier serializes those background writes against recall so a lookup
+	// never sees a half-written index. nil (CLI, tests) disables memory.
+	MemFiles   *memfile.Store
+	MemBarrier *memfile.Manager
+	TurnMemory bool
+	NoteStore  *note.Store
 	// SearchBridge is the web-search backend used by the deep-research pipeline
 	// (RunSearchSession) and by web_search and fetch_page. nil when search is
 	// disabled — deep_search is only registered when it is non-nil.
@@ -81,6 +97,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	maxSteps := lr.MaxSteps
 	if maxSteps == 0 {
 		maxSteps = 1000
+	}
+	// Auto-resume ceiling. hardMax == maxSteps when auto-resume is off (the
+	// default), so nothing changes for callers that leave MaxAutoResumes zero.
+	// Read once into a local — the server shares one LoopRunner across concurrent
+	// turns, so this must not depend on mutating the shared field. See
+	// LoopRunner.MaxAutoResumes.
+	hardMax := maxSteps
+	if lr.MaxAutoResumes > 0 {
+		hardMax = maxSteps * (1 + lr.MaxAutoResumes)
 	}
 
 	// Always notify the frontend when the loop exits, regardless of reason.
@@ -235,7 +260,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		}()
 	}
 
-	memoryEnabled := lr.Memory != nil && lr.Memory.Enabled()
+	// The per-turn markdown route is the only memory now, governed solely by its
+	// env gate (OGCODE_TURN_MEMORY, default on). When off, there is no memory.
+	turnMemoryActive := lr.TurnMemory && lr.MemFiles != nil
 
 	// Resolve the provider/model and the two fixed per-run model attributes.
 	p, modelID, modelSupportsImages, modelContextWindow := lr.resolveRunModel(ctx, sess, sessionID)
@@ -282,64 +309,16 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 	slog.Info("agent loop starting", "session", sessionID, "agent", agent.ID, "model", modelID)
 
-	// Agentic memory: read graph context before the loop
-	var memoryText string
-	if memoryEnabled {
-		graphText := lr.Memory.ReadMemory(ctx, string(sessionID))
-		if graphText != "" {
-			memoryText = graphText
-		}
-
-		messages, _ := lr.Store.GetMessages(sessionID, "", 1000)
-
-		// Append the last non-tool assistant response so the LLM has continuity
-		// without needing to recall it. Targeted recall for specific facts is done
-		// on-demand via the memory_recall tool.
-		if lastText := extractLastAssistantText(messages); lastText != "" {
-			if memoryText != "" {
-				memoryText += "\n\n### Last Response\n" + lastText
-			} else {
-				memoryText = "### Last Response\n" + lastText
-			}
-		}
-
-		// Calculate net token savings: without memory the full history is sent every turn,
-		// so savings = all skipped history tokens minus the memory context injected.
-		// Negative means memory adds overhead (normal on short sessions); positive means savings.
-		// Skip if memoryText is only whitespace (would be overhead with no context benefit).
-		if strings.TrimSpace(memoryText) != "" && len(messages) > 1 {
-			lastUserIdx := -1
-			for i := len(messages) - 1; i >= 0; i-- {
-				if messages[i].Info.Role == session.RoleUser {
-					for _, p := range messages[i].Parts {
-						if p.Type == session.PartText {
-							lastUserIdx = i
-							break
-						}
-					}
-					if lastUserIdx >= 0 {
-						break
-					}
-				}
-			}
-			if lastUserIdx > 0 {
-				var skippedChars int
-				for _, msg := range messages[:lastUserIdx] {
-					for _, p := range msg.Parts {
-						skippedChars += len(p.Data)
-					}
-				}
-				// 1 token ≈ 4 chars. Net = history avoided − memory injected.
-				netSaved := (skippedChars - len(memoryText)) / 4
-				lr.Bus.Publish("memory.savings", map[string]any{
-					"sessionId":   string(sessionID),
-					"savedTokens": netSaved,
-				})
-				if err := lr.Store.UpdateMemoryTokensSaved(sessionID, netSaved); err != nil {
-					slog.Warn("persist memory tokens saved", "err", err)
-				}
-			}
-		}
+	// Turn-memory route: the message path sends only the current turn, so to keep
+	// continuity across turns we re-inject just the PREVIOUS turn's final assistant
+	// response — the common "what did I just do" case — without the agent having to
+	// call recall for it. Captured once here, before the step loop: recomputing it
+	// per step would instead pick up this turn's own output. Anything older stays
+	// on demand via the recall tools.
+	var prevTurnResponse string
+	if turnMemoryActive {
+		msgs, _ := lr.Store.GetMessages(sessionID, "", 1000)
+		prevTurnResponse = extractLastAssistantText(msgs)
 	}
 
 	// In-memory working set of the conversation. The DB stays the durable log
@@ -359,9 +338,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	messagesLoaded := false
 	var newMessageIDs []session.MessageID // created in the prior iteration, folded in next
 
-	for step := 1; step <= maxSteps; step++ {
-		if step == maxSteps {
-			slog.Warn("agent loop reached MaxSteps limit", "session", sessionID, "maxSteps", maxSteps)
+	for step := 1; step <= hardMax; step++ {
+		if step == maxSteps && hardMax > maxSteps {
+			slog.Warn("agent loop exhausted its step budget; auto-extending so the turn resumes",
+				"session", sessionID, "maxSteps", maxSteps, "hardMax", hardMax)
+		}
+		if step == hardMax {
+			slog.Warn("agent loop reached its hard step ceiling", "session", sessionID, "hardMax", hardMax)
 		}
 		slog.Info("agent loop step", "session", sessionID, "step", step)
 
@@ -460,8 +443,8 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				}
 				slog.Info("agent loop breaking", "session", sessionID, "reason", "last assistant finished", "finish", finish, "totalMessages", len(messages))
 				exitReason = finish
-				if memoryEnabled {
-					lr.writeMemory(ctx, sessionID, p, modelID)
+				if turnMemoryActive {
+					lr.writeTurnMemory(ctx, sessionID, p, modelID)
 				}
 				return nil
 			}
@@ -530,36 +513,27 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// entries. This separation is critical for Anthropic prompt caching: the
 		// provider puts the cache_control breakpoint on the first system block
 		// only, so anything that changes mid-session must stay out of it.
-		systemPrompts := buildSystemPromptEntries(agent, workDir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles)
+		// Recall guidance appears when turn-memory is active and the agent holds
+		// the recall tools.
+		systemPrompts := buildSystemPromptEntries(agent, workDir, turnMemoryActive, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles)
 		var modelMessages []provider.ModelMessage
 
-		if memoryEnabled {
-			// Agentic memory path: memory handles context compression by filtering
-			// history to the last user message and injecting <prior_context>.
-			// Compaction is completely bypassed when memory is active — but
-			// <prior_context> compresses across turns, not within one, so the
-			// in-turn watermark still applies here.
-			visible := messages
-			if start := watermark.sliceStart(messages, 0); start > 0 {
-				visible = messages[start:]
-			}
-			modelMessages = toProviderMessages(visible, memoryText, modelSupportsImages, modelID)
+		// Only the current user turn goes on the wire — from the last text-user
+		// message forward — unless the agent narrowed it itself via compact_context.
+		// Earlier turns live on disk as summaries reachable through recall; the
+		// previous turn's final response is re-injected for cheap continuity, and
+		// compaction (if it ever fires) covers anything older within the session.
+		turnStartIdx := findLastTextUserMessageIndex(messages)
+		if turnStartIdx >= 0 && turnStartIdx < len(messages) {
+			modelMessages = convertMessages(messages[watermark.sliceStart(messages, turnStartIdx):], modelSupportsImages, modelID)
 		} else {
-			// Compaction path (memory disabled): automatic compaction operates on
-			// user-turn boundaries, not individual tool steps, so the current user
-			// turn (from the last text-user message forward) is sent intact unless
-			// the agent has narrowed it itself via compact_context. Previous turns
-			// are represented by the compactionSummary injected into the system
-			// prompt so the model never loses the thread of the session.
-			turnStartIdx := findLastTextUserMessageIndex(messages)
-			if turnStartIdx >= 0 && turnStartIdx < len(messages) {
-				modelMessages = toProviderMessages(messages[watermark.sliceStart(messages, turnStartIdx):], "", modelSupportsImages, modelID)
-			} else {
-				modelMessages = toProviderMessages(messages, "", modelSupportsImages, modelID)
-			}
-			if compactionSummary != "" {
-				systemPrompts = append(systemPrompts, compactionSummary)
-			}
+			modelMessages = convertMessages(messages, modelSupportsImages, modelID)
+		}
+		if compactionSummary != "" {
+			systemPrompts = append(systemPrompts, compactionSummary)
+		}
+		if prevTurnResponse != "" {
+			modelMessages = prependPreviousResponse(modelMessages, prevTurnResponse)
 		}
 		if watermark.active() {
 			modelMessages = prependCompactionSummary(modelMessages, watermark.summary)
@@ -666,7 +640,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// tool results not yet reflected in any reported count — so the check errs
 		// toward compacting early rather than overflowing.
 		requestTokens := effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
-		if !memoryEnabled && requestTokens > maxRequestTokens && compactionCount == 0 {
+		if requestTokens > maxRequestTokens && compactionCount == 0 {
 			before := len(streamReq.Messages)
 			slog.Info("proactive compaction: request tokens exceed threshold", "session", sessionID, "estimatedTokens", requestTokens, "reportedInputTokens", lastInputTokens, "thresholdTokens", maxRequestTokens, "contextWindow", modelContextWindow, "messages", before)
 			compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
@@ -742,9 +716,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 			slog.Warn("stream chat attempt failed", "session", sessionID, "attempt", attempt, "err", streamErr)
 			// Context length exceeded: summarize old history with the LLM and retry.
-			// Only used when agentic memory is OFF; with memory active the context is
-			// already compressed via <prior_context> so compaction should not run.
-			if !memoryEnabled && compactionCount < maxCompactions && isContextLengthError(streamErr) {
+			if compactionCount < maxCompactions && isContextLengthError(streamErr) {
 				before := len(streamReq.Messages)
 				slog.Info("context length exceeded, using LLM to compact history", "session", sessionID, "messages", before)
 				compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
@@ -1441,8 +1413,8 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 			slog.Info("agent loop complete", "session", sessionID, "steps", step, "reason", finishReason)
 			exitReason = finishReason
-			if memoryEnabled {
-				lr.writeMemory(ctx, sessionID, p, modelID)
+			if turnMemoryActive {
+				lr.writeTurnMemory(ctx, sessionID, p, modelID)
 			}
 			return nil
 		}
@@ -1454,10 +1426,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		}
 	}
 
-	// Reached MaxSteps with tool calls still pending — treat as stop.
-	exitReason = "stop"
-	if memoryEnabled {
-		lr.writeMemory(ctx, sessionID, p, modelID)
+	// Reached the hard step ceiling with tool calls still pending. The turn ends
+	// on paired tool results, so the session stays continuable — a follow-up
+	// message or Resume picks up from here with a fresh budget. A distinct exit
+	// reason keeps an extended-then-stopped turn from being read as a clean finish.
+	exitReason = "step_limit"
+	if turnMemoryActive {
+		lr.writeTurnMemory(ctx, sessionID, p, modelID)
 	}
 	return nil
 }
@@ -1637,117 +1612,197 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 	return resultID
 }
 
-// writeMemory extracts the last conversation turn and persists it via memory_add.
-// chatProvider/chatModel are the session's resolved LLM — memory synthesis uses
-// the same model the user is chatting with, captured here at dispatch time.
-func (lr *LoopRunner) writeMemory(ctx context.Context, sessionID session.SessionID, chatProvider provider.Provider, chatModel string) {
+// writeTurnMemory is the per-turn markdown memory writer. It synthesizes a structured
+// summary of the just-finished turn (the user request, the tool calls' inputs
+// and intent but NOT their results — the token saving that motivates the
+// feature, and the final response), writes it as a dated file under the
+// project's .ogcode/memory/, and incrementally indexes that single file. The
+// synthesis (an LLM call) and indexing run on a detached goroutine so the turn
+// returns at once; the barrier is entered synchronously first so a recall firing
+// right after the turn waits for this write to land in the index.
+func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.SessionID, chatProvider provider.Provider, chatModel string) {
+	if chatProvider == nil {
+		slog.Info("writeTurnMemory: no provider to synthesize with, skipping")
+		return
+	}
 	messages, err := lr.Store.GetMessages(sessionID, "", 1000)
 	if err != nil {
-		slog.Warn("writeMemory: failed to load messages", "err", err)
+		slog.Warn("writeTurnMemory: failed to load messages", "err", err)
 		return
 	}
 
-	// Find the last user message that has a text part (skip tool-result user messages)
-	var userText string
-	var userMsgIdx int
+	// Locate the turn's user request (skip tool-result user messages).
+	userText := ""
+	userMsgIdx := -1
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Info.Role != session.RoleUser || len(messages[i].Parts) == 0 {
 			continue
 		}
-		hasText := false
+		found := ""
 		for _, p := range messages[i].Parts {
 			if p.Type == session.PartText {
 				var data session.TextPartData
 				if json.Unmarshal(p.Data, &data) == nil && data.Text != "" {
-					userText = data.Text
-					hasText = true
+					found = data.Text
 				}
 			}
 		}
-		if hasText {
+		if found != "" {
+			userText = found
 			userMsgIdx = i
 			break
 		}
 	}
 	if userText == "" {
-		slog.Info("writeMemory: no user text found, skipping")
+		slog.Info("writeTurnMemory: no user text found, skipping")
 		return
 	}
 
-	// Build response trace from assistant messages after the user message
-	responseText := buildTurnResponse(messages, userMsgIdx)
-	if responseText == "" {
-		slog.Info("writeMemory: no response text, skipping")
-		return
-	}
-
-	slog.Info("writeMemory: persisting turn", "session", sessionID, "questionLen", len(userText), "responseLen", len(responseText))
-	var chat memory.ChatClient
-	if chatProvider != nil {
-		chat = memory.NewChatClient(chatProvider, chatModel)
-	}
-
-	// Stamp the workspace onto the write so project-scoped recall can find this
-	// turn later. The session row is the only place that knows the directory and
-	// type; a miss here is not fatal — the fact is still stored session-scoped.
-	scope := memory.Scope{SessionID: string(sessionID)}
+	// Resolve session meta up front (cheap, on the caller goroutine).
+	meta := memfile.Meta{SessionID: string(sessionID), CreatedAt: time.Now()}
+	dir := lr.Dir
 	if sess, err := lr.Store.Get(sessionID); err == nil && sess != nil {
-		dir := sess.Directory
-		if dir == "" {
+		if sess.Directory != "" {
+			dir = sess.Directory
+		} else if sess.ProjectID != "" {
 			dir = sess.ProjectID
 		}
-		scope.ProjectID = project.Resolve(dir)
-		scope.SessionType = sess.SessionType
-		scope.SessionName = sess.Title
-	} else if err != nil {
-		slog.Warn("writeMemory: session lookup failed; storing without project scope", "session", sessionID, "err", err)
+		meta.SessionType = sess.SessionType
+		meta.Title = sess.Title
+	}
+	meta.ProjectID = project.Resolve(dir)
+
+	// Utility/ephemeral sessions (the recall agent itself, subagents, notes,
+	// indexing, search, breakdown) are not units of work worth remembering — and
+	// summarizing a memory-recall turn would recurse — so skip them.
+	if !turnMemorableSession(meta.SessionType) {
+		return
 	}
 
-	lr.Memory.WriteMemory(ctx, scope, userText, responseText, chat)
+	digest := buildTurnDigest(messages, userMsgIdx, userText)
+	projectID := meta.ProjectID
+
+	// Enter the barrier synchronously so a recall that follows this turn observes
+	// the in-flight write, then do the slow synthesis+write+index off the main
+	// thread.
+	lr.MemBarrier.Begin(projectID)
+	go func() {
+		defer lr.MemBarrier.Done(projectID)
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("writeTurnMemory: panic in background summary", "err", r, "stack", string(debug.Stack()))
+			}
+		}()
+
+		// Detached context so the summary still completes if the turn's context is
+		// cancelled the moment it ends.
+		bgCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		summary, err := newSynthClient(chatProvider, chatModel).Chat(bgCtx, memfile.SummarySystemPrompt, digest)
+		if err != nil {
+			slog.Warn("writeTurnMemory: summary synthesis failed", "session", sessionID, "err", err)
+			return
+		}
+		if strings.TrimSpace(summary) == "" {
+			slog.Info("writeTurnMemory: empty summary, skipping", "session", sessionID)
+			return
+		}
+
+		// The summary's own H1 titles the file better than the session title.
+		if h1 := firstMarkdownH1(summary); h1 != "" {
+			meta.Title = h1
+		}
+
+		path, err := memfile.Write(dir, meta, summary)
+		if err != nil {
+			slog.Warn("writeTurnMemory: write summary failed", "session", sessionID, "err", err)
+			return
+		}
+		if err := lr.MemFiles.IndexFile(path, meta); err != nil {
+			slog.Warn("writeTurnMemory: index summary failed", "path", path, "err", err)
+			return
+		}
+		slog.Info("writeTurnMemory: turn summary written and indexed", "session", sessionID, "path", path)
+	}()
 }
 
-// buildTurnResponse serializes all assistant messages after a given user message
-// into a structured text trace (tool calls, results, text).
-func buildTurnResponse(messages []*session.MessageWithParts, userMsgIdx int) string {
+// buildTurnDigest renders a compact digest of one turn for summary synthesis:
+// the user's request, every tool call's name and input (NOT its output — that is
+// the token saving this feature exists for), and the agent's final text
+// response. Reasoning and tool results are omitted.
+func buildTurnDigest(messages []*session.MessageWithParts, userMsgIdx int, userText string) string {
 	var b strings.Builder
+	b.WriteString("## User request\n")
+	b.WriteString(strings.TrimSpace(userText))
+	b.WriteString("\n\n## Agent tool calls (name + input/intent only — results omitted)\n")
+	calls := 0
 	for i := userMsgIdx + 1; i < len(messages); i++ {
 		m := messages[i]
-		if m.Info.Role == session.RoleAssistant {
-			fmt.Fprintf(&b, "--- Assistant iteration ---\n")
-			for _, p := range m.Parts {
-				switch p.Type {
-				case session.PartText:
-					var data session.TextPartData
-					if json.Unmarshal(p.Data, &data) == nil && data.Text != "" {
-						fmt.Fprintf(&b, "Text: %s\n", data.Text)
-					}
-				case session.PartTool:
-					var data session.ToolPartData
-					if json.Unmarshal(p.Data, &data) == nil {
-						status := string(data.State.Status)
-						fmt.Fprintf(&b, "Tool: %s (%s)\n", data.Tool, status)
-						if data.State.Input != nil {
-							fmt.Fprintf(&b, "  Input: %s\n", string(data.State.Input))
-						}
-						if data.State.Output != nil {
-							output := *data.State.Output
-							if len(output) > 500 {
-								output = output[:500] + "..."
-							}
-							fmt.Fprintf(&b, "  Output: %s\n", output)
-						}
-						if data.State.Error != nil {
-							fmt.Fprintf(&b, "  Error: %s\n", *data.State.Error)
-						}
-					}
-				case session.PartReasoning:
-					// Skip reasoning parts — not stored in knowledge graph.
-					// Reasoning is ephemeral and should not pollute long-term memory.
-				}
+		if m.Info.Role != session.RoleAssistant {
+			continue
+		}
+		for _, p := range m.Parts {
+			if p.Type != session.PartTool {
+				continue
 			}
+			var data session.ToolPartData
+			if json.Unmarshal(p.Data, &data) != nil {
+				continue
+			}
+			calls++
+			input := strings.TrimSpace(string(data.State.Input))
+			if input == "" {
+				input = "(no arguments)"
+			}
+			fmt.Fprintf(&b, "- %s %s\n", data.Tool, truncateForDigest(input))
 		}
 	}
+	if calls == 0 {
+		b.WriteString("(no tool calls this turn)\n")
+	}
+	b.WriteString("\n## Agent final response\n")
+	final := extractLastAssistantText(messages)
+	if strings.TrimSpace(final) == "" {
+		final = "(no final text response)"
+	}
+	b.WriteString(strings.TrimSpace(final))
+	b.WriteString("\n")
 	return b.String()
+}
+
+// digestInputCap bounds a single tool call's input in the digest. Inputs carry
+// intent, which the summary needs; but a large payload (e.g. a whole file body
+// in a write call) would blow the summary's token budget for no gain, so it is
+// clipped — the summary only needs to know what was done, not replay it.
+const digestInputCap = 2000
+
+func truncateForDigest(s string) string {
+	if len(s) <= digestInputCap {
+		return s
+	}
+	return s[:digestInputCap] + fmt.Sprintf("… (+%d chars)", len(s)-digestInputCap)
+}
+
+// turnMemorableSession reports whether a session type is a real unit of work
+// worth summarizing into per-turn memory. Utility/ephemeral agents are excluded.
+func turnMemorableSession(sessionType string) bool {
+	switch sessionType {
+	case "subagent", "memory-recall", "note", "index", "search", "breakdown":
+		return false
+	}
+	return true
+}
+
+// firstMarkdownH1 returns the text of the first level-1 heading in md, or "".
+func firstMarkdownH1(md string) string {
+	for _, line := range strings.Split(md, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(t, "# "))
+		}
+	}
+	return ""
 }
 
 // probeImageTimeout bounds the one-time capability probe so a slow/unreachable
@@ -2587,56 +2642,30 @@ func findLastTextUserMessageIndex(messages []*session.MessageWithParts) int {
 	return -1
 }
 
-func toProviderMessages(messages []*session.MessageWithParts, memoryText string, modelSupportsImages bool, modelID string) []provider.ModelMessage {
-	// When memory is active, filter to only the last user message and everything after.
-	// This replaces full history with the compressed <prior_context> block.
-	if memoryText != "" {
-		// Find the last user message index
-		lastUserIdx := -1
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Info.Role == session.RoleUser {
-				// Skip tool-result user messages (they have tool parts)
-				hasText := false
-				for _, p := range messages[i].Parts {
-					if p.Type == session.PartText {
-						hasText = true
-					}
-				}
-				if hasText {
-					lastUserIdx = i
-					break
-				}
-			}
-		}
-
-		if lastUserIdx >= 0 {
-			// Include everything from the last text-user message onwards
-			// plus any preceding tool-result messages (for ongoing tool chains)
-			filtered := messages[lastUserIdx:]
-
-			// Prepend <prior_context> to the first user message
-			result := convertMessages(filtered, modelSupportsImages, modelID)
-
-			// Find the first user message and prepend context
-			for i, msg := range result {
-				if msg.Role == "user" {
-					var content string
-					if msg.Content != nil {
-						json.Unmarshal(msg.Content, &content)
-					}
-					content = "<prior_context>\n" + memoryText + "\n</prior_context>\n\n" + content
-					result[i].Content, _ = json.Marshal(content)
-					break
-				}
-			}
-
-			return result
-		}
+// prependPreviousResponse prepends the previous turn's final assistant response
+// to the first user message, wrapped in a <previous_response> tag, so the
+// turn-memory route keeps cross-turn continuity even though the message path
+// sends only the current turn. It mirrors how <prior_context> is prepended, but
+// carries just the last response — not a graph summary — and uses a distinct tag
+// so it is unmistakable for the removed legacy context. A no-op if there is no
+// user message to attach to.
+func prependPreviousResponse(messages []provider.ModelMessage, prev string) []provider.ModelMessage {
+	if prev == "" {
+		return messages
 	}
-
-	// No memory: send the full conversation history and let the model's context
-	// window be the limit. Memory mode is the right solution for long sessions.
-	return convertMessages(messages, modelSupportsImages, modelID)
+	for i, msg := range messages {
+		if msg.Role != "user" {
+			continue
+		}
+		var content string
+		if msg.Content != nil {
+			json.Unmarshal(msg.Content, &content)
+		}
+		content = "<previous_response>\n" + prev + "\n</previous_response>\n\n" + content
+		messages[i].Content, _ = json.Marshal(content)
+		break
+	}
+	return messages
 }
 
 // replayableReasoning decides whether an assistant message's stored thinking
@@ -2899,17 +2928,6 @@ func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDCo
 		}
 	}
 
-	// The LaTeX environment is detected once and cached for the process, so it is
-	// static *today*. But detection is a probe of the host, not a session-fixed
-	// value — a future change (or a test forcing the cache) could make it vary, and
-	// the static block must stay byte-identical by construction, not by caching.
-	// It lands here next to the other host-derived, per-turn entries for the same
-	// reason the index status does.
-	if a.HasTool("latex_to_pdf") {
-		if lp := latexInfoPrompt(); lp != "" {
-			entries = append(entries, strings.TrimSpace(lp))
-		}
-	}
 	entries = append(entries, systemReminderPrompt())
 
 	// Output-only agents pin their format constraint last, where it sits closest
@@ -2954,34 +2972,31 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// inside memoryMDPrompt so the section never points at a tag that the
 		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
-		// The agentic-memory comparison is gated on the same condition as the
-		// paragraph below: the recall tools are only registered when memory is
-		// initialised, so describing them otherwise names a call the agent will
-		// never be offered.
-		hasRecall := memoryEnabled && a.HasTool("memory_recall")
-		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "", hasRecall)
+		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
 	}
 
-	// Only advertise agentic memory to agents that actually have the memory_recall
-	// tool (Build, Task, Plan). Note/Breakdown/Index/Search lack it, so telling
-	// them to "use the memory_recall tool" would reference a tool they don't have.
+	// LaTeX environment: a host probe, but detection is cached for the process
+	// (getLatexEnv), so it is byte-identical for the whole session and belongs in
+	// the cached base rather than being re-sent every turn. Gated on the tool, not
+	// on projectScoped, to match exactly where latex_to_pdf is offered.
+	if a.HasTool("latex_to_pdf") {
+		if lp := latexInfoPrompt(); lp != "" {
+			prompt += "\n\n" + strings.TrimSpace(lp)
+		}
+	}
+
+	// Advertise recall only to agents that hold the memory_recall tool (Build,
+	// Task, Plan). memoryEnabled here means turn-memory is active for this run.
 	if memoryEnabled && a.HasTool("memory_recall") {
 		prompt += `
 
-You have access to agentic memory. Prior conversation context is provided in <prior_context> blocks, which includes a knowledge graph summary of THIS conversation and the most recent assistant response for continuity. It does not contain anything from earlier sessions.
+This project keeps a persistent memory: every completed turn is saved as a structured markdown summary, and a read-only recall sub-agent searches those summaries on your behalf. Use it proactively whenever the request touches past work, prior decisions, or earlier context you do not already have in view — do not guess or hallucinate past details. Each call runs the sub-agent, so it may take a moment and returns a brief, synthesized answer rather than raw excerpts. Ask one precise question per call.
 
-To retrieve specific past facts, decisions, or details, use the memory_recall tool with a precise question. Use it proactively whenever the current query references past context, prior decisions, or earlier work — do not guess or hallucinate past details.`
+Use memory_recall for THIS conversation's earlier turns — what was decided or done before but is no longer in view.`
 
 		if a.HasTool("project_memory_recall") {
 			prompt += `
-
-Agentic memory has two scopes, and picking the wrong one loses information:
-- memory_recall searches THIS conversation only. Use it for what was said or done earlier in this session.
-- project_memory_recall searches EVERY past conversation in this project. Use it when the question reaches beyond this session — why something was built the way it was, what was tried before, when a convention or decision was introduced, or anything referring to work you have no record of in this session.
-
-Results from project_memory_recall are attributed to the conversation and date they came from. Treat the most recent fact as current when two disagree, and say so rather than presenting a superseded decision as if it still stood.
-
-project_memory_recall also accepts scope: "session", which runs that same dated, attributed search over the current conversation only. Reach for it when you want this session's history with timestamps and ordering rather than the flat summary memory_recall returns.`
+Use project_memory_recall for anything reaching beyond this session — why something was built a certain way, what was tried before, when a convention was introduced. It also accepts scope: "session" to restrict that dated search to the current conversation. When summaries disagree, prefer the most recent.`
 		}
 	}
 
@@ -3449,6 +3464,9 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 	childCtx := WithoutLoopControl(ctx)
 	childRunner := *lr
 	childRunner.MaxSteps = subagentMaxSteps
+	// A sub-agent is a bounded, delegated task; it must not inherit the server's
+	// auto-resume, or a runaway sub-agent would silently extend its own budget.
+	childRunner.MaxAutoResumes = 0
 	childRunner.Permissions = nil
 	if err := childRunner.RunLoop(childCtx, sess.ID, "subagent", 0, 0); err != nil {
 		return "", fmt.Errorf("subagent loop: %w", err)
@@ -3471,6 +3489,99 @@ func truncateText(s string, max int) string {
 		return s
 	}
 	return s[:max] + "…"
+}
+
+// RunMemoryRecallSession runs the read-only memory-recall sub-agent for a recall
+// question and returns its concise written answer. It mirrors RunTaskSession: an
+// ephemeral session deleted on completion, a capped child loop with the parent's
+// LoopControl and permissions stripped, and the parent model inherited via the
+// session's Model. The scope (project vs one session) is placed on the child
+// context for the memory_map tool, so the model cannot widen it. Wired to the
+// recall tools via the tool.RecallFunc contract.
+func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scope, targetSessionID, dir, model string) (string, error) {
+	if dir == "" {
+		dir = lr.Dir
+	}
+	if model == "" {
+		dp := lr.Registry.DefaultUsable()
+		if dp == nil {
+			dp = lr.DefaultProvider
+		}
+		if dp != nil {
+			if models := dp.Models(); len(models) > 0 {
+				model = models[0].ID
+			}
+		}
+	}
+	if scope == "" {
+		scope = "project"
+	}
+
+	sess := &session.Session{
+		ID:          session.NewSessionID(),
+		ProjectID:   dir,
+		Directory:   dir,
+		Title:       "Memory recall: " + truncateText(question, 60),
+		Model:       model,
+		SessionType: "memory-recall",
+		CreatedAt:   session.Now(),
+		UpdatedAt:   session.Now(),
+	}
+	if err := lr.Store.Create(sess); err != nil {
+		return "", fmt.Errorf("create memory-recall session: %w", err)
+	}
+	defer func() {
+		if err := lr.Store.Delete(sess.ID); err != nil {
+			slog.Warn("delete ephemeral memory-recall session", "session", sess.ID, "err", err)
+		}
+	}()
+
+	userMsg := &session.MessageInfo{
+		ID:        session.NewMessageID(),
+		SessionID: sess.ID,
+		Role:      session.RoleUser,
+		Agent:     "memory-recall",
+		CreatedAt: session.Now(),
+	}
+	if err := lr.Store.CreateMessage(userMsg); err != nil {
+		return "", fmt.Errorf("create memory-recall user message: %w", err)
+	}
+	textData, _ := json.Marshal(session.TextPartData{Text: question})
+	if err := lr.Store.CreatePart(&session.Part{
+		ID:        session.NewPartID(),
+		MessageID: userMsg.ID,
+		SessionID: sess.ID,
+		Type:      session.PartText,
+		Data:      textData,
+		CreatedAt: session.Now(),
+		UpdatedAt: session.Now(),
+	}); err != nil {
+		return "", fmt.Errorf("create memory-recall user part: %w", err)
+	}
+
+	// Carry the trusted scope on the child context for memory_map, and strip the
+	// parent's loop control/permissions exactly as RunTaskSession does.
+	childCtx := tool.WithRecallScope(WithoutLoopControl(ctx), tool.RecallScope{
+		Scope:     scope,
+		SessionID: targetSessionID,
+		ProjectID: project.Resolve(dir),
+	})
+	childRunner := *lr
+	childRunner.MaxSteps = subagentMaxSteps
+	childRunner.Permissions = nil
+	if err := childRunner.RunLoop(childCtx, sess.ID, "memory-recall", 0, 0); err != nil {
+		return "", fmt.Errorf("memory-recall loop: %w", err)
+	}
+
+	msgs, err := lr.Store.GetMessages(sess.ID, "", 1000)
+	if err != nil {
+		return "", fmt.Errorf("load memory-recall messages: %w", err)
+	}
+	answer := extractLastAssistantText(msgs)
+	if strings.TrimSpace(answer) == "" {
+		return "No relevant past context was found in memory.", nil
+	}
+	return answer, nil
 }
 
 // Token budgeting for proactive compaction lives in tokens.go

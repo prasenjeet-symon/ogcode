@@ -1273,9 +1273,6 @@ html {
   transform: translateX(0);
   box-shadow: 0 0 60px rgba(0, 0, 0, 0.55);
 }
-.sidebar-drawer.is-open .sidebar-drawer-scrim {
-  opacity: 1;
-}
 .sidebar-drawer-scrim {
   position: fixed;
   inset: 0;
@@ -1286,8 +1283,12 @@ html {
   pointer-events: none;
   transition: opacity var(--spring-md);
 }
-.sidebar-drawer.is-open .sidebar-drawer-scrim.is-active {
-  opacity: 1;
+/* The scrim is a SIBLING of .sidebar-drawer (mounted under the same root,
+   not a descendant — see sidebar-shell.tsx) and mounts only while open via
+   <Show>, so plain .is-active styling is enough. No .sidebar-drawer.is-open
+   scoping, and none of the transform-containing-block traps that came with
+   nesting it inside the transformed drawer. */
+.sidebar-drawer-scrim.is-active {
   pointer-events: auto;
 }
 

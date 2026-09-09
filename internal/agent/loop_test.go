@@ -51,16 +51,17 @@ func TestBuildSystemPrompt_MemoryMDSection_ContainsPurposeSection(t *testing.T) 
 
 	prompt := buildSystemPrompt(agent, dir, false, "", "", 0, 0)
 
-	// Verify key sections are always present
+	// The slimmed section still states what MEMORY.md is, that it is re-read each
+	// turn, how it differs from AGENT.md, and (for a write-capable agent) how to
+	// maintain it — just without the long prose the earlier version carried.
 	for _, sub := range []string{
-		"### Purpose",
-		"### What belongs in MEMORY.md",
-		"### What does NOT belong in MEMORY.md",
-		"### How it differs from AGENT.md",
+		"## MEMORY.md — Project Long-Term Memory",
+		"re-read at the start of every turn",
+		"AGENT.md",
 		"### How to maintain MEMORY.md",
 	} {
 		if !strings.Contains(prompt, sub) {
-			t.Errorf("expected section %q in prompt when no MEMORY.md exists", sub)
+			t.Errorf("expected %q in prompt when no MEMORY.md exists", sub)
 		}
 	}
 }
@@ -164,7 +165,7 @@ func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
 	// Project-scoped agent keeps the context sections and (memory on + has
 	// memory_recall) gets the agentic-memory block.
 	build := buildSystemPrompt(BuildAgent, dir, true, agentMD, "", 0, 0)
-	for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall tool"} {
+	for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall"} {
 		if !strings.Contains(build, s) {
 			t.Errorf("BuildAgent prompt should contain %q", s)
 		}
@@ -174,7 +175,7 @@ func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
 	// they don't operate on the codebase and lack memory_recall.
 	for _, a := range []Agent{IndexAgent, SearchAgent} {
 		p := buildSystemPrompt(a, dir, true, agentMD, "some memory content", 0, 0)
-		for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall tool"} {
+		for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall"} {
 			if strings.Contains(p, s) {
 				t.Errorf("%s prompt should NOT contain project-context %q", a.ID, s)
 			}
@@ -825,35 +826,43 @@ func TestEstimateRequestTokensReasoningParts(t *testing.T) {
 // project_memory_recall *without* memory_recall would silently get the tool and
 // no instructions on when to prefer it.
 func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
-	const scopeSentinel = "project_memory_recall searches EVERY past conversation"
-
 	all := []Agent{BuildAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, IndexAgent, SearchAgent, SubagentAgent}
+	withTool := []Agent{}
 	for _, a := range all {
-		if !a.HasTool("project_memory_recall") {
-			continue
+		if a.HasTool("project_memory_recall") {
+			withTool = append(withTool, a)
 		}
+	}
+	withoutTool := []Agent{NoteAgent, BreakdownAgent, IndexAgent, SearchAgent}
+
+	// Recall is the per-turn markdown route only. Every agent holding
+	// project_memory_recall must be told both scopes and the session parameter,
+	// with no lingering graph / <prior_context> wording. The third arg to
+	// buildSystemPrompt is "memory active" for the run.
+	const sentinel = "project_memory_recall for anything reaching beyond this session"
+	for _, a := range withTool {
 		if !a.HasTool("memory_recall") {
 			t.Errorf("%s has project_memory_recall but not memory_recall; the scope guidance is gated on the latter and would never render", a.ID)
 		}
 		p := buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0)
-		if !strings.Contains(p, scopeSentinel) {
-			t.Errorf("%s prompt is missing the project-vs-session scope guidance", a.ID)
+		if !strings.Contains(p, sentinel) {
+			t.Errorf("%s prompt is missing the project scope guidance", a.ID)
 		}
 		if !strings.Contains(p, `scope: "session"`) {
 			t.Errorf("%s prompt does not mention the session scope parameter", a.ID)
 		}
+		if strings.Contains(p, "<prior_context>") || strings.Contains(p, "knowledge graph") {
+			t.Errorf("%s prompt still references the removed graph/prior_context", a.ID)
+		}
 	}
 
-	// Memory off: no memory guidance at all, whatever tools the agent holds.
-	off := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0)
-	if strings.Contains(off, scopeSentinel) {
-		t.Error("scope guidance leaked into the prompt with agentic memory disabled")
+	// Memory inactive: no recall guidance at all, whatever tools the agent holds.
+	if strings.Contains(buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0), sentinel) {
+		t.Error("scope guidance leaked into the prompt with memory inactive")
 	}
-
 	// Agents without the tool must not be told to use it.
-	for _, a := range []Agent{NoteAgent, BreakdownAgent, IndexAgent, SearchAgent} {
-		p := buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0)
-		if strings.Contains(p, scopeSentinel) {
+	for _, a := range withoutTool {
+		if strings.Contains(buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0), sentinel) {
 			t.Errorf("%s lacks project_memory_recall but its prompt advertises it", a.ID)
 		}
 	}

@@ -168,91 +168,36 @@ func indexStatusPrompt(indexedFiles int) string {
 // receive this section, but neither holds memory_recall. Describing the tool to
 // them sends the model after a call it will never be offered. Every agent that
 // holds memory_recall also holds project_memory_recall, so one flag covers both.
-func memoryMDPrompt(canWriteFiles, hasContent, hasRecall bool) string {
-	base := `## MEMORY.md — Project Long-Term Memory
-
-`
+func memoryMDPrompt(canWriteFiles, hasContent bool) string {
+	base := "## MEMORY.md — Project Long-Term Memory\n\n"
 	switch {
 	case hasContent && canWriteFiles:
-		base += `The content above in the <memory-md> tag is loaded from your project's MEMORY.md file(s). This is the project's persistent, cross-session knowledge base. It survives across conversations — unlike chat history, which resets each session.
-
-`
+		base += "The content above in the <memory-md> tag is your project's MEMORY.md — a persistent, cross-session knowledge base that survives across conversations (chat history does not).\n\n"
 	case hasContent:
-		base += `The content above in the <memory-md> tag is loaded from the project's MEMORY.md file(s). This is the project's persistent, cross-session knowledge base. It survives across conversations — unlike chat history, which resets each session. Treat it as reference material — you can read it but cannot modify it.
-
-`
+		base += "The content above in the <memory-md> tag is the project's MEMORY.md — a persistent, cross-session knowledge base that survives across conversations (chat history does not). Treat it as read-only reference.\n\n"
 	default:
-		base += `This project has no MEMORY.md file, so there is no <memory-md> tag above and this session starts with no recorded project knowledge. MEMORY.md is a project's persistent, cross-session knowledge base: it survives across conversations, unlike chat history, which resets each session.
-
-`
+		base += "This project has no MEMORY.md file yet, so there is no <memory-md> tag above. MEMORY.md is a project's persistent, cross-session knowledge base that survives across conversations, unlike chat history.\n\n"
 	}
 
-	base += `### Purpose
-MEMORY.md stores hard-won knowledge about this project that you would otherwise forget between sessions. Think of it as a lab notebook: a place to record what you've learned so your future self (and future sessions) don't have to rediscover it.
+	base += "It holds durable, project-specific knowledge — decisions and why, conventions, architecture, gotchas, and facts like config values, versions, and build/test commands. It is re-read at the start of every turn. Keep it concise; it is not for behavioral rules (those belong in AGENT.md) or anything obvious from the code."
 
-### What belongs in MEMORY.md
-- **Decisions & rationale** — why a particular approach was chosen over alternatives
-- **Patterns & conventions** — naming patterns, file organization, coding style, commit message format
-- **Architecture notes** — how components connect, data flow, key abstractions
-- **Gotchas & pitfalls** — things that broke unexpectedly, non-obvious behaviors, workarounds
-- **Project-specific facts** — config values, API quirks, dependency versions, build commands
-- **Workflow notes** — how to test, deploy, debug, or reproduce issues in this project
-
-### What does NOT belong in MEMORY.md
-- Temporary or per-session state (use chat context or agentic memory recall for that)
-- Instructions or rules for how to behave (those go in AGENT.md, not MEMORY.md)
-- Verbose logs or full file contents (link or reference them, don't copy them)
-- Information that is obvious from reading the code itself
-
-### How it differs from AGENT.md
-- **AGENT.md** = behavioral instructions ("follow these rules", "always do X before Y"). It tells you HOW to act.
-- **MEMORY.md** = factual knowledge ("we chose PostgreSQL over MongoDB because X", "the auth middleware lives in middleware/auth.go"). It tells you WHAT you know.
-`
-	if hasRecall {
-		base += `- **Agentic memory** (the <prior_context> block, memory_recall and project_memory_recall tools) = conversation summaries mined from chat history. memory_recall covers the current session; project_memory_recall covers every past session in this project. Both are recalled on demand and reflect what was *said*; MEMORY.md is curated knowledge you deliberately write down.
-`
-	}
-	base += `
-`
 	if canWriteFiles {
-		base += `### How to maintain MEMORY.md
-- Use the read tool to inspect current contents before making changes
-- Use the edit tool for targeted updates (preferred — avoids rewriting the whole file)
-- Use the write tool only when restructuring the entire file or creating the file for the first time
-- Keep it concise and well-organized — future sessions must read and understand it quickly
-- Remove or update stale entries when you discover they are no longer accurate`
+		base += `
+
+### How to maintain MEMORY.md
+- Use the edit tool for targeted updates; use write only to restructure or first create the file.
+- Record a fact the moment it proves out — a project-specific build/test failure and its fix, an assumption about the code that turned out wrong, an approach you tried and backed out — as one line ("tried X → got Y → do Z instead"). Skip anything a future session could read straight from the code.
+- Before adding, check it isn't already recorded and update in place. Do this on your own initiative — it is part of finishing the work.`
 		if !hasContent {
-			base += `
-- There is no MEMORY.md yet — create one in the project root with the write tool as soon as this project has meaningful knowledge worth recording`
+			base += "\n- There is no MEMORY.md yet — create one in the project root with the write tool once there is knowledge worth recording."
 		}
-
-		base += `
-
-### Turn what you learned this turn into MEMORY.md
-MEMORY.md is re-read at the start of every turn, so an entry you write now is in your prompt on the next one. That is the only channel through which something you worked out in this turn survives it. Anything you leave unwritten you will rediscover from scratch, at the same cost, the next time it comes up.
-
-The entries that pay for themselves most are the mistakes you already made. When something fails and you recover from it, record the correction at the moment it starts working, while you still know why it works. Then, before you finish the turn, look back over it once and ask whether anything else you learned belongs in the file. Do this on your own initiative — recording what you learned is part of finishing the work, not something to wait to be asked for.
-
-Record it when:
-- A build, test, or command failed for a project-specific reason: a missing env var, a required flag, a generator that has to run first
-- An assumption about this codebase turned out to be wrong — a function does not do what its name suggests, a setting is overridden somewhere else, a file is generated rather than hand-written
-- You tried an approach, it did not work, and you backed it out
-- A fix needed a non-obvious step nobody would guess from reading the code
-- A tool or dependency behaves differently in this project than it does by default
-
-The bar is one question: would a session without this entry waste time, or walk into the same mistake? If yes, write it. If no, leave it out — a typo you fixed, a transient network error, or a detail already plain in the code all fail that test, and a MEMORY.md padded with them gets skimmed and then ignored, which costs you the entries that mattered.
-
-Write each one as a single line under the heading it belongs to, in the form "tried X → got Y → do Z instead". Before adding one, check whether it is already recorded, and update that line instead of appending a near-duplicate. Use edit rather than write, so the rest of the file stays untouched.`
 	} else {
-		base += `### How to use MEMORY.md`
-		if hasContent {
-			base += `
-- Read it at the start of every session to load project context`
-		}
 		base += `
-- Reference it when making decisions — it contains hard-won knowledge from past sessions
-- Note any facts you discover that should be recorded — a future session with write access can add them
-- Do not modify MEMORY.md. You have no write or edit tools, and it must not be changed by any other route either`
+
+### How to use MEMORY.md
+- Reference it when making decisions — it holds hard-won knowledge from past sessions.
+- Note any facts worth recording; a future session with write access can add them.
+- Do not modify MEMORY.md — you have no write or edit tools.`
 	}
 
 	return base
@@ -283,20 +228,20 @@ func markdownCapabilitiesPrompt(hasLatexTool, savedToFile bool) string {
 	if hasLatexTool {
 		latexTool = " The latex_to_pdf tool is also available for programmatic PDF generation."
 	}
-	latexDocs := "- **LaTeX documents** (triple-backtick latex blocks) — full LaTeX documents compiled and rendered inline as page images in the chat viewport. Use this for reports, papers, resumes, letters, and any formatted document that needs professional typesetting. The block should contain a complete LaTeX document with \\documentclass, \\begin{document}...\\end{document}, etc. The interface will automatically compile the document and display the rendered pages inline, with a PDF download button and a source code toggle."
+	latexDocs := "- **LaTeX documents** (triple-backtick latex blocks) — complete documents (\\documentclass … \\end{document}), compiled and rendered inline as page images, with a PDF download button and a source code toggle. Use for reports, papers, resumes, letters, and anything needing professional typesetting."
 	if savedToFile {
-		latexDocs = "- **LaTeX documents** (triple-backtick latex blocks) — full LaTeX documents for reports, papers, resumes, letters, and any formatted document that needs professional typesetting. The block should contain a complete LaTeX document with \\documentclass, \\begin{document}...\\end{document}, etc. The saved file keeps the block as a raw fence; when the note is later viewed in the chat the fence is a recognized render target and is compiled to inline page images, but the file itself does not render or offer a PDF download."
+		latexDocs = "- **LaTeX documents** (triple-backtick latex blocks) — complete documents (\\documentclass … \\end{document}) for reports, papers, resumes, letters. In a saved .md the fence is a recognized render target only when the note is later viewed in chat; the file itself does not render or offer a PDF download."
 	}
 	return `## Markdown output capabilities
 
 The chat interface natively renders the following — use them when they add genuine clarity:
 
 - **Mermaid diagrams** (triple-backtick mermaid blocks) — flows, architectures, sequences, entity relationships.
-- **LaTeX math** — inline with $...$ and display block with $$...$$ — for mathematical formulas and equations.
+- **LaTeX math** — inline $...$ and display $$...$$ — for formulas and equations.
 ` + latexDocs + latexTool + `
-- **Plotly charts** (triple-backtick plotly blocks) — bar, line, scatter, pie, heatmap, and more. The block must contain a valid JSON object with a "data" array and optional "layout" object following the Plotly.js spec.
-- **Rough diagrams** (triple-backtick rough blocks) — hand-drawn style 2D diagrams. The block must contain a valid JSON object with an "elements" array and optional "width"/"height"/"options" fields. Each element has a "type" (rectangle, circle, ellipse, line, arrow, path, linearPath, polygon, text) plus type-specific coordinates and optional RoughJS style options (stroke, fill, roughness, bowing, fillStyle, etc.).
-- **HTML/CSS/JS** (triple-backtick html blocks) — full interactive content rendered in a sandboxed iframe. Use this for rich visualizations, custom dashboards, interactive widgets, styled tables, animated content, or any presentation that goes beyond static markdown. The block should contain a complete HTML document (or fragment with inline <style> and <script>). CSS is fully supported. JavaScript runs in a sandbox with no access to the parent page. The iframe has a transparent background with no border — it blends seamlessly into the chat. **Do NOT add a background color, gradient, or card-like container to your HTML.** Design your content to feel like a natural part of the conversation. If you need visual sections, use subtle borders or spacing instead of opaque backgrounds.`
+- **Plotly charts** (triple-backtick plotly blocks) — a JSON object with a "data" array and optional "layout" (Plotly.js spec): bar, line, scatter, pie, heatmap, etc.
+- **Rough diagrams** (triple-backtick rough blocks) — hand-drawn-style 2D diagrams: JSON with an "elements" array (types: rectangle, circle, ellipse, line, arrow, path, polygon, text) plus optional RoughJS style options.
+- **HTML/CSS/JS** (triple-backtick html blocks) — full interactive content in a sandboxed iframe (JS has no access to the parent page). Use for rich visualizations, dashboards, widgets, styled tables. The iframe is transparent and borderless — **do NOT add a background color, gradient, or card-like container**; use subtle borders or spacing so it blends into the chat.`
 }
 
 // latexEnv holds information about the detected LaTeX installation.
@@ -631,9 +576,7 @@ You cannot run commands or change files, so the risk here is a corrupted answer:
 func parallelToolCallsPrompt(canWriteFiles, codeFacing bool) string {
 	prompt := `## Parallel tool calls
 
-**Batching is the default. A sequential call is one you should be able to justify.**
-
-Every response block you spend is a full round trip: your output, the model call, the wait. Ten files read one per block is ten round trips for work that takes one. The cost is paid in the developer's waiting time and in tokens, because each step re-sends the conversation so far.
+**Batching is the default; a sequential call is one you should be able to justify.** Every response block is a full round trip (your output, the model call, the wait) and re-sends the conversation so far — ten files read one-per-block cost ten round trips for one block's work.
 
 `
 
@@ -646,8 +589,6 @@ Batch aggressively:
 - Checking a hypothesis → "glob" and "grep" in the same block, not one then the other
 - Confirming a name exists in several places → one "grep" per place, all at once
 
-**The anti-pattern to avoid:** reading one file, thinking, reading the next, thinking. If you are about to explore a directory, decide everything you want to look at first and ask for all of it at once. Read the results together and you will understand the shape faster than by dribbling them in.
-
 **The exception:** a genuine data dependency — you need a path from a grep before you can read it. That is a real reason to take two blocks. "It feels tidier one at a time" is not.`
 	} else {
 		prompt += `**The test:** does this call's input contain something only another call's output can give you? If no, they belong in the same block. Two questions about different angles of the same topic are independent. Two pages you have already picked out are independent. Independence is the common case — dependency is the exception, and you have to be able to name it.
@@ -657,8 +598,6 @@ Batch aggressively:
 - Decomposing a question → every "web_search" for it in one block, not one query then the next
 - Reading what you found → every "fetch_page" you selected in one block
 - Cross-checking a claim → one search per source, all at once
-
-**The anti-pattern to avoid:** searching, reading, thinking, searching again. Decide every angle you want covered first and ask for all of it at once. Read the results together and you will see the shape of the answer faster than by dribbling them in.
 
 **The exception:** a genuine data dependency — you need a URL from a search before you can fetch it. That is a real reason to take two blocks. "It feels tidier one at a time" is not.`
 	}

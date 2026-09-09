@@ -33,28 +33,42 @@ var clientImpl = &mcp.Implementation{
 	Version: "1.0",
 }
 
+// serverConn is one connected MCP server: its live session, the subprocess (for
+// stdio transports), and the tools discovered from it. err records why a connect
+// attempt failed, so the settings screen can show it. A disabled server has no
+// serverConn at all — it is never dialled.
+type serverConn struct {
+	session *mcp.ClientSession
+	proc    *exec.Cmd
+	tools   []tool.ToolDef
+	err     string
+}
+
+func (c *serverConn) toolIDs() []string {
+	ids := make([]string, 0, len(c.tools))
+	for _, t := range c.tools {
+		ids = append(ids, t.ID())
+	}
+	return ids
+}
+
 // Manager owns all MCP server connections and the tools discovered from them.
 type Manager struct {
 	// cfg is the config passed to New; Connect uses it to dial servers. nil
 	// when New was given no MCP servers.
 	cfg *config.Config
 
-	// tools are all MCP tools, namespaced as "<server>/<tool>", registered with
-	// the host's tool.Registry. Guarded by mu because Connect (background) and
-	// Tools (agent loop) may run concurrently.
-	tools []tool.ToolDef
-
-	// sessions are the live client sessions, one per configured server.
-	sessions []*mcp.ClientSession
-	// procs are the subprocess servers started for stdio transports; Close
-	// terminates them.
-	procs []*exec.Cmd
+	// servers holds one entry per server that has been dialled (or attempted),
+	// keyed by server name. Disabled servers are absent. Guarded by mu because
+	// Connect (background), Tools (agent loop) and SetServerEnabled (the settings
+	// toggle) may run concurrently.
+	servers map[string]*serverConn
 
 	// receiver serves the localhost OAuth callback for any URL-based server
 	// without static headers. It is nil when no server needs OAuth.
 	receiver *codeReceiver
 
-	// mu guards tools (and the sessions/procs slices during Connect).
+	// mu guards the servers map.
 	mu sync.RWMutex
 	// connectOnce makes Connect idempotent — only the first call dials servers.
 	connectOnce sync.Once
@@ -78,7 +92,7 @@ type Manager struct {
 // could not surface the OAuth prompt. Connect is instead launched after the
 // HTTP server is up (server.go) or before the loop runs (run.go).
 func New(ctx context.Context, cfg *config.Config) (*Manager, error) {
-	m := &Manager{}
+	m := &Manager{servers: map[string]*serverConn{}}
 	if cfg == nil || len(cfg.MCP) == 0 {
 		return m, nil
 	}
@@ -137,8 +151,18 @@ func (m *Manager) Connect(ctx context.Context) ([]tool.ToolDef, error) {
 		err     error
 	}
 
-	results := make(chan result, len(m.cfg.MCP))
+	// A disabled server is never dialled: it holds no connection, no subprocess
+	// and contributes no tools, so nothing about it reaches the agent.
+	enabled := make([]string, 0, len(m.cfg.MCP))
 	for name, sc := range m.cfg.MCP {
+		if !sc.Disabled {
+			enabled = append(enabled, name)
+		}
+	}
+
+	results := make(chan result, len(enabled))
+	for _, name := range enabled {
+		sc := m.cfg.MCP[name]
 		go func(name string, sc config.MCPServerConfig) {
 			res := result{name: name}
 			res.session, res.tools, res.proc, res.err = connect(ctx, name, sc, m.receiver)
@@ -150,9 +174,10 @@ func (m *Manager) Connect(ctx context.Context) ([]tool.ToolDef, error) {
 	var newTools []tool.ToolDef
 	usedIDs := make(map[string]bool)
 	m.mu.Lock()
-	for i := 0; i < len(m.cfg.MCP); i++ {
+	for range enabled {
 		res := <-results
 		if res.err != nil {
+			m.servers[res.name] = &serverConn{err: res.err.Error()}
 			errs = append(errs, fmt.Sprintf("mcp server %q: %v", res.name, res.err))
 			continue
 		}
@@ -165,18 +190,16 @@ func (m *Manager) Connect(ctx context.Context) ([]tool.ToolDef, error) {
 			}
 			continue
 		}
-		m.sessions = append(m.sessions, res.session)
-		if res.proc != nil {
-			m.procs = append(m.procs, res.proc)
-		}
+		conn := &serverConn{session: res.session, proc: res.proc}
 		for _, t := range res.tools {
 			// Ids are "mcp_<server>_<tool>", sanitised to the character set
 			// providers allow in a function name — see toolID.
 			id := uniqueToolID(usedIDs, res.name, t.Name)
-			tool := newMCPTool(id, res.name, t, res.session)
-			m.tools = append(m.tools, tool)
-			newTools = append(newTools, tool)
+			tl := newMCPTool(id, res.name, t, res.session)
+			conn.tools = append(conn.tools, tl)
+			newTools = append(newTools, tl)
 		}
+		m.servers[res.name] = conn
 	}
 	m.mu.Unlock()
 
@@ -186,13 +209,134 @@ func (m *Manager) Connect(ctx context.Context) ([]tool.ToolDef, error) {
 	return newTools, nil
 }
 
-// Tools returns the adapted MCP tool definitions discovered so far. The slice
-// grows as Connect discovers tools; it is empty before Connect runs or when no
-// server exposed any tools. Safe to call concurrently with Connect.
+// Tools returns the adapted MCP tool definitions discovered so far, across every
+// connected server. It is empty before Connect runs or when no server exposed
+// any tools. Safe to call concurrently with Connect and SetServerEnabled.
 func (m *Manager) Tools() []tool.ToolDef {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]tool.ToolDef(nil), m.tools...)
+	var out []tool.ToolDef
+	for _, c := range m.servers {
+		out = append(out, c.tools...)
+	}
+	return out
+}
+
+// ServerStatus is the runtime state of one MCP server, for the settings screen.
+// It covers only servers ogcode has attempted to connect; a disabled server is
+// absent (the caller fills its row from config).
+type ServerStatus struct {
+	Name      string
+	Connected bool
+	ToolCount int
+	Err       string
+}
+
+// Statuses returns the runtime state of every server ogcode has connected or
+// tried to. Safe to call concurrently.
+func (m *Manager) Statuses() []ServerStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ServerStatus, 0, len(m.servers))
+	for name, c := range m.servers {
+		out = append(out, ServerStatus{
+			Name:      name,
+			Connected: c.session != nil,
+			ToolCount: len(c.tools),
+			Err:       c.err,
+		})
+	}
+	return out
+}
+
+// SetServerEnabled brings one server online or takes it offline at runtime, the
+// path behind the settings toggle. Enabling dials sc now and returns its adapted
+// tools for the caller to register into the host tool.Registry; disabling closes
+// the session, terminates any subprocess, and returns the tool ids to remove, so
+// the tools stop reaching the agent's prompt without a restart. Both are no-ops
+// (empty return) when the server is already in the requested state.
+//
+// The dial happens outside the lock so it never blocks the agent loop's Tools()
+// for the length of a connect; the lock is taken only to read and mutate the
+// servers map.
+func (m *Manager) SetServerEnabled(ctx context.Context, name string, sc config.MCPServerConfig, enabled bool) (added []tool.ToolDef, removed []string, err error) {
+	if !enabled {
+		m.mu.Lock()
+		conn := m.servers[name]
+		delete(m.servers, name)
+		m.mu.Unlock()
+		if conn == nil {
+			return nil, nil, nil
+		}
+		removed = conn.toolIDs()
+		if conn.session != nil {
+			_ = conn.session.Close()
+		}
+		if conn.proc != nil {
+			killProcessTree(conn.proc)
+		}
+		return nil, removed, nil
+	}
+
+	// Enabling. Already connected → nothing to do.
+	m.mu.RLock()
+	existing := m.servers[name]
+	closed := m.closed
+	m.mu.RUnlock()
+	if closed {
+		return nil, nil, fmt.Errorf("mcp manager is closed")
+	}
+	if existing != nil && existing.session != nil {
+		return nil, nil, nil
+	}
+
+	session, tools, proc, dialErr := connect(ctx, name, sc, m.receiver)
+	if dialErr != nil {
+		m.mu.Lock()
+		m.servers[name] = &serverConn{err: dialErr.Error()}
+		m.mu.Unlock()
+		return nil, nil, dialErr
+	}
+
+	m.mu.Lock()
+	// Close raced in, or a concurrent enable already connected this server:
+	// tear this fresh session down rather than leaking it.
+	if m.closed || (m.servers[name] != nil && m.servers[name].session != nil) {
+		m.mu.Unlock()
+		_ = session.Close()
+		if proc != nil {
+			killProcessTree(proc)
+		}
+		if m.closed {
+			return nil, nil, fmt.Errorf("mcp manager is closed")
+		}
+		return nil, nil, nil
+	}
+	usedIDs := m.usedToolIDsLocked()
+	conn := &serverConn{session: session, proc: proc}
+	for _, t := range tools {
+		id := uniqueToolID(usedIDs, name, t.Name)
+		tl := newMCPTool(id, name, t, session)
+		conn.tools = append(conn.tools, tl)
+		added = append(added, tl)
+	}
+	m.servers[name] = conn
+	m.mu.Unlock()
+	return added, nil, nil
+}
+
+// usedToolIDsLocked returns the set of tool ids already claimed across all
+// connected servers, so a newly enabled server's ids are disambiguated against
+// them and cannot silently clobber an existing tool in the host registry. Must
+// be called with mu held.
+func (m *Manager) usedToolIDsLocked() map[string]bool {
+	used := make(map[string]bool)
+	for _, c := range m.servers {
+		for _, id := range c.toolIDs() {
+			used[id] = true
+		}
+	}
+	return used
 }
 
 // Close terminates every server connection and subprocess exactly once. It is
@@ -206,19 +350,24 @@ func (m *Manager) Close() error {
 	m.closeOnce.Do(func() {
 		m.mu.Lock()
 		m.closed = true
-		sessions := m.sessions
-		procs := m.procs
+		conns := make([]*serverConn, 0, len(m.servers))
+		for _, c := range m.servers {
+			conns = append(conns, c)
+		}
+		m.servers = map[string]*serverConn{}
 		receiver := m.receiver
 		m.mu.Unlock()
 
 		var errs []string
-		for _, s := range sessions {
-			if err := s.Close(); err != nil {
-				errs = append(errs, err.Error())
+		for _, c := range conns {
+			if c.session != nil {
+				if err := c.session.Close(); err != nil {
+					errs = append(errs, err.Error())
+				}
 			}
-		}
-		for _, p := range procs {
-			killProcessTree(p)
+			if c.proc != nil {
+				killProcessTree(c.proc)
+			}
 		}
 		receiver.close()
 		if len(errs) > 0 {

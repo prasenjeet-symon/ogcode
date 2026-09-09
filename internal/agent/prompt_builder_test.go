@@ -7,7 +7,7 @@ import (
 )
 
 func TestMemoryMDPrompt_CanWrite(t *testing.T) {
-	prompt := memoryMDPrompt(true, true, true)
+	prompt := memoryMDPrompt(true, true)
 
 	if !strings.Contains(prompt, "### How to maintain MEMORY.md") {
 		t.Error("expected 'How to maintain' heading when canWriteFiles=true")
@@ -15,8 +15,8 @@ func TestMemoryMDPrompt_CanWrite(t *testing.T) {
 	if !strings.Contains(prompt, "Use the edit tool for targeted updates") {
 		t.Error("expected edit tool mention when canWriteFiles=true")
 	}
-	if !strings.Contains(prompt, "Use the write tool only") {
-		t.Error("expected write tool mention when canWriteFiles=true")
+	if !strings.Contains(prompt, "use write only") {
+		t.Error("expected write-tool guidance when canWriteFiles=true")
 	}
 	if strings.Contains(prompt, "Do not modify MEMORY.md") {
 		t.Error("did not expect the do-not-modify rule when canWriteFiles=true")
@@ -24,7 +24,7 @@ func TestMemoryMDPrompt_CanWrite(t *testing.T) {
 }
 
 func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
-	prompt := memoryMDPrompt(false, true, true)
+	prompt := memoryMDPrompt(false, true)
 
 	if !strings.Contains(prompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading when canWriteFiles=false")
@@ -41,17 +41,17 @@ func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
 }
 
 func TestMemoryMDPrompt_CommonSections(t *testing.T) {
-	// Both variants should include these common sections
+	// Both variants keep the durable content that survived the slim: what
+	// MEMORY.md is, that it is re-read every turn, and how it relates to AGENT.md.
 	for _, canWrite := range []bool{true, false} {
-		prompt := memoryMDPrompt(canWrite, true, true)
+		prompt := memoryMDPrompt(canWrite, true)
 		for _, sub := range []string{
-			"### Purpose",
-			"### What belongs in MEMORY.md",
-			"### What does NOT belong in MEMORY.md",
-			"### How it differs from AGENT.md",
+			"## MEMORY.md — Project Long-Term Memory",
+			"re-read at the start of every turn",
+			"AGENT.md",
 		} {
 			if !strings.Contains(prompt, sub) {
-				t.Errorf("expected section %q in prompt (canWrite=%v)", sub, canWrite)
+				t.Errorf("expected %q in prompt (canWrite=%v)", sub, canWrite)
 			}
 		}
 	}
@@ -241,7 +241,7 @@ func TestParallelToolCallsPrompt_PushesBatchingAsTheDefault(t *testing.T) {
 		"Batching is the default", // the framing, not a permission
 		"round trip",              // what a sequential call actually costs
 		"same block",              // the concrete instruction
-		"anti-pattern",            // the habit being corrected
+		"The exception:",          // when a sequential call IS justified
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("parallel tool calls prompt missing %q", want)
@@ -884,19 +884,19 @@ func TestProjectIndexPrompt_ShellRuleMatchesWhetherTheAgentMayWrite(t *testing.T
 	}
 }
 
-// The recall tools are registered only when memory is initialised, and Note and
-// Breakdown never hold them at all — but both are project-scoped, so both
-// receive the MEMORY.md section. Describing a tool there sends the model after a
-// call it will never be offered, which is the failure this file gates against
-// everywhere else.
-func TestMemoryMDPrompt_OnlyExplainsRecallToAgentsThatHaveIt(t *testing.T) {
-	if !strings.Contains(memoryMDPrompt(true, true, true), "memory_recall") {
-		t.Error("agent holding the recall tools lost the comparison that distinguishes them")
-	}
-	without := memoryMDPrompt(false, true, false)
-	for _, unwanted := range []string{"memory_recall", "project_memory_recall", "<prior_context>"} {
-		if strings.Contains(without, unwanted) {
-			t.Errorf("MEMORY.md section names %q to an agent that cannot call it", unwanted)
+// After the slim, the MEMORY.md section no longer carries the recall-tool
+// comparison — that guidance lives in its own block, gated on the agent actually
+// holding the recall tools. So the MEMORY.md section must never name a recall
+// tool: Note and Breakdown are project-scoped (they receive the MEMORY.md
+// section) but hold neither tool, and naming one would send the model after a
+// call it will never be offered.
+func TestMemoryMDPrompt_DoesNotNameRecallTools(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		s := memoryMDPrompt(canWrite, true)
+		for _, unwanted := range []string{"memory_recall", "project_memory_recall", "<prior_context>"} {
+			if strings.Contains(s, unwanted) {
+				t.Errorf("MEMORY.md section names %q (canWrite=%v); recall belongs in its own block", unwanted, canWrite)
+			}
 		}
 	}
 

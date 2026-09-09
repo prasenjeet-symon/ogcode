@@ -23,11 +23,10 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/git"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
-	"github.com/prasenjeet-symon/ogcode/internal/memory"
+	"github.com/prasenjeet-symon/ogcode/internal/memfile"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/plan"
-	"github.com/prasenjeet-symon/ogcode/internal/project"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/resource"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
@@ -61,19 +60,19 @@ type Server struct {
 	registry        *provider.Registry
 	defaultProvider provider.Provider
 	loopRunner      *agent.LoopRunner
-	mem             *memory.Memory
 	permissions     *permission.Manager
 	skillLoader     *skill.Loader
 	mcpManager      *mcp.Manager
+	// toolRegistry is the live tool set the agent loop reads each step. Held so
+	// the MCP settings toggle can register a newly enabled server's tools and
+	// remove a disabled one's, taking effect on the next turn.
+	toolRegistry *tool.Registry
 	// mcpConnect, when non-nil, dials the MCP servers lazily after the HTTP
 	// server starts listening (set in Start, invoked from the goroutine below).
 	mcpConnect func()
 	// mcpCancel cancels the lazy-connect context on shutdown so an in-flight
 	// OAuth/dial does not block past the server's lifetime.
 	mcpCancel context.CancelFunc
-	// embedCancel cancels the background local-embedder model download on
-	// shutdown so an in-flight ~133 MB fetch does not outlive the server.
-	embedCancel context.CancelFunc
 
 	// Version check manager
 	versionManager *version.Manager
@@ -166,6 +165,11 @@ func (s *Server) Start() error {
 	s.taskStore = task.NewStore(database)
 	s.noteStore = note.NewStore(database)
 	s.docindexStore = docindex.NewStore(database)
+	// Per-turn markdown memory: the index over .ogcode/memory/ lives in the same
+	// project-local DB, and one barrier serializes background summary writes
+	// against recall. Both are cheap to construct even when the feature is off.
+	memfileStore := memfile.NewStore(database)
+	memBarrier := memfile.NewManager()
 
 	// Recover notes stuck in "generating" status from a previous server crash.
 	if stuck, err := s.noteStore.RecoverStuckNotes(); err != nil {
@@ -217,6 +221,7 @@ func (s *Server) Start() error {
 	toolRegistry.Register(tool.ReadDocxPageTool{})
 	toolRegistry.Register(tool.NewDocxIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.NewProjectIndexTool(s.docindexStore))
+	toolRegistry.Register(tool.NewMemoryMapTool(memfileStore))
 	toolRegistry.Register(tool.LatexToPdfTool{})
 	toolRegistry.Register(tool.ViewImageTool{})
 	toolRegistry.Register(tool.NewCompactContextTool())
@@ -234,6 +239,7 @@ func (s *Server) Start() error {
 	})
 	toolRegistry.Register(tool.NewSkillTool(skillLoader))
 	s.skillLoader = skillLoader
+	s.toolRegistry = toolRegistry
 
 	// MCP servers: build the Manager now (cheap — binds the OAuth callback
 	// receiver only) but defer the actual connections to after the HTTP server
@@ -312,8 +318,6 @@ func (s *Server) Start() error {
 		slog.Info("web search disabled by configuration")
 	}
 
-	// memory_recall will be registered below after mem is initialized
-
 	// Determine default provider. DefaultUsable applies the stable priority but
 	// skips an installed-but-stopped Ollama so the community free pool and the
 	// user's own keys are preferred over a daemon that would just refuse.
@@ -345,62 +349,6 @@ func (s *Server) Start() error {
 		}
 	}
 
-	var mem *memory.Memory
-	// Agentic memory is enabled from the settings UI. Embedding is always
-	// produced by the inbuilt local embedder (gte-small) — zero config,
-	// no third-party service. The synthesis LLM is NOT configured here: it is
-	// injected per request (WriteMemory/Recall) using the session's selected
-	// model, so memory rides on whatever LLM the user is chatting with.
-	dbMemCfg, err := session.GetMemoryConfig(globalDatabase)
-	if err != nil {
-		slog.Warn("failed to read memory config from DB", "err", err)
-	} else if dbMemCfg.Enabled {
-		embedP := provider.NewEmbedder()
-		memStore, err := memory.Open(memory.DefaultDBPath())
-		if err != nil {
-			slog.Warn("failed to open memory store; memory disabled", "err", err)
-		} else {
-			mem = memory.New(memStore, &memory.GraphOpts{
-				EmbedProvider: embedP,
-			})
-			s.mem = mem
-			toolRegistry.Register(tool.NewMemoryRecallTool(mem, registry))
-			toolRegistry.Register(tool.NewProjectMemoryRecallTool(mem, registry))
-			s.backfillMemoryProjects(memStore)
-			// Facts stored without an embedding are invisible to semantic
-			// recall, and until the embedder was fixed almost none of them got
-			// one. Repair the backlog in the background so an existing graph
-			// becomes searchable without the user having to know about
-			// /api/memory/reindex. No-op once the backlog is clear.
-			go func() {
-				// The backfill saturates several cores for minutes on an old
-				// graph, so it labels itself: the resource pill then says what
-				// is eating the machine instead of leaving the user to guess.
-				defer s.resources.ClearActivity()
-				embedded, failed, err := mem.BackfillEmbeddings(context.Background(), func(done, total int) {
-					s.resources.SetActivity(resource.Activity{
-						Label: "embedding memory",
-						Done:  done,
-						Total: total,
-					})
-				})
-				if err != nil {
-					slog.Warn("agentic memory: embedding backfill failed", "err", err)
-					return
-				}
-				if embedded > 0 || failed > 0 {
-					slog.Info("agentic memory: embedding backfill finished", "embedded", embedded, "failed", failed)
-				}
-			}()
-			slog.Info("agentic memory enabled (local embedder; synthesis uses session LLM)")
-		}
-	}
-
-	// The eager local-embedder model download used to block here, before the
-	// HTTP listener bound — a cold-cache first boot stalled ~40s on the ~133 MB
-	// ONNX fetch while healthchecks hammered a dead port. It now runs in the
-	// background goroutine after the listener is up (see below).
-
 	s.permissions = permission.NewManager()
 	s.loopRunner = &agent.LoopRunner{
 		Store:           s.store,
@@ -409,9 +357,19 @@ func (s *Server) Start() error {
 		DefaultProvider: defaultProvider,
 		Tools:           toolRegistry,
 		Dir:             s.dir,
-		Memory:          mem,
-		NoteStore:       s.noteStore,
-		SearchBridge:    searchBackend,
+		// Interactive turns get a generous 10,000-iteration budget, plus
+		// auto-resume: a turn that still exhausts it extends up to twice more
+		// (a 30,000-iteration hard ceiling) instead of stranding the user
+		// mid-task, then stops but stays continuable. Reaching even 10,000 is
+		// extraordinary, so the ceiling is a runaway backstop, not a normal
+		// operating point.
+		MaxSteps:       10000,
+		MaxAutoResumes: 2,
+		MemFiles:       memfileStore,
+		MemBarrier:     memBarrier,
+		TurnMemory:     memfile.TurnMemoryEnabled(),
+		NoteStore:      s.noteStore,
+		SearchBridge:   searchBackend,
 		// Read the deep-research tuning fresh from the global config DB on each
 		// call so settings-screen changes apply without a server restart.
 		SearchParams: func() session.SearchConfig {
@@ -450,6 +408,15 @@ func (s *Server) Start() error {
 	// regardless of the search bridge — the sub-agent is a read-only codebase
 	// investigator that only optionally uses deep_search.
 	toolRegistry.Register(tool.TaskTool{Run: s.loopRunner.RunTaskSession})
+
+	// Memory recall tools delegate to the read-only recall sub-agent over the
+	// project's markdown turn summaries, waiting on the summary barrier first.
+	// Registered only when turn-memory is on (its env gate); off ⇒ no memory.
+	if memfile.TurnMemoryEnabled() {
+		recallFn := s.loopRunner.RunMemoryRecallSession
+		toolRegistry.Register(tool.NewMemoryRecallTool(recallFn, memBarrier))
+		toolRegistry.Register(tool.NewProjectMemoryRecallTool(recallFn, memBarrier))
+	}
 
 	// Repair any interactive session whose last turn was cut short by a process
 	// that is no longer running. A crash records nothing on the way out, and
@@ -519,23 +486,6 @@ func (s *Server) Start() error {
 		go s.mcpConnect()
 	}
 
-	// Prefetch the inbuilt local embedder's model weights in the background,
-	// now that the listener is up. The local embedder is the default and may be
-	// enabled at runtime via the settings UI without a restart, so we always
-	// run this regardless of whether agentic memory is configured yet — it gets
-	// the one-time ~133 MB download out of the way. Errors are non-fatal: the
-	// next Embed call retries, so we log and continue rather than refusing to
-	// start. embedCancel aborts an in-flight download during shutdown.
-	embedCtx, embedCancel := context.WithCancel(context.Background())
-	s.embedCancel = embedCancel
-	go func() {
-		dlCtx, dlCancel := context.WithTimeout(embedCtx, 5*time.Minute)
-		defer dlCancel()
-		if err := provider.EnsureLocalEmbedderModel(dlCtx); err != nil {
-			slog.Warn("local embedder: startup model download failed; will retry on first use", "err", err)
-		}
-	}()
-
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -575,11 +525,6 @@ func (s *Server) Start() error {
 		s.mcpCancel()
 	}
 
-	// Abort the background embedder model download if it is still running.
-	if s.embedCancel != nil {
-		s.embedCancel()
-	}
-
 	// Close MCP server connections (terminates stdio subprocesses and HTTP
 	// sessions). Done after the HTTP server is down so in-flight tool calls
 	// have already been cancelled by the context.
@@ -595,12 +540,6 @@ func (s *Server) Start() error {
 		s.posthogClient.Stop()
 	}
 
-	// Close memory store
-	if s.mem != nil {
-		if err := s.mem.Store.Close(); err != nil {
-			slog.Warn("close memory store", "err", err)
-		}
-	}
 
 	// Close database
 	if s.db != nil {
@@ -773,50 +712,6 @@ func (s *Server) migrateModelPreferencesToGlobal() {
 	}
 	if migrated > 0 {
 		slog.Info("migrated model preferences to global config DB", "count", migrated)
-	}
-}
-
-// backfillMemoryProjects stamps project identity onto memory nodes written
-// before the memory store tracked projects. Without it, every fact recorded by
-// an older build is invisible to project-scoped recall.
-//
-// Sessions are grouped by their resolved directory rather than assumed to all
-// belong to s.dir: this workspace's database also holds task-worktree sessions,
-// which resolve to their own project key. Only rows with an empty project_id are
-// touched, so the pass is idempotent and costs nothing once complete.
-func (s *Server) backfillMemoryProjects(memStore *memory.Store) {
-	sessions, err := s.store.ListAll()
-	if err != nil {
-		slog.Warn("memory backfill: failed to list sessions", "err", err)
-		return
-	}
-	byProject := make(map[string]map[string]string) // projectID → sessionID → sessionType
-	for _, sess := range sessions {
-		dir := sess.Directory
-		if dir == "" {
-			dir = sess.ProjectID
-		}
-		projectID := project.Resolve(dir)
-		if projectID == "" {
-			continue
-		}
-		if byProject[projectID] == nil {
-			byProject[projectID] = make(map[string]string)
-		}
-		byProject[projectID][string(sess.ID)] = sess.SessionType
-	}
-
-	var total int64
-	for projectID, sessionTypes := range byProject {
-		n, err := memStore.BackfillProject(projectID, sessionTypes)
-		if err != nil {
-			slog.Warn("memory backfill failed", "project", projectID, "err", err)
-			continue
-		}
-		total += n
-	}
-	if total > 0 {
-		slog.Info("memory backfill: stamped project identity on legacy nodes", "nodes", total, "projects", len(byProject))
 	}
 }
 

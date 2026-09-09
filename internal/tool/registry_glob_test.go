@@ -106,3 +106,22 @@ func itoa(i int) string {
 	}
 	return string(b)
 }
+
+// Remove drops tools by id so a disabled MCP server's tools stop being expanded
+// by "mcp_*" — the mechanism that keeps their schemas out of the prompt.
+func TestRegistry_Remove(t *testing.T) {
+	r := NewRegistry()
+	r.Register(fakeTool{"bash"})
+	r.Register(fakeTool{"mcp_slack_send"})
+	r.Register(fakeTool{"mcp_slack_list"})
+
+	r.Remove("mcp_slack_send", "mcp_slack_list", "does_not_exist")
+
+	got := ids(r.ForAgent([]string{"bash", "mcp_*"}))
+	if !equal(got, []string{"bash"}) {
+		t.Errorf("after Remove: got %v, want only [bash]", got)
+	}
+	if r.Get("mcp_slack_send") != nil {
+		t.Errorf("removed tool should not resolve via Get")
+	}
+}

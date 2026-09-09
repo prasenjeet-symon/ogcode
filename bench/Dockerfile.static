@@ -1,0 +1,30 @@
+# Fully-static ogcode build for the benchmark harness.
+#
+# The stock Dockerfile links musl DYNAMICALLY (interpreter /lib/ld-musl-*.so.1),
+# which cannot run on the glibc SWE-bench eval images (Ubuntu, no musl loader) --
+# `exec: no such file or directory`. This adds `-linkmode external -extldflags
+# -static` so the binary needs no loader and runs on any linux. go-fitz's bundled
+# libmupdf_linux_amd64_musl.a is self-contained, so the static link resolves.
+FROM node:20-alpine AS web-builder
+WORKDIR /app/web
+COPY web/package.json web/package-lock.json ./
+RUN npm install --legacy-peer-deps
+COPY web/ ./
+RUN npm run build
+
+FROM golang:1.26-alpine AS go-builder
+RUN apk add --no-cache git gcc musl-dev
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . ./
+COPY --from=web-builder /app/web/dist /app/web/dist
+RUN CGO_ENABLED=1 go build -tags musl \
+      -ldflags "-s -w -linkmode external -extldflags=-static -X github.com/prasenjeet-symon/ogcode/internal/cli.version=static-bench" \
+      -o ogcode .
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates git
+COPY --from=go-builder /app/ogcode /usr/local/bin/ogcode
+ENTRYPOINT ["ogcode"]
+CMD ["serve"]

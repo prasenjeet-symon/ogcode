@@ -300,14 +300,6 @@ type Provider interface {
 	StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error)
 }
 
-// Embedder is an optional interface that providers can implement to support
-// text embeddings (used for agentic memory semantic recall).
-type Embedder interface {
-	// Embed returns embedding vectors for the given input strings.
-	Embed(ctx context.Context, inputs []string) ([][]float32, error)
-	EmbedModel() string
-}
-
 // ModelRefresher is an optional interface that providers can implement
 // to support dynamic model list refreshing.
 type ModelRefresher interface {
@@ -516,19 +508,6 @@ func NewProviderWithConfig(providerID, apiKey, baseURL string) (Provider, error)
 	}
 }
 
-// LocalEmbedderProvider is the provider ID for the inbuilt, no-dependency
-// embedder that runs a sentence-embedding model in-process. It needs no API
-// key and no network access. It is the only embedder ogcode supports —
-// agentic memory embeddings are always produced locally.
-const LocalEmbedderProvider = "local"
-
-// NewEmbedder returns the inbuilt local embedder. ogcode no longer supports
-// third-party embedders (OpenAI, OpenRouter, Ollama) for agentic memory — the
-// pure-Go gte-small model runs in-process with zero configuration.
-// The returned provider also satisfies Embedder.
-func NewEmbedder() Provider {
-	return NewLocalEmbedder("")
-}
 
 // RefreshModels clears cached model lists for all providers that support it,
 // forcing re-fetch on next Models() call.

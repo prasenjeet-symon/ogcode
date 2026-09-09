@@ -130,3 +130,53 @@ func TestLoader_AppliesConfiguredPermissions(t *testing.T) {
 		}
 	}
 }
+
+// SetPermissions replaces the loader's rules at runtime — the UI toggle's path.
+// The next Load must resolve visibility against the new rules, so a skill
+// switched off disappears from the listing without a restart, and one switched
+// back on returns.
+func TestLoader_SetPermissionsTakesEffectOnNextLoad(t *testing.T) {
+	isolateHome(t)
+	project := t.TempDir()
+	root := filepath.Join(project, ".agents", "skills")
+	writeSkill(t, root, "docx", "---\nname: docx\ndescription: x\n---\nbody\n")
+
+	loader := NewLoader(Config{})
+	if got := loader.Load(project).Action("docx"); got != Allow {
+		t.Fatalf("initial action = %q, want allow", got)
+	}
+
+	loader.SetPermissions(map[string]string{"docx": "deny"})
+	reg := loader.Load(project)
+	if got := reg.Action("docx"); got != Deny {
+		t.Errorf("after disable, action = %q, want deny", got)
+	}
+	for _, s := range reg.Visible() {
+		if s.Name == "docx" {
+			t.Error("a skill switched off is still listed as visible")
+		}
+	}
+
+	loader.SetPermissions(map[string]string{})
+	if got := loader.Load(project).Action("docx"); got != Allow {
+		t.Errorf("after re-enable, action = %q, want allow", got)
+	}
+}
+
+// SetPermissions copies its argument: a caller that keeps mutating the map it
+// passed must not bleed into the loader's live rules.
+func TestLoader_SetPermissionsCopiesInput(t *testing.T) {
+	isolateHome(t)
+	project := t.TempDir()
+	writeSkill(t, filepath.Join(project, ".agents", "skills"), "docx",
+		"---\nname: docx\ndescription: x\n---\nbody\n")
+
+	loader := NewLoader(Config{})
+	perms := map[string]string{"docx": "deny"}
+	loader.SetPermissions(perms)
+	perms["docx"] = "allow" // mutate after handing it over
+
+	if got := loader.Load(project).Action("docx"); got != Deny {
+		t.Errorf("action = %q, want deny — the loader aliased the caller's map", got)
+	}
+}

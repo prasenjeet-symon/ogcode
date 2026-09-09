@@ -1,8 +1,8 @@
 import { useParams, useNavigate, useLocation } from '@solidjs/router';
 import { usePlan } from '../context/plan';
 import { useServer } from '../context/server';
-import { downloadPlanExport, getProviderPricing, getModels } from '../api/client';
-import { createEffect, createMemo, on, Show, createSignal } from 'solid-js';
+import { downloadPlanExport } from '../api/client';
+import { createEffect, on, Show, createSignal } from 'solid-js';
 import PlanSidebar from '../components/plan-sidebar';
 import PlanMessageList from '../components/plan-message-list';
 import PlanPromptInput from '../components/plan-prompt-input';
@@ -11,7 +11,6 @@ import Breadcrumb from '../components/breadcrumb';
 import NotificationBell from '../components/notification-bell';
 import TokenPill from '../components/token-pill';
 import ResourcePill from '../components/resource-pill';
-import MemoryDialog from '../components/memory-dialog';
 import { DrawerToggle } from '../components/sidebar-shell';
 import { NotFoundPanel } from './not-found';
 
@@ -26,32 +25,6 @@ function PlanDetailContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = createSignal<'conversation' | 'tasks'>('conversation');
-
-  // Real-time pricing for OpenRouter and Ollama providers.
-  const [dynamicPrices, setDynamicPrices] = createSignal<Record<string, number>>({});
-  const [models, setModels] = createSignal<any[]>([]);
-
-  createEffect(on(() => plan.activePlan()?.model, (model) => {
-    if (!model) return;
-    const provider = model.split('/')[0];
-    if (provider === 'openrouter' || provider === 'ollama') {
-      getProviderPricing(provider).then(setDynamicPrices).catch(() => {});
-    }
-  }));
-
-  // Load models for pricing
-  getModels().then((list) => setModels(list || [])).catch(() => {});
-
-  // Compute total tokens consumed (for MemoryDialog)
-  const planTotalTokens = createMemo(() => {
-    let total = 0;
-    for (const m of plan.messages()) {
-      const t = m.info.tokens;
-      if (!t) continue;
-      total += (t.input ?? 0) + (t.cacheRead ?? 0) + (t.cacheWrite ?? 0) + (t.output ?? 0);
-    }
-    return total;
-  });
 
   createEffect(on(() => params.id, (id) => {
     if (id) {
@@ -118,16 +91,6 @@ function PlanDetailContent() {
             <div class="hide-below-lg flex items-center gap-2">
               <TokenPill messages={plan.messages} />
               <ResourcePill />
-
-              <Show when={server.memoryEnabled()}>
-                <MemoryDialog
-                  savedTokens={plan.memorySavedTokens()}
-                  totalTokens={planTotalTokens()}
-                  model={plan.activePlan()?.model ?? ''}
-                  dynamicPrices={dynamicPrices()}
-                  models={models()}
-                />
-              </Show>
             </div>
 
             {/* Tab toggle for narrow screens */}

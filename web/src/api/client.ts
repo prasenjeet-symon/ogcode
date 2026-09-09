@@ -275,8 +275,6 @@ export function sendGuidance(sessionId: string, content: string, cancelTool?: bo
 export interface ConfigInfo {
   directory: string;
   port: number;
-  memoryEnabled: boolean;
-  memoryProvider: string;
 }
 
 export function getConfig(): Promise<ConfigInfo> {
@@ -317,36 +315,6 @@ export interface ResourceSnapshot {
 
 export function getResources(): Promise<ResourceSnapshot> {
   return fetchAPI('/resources');
-}
-
-// Memory config API
-export interface MemoryConfig {
-  enabled: boolean;
-  updatedAt: number;
-}
-
-export function getMemoryConfig(): Promise<MemoryConfig> {
-  return fetchAPI('/memory/config');
-}
-
-export function setMemoryConfig(cfg: Omit<MemoryConfig, 'updatedAt'>): Promise<MemoryConfig> {
-  return fetchAPI('/memory/config', {
-    method: 'POST',
-    body: JSON.stringify(cfg),
-  });
-}
-
-// Re-embed every stored memory document and graph node against the current
-// embedding model. Use after switching embedding providers, which invalidates
-// existing vectors (dimension or model mismatch).
-export function reindexMemory(): Promise<{ status: string }> {
-  return fetchAPI('/memory/reindex', { method: 'POST' });
-}
-
-// Wipe all memory tables (documents, nodes, edges, collections). Destructive,
-// irreversible — confirm before calling.
-export function resetMemory(): Promise<{ status: string }> {
-  return fetchAPI('/memory/reset', { method: 'POST' });
 }
 
 // Provider config API
@@ -1057,8 +1025,63 @@ export interface Skill {
   name: string;
   description: string;
   source: string;
+  // False when the skill is disabled (denied) for this project: it is then
+  // withheld from the agent's prompt entirely, so its frontmatter costs no
+  // tokens. The settings list still shows it, switched off, so it can be
+  // turned back on.
+  enabled: boolean;
 }
 
 export function listSkills(): Promise<Skill[]> {
   return fetchAPI('/skills');
+}
+
+// Enable or disable a skill for this project. Disabling writes a "deny" rule
+// into the project's ogcode.json and hides the skill from the agent; enabling
+// removes it. Returns the skill's updated state. Takes effect on the next turn
+// — no restart.
+export function setSkillEnabled(name: string, enabled: boolean): Promise<Skill> {
+  return fetchAPI(`/skills/${encodeURIComponent(name)}`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// MCP API
+export interface MCPServer {
+  name: string;
+  // Transport ogcode uses to reach the server: "stdio" | "http" | "sse".
+  transport: string;
+  // What the server is — the command line (stdio) or URL (http/sse). Never a
+  // secret; headers and tokens are excluded.
+  target: string;
+  // Where the config lives after any toggle: "project" | "global".
+  scope: string;
+  // How it authenticates: "oauth" (tokens on disk, kept when disabled),
+  // "headers" (static token in config), or "none".
+  auth: string;
+  // False when disabled: ogcode neither connects to it nor exposes its tools,
+  // so nothing about it reaches the agent (no tokens spent on tool schemas).
+  // Config and stored auth tokens are untouched.
+  enabled: boolean;
+  // Live connection state (meaningful only when enabled).
+  connected: boolean;
+  toolCount: number;
+  // Last connect error, if any (e.g. server down, or awaiting OAuth).
+  error?: string;
+}
+
+export function listMCPServers(): Promise<MCPServer[]> {
+  return fetchAPI('/mcp');
+}
+
+// Enable or disable an MCP server for this project. Disabling tears down the
+// connection and removes its tools from the agent's toolset; enabling
+// reconnects and registers them. Writes the choice into the project's
+// ogcode.json; auth tokens are never touched. Takes effect on the next turn.
+export function setMCPEnabled(name: string, enabled: boolean): Promise<MCPServer> {
+  return fetchAPI(`/mcp/${encodeURIComponent(name)}`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
 }

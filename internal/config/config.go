@@ -61,6 +61,12 @@ type MCPServerConfig struct {
 	// opts into an explicit client. Has no effect for stdio servers or when
 	// Headers is set.
 	Auth *MCPAuthConfig `json:"auth,omitempty"`
+	// Disabled turns the server off without deleting it: ogcode neither connects
+	// to it nor exposes its tools, so nothing about it reaches the agent's
+	// prompt (and no tokens are spent on its tool schemas). The server's config
+	// and any stored OAuth tokens are left untouched, so flipping this back to
+	// false reconnects it. Off by default — an unset field means enabled.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // MCPAuthConfig configures OAuth authorization for a URL-based MCP server. It

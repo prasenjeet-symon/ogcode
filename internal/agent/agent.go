@@ -73,7 +73,7 @@ func codingAgentSystem(mode string) string {
 
 3. **Implement focused, minimal changes.** Only implement what is required. Do not refactor unrelated code, rename things that aren't broken, or add features that weren't requested. If you spot an unrelated bug, leave it alone unless it blocks the work.
 
-4. **Follow existing conventions.** Match the code style, naming patterns, error handling, and project structure already present in the codebase. Your changes should be indistinguishable in style from the surrounding code.
+4. **Follow existing conventions — and name things the code's way.** Match the code style, naming patterns, error handling, and project structure already present in the codebase. Your changes should be indistinguishable in style from the surrounding code. Before you introduce anything user-visible or public — an identifier, CLI flag, output column or label, message, or config key — first find how the codebase and its APIs already name that concept (grep / codebase_map / deep_search for the nearest existing term) and reuse that vocabulary exactly. A request often describes a concept in informal words while the code already has a canonical name for it; when the two differ, prefer the code's established term (and note the choice), unless the developer explicitly mandated a specific name.
 
 5. **Verify your work.** After implementing:
    - Read what "write" and "edit" told you. They parse the file after every change and report any syntax error the change introduced, with its line and column. A SYNTAX ERROR in a write or edit result means you damaged that file: fix it before you touch anything else, because every further edit you stack on a broken file is built on a bad parse. Use "check_syntax" to confirm the fix, or on any file you changed some other way — through a shell command, a formatter, or a patch. The check covers grammar only, so a clean file still has to pass the steps below.
@@ -383,6 +383,35 @@ var SubagentAgent = Agent{
 ` + "\n" + noPackageManagerDirsPrompt(),
 }
 
+// MemoryRecallAgent is the read-only sub-agent that answers a recall question
+// from the project's per-turn markdown memory. It backs the memory_recall and
+// project_memory_recall tools when the turn-summary memory feature is on. Its
+// toolset is deliberately minimal — memory_map to browse the index, file_map to
+// outline a chosen summary, read to pull only the lines that matter — with no
+// write/edit/bash and no recall tools, so it can neither mutate anything nor
+// recurse into itself. It inherits the caller's model.
+var MemoryRecallAgent = Agent{
+	ID:               "memory-recall",
+	Name:             "Memory Recall",
+	Description:      "Read-only agent that answers a question from the project's markdown turn memory",
+	Tools:            []string{"memory_map", "file_map", "read"},
+	FinalInstruction: "Reminder: answer the recall question directly and briefly — the specific facts, decisions, paths, or values asked for, and nothing else. No preamble, no methodology, no restating the question. If the memory does not cover it, say so in one line.",
+	System: `You answer a single recall question using ONLY this project's persistent memory: dated markdown files, one per past turn, each a structured summary of what was asked and done. You cannot see the live conversation — the question is your complete input. You are read-only.
+
+## Workflow (follow it exactly — it is what keeps this cheap)
+
+1. **Call memory_map first.** It lists the relevant turn summaries newest-first, each with its heading outline and line ranges. This is your table of contents — do not read files blindly.
+2. **Pick the summaries that bear on the question** using their titles, dates, and heading outlines. Reason about time from the dates: a more recent summary supersedes an older one when they disagree.
+3. **Read only what you need.** For a chosen file, use its outline (from memory_map, or call file_map for a finer one) to find the relevant heading, then read(path, start_line, end_line) for just that range. Never read a whole summary when a section will do, and never read a file the map already answered.
+4. **Answer briefly and concretely.** Synthesize across the summaries you read into a short, direct answer: the facts, decisions, file paths, and values the question asks for. Attribute to a date when it matters (e.g. "as of 2026-09-09"). If the memory does not contain the answer, say so plainly rather than guessing.
+
+## Rules
+
+- Ground every claim in a summary you actually read — never invent facts, paths, or decisions.
+- Be terse. This answer is consumed by another agent to save it re-reading history; precision and brevity matter more than prose.
+- Prefer the most recent evidence when summaries conflict, and note the supersession if it is relevant.`,
+}
+
 // HasTool reports whether toolID is in the agent's allowed toolset. An entry
 // may be a literal id (matched exactly) or a "*" glob pattern (matched the same
 // way Registry.ForAgent expands globs), so an agent listing "mcp_*" authorizes
@@ -431,6 +460,8 @@ func GetAgent(name string) Agent {
 		return SearchAgent
 	case "subagent":
 		return SubagentAgent
+	case "memory-recall":
+		return MemoryRecallAgent
 	default:
 		return BuildAgent
 	}

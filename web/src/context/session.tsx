@@ -58,9 +58,14 @@ export interface PendingPermission {
 
 /** Why the agent loop stopped, when nothing in the transcript says so. */
 export type LoopFailure = {
-  /** The loop's exit reason: "error", "panic", or any non-clean finish. */
+  /** The loop's exit reason: "error", "panic", or any non-clean finish —
+   *  including "aborted", a user stop that landed between messages (after the
+   *  tool results were written, before the next model call) and so left no
+   *  aborted marker in the transcript. Rendered as a neutral "Generation
+   *  cancelled" notice rather than an error. */
   reason: string;
-  /** The server-side error text, when there was one. */
+  /** The server-side error text, when there was one. For "aborted" this is
+   *  Go's bare "context canceled" — carried for debugging, never rendered. */
   message: string;
 };
 
@@ -959,6 +964,15 @@ export const SessionProvider: ParentComponent = (props) => {
           // died after its tool results were written ends on a user-role
           // message — so scan back for the assistant turn that would be
           // carrying the explanation.
+          //
+          // A stop that lands between messages (abort checked at the top of
+          // the loop iteration, after the tool results were written) leaves no
+          // aborted marker anywhere, so nothing explains it. reason==='aborted'
+          // then renders the neutral "Generation cancelled" notice instead of
+          // an error quoting Go's bare "context canceled". When the abort
+          // landed mid-stream the backend marks the assistant message
+          // finish==='aborted', the scan below finds it, and no banner draws —
+          // the message shows its own notice.
           if (errText) {
             let explained = false;
             for (let i = msgs.length - 1; i >= 0; i--) {

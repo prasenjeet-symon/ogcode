@@ -100,6 +100,17 @@ func (r *Registry) Register(t ToolDef) {
 	r.tools[t.ID()] = t
 }
 
+// Remove deletes tools by id. It is how a disabled MCP server's tools stop
+// reaching the agent: the next ForAgent no longer expands "mcp_*" onto them, so
+// their schemas leave the prompt. Unknown ids are ignored.
+func (r *Registry) Remove(ids ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		delete(r.tools, id)
+	}
+}
+
 func (r *Registry) Get(id string) ToolDef {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

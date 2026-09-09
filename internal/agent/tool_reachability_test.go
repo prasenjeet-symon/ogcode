@@ -432,7 +432,7 @@ func TestBuildSystemPromptEntries_IndexStatusOnlyForIndexAwareAgents(t *testing.
 // breakpoint and must stay byte-identical across turns by construction, so the
 // LaTeX section has to land outside it, the same way the index status does.
 // Forcing the cache to two different values must not perturb entry [0].
-func TestBuildSystemPromptEntries_LatexInfoStaysOutOfCachedPrefix(t *testing.T) {
+func TestBuildSystemPromptEntries_LatexInfoIsInCachedPrefix(t *testing.T) {
 	// Save and restore the cached latex env so the probe is not left dirty for
 	// later tests in this process.
 	latexEnvMu.Lock()
@@ -465,13 +465,20 @@ func TestBuildSystemPromptEntries_LatexInfoStaysOutOfCachedPrefix(t *testing.T) 
 	setLatexCache(false)
 	withoutLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1)
 
-	if withLatex[0] != withoutLatex[0] {
-		t.Error("the LaTeX environment leaked into entry [0]; a changed detection " +
-			"would invalidate the cached prefix")
+	// The LaTeX environment lives in the cached base (entry [0]), not a per-turn
+	// entry: detection is process-cached (getLatexEnv), so the block is
+	// byte-identical for the whole session and only differs across hosts, never
+	// within one — safe to cache, and it saves re-sending it every turn.
+	if !strings.Contains(withLatex[0], "## LaTeX environment") {
+		t.Error("the LaTeX environment should be in the cached base entry [0]")
 	}
-	if !strings.Contains(strings.Join(withLatex, "\n"), "## LaTeX environment") {
-		t.Error("the LaTeX environment section never reached the prompt at all")
+	// It must not also appear as a separate per-turn entry.
+	for i, e := range withLatex[1:] {
+		if strings.Contains(e, "## LaTeX environment") {
+			t.Errorf("LaTeX section duplicated in per-turn entry [%d]", i+1)
+		}
 	}
+	// Absent entirely when pdflatex is unavailable.
 	if strings.Contains(strings.Join(withoutLatex, "\n"), "## LaTeX environment") {
 		t.Error("LaTeX section emitted even though pdflatex is unavailable")
 	}

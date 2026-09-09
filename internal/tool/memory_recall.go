@@ -4,26 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
-	"github.com/prasenjeet-symon/ogcode/internal/memory"
-	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/project"
 )
 
-// MemoryRecallTool lets the LLM query the agentic knowledge graph on demand.
-// Synthesis uses the session's currently selected model: the tool resolves the
-// provider from the model ID via the registry and builds a per-call chat client.
+// MemoryRecallTool answers a question from the CURRENT session's persistent
+// memory by delegating to the read-only recall sub-agent, which reads this
+// session's dated markdown turn summaries. Barrier makes it wait for any
+// in-flight background summary write to land before the lookup runs.
 type MemoryRecallTool struct {
-	Memory   *memory.Memory
-	Registry *provider.Registry
+	Recall  RecallFunc
+	Barrier RecallBarrier
 }
 
-func NewMemoryRecallTool(mem *memory.Memory, registry *provider.Registry) MemoryRecallTool {
-	return MemoryRecallTool{Memory: mem, Registry: registry}
+func NewMemoryRecallTool(recall RecallFunc, barrier RecallBarrier) MemoryRecallTool {
+	return MemoryRecallTool{Recall: recall, Barrier: barrier}
 }
 
 func (t MemoryRecallTool) ID() string { return "memory_recall" }
 func (t MemoryRecallTool) Description() string {
-	return "Search the agentic memory graph for past facts, context, and prior reasoning relevant to a specific question. Use this when you need precise historical details (e.g., exact config values, file paths, decisions made earlier) that may be summarized too coarsely in <prior_context>."
+	return "Recall facts, decisions, or details from earlier in THIS conversation. A read-only sub-agent searches this session's saved turn summaries and returns a brief, synthesized answer. Use it whenever the request refers to earlier work in this session that is no longer in view — do not guess."
 }
 
 func (t MemoryRecallTool) Parameters() json.RawMessage {
@@ -33,17 +34,13 @@ func (t MemoryRecallTool) Parameters() json.RawMessage {
 		"properties": {
 			"question": {
 				"type": "string",
-				"description": "A clear, specific question to look up in the memory graph."
+				"description": "A clear, specific question to look up in this session's memory."
 			}
 		}
 	}`)
 }
 
 func (t MemoryRecallTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
-	if t.Memory == nil || !t.Memory.Enabled() {
-		return Result{Title: "Memory Recall", Output: "Agentic memory is not enabled."}, nil
-	}
-
 	var params struct {
 		Question string `json:"question"`
 	}
@@ -53,29 +50,22 @@ func (t MemoryRecallTool) Execute(ctx context.Context, args json.RawMessage, tct
 	if params.Question == "" {
 		return Result{Title: "Memory Recall", Output: "No question provided."}, nil
 	}
-
-	slog.Info("memory_recall tool invoked", "question", params.Question, "session", tctx.SessionID)
-
-	// Build a synthesis client from the session's selected model so recall
-	// uses the same LLM the user is chatting with. Falls back to nil (raw
-	// tree, no synthesis) when the model can't be resolved.
-	var chat memory.ChatClient
-	if t.Registry != nil && tctx.Model != "" {
-		if p := t.Registry.ResolveProvider(tctx.Model); p != nil {
-			chat = memory.NewChatClient(p, tctx.Model)
-		}
+	if t.Recall == nil {
+		return Result{Title: "Memory Recall", Output: "Memory is not enabled."}, nil
 	}
 
-	recall, err := t.Memory.RecallMemory(ctx, string(tctx.SessionID), params.Question, chat)
+	// Wait for any in-flight summary write for this project so the lookup sees a
+	// settled index, then delegate to the read-only recall sub-agent.
+	if t.Barrier != nil {
+		t.Barrier.Wait(project.Resolve(tctx.SessionDir))
+	}
+	slog.Info("memory_recall delegating to recall agent", "question", params.Question, "session", tctx.SessionID)
+	answer, err := t.Recall(ctx, params.Question, "session", string(tctx.SessionID), tctx.SessionDir, tctx.Model)
 	if err != nil {
-		// Distinct from an empty result on purpose: "nothing found" would tell
-		// the model memory holds nothing on this subject, when in fact the
-		// lookup failed and the answer may well be in there.
-		return Result{Title: "Memory Recall", Output: "Memory lookup failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
+		return Result{Title: "Memory Recall", Output: "Memory recall failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
 	}
-	if recall == "" {
-		return Result{Title: "Memory Recall", Output: "No relevant past context found in memory."}, nil
+	if strings.TrimSpace(answer) == "" {
+		return Result{Title: "Memory Recall", Output: "No relevant past context found in this session's memory."}, nil
 	}
-
-	return Result{Title: "Memory Recall", Output: recall}, nil
+	return Result{Title: "Memory Recall", Output: answer}, nil
 }

@@ -1,5 +1,6 @@
 import { Navigate, Route, Router, useNavigate, useLocation } from '@solidjs/router';
-import { createEffect } from 'solid-js';
+import { createEffect, onCleanup } from 'solid-js';
+import { closeDrawer } from './lib/mobile-drawer';
 import { ServerProvider } from './context/server';
 import { OnboardingProvider, useOnboarding } from './context/onboarding';
 import { SessionProvider } from './context/session';
@@ -26,6 +27,7 @@ import SettingsLayout from './pages/settings/layout';
 import GeneralSettings from './pages/settings/general';
 import ModelsSettings from './pages/settings/models';
 import SkillsSettings from './pages/settings/skills';
+import MCPSettings from './pages/settings/mcp';
 import AboutSettings from './pages/settings/about';
 import Onboarding from './pages/onboarding';
 import NotFound from './pages/not-found';
@@ -51,6 +53,7 @@ export default function App() {
         <Route path="/" component={GeneralSettings} />
         <Route path="/models" component={ModelsSettings} />
         <Route path="/skills" component={SkillsSettings} />
+        <Route path="/mcp" component={MCPSettings} />
         <Route path="/about" component={AboutSettings} />
       </Route>
       {/* Catch-all: without it the router matches nothing and renders a blank
@@ -72,6 +75,14 @@ function AppWrapper(props: { children?: any }) {
                     <NotificationProvider>
                       <DesktopNotificationProvider>
                         <OnboardingGate />
+                        {/* Close any open mobile drawer whenever the route
+                            changes. Lives here — not in SidebarShell — because
+                            every page renders its own shell: the shell that
+                            saw the navigation unmounts mid-route, and the next
+                            page's shell initializes lastPath AFTER the route
+                            changed, so it would never see a "navigation".
+                            AppWrapper mounts once and observes every change. */}
+                        <DrawerNavCloser />
                         <div class="flex h-dvh bg-[color:var(--bg-base)] text-zinc-100 antialiased">
                           {props.children}
                         </div>
@@ -104,5 +115,22 @@ function OnboardingGate() {
       navigate('/onboarding', { replace: true });
     }
   });
+  return null;
+}
+
+// Closes the mobile navigation drawer on any route change. Rendered once in
+// AppWrapper (inside the Router, so useLocation works) and never unmounts.
+// Tracks the pathname across runs; on the very first run it just records the
+// current path — there is nothing to close yet, and treating mount as
+// navigation would close a drawer the user just opened.
+function DrawerNavCloser() {
+  const location = useLocation();
+  let lastPath = location.pathname;
+  createEffect(() => {
+    const p = location.pathname;
+    if (p !== lastPath) closeDrawer();
+    lastPath = p;
+  });
+  onCleanup(() => { closeDrawer(); });
   return null;
 }

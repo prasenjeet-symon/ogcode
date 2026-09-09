@@ -56,11 +56,6 @@ func (s *Server) routes() http.Handler {
 		r.Post("/theme", s.handleSetTheme)
 		r.Delete("/theme/{directory}", s.handleDeleteTheme)
 
-		r.Get("/memory/config", s.handleGetMemoryConfig)
-		r.Post("/memory/config", s.handleSetMemoryConfig)
-		r.Post("/memory/reindex", s.handleMemoryReindex)
-		r.Post("/memory/reset", s.handleMemoryReset)
-
 		r.Get("/search/config", s.handleGetSearchConfig)
 		r.Post("/search/config", s.handleSetSearchConfig)
 		r.Post("/search/config/validate", s.handleValidateSearchKey)
@@ -76,6 +71,10 @@ func (s *Server) routes() http.Handler {
 		r.Get("/resources", s.handleResources)
 
 		r.Get("/skills", s.handleListSkills)
+		r.Post("/skills/{name}", s.handleSetSkillEnabled)
+
+		r.Get("/mcp", s.handleListMCP)
+		r.Post("/mcp/{name}", s.handleSetMCPEnabled)
 
 		r.Route("/session", func(r chi.Router) {
 			r.Get("/", s.handleListSessions)

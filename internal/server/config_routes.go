@@ -151,46 +151,16 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) configPayload() map[string]any {
-	memoryEnabled := s.mem != nil && s.mem.Enabled()
-	memoryProvider := ""
-	if s.mem != nil && s.mem.Graph != nil && s.mem.Graph.Embed != nil {
-		memoryProvider = "ogcode-embedded"
-	}
 	return map[string]any{
-		"directory":      s.dir,
-		"port":           s.port,
-		"memoryEnabled":  memoryEnabled,
-		"memoryProvider": memoryProvider,
-		"searchEnabled":  s.searchBackend != nil,
-		"searchRunning":  s.searchBackend != nil,
+		"directory":     s.dir,
+		"port":          s.port,
+		"searchEnabled": s.searchBackend != nil,
+		"searchRunning": s.searchBackend != nil,
 	}
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.configPayload())
-}
-
-func (s *Server) handleGetMemoryConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := session.GetMemoryConfig(s.globalDB)
-	if err != nil {
-		http.Error(w, "failed to read memory config", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, session.MaskedMemoryConfig(cfg))
-}
-
-func (s *Server) handleSetMemoryConfig(w http.ResponseWriter, r *http.Request) {
-	var incoming session.MemoryConfig
-	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if err := session.SetMemoryConfig(s.globalDB, &incoming); err != nil {
-		http.Error(w, "failed to save memory config", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, session.MaskedMemoryConfig(&incoming))
 }
 
 func (s *Server) handleGetSearchConfig(w http.ResponseWriter, r *http.Request) {

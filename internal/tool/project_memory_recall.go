@@ -6,30 +6,27 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
-	"github.com/prasenjeet-symon/ogcode/internal/memory"
 	"github.com/prasenjeet-symon/ogcode/internal/project"
-	"github.com/prasenjeet-symon/ogcode/internal/provider"
 )
 
-// ProjectMemoryRecallTool queries the agentic knowledge graph across every
-// conversation ever held in this workspace, where memory_recall only sees the
-// current session. Synthesis uses the session's selected model, resolved per
-// call from the registry — same contract as MemoryRecallTool.
+// ProjectMemoryRecallTool answers a question from the project's persistent
+// memory — every past conversation in this workspace — by delegating to the
+// read-only recall sub-agent over the dated markdown turn summaries. With
+// scope "session" it restricts the search to the current conversation.
 type ProjectMemoryRecallTool struct {
-	Memory   *memory.Memory
-	Registry *provider.Registry
+	Recall  RecallFunc
+	Barrier RecallBarrier
 }
 
-func NewProjectMemoryRecallTool(mem *memory.Memory, registry *provider.Registry) ProjectMemoryRecallTool {
-	return ProjectMemoryRecallTool{Memory: mem, Registry: registry}
+func NewProjectMemoryRecallTool(recall RecallFunc, barrier RecallBarrier) ProjectMemoryRecallTool {
+	return ProjectMemoryRecallTool{Recall: recall, Barrier: barrier}
 }
 
 func (t ProjectMemoryRecallTool) ID() string { return "project_memory_recall" }
 
 func (t ProjectMemoryRecallTool) Description() string {
-	return "Search the agentic memory graph across ALL past sessions in this project, not just the current conversation. Use it for questions about work done earlier in this codebase: why a decision was made, how something was implemented before, what was tried and rejected, when a convention was introduced. Results are attributed to the conversation and date they came from, and conflicting facts are resolved in favour of the most recent. Set scope to \"session\" to run the same dated, attributed search over the current conversation only."
+	return "Search this project's persistent memory across ALL past sessions in the workspace, not just the current conversation. Use it for questions about work done earlier in this codebase: why a decision was made, how something was implemented before, what was tried and rejected, when a convention was introduced. A read-only sub-agent reads the dated turn summaries and returns a brief, synthesized answer, preferring the most recent when they disagree. Set scope to \"session\" to search only the current conversation."
 }
 
 func (t ProjectMemoryRecallTool) Parameters() json.RawMessage {
@@ -41,33 +38,19 @@ func (t ProjectMemoryRecallTool) Parameters() json.RawMessage {
 				"type": "string",
 				"description": "A clear, specific question to look up across the project's history."
 			},
-			"since_days": {
-				"type": "integer",
-				"description": "Optional. Only consider facts recorded in the last N days. Omit to search the entire project history."
-			},
-			"topic": {
-				"type": "string",
-				"description": "Optional. Restrict the search to a single topic name, exactly as it appears in the project map of an earlier recall result."
-			},
 			"scope": {
 				"type": "string",
 				"enum": ["project", "session"],
-				"description": "Optional, defaults to \"project\" (every past session in this workspace). Use \"session\" to search only the current conversation while still getting dated, recency-ranked results."
+				"description": "Optional, defaults to \"project\" (every past session in this workspace). Use \"session\" to search only the current conversation."
 			}
 		}
 	}`)
 }
 
 func (t ProjectMemoryRecallTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
-	if t.Memory == nil || !t.Memory.Enabled() {
-		return Result{Title: "Project Memory Recall", Output: "Agentic memory is not enabled."}, nil
-	}
-
 	var params struct {
-		Question  string `json:"question"`
-		SinceDays int    `json:"since_days"`
-		Topic     string `json:"topic"`
-		Scope     string `json:"scope"`
+		Question string `json:"question"`
+		Scope    string `json:"scope"`
 	}
 	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, err
@@ -75,21 +58,17 @@ func (t ProjectMemoryRecallTool) Execute(ctx context.Context, args json.RawMessa
 	if params.Question == "" {
 		return Result{Title: "Project Memory Recall", Output: "No question provided."}, nil
 	}
+	if t.Recall == nil {
+		return Result{Title: "Project Memory Recall", Output: "Memory is not enabled."}, nil
+	}
 
 	projectID := project.Resolve(tctx.SessionDir)
 	if projectID == "" {
 		return Result{Title: "Project Memory Recall", Output: "No project directory resolved for this session."}, nil
 	}
 
-	var since int64
-	if params.SinceDays > 0 {
-		since = time.Now().AddDate(0, 0, -params.SinceDays).UnixMilli()
-	}
-
-	// Scope "session" reuses the whole project pipeline against one conversation,
-	// so the caller still gets dates, attribution and recency ranking. The session
-	// ID comes from the tool context, never from the model — an agent cannot point
-	// this at some other conversation.
+	// Scope defaults to the whole project. "session" restricts to the current
+	// conversation; the session ID comes from the tool context, never the model.
 	scope := strings.ToLower(strings.TrimSpace(params.Scope))
 	var onlySession string
 	switch scope {
@@ -101,44 +80,26 @@ func (t ProjectMemoryRecallTool) Execute(ctx context.Context, args json.RawMessa
 		return Result{Title: "Project Memory Recall", Output: fmt.Sprintf("Unknown scope %q — use \"project\" or \"session\".", params.Scope)}, nil
 	}
 
-	slog.Info("project_memory_recall tool invoked",
-		"question", params.Question, "project", projectID, "scope", scope,
-		"sinceDays", params.SinceDays, "session", tctx.SessionID)
-
-	// Synthesis runs on the session's own model, so recall inherits whatever the
-	// user selected rather than a server-wide default. A model that cannot be
-	// resolved falls back to the raw assembled context (no synthesis).
-	var chat memory.ChatClient
-	if t.Registry != nil && tctx.Model != "" {
-		if p := t.Registry.ResolveProvider(tctx.Model); p != nil {
-			chat = memory.NewChatClient(p, tctx.Model)
-		}
+	// Wait for any in-flight summary write for this project, then delegate.
+	if t.Barrier != nil {
+		t.Barrier.Wait(projectID)
 	}
-
-	recall, err := t.Memory.RecallProjectMemory(ctx, memory.ProjectRecallRequest{
-		ProjectID: projectID,
-		Question:  params.Question,
-		Since:     since,
-		TopicName: params.Topic,
-		SessionID: onlySession,
-		Chat:      chat,
-	})
-
 	title := "Project Memory Recall"
 	if onlySession != "" {
 		title = "Session Memory Recall"
 	}
+	slog.Info("project_memory_recall delegating to recall agent",
+		"question", params.Question, "project", projectID, "scope", scope, "session", tctx.SessionID)
+	answer, err := t.Recall(ctx, params.Question, scope, onlySession, tctx.SessionDir, tctx.Model)
 	if err != nil {
-		// See MemoryRecallTool: a failed lookup must not read as an empty one.
-		return Result{Title: title, Output: "Memory lookup failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
+		return Result{Title: title, Output: "Memory recall failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
 	}
-	if recall == "" {
+	if strings.TrimSpace(answer) == "" {
 		where := "this project's memory"
 		if onlySession != "" {
 			where = "this session's memory"
 		}
 		return Result{Title: title, Output: "No relevant past context found in " + where + "."}, nil
 	}
-
-	return Result{Title: title, Output: recall}, nil
+	return Result{Title: title, Output: answer}, nil
 }

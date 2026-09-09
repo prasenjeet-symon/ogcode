@@ -1,5 +1,4 @@
 import { Show, createEffect, onCleanup, type JSX } from 'solid-js';
-import { useLocation } from '@solidjs/router';
 import { drawerIsOpen, openDrawer, closeDrawer } from '../lib/mobile-drawer';
 
 interface SidebarShellProps {
@@ -21,20 +20,12 @@ interface SidebarShellProps {
 // (search text, rename-in-progress, collapsed rail) alive across open/close
 // cycles and keeps the closed state free of layout cost.
 export default function SidebarShell(props: SidebarShellProps) {
-  const location = useLocation();
   const isOpen = () => drawerIsOpen(props.drawer);
 
-  // Any navigation closes the drawer — selecting a session/plan on mobile
-  // should land you in the conversation, not staring at the list. The
-  // comparison is against the pathname seen on the previous run of this
-  // effect, so opening the drawer (which re-runs the effect without moving
-  // the route) never registers as a navigation.
-  let lastPath = location.pathname;
-  createEffect(() => {
-    const p = location.pathname;
-    if (isOpen() && p !== lastPath) closeDrawer();
-    lastPath = p;
-  });
+  // Close-on-navigation lives in DrawerNavCloser (app.tsx), which mounts once
+  // above the router outlet and survives page swaps — a shell here unmounts
+  // mid-navigation and the next page's shell would initialize lastPath after
+  // the route already changed, never observing the navigation.
 
   // While open, Escape closes and the page behind must not scroll (iOS
   // rubber-bands the whole document otherwise). The cleanup pair runs when
@@ -57,18 +48,27 @@ export default function SidebarShell(props: SidebarShellProps) {
       {/* Inline on desktop — zero cost, unchanged layout. */}
       <div class="hidden lg:flex shrink-0">{props.children}</div>
 
+      {/* Scrim — a SIBLING of the drawer, never a child. The drawer carries a
+          CSS transform, and a transformed element becomes the containing
+          block for position:fixed descendants: a scrim inside it would cover
+          only the drawer's own 320px box (dimming the sidebar instead of the
+          page behind) and paint above the sidebar content, swallowing every
+          tap on session/plan rows. As a sibling under the root it covers the
+          real viewport, sits under the drawer (z 59 < 60), and its tap
+          closes the drawer. */}
+      <Show when={isOpen()}>
+        <div
+          class="sidebar-drawer-scrim is-active"
+          onClick={closeDrawer}
+          aria-label="Close navigation"
+        />
+      </Show>
+
       {/* Drawer below lg */}
       <div
         class={`sidebar-drawer lg:hidden ${isOpen() ? 'is-open' : ''}`}
         aria-hidden={!isOpen()}
       >
-        <Show when={isOpen()}>
-          <div
-            class="sidebar-drawer-scrim is-active"
-            onClick={closeDrawer}
-            aria-label="Close navigation"
-          />
-        </Show>
         <div
           class="sidebar-drawer-viewport"
           onClick={(e) => {

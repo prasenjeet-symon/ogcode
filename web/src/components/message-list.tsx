@@ -134,35 +134,53 @@ export default function MessageList() {
           {/* The loop stopped and nothing in the transcript says why — a server
               error before any assistant message existed, or a panic. Sits at the
               same spot as the working indicator it replaces, so the eye lands on
-              it where it was already waiting for the answer. */}
+              it where it was already waiting for the answer.
+              reason==='aborted' is a user stop that landed between messages —
+              after the tool results were written, before the next model call —
+              leaving no aborted marker in the transcript to explain it. It is
+              not a failure, so it gets the same neutral amber "Generation
+              cancelled" notice the in-message marker uses (message-item.tsx),
+              not this red banner. */}
           <Show when={session.loopError()}>
             {(failure) => (
-              <div
-                class="flex items-start gap-2 rounded-md border border-red-800/40 bg-red-950/30 px-3 py-2 text-meta text-red-300 animate-fade-in"
-                role="alert"
-              >
-                <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                </svg>
-                <div class="min-w-0 flex-1">
-                  <div class="font-medium">
-                    {failure().reason === 'panic'
-                      ? 'The agent loop crashed'
-                      : 'The agent loop stopped early'}
+              <Show
+                when={failure().reason === 'aborted'}
+                fallback={
+                  <div
+                    class="flex items-start gap-2 rounded-md border border-red-800/40 bg-red-950/30 px-3 py-2 text-meta text-red-300 animate-fade-in"
+                    role="alert"
+                  >
+                    <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <div class="min-w-0 flex-1">
+                      <div class="font-medium">
+                        {failure().reason === 'panic'
+                          ? 'The agent loop crashed'
+                          : 'The agent loop stopped early'}
+                      </div>
+                      <div class="mt-0.5 break-words opacity-90">{failure().message}</div>
+                    </div>
+                    <button
+                      type="button"
+                      class="shrink-0 opacity-60 hover:opacity-100"
+                      aria-label="Dismiss"
+                      onClick={() => session.dismissLoopError()}
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
-                  <div class="mt-0.5 break-words opacity-90">{failure().message}</div>
-                </div>
-                <button
-                  type="button"
-                  class="shrink-0 opacity-60 hover:opacity-100"
-                  aria-label="Dismiss"
-                  onClick={() => session.dismissLoopError()}
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                }
+              >
+                <div class="flex items-center gap-2 rounded-md border border-amber-700/40 bg-amber-950/30 px-3 py-1.5 text-meta text-amber-300 animate-fade-in">
+                  <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                   </svg>
-                </button>
-              </div>
+                  <span>Generation cancelled</span>
+                </div>
+              </Show>
             )}
           </Show>
 

@@ -13,6 +13,24 @@ const POSTHOG_API_HOST = 'https://app.posthog.com';
 
 let initialised = false;
 
+// Stable distinct ID for the browser user, persisted in localStorage.
+// PostHog's project is configured with "Require identified users", so
+// anonymous traffic is dropped server-side — every install must identify
+// itself with a real ID on load.
+function currentDistinctId(): string {
+  try {
+    let id = localStorage.getItem('ph_ogcode_distinct_id');
+    if (!id) {
+      id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem('ph_ogcode_distinct_id', id);
+    }
+    return id;
+  } catch {
+    // localStorage may be unavailable (private mode) — fall back to a per-load id
+    return `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
 /** Initialise PostHog. Safe to call once. */
 export async function initPostHog(): Promise<void> {
   if (initialised) return;
@@ -26,8 +44,9 @@ export async function initPostHog(): Promise<void> {
       disable_session_recording: false,
     });
     initialised = true;
-    // Identify the current anonymous user
-    posthog.identify();
+    // Identify with a stable per-install ID (localStorage-persisted) so the
+    // "Require identified users" project setting doesn't drop our events.
+    posthog.identify(currentDistinctId());
   } catch {
     // analytics should never break the app
   }
@@ -50,7 +69,8 @@ export function identify(distinctId?: string, properties?: Record<string, any>):
     if (distinctId) {
       posthog.identify(distinctId, properties);
     } else {
-      posthog.identify();
+      // No explicit ID given — fall back to the stable per-install ID
+      posthog.identify(currentDistinctId(), properties);
     }
   } catch {
     // swallow
