@@ -401,7 +401,11 @@ func collectUsage(store *session.Store, sessionID session.SessionID) (tokens run
 		tokens.Reasoning += t.Reasoning
 		tokens.CacheRead += t.CacheRead
 		tokens.CacheWrite += t.CacheWrite
-		tokens.Total += t.Total
+		// Cache read is excluded: cached tokens were already counted as input when
+		// first sent, so summing them over a session re-counts the same context
+		// prefix once per turn. Cache write stays — providers that report it never
+		// count it inside input.
+		tokens.Total += t.Input + t.CacheWrite + t.Output
 	}
 	return tokens, turns, finish
 }

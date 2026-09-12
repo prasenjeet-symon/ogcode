@@ -105,7 +105,9 @@ func TestCollectUsageSumsAssistantTurnsOnly(t *testing.T) {
 	if finish != "stop" {
 		t.Errorf("finish = %q, want the last turn's reason %q", finish, "stop")
 	}
-	want := runTokens{Input: 30, Output: 12, CacheRead: 100, CacheWrite: 50, Total: 192}
+	// Total excludes cache read (already counted as input when first sent) but
+	// includes cache write (never counted inside input by reporting providers).
+	want := runTokens{Input: 30, Output: 12, CacheRead: 100, CacheWrite: 50, Total: 92}
 	if tokens != want {
 		t.Errorf("tokens = %+v, want %+v", tokens, want)
 	}

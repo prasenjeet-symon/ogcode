@@ -9,9 +9,9 @@ type MessageID = id.MessageID
 type PartID = id.PartID
 type PermissionID = id.PermissionID
 
-func NewSessionID() SessionID   { return id.NewSessionID() }
-func NewMessageID() MessageID   { return id.NewMessageID() }
-func NewPartID() PartID         { return id.NewPartID() }
+func NewSessionID() SessionID       { return id.NewSessionID() }
+func NewMessageID() MessageID       { return id.NewMessageID() }
+func NewPartID() PartID             { return id.NewPartID() }
 func NewPermissionID() PermissionID { return id.NewPermissionID() }
 
 type ModelPreference struct {
@@ -31,8 +31,11 @@ type ModelPreference struct {
 
 // ModelCapability is a probed/known capability record for a model, persisted so
 // the image-support probe runs at most once per model (until manually refreshed).
+// ContextWindow carries a window learned from a context-overflow error body
+// (0 = unknown); see session.LearnModelContextWindow.
 type ModelCapability struct {
 	ModelID        string `json:"modelId"`
 	SupportsImages bool   `json:"supportsImages"`
 	ProbedAt       int64  `json:"probedAt"`
+	ContextWindow  int    `json:"contextWindow"`
 }

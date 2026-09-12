@@ -241,6 +241,7 @@ function ProviderSection(props: {
           config={props.config}
           onSaved={props.onSaved}
           onApplied={props.onApplied}
+          modelCount={() => props.models.length}
           hide={hideRow}
         />
       </Show>
@@ -278,6 +279,9 @@ function Credentials(props: {
   config: ProviderConfig | undefined;
   onSaved: (c: ProviderConfig) => void;
   onApplied: () => Promise<void>;
+  // This provider's catalogue size after a refresh. Read AFTER onApplied settles
+  // to tell a real credential problem (0 models) from a transient refresh blip.
+  modelCount: () => number;
   hide: (...terms: string[]) => boolean;
 }) {
   const [apiKey, setApiKey] = createSignal('');
@@ -353,15 +357,37 @@ function Credentials(props: {
     // providers in place), so pull the freshly-fetched catalogue rather than ask
     // for a restart. A failure past this point is a fetch failure, not a save
     // failure — the key is stored either way, so say which.
+    // The refresh promise rejects only when the request fails to round-trip
+    // (server unreachable / transient) — NOT when the list is empty: the server's
+    // /models/refresh returns 200 with a fallback list even when a provider's own
+    // fetch fails. So "did it throw" and "did this provider get models" are two
+    // independent signals, and an honest result needs both:
+    //   resolved + models  -> fetched fine
+    //   resolved + none    -> the key or base URL is the problem
+    //   threw    + models  -> a transient blip; the stored catalogue is already fine
+    //   threw    + none    -> could not reach the server to refresh
+    // The old code blamed the key on ANY throw — crying wolf on a blip while a full
+    // catalogue was loaded (the "223 on / could not be fetched" contradiction), and
+    // staying silent on the real 0-model case, which resolves without throwing.
     setRefreshing(true);
+    let refreshFailed = false;
     try {
       await props.onApplied();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 4000);
     } catch {
-      setError('Saved, but the model list could not be fetched. Check the key or endpoint, then Save again.');
+      refreshFailed = true;
     } finally {
       setRefreshing(false);
+    }
+    const gotModels = props.modelCount() > 0;
+    if (gotModels) {
+      // Key stored and models present. If the request itself blipped we simply
+      // didn't refresh this time — not a credential problem, so don't alarm.
+      setSaved(true);
+      setTimeout(() => setSaved(false), 4000);
+    } else if (refreshFailed) {
+      setError('Saved, but ogcode could not reach the server to refresh the model list. Check that the ogcode server is running, then Save again.');
+    } else {
+      setError('Saved, but no models came back for this provider. Double-check the API key or base URL, then Save again.');
     }
   };
 

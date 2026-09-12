@@ -42,8 +42,11 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
       out.cacheRead  += t.cacheRead ?? 0;
       out.cacheWrite += t.cacheWrite ?? 0;
     }
-    // Include cache variants so total reflects all tokens consumed, not just uncached input.
-    out.total = out.input + out.cacheRead + out.cacheWrite + out.output;
+    // Cache read is excluded: cached tokens were already counted as input when
+    // first sent, so summing them over a session re-counts the same context
+    // prefix once per step. Cache write stays — providers that report it never
+    // count it inside input.
+    out.total = out.input + out.cacheWrite + out.output;
     return out;
   });
 

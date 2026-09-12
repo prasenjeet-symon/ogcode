@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -98,10 +99,7 @@ func (p *OpenAIProvider) Embed(ctx context.Context, inputs []string) ([][]float3
 		Input []string `json:"input"`
 	}
 	type embedResponse struct {
-		Data []struct {
-			Index     int       `json:"index"`
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
+		Data  []embedItem `json:"data"`
 		Usage struct {
 			PromptTokens int `json:"prompt_tokens"`
 			TotalTokens  int `json:"total_tokens"`
@@ -143,8 +141,39 @@ func (p *OpenAIProvider) Embed(ctx context.Context, inputs []string) ([][]float3
 		return nil, fmt.Errorf("decode embed response: %w", err)
 	}
 
-	vecs := make([][]float32, len(inputs))
-	for _, d := range out.Data {
+	vecs, err := assembleEmbeddings(out.Data, len(inputs))
+	if err != nil {
+		return nil, fmt.Errorf("%s embed API: %w", p.id, err)
+	}
+	return vecs, nil
+}
+
+// embedItem is one entry of an embeddings response: an input's embedding vector
+// and the index of the input it corresponds to.
+type embedItem struct {
+	Index     int       `json:"index"`
+	Embedding []float32 `json:"embedding"`
+}
+
+// assembleEmbeddings places each returned embedding at its response index,
+// producing exactly one vector per input in input order. It validates the
+// response rather than trusting it: a provider-supplied index outside [0,n)
+// would otherwise index the result slice out of range and panic (the whole
+// point of this helper), and a duplicate or missing index would silently
+// misalign every embedding with its input. Any of those is an error, consistent
+// with the rest of Embed returning errors instead of a bad result.
+func assembleEmbeddings(data []embedItem, n int) ([][]float32, error) {
+	if len(data) != n {
+		return nil, fmt.Errorf("returned %d embeddings for %d inputs", len(data), n)
+	}
+	vecs := make([][]float32, n)
+	for _, d := range data {
+		if d.Index < 0 || d.Index >= n {
+			return nil, fmt.Errorf("out-of-range index %d for %d inputs", d.Index, n)
+		}
+		if vecs[d.Index] != nil {
+			return nil, fmt.Errorf("duplicate index %d in response", d.Index)
+		}
 		vecs[d.Index] = d.Embedding
 	}
 	return vecs, nil
@@ -300,6 +329,31 @@ type oaiModelEntry struct {
 	Name    string `json:"name"` // populated by OpenRouter, empty for Ollama
 	Object  string `json:"object"`
 	OwnedBy string `json:"owned_by"`
+	// ContextLength is populated by OpenRouter's /models (and any other
+	// OpenAI-compatible endpoint that mirrors the field); Ollama leaves it out.
+	// Parsed leniently below — some mirrors send it as a string — and 0 means
+	// "endpoint did not report one"; the caller must not guess.
+	ContextLength any `json:"context_length,omitempty"`
+}
+
+// oaiContextWindow coerces a models-list context_length into an int. OpenRouter
+// sends a JSON number; some OpenAI-compatible mirrors send it as a string.
+// Anything non-positive or unparsable is 0 — unknown, never guessed.
+func oaiContextWindow(v any) int {
+	switch n := v.(type) {
+	case float64:
+		if n > 0 && n <= float64(int(^uint(0)>>1)) {
+			return int(n)
+		}
+	case string:
+		s := strings.TrimSpace(n)
+		if s != "" {
+			if f, err := strconv.ParseFloat(s, 64); err == nil && f > 0 && f <= float64(int(^uint(0)>>1)) {
+				return int(f)
+			}
+		}
+	}
+	return 0
 }
 
 // fetchDynamicModels fetches the model list from /v1/models for cloud providers.
@@ -354,6 +408,9 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 			ProviderID:     p.id,
 			SupportsImages: modelNameSuggestsVision(m.ID),
 			Collection:     p.collection,
+			// Only an endpoint-reported length is stored; 0 stays 0 so callers
+			// keep treating the window as unknown rather than guessing.
+			ContextWindow: oaiContextWindow(m.ContextLength),
 		})
 	}
 	slog.Info("dynamically fetched models from endpoint", "provider", p.id, "count", len(models))
@@ -406,18 +463,18 @@ var ollamaLocalFallback = []ModelInfo{
 	{ID: "deepseek-coder-v2", Name: "DeepSeek Coder V2", ProviderID: "ollama", ActiveByDefault: true},
 	{ID: "mistral", Name: "Mistral", ProviderID: "ollama", ActiveByDefault: false},
 	{ID: "codellama", Name: "Code Llama", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "qwen3.5", Name: "Qwen3.5", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "qwen3.5", Name: "Qwen3.5", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 262144},
 	{ID: "qwen3-coder-next", Name: "Qwen3 Coder Next", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 1048576},
 }
 
 // ollamaCloudFallback is used when the cloud Ollama endpoint is unreachable.
 var ollamaCloudFallback = []ModelInfo{
 	{ID: "qwen3-coder-next", Name: "Qwen3 Coder Next", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "kimi-k2.6", Name: "Kimi K2.6", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "glm-5.1", Name: "GLM-5.1", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "kimi-k2.6", Name: "Kimi K2.6", ProviderID: "ollama", ActiveByDefault: true, ContextWindow: 262144},
+	{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ProviderID: "ollama", ActiveByDefault: true, ContextWindow: 1048576},
+	{ID: "glm-5.1", Name: "GLM-5.1", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 202752},
+	{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 1048576},
 	{ID: "mistral-large-3", Name: "Mistral Large 3", ProviderID: "ollama", ActiveByDefault: false},
 }
 
@@ -903,8 +960,10 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 	scanner := bufio.NewScanner(idle)
 	scanner.Buffer(make([]byte, 0, 64*1024), streamMaxLineBytes)
 
-	// Track active tool calls by index so we can match deltas
+	// Track active tool calls by index so we can match deltas. lastToolID is the
+	// fallback when a provider sends argument deltas without a usable index.
 	activeToolCalls := make(map[int]string) // index -> callID
+	var lastToolID string
 
 	// Weak/open models (e.g. many served via Ollama) sometimes emit a tool call
 	// as plain text — a JSON object in the content — instead of via the structured
@@ -962,6 +1021,7 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 				if tc.ID != "" {
 					// New tool call starting
 					activeToolCalls[tc.Index] = tc.ID
+					lastToolID = tc.ID
 					ch <- StreamEvent{
 						Type:       EventToolCallStart,
 						ToolCallID: tc.ID,
@@ -969,8 +1029,19 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 						ToolInput:  []byte(tc.Function.Arguments),
 					}
 				} else if tc.Function.Arguments != "" {
-					// Argument delta — use the tracked callID
+					// Argument delta. Route by index to the call it belongs to, but
+					// fall back to the most recently started call when the provider
+					// omitted or mismatched the index (some non-conforming endpoints
+					// send every delta at index 0). Never emit a delta with an empty
+					// id: the agent matches deltas to a call by id, so an unroutable
+					// one silently drops the bytes and truncates the arguments.
 					callID := activeToolCalls[tc.Index]
+					if callID == "" {
+						callID = lastToolID
+					}
+					if callID == "" {
+						continue
+					}
 					ch <- StreamEvent{
 						Type:       EventToolCallDelta,
 						ToolCallID: callID,

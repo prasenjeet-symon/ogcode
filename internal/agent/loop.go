@@ -717,6 +717,24 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			slog.Warn("stream chat attempt failed", "session", sessionID, "attempt", attempt, "err", streamErr)
 			// Context length exceeded: summarize old history with the LLM and retry.
 			if compactionCount < maxCompactions && isContextLengthError(streamErr) {
+				// Learn the model's real window from the overflow body before
+				// anything mutates state: the provider states the cap in exactly
+				// these errors ("maximum context length is 8192 tokens"), and
+				// compactRequest below replaces streamReq.Messages. The sanity
+				// check lives here rather than in the parser — only the caller
+				// knows the size of the request that just overflowed, and a
+				// "window" no bigger than a request we just sent cannot be the
+				// window (misreads the wrong number); keeping it disqualifies
+				// the parse. lastInputTokens (provider-reported, from the
+				// previous step) is the more exact prompt size when nonzero.
+				promptTokens := effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
+				if learned := provider.ParseContextWindowFromBody(errorBody(streamErr)); learned > promptTokens {
+					if lerr := session.LearnModelContextWindow(lr.Store.DB(), modelID, learned); lerr != nil {
+						slog.Warn("failed to persist learned context window", "model", modelID, "err", lerr)
+					} else {
+						slog.Info("learned model context window from overflow error", "model", modelID, "contextWindow", learned)
+					}
+				}
 				before := len(streamReq.Messages)
 				slog.Info("context length exceeded, using LLM to compact history", "session", sessionID, "messages", before)
 				compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
@@ -1839,9 +1857,17 @@ func (lr *LoopRunner) resolveRunModel(ctx context.Context, sess *session.Session
 	// decide to return an image (e.g. a rendered PDF page) instead of text.
 	supportsImages = lr.resolveImageSupport(ctx, p, modelID)
 	// The active model's context window (0 = unknown), used to size the
-	// proactive-compaction trigger.
+	// proactive-compaction trigger. The catalog is authoritative when it knows
+	// the model; when it is silent (Ollama locals, dynamic OpenAI-compatible
+	// endpoints), a window learned from a previous overflow error fills the gap.
 	if lr.Registry != nil {
 		contextWindow = lr.Registry.ContextWindow(modelID)
+	}
+	if contextWindow <= 0 {
+		if cap, ok, err := session.GetModelCapability(lr.Store.DB(), modelID); err == nil && ok && cap.ContextWindow > 0 {
+			contextWindow = cap.ContextWindow
+			slog.Info("using learned context window", "model", modelID, "contextWindow", contextWindow)
+		}
 	}
 	return p, modelID, supportsImages, contextWindow
 }
@@ -3147,6 +3173,19 @@ func isContextLengthError(err error) bool {
 		// and for the ollama prefix so a body-less 400 from some other provider is
 		// not relabelled as an overflow it never was.
 		(strings.Contains(lower, "ollama api error 400") && strings.HasSuffix(strings.TrimSpace(lower), "400:"))
+}
+
+// errorBody returns the raw provider text an error carries, for body parsing.
+// For a structured *provider.APIError that is the HTTP response body; for any
+// other error it is the string form — the same text the string-matching
+// classification paths inspect, so a parse never sees text the classifier
+// could not have.
+func errorBody(err error) string {
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Body
+	}
+	return err.Error()
 }
 
 // retryAfterFromError returns the server-provided Retry-After hint carried by a

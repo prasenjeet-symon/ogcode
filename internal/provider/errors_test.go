@@ -32,6 +32,61 @@ func TestAPIError_IsTransient(t *testing.T) {
 	}
 }
 
+// TestParseContextWindowFromBody exercises the cap-figure extraction from
+// overflow bodies across the real provider phrasings, plus the rejections:
+// unparseable text, and numbers outside the plausible-window band (those are a
+// token count of something else — an output cap, an id — not the window).
+func TestParseContextWindowFromBody(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"openai", "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens.", 8192},
+		{"fireworks variant", "maximum context length of 131072 tokens. However, you requested 131073 tokens.", 131072},
+		{"anthropic", "prompt is too long: 195000 tokens > 200000 maximum", 200000},
+		{"gemini", "The input token count (250000) exceeds the maximum number of tokens allowed (200000).", 200000},
+		{"mirror generic", "prompt is too long: it exceeds the maximum of 8192 tokens", 8192},
+		{"bare statement", "request failed: context length exceeds 4096 tokens", 4096},
+		{"json wrapped", `{"error":{"message":"maximum context length is 16385 tokens"}}`, 16385},
+		{"no number", "prompt is too long", 0},
+		{"junk", "invalid request body", 0},
+		{"empty", "", 0},
+		// Below the plausibility floor: a 100-token "window" is some other count.
+		{"below floor", "your request of 100 tokens exceeds the context length of 100 tokens", 0},
+		// Above the plausibility ceiling: not a window any provider ships.
+		{"above ceiling", "maximum context length is 99999999 tokens", 0},
+		// A non-window token count in an overflow body must not be taken as the
+		// cap: OpenAI's phrasing states both the input ("... requested 9000
+		// tokens") and the cap — only the cap phrase matches.
+		{"requested count not the cap", "maximum context length is 8192 tokens; you requested 9000", 8192},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ParseContextWindowFromBody(c.body); got != c.want {
+				t.Errorf("ParseContextWindowFromBody(%q) = %d, want %d", c.body, got, c.want)
+			}
+		})
+	}
+}
+
+// TestParseContextWindowFromBody_PhrasingsClassifyAsOverflow pins the shared
+// seam between learning and classification: every phrasing the parser matches
+// must also classify as a context overflow via IsContextLengthMessage, because
+// the loop only learns from bodies the classifier already accepted. A pattern
+// whose sample is no longer classified is dead code at best and a mislabel at
+// worst.
+func TestParseContextWindowFromBody_PhrasingsClassifyAsOverflow(t *testing.T) {
+	for i, p := range contextWindowPatterns {
+		if !IsContextLengthMessage(p.sample) {
+			t.Errorf("pattern %d (%s) sample %q is not classified as an overflow by IsContextLengthMessage", i, p.re.String(), p.sample)
+		}
+		if ParseContextWindowFromBody(p.sample) == 0 {
+			t.Errorf("pattern %d (%s) does not parse its own sample: %q", i, p.re.String(), p.sample)
+		}
+	}
+}
+
 func TestAPIError_IsContextLength(t *testing.T) {
 	cases := []struct {
 		provider string

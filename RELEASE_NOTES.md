@@ -1,3 +1,40 @@
+# Release Notes — v0.35.0
+
+## Minor: Learned Context Windows
+
+### Learned context windows from overflow errors
+
+When a model's catalog doesn't report a context window (Ollama local models,
+dynamic OpenAI-compatible endpoints), the agent loop now **learns** it the
+first time the provider rejects an oversized prompt: the cap figure is parsed
+from the error body ("maximum context length is 8192 tokens",
+"prompt is too long: 195000 tokens > 200000 maximum", …), sanity-checked
+against the size of the request that just failed, and persisted with the
+model's capability record (migration 038). Every later run sizes compaction
+from the real window instead of the fixed 128k fallback — so small local
+models compact early instead of erroring, and large ones use far more of
+their window. The manual "refresh capability" action clears the learned
+figure along with the image verdict.
+
+### Real context windows from model catalogs
+
+- **Ollama cloud catalog** now fills each model's window from the host's
+  `POST /api/show` (`<arch>.context_length`), bounded (3s per lookup, fan-out
+  8, ≤40 lookups, silent failure → 0). Previously the `/api/tags` catalog
+  carried no window data at all.
+- **OpenAI-compatible `/models`** now parses `context_length` (number or
+  string, e.g. OpenRouter); absent → 0, never guessed.
+- Static fallback lists carry real probed windows for known models.
+
+### Fix: session token totals no longer double-count cache reads
+
+Session/CLI totals (`ogcode run` usage summary and the UI token pill)
+previously summed `cacheRead` on top of input, re-counting the same context
+prefix once per turn. Totals are now input + cacheWrite + output. Cache
+write stays — providers that report it never count it inside input.
+
+---
+
 # Release Notes — v0.34.0
 
 ## Major: Agentic Turn-Memory, MCP & Skill Management UI
