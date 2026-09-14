@@ -30,22 +30,22 @@ type latexResponse struct {
 
 // latexPagesResponse is the JSON response for the LaTeX pages rendering endpoint.
 type latexPagesResponse struct {
-	Success    bool              `json:"success"`
-	Error      string            `json:"error,omitempty"`
-	Output     string            `json:"output,omitempty"`
-	DocClass   string            `json:"docClass,omitempty"`
-	Title      string            `json:"title,omitempty"`
-	Pages      []latexPageImage  `json:"pages,omitempty"`
-	PdfBase64  string            `json:"pdfBase64,omitempty"`
-	PdfSize    int64             `json:"pdfSize,omitempty"`
+	Success   bool             `json:"success"`
+	Error     string           `json:"error,omitempty"`
+	Output    string           `json:"output,omitempty"`
+	DocClass  string           `json:"docClass,omitempty"`
+	Title     string           `json:"title,omitempty"`
+	Pages     []latexPageImage `json:"pages,omitempty"`
+	PdfBase64 string           `json:"pdfBase64,omitempty"`
+	PdfSize   int64            `json:"pdfSize,omitempty"`
 }
 
 // latexPageImage represents a single rendered page of a LaTeX document.
 type latexPageImage struct {
-	Image    string `json:"image"`    // base64-encoded JPEG
-	Width    int    `json:"width"`     // page width in pixels
-	Height   int    `json:"height"`   // page height in pixels
-	PageNum  int    `json:"pageNum"`   // 1-based page number
+	Image   string `json:"image"`   // base64-encoded JPEG
+	Width   int    `json:"width"`   // page width in pixels
+	Height  int    `json:"height"`  // page height in pixels
+	PageNum int    `json:"pageNum"` // 1-based page number
 }
 
 // compileLatex is a shared helper that compiles LaTeX source to PDF.

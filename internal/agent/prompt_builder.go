@@ -483,6 +483,21 @@ func latexInfoPrompt() string {
 	return b.String()
 }
 
+// publicServingPrompt returns a section advertising the workspace's public/
+// folder: files the agent drops there are served by this server over HTTP at
+// /public/<name>, so the agent can hand the URL to the user/web UI. The dir is
+// fixed per session, so this belongs in the cacheable base.
+func publicServingPrompt(dir string) string {
+	return fmt.Sprintf(`
+## Public file hosting
+
+The server exposes a single workspace folder over HTTP at /public. Place any file you want the web UI to fetch, display, or let the user download under %s/public/ — a built site, a generated report or chart, a downloadable artifact — and it is immediately reachable at:
+
+  /public/<filename>
+
+Return that path (or a full URL made from it) when you produce a file the user may want to download or view in the browser. The folder is served deliberately-exposed: reachable on the LAN during interactive serve and through the user's tunnel in hosted worktrees, so do not put secrets in it. Writing to the folder can be done with the regular write/bash tools; there is no separate upload tool.`, dir)
+}
+
 // viewportPrompt returns a section telling the agent about the user's
 // rendering viewport so it can make responsive design decisions.
 func viewportPrompt(width, height int) string {

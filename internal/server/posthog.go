@@ -36,17 +36,17 @@ type PostHogClient struct {
 }
 
 type posthogEvent struct {
-	Event      string            `json:"event"`
-	DistinctID string            `json:"distinct_id"`
-	Properties map[string]any    `json:"properties"`
+	Event      string         `json:"event"`
+	DistinctID string         `json:"distinct_id"`
+	Properties map[string]any `json:"properties"`
 }
 
 type posthogCapture struct {
-	APIKey    string      `json:"api_key"`
-	Event     string      `json:"event"`
-	DistinctID string     `json:"distinct_id"`
+	APIKey     string         `json:"api_key"`
+	Event      string         `json:"event"`
+	DistinctID string         `json:"distinct_id"`
 	Properties map[string]any `json:"properties,omitempty"`
-	Timestamp string      `json:"timestamp"`
+	Timestamp  string         `json:"timestamp"`
 }
 
 // NewPostHogClient returns an active client that starts a background worker.

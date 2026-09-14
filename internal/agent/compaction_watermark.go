@@ -114,3 +114,42 @@ const compactionSummaryPreamble = "[Earlier steps of this turn have been compact
 // a single structured call have nothing to compact and should not be offered a
 // tool that only adds a decision to make.
 func canCompactContext(a Agent) bool { return a.HasTool("read") }
+
+// proactiveCompactionBoundary returns the working-set index at which the
+// model-facing history should resume after a proactive (size-triggered)
+// compaction, or -1 when the current turn is too short to narrow safely.
+//
+// It keeps the last keep working-set messages verbatim and treats everything
+// before the boundary as covered by the compaction summary. The boundary is
+// pulled back to the nearest assistant message so the narrowed slice starts on
+// the one front edge every provider accepts — an assistant message never
+// depends on anything before it for tool-call pairing, whereas a tool result
+// orphaned from its call is rejected. This is the same anchor the agent-driven
+// compact_context watermark uses (it points at the assistant message that
+// carried the call).
+//
+// Anchoring in working-set space rather than the summarizer's converted space
+// is what makes it safe: convertMessages expands one working-set message into
+// one OR MORE provider messages, so keeping the last keep working-set messages
+// keeps at least keep provider messages — a superset of the last keep provider
+// messages the summarizer kept verbatim. Everything the watermark then drops is
+// therefore a subset of what the summary already covers; nothing goes missing.
+func proactiveCompactionBoundary(messages []*session.MessageWithParts, turnStart, keep int) int {
+	if turnStart < 0 || keep < 1 {
+		return -1
+	}
+	b := len(messages) - keep
+	if b <= turnStart {
+		return -1
+	}
+	// Move the boundary earlier (keeping MORE recent context, never less) until
+	// it lands on an assistant message. Bounded by turnStart, and assistant
+	// messages are frequent — every step creates one — so this rarely moves far.
+	for b > turnStart && messages[b].Info.Role != session.RoleAssistant {
+		b--
+	}
+	if b <= turnStart {
+		return -1
+	}
+	return b
+}

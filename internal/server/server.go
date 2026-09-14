@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -46,7 +48,7 @@ const (
 )
 
 type Server struct {
-	port            int
+	port            atomic.Int32 // written once by Serve after bind, read cross-goroutine via Port()
 	dir             string
 	mode            ServerMode
 	db              *db.DB
@@ -118,16 +120,94 @@ type Server struct {
 	docindexMu      sync.Mutex
 	docindexRunning bool
 	indexerProgress *indexer.ProgressTracker // nil when not indexing
+
+	// opts carries the runtime toggles set at construction (see Options).
+	opts Options
+
+	// stopCh is closed by Stop() to end the Serve wait loop without a signal.
+	// Allocated in serve; Stop before Serve is a no-op by design (Serve is what
+	// wires the shutdown path). stopOnce guards a double Stop. stopMu guards the
+	// field itself: Stop and a second Serve read it cross-goroutine while serve
+	// writes it (pinned race-free by the lifecycle tests under -race).
+	stopMu   sync.Mutex
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func New(port int, dir string, mode ServerMode) *Server {
-	return &Server{port: port, dir: dir, mode: mode, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64), loopControls: make(map[session.SessionID]*agent.LoopControl)}
+	return NewWithOptions(port, dir, mode, Options{})
 }
 
-func (s *Server) Start() error {
+// Options tunes a server's runtime behavior without changing what it serves.
+// The zero value reproduces the interactive `ogcode serve` behavior.
+type Options struct {
+	// NoBrowser suppresses opening the operator's browser on start. The worker
+	// spawns one server per worktree; none of them should open a tab.
+	NoBrowser bool
+	// Loopback binds the listener to 127.0.0.1 instead of all interfaces. The
+	// worker's tunnel is the only remote path to a hosted server, so a hosted
+	// server must not also be reachable on the machine's LAN address.
+	Loopback bool
+	// OnListen, when set, is called once with the ACTUAL bound port right after
+	// the listener is established — which can differ from the requested port when
+	// that one was busy and the bind loop walked past it. The CLI uses it to
+	// record a project's port; leave nil to skip (worker-spawned servers do).
+	OnListen func(port int)
+}
+
+func NewWithOptions(port int, dir string, mode ServerMode, opts Options) *Server {
+	s := &Server{dir: dir, mode: mode, opts: opts, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64), loopControls: make(map[session.SessionID]*agent.LoopControl)}
+	s.port.Store(int32(port))
+	return s
+}
+
+// Serve runs the HTTP server until ctx is cancelled, a SIGINT/SIGTERM arrives,
+// or Stop is called — then shuts down gracefully (in-flight requests drained
+// within the 10s shutdown timeout, MCP torn down, DBs closed) and returns. The
+// signal path keeps standalone `ogcode serve` behavior unchanged; a ctx-driven
+// caller (the worker hosting one server per worktree) cancels its ctx per
+// worktree and never has signals racing across N servers. Serve must be called
+// once per Server.
+func (s *Server) Serve(ctx context.Context) error {
+	s.stopMu.Lock()
+	started := s.stopCh != nil
+	s.stopMu.Unlock()
+	if started {
+		return errors.New("ogcode server: Serve called twice")
+	}
+	return s.serve(ctx)
+}
+
+// Stop asks a Serve loop to begin graceful shutdown; Serve then returns once
+// shutdown completes. Safe to call from another goroutine; a no-op when Serve
+// has not started (or has already finished).
+func (s *Server) Stop() {
+	s.stopMu.Lock()
+	ch := s.stopCh
+	s.stopMu.Unlock()
+	if ch != nil {
+		s.stopOnce.Do(func() { close(ch) })
+	}
+}
+
+// Port reports the port the server actually bound. Meaningful only after Serve
+// has bound the listener (the caller's Serve goroutine is running); callers
+// that passed port 0 read the kernel-assigned value here to dial the tunnel.
+func (s *Server) Port() int {
+	return int(s.port.Load())
+}
+
+func (s *Server) serve(ctx context.Context) error {
 	dbPath := filepath.Join(s.dir, ".ogcode", "ogcode.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
+	}
+
+	// The workspace's public/ folder is served over HTTP at /public by every
+	// server instance (interactive, plan-mode, worker-hosted) — see routes().
+	// Create it eagerly so the route is stable even when it is still empty.
+	if err := s.ensurePublicDir(); err != nil {
+		return fmt.Errorf("create public dir: %w", err)
 	}
 
 	database, err := db.Open(dbPath)
@@ -446,13 +526,16 @@ func (s *Server) Start() error {
 	r := s.routes()
 
 	// Try ports starting from the configured port, up to 50 attempts.
+	host := ""
+	if s.opts.Loopback {
+		host = "127.0.0.1"
+	}
 	var listener net.Listener
-	tryPort := s.port
+	tryPort := int(s.port.Load())
 	for i := 0; i < 50; i++ {
-		l, err := net.Listen("tcp", fmt.Sprintf(":%d", tryPort))
+		l, err := net.Listen("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", tryPort)))
 		if err == nil {
 			listener = l
-			s.port = tryPort
 			break
 		}
 		if strings.Contains(err.Error(), "address already in use") {
@@ -463,10 +546,20 @@ func (s *Server) Start() error {
 		return fmt.Errorf("bind port: %w", err)
 	}
 	if listener == nil {
-		return fmt.Errorf("no available port found (tried %d–%d)", s.port, tryPort-1)
+		return fmt.Errorf("no available port found (tried %d–%d)", s.port.Load(), tryPort-1)
+	}
+	// Surface the ACTUAL bound port: tryPort 0 means the kernel picked one, and
+	// a caller that dials the tunnel needs the real value (Port()).
+	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); ok {
+		s.port.Store(int32(tcpAddr.Port))
+	}
+	// Report the port actually bound (post-walk) so the CLI can remember it for
+	// this project. Fired before serving begins; nil for callers that don't care.
+	if s.opts.OnListen != nil {
+		s.opts.OnListen(int(s.port.Load()))
 	}
 
-	addr := fmt.Sprintf(":%d", s.port)
+	addr := listener.Addr().String()
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      r,
@@ -475,9 +568,11 @@ func (s *Server) Start() error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	url := fmt.Sprintf("http://localhost:%d", s.port)
+	url := fmt.Sprintf("http://localhost:%d", s.port.Load())
 	slog.Info("starting ogcode server", "addr", addr, "dir", s.dir)
-	go openBrowser(url)
+	if !s.opts.NoBrowser {
+		go openBrowser(url)
+	}
 
 	// MCP servers connect lazily now that the HTTP server is listening — the
 	// UI/bus are live so an OAuth-required server's browser prompt reaches the
@@ -486,25 +581,40 @@ func (s *Server) Start() error {
 		go s.mcpConnect()
 	}
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	// signalCh owns process signals; stopCh is the programmatic Stop() path, so
+	// a ctx-driven caller (the worker hosting N servers) is never torn down by a
+	// signal meant for some other component.
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signalCh)
+	s.stopMu.Lock()
+	s.stopCh = make(chan struct{})
+	s.stopMu.Unlock()
 
 	go func() {
 		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "err", err)
-			quit <- syscall.SIGTERM
+			signalCh <- syscall.SIGTERM
 		}
 	}()
 
-	<-quit
+	s.stopMu.Lock()
+	stopCh := s.stopCh
+	s.stopMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+	case <-signalCh:
+	case <-stopCh:
+	}
 	slog.Info("shutting down server...")
 
 	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Shutdown HTTP server (closes all connections and releases port)
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Warn("server shutdown error", "err", err)
 	}
 
@@ -539,7 +649,6 @@ func (s *Server) Start() error {
 		s.posthogClient.Capture("ogcode_server_stopped", posthogDistinctID(), nil)
 		s.posthogClient.Stop()
 	}
-
 
 	// Close database
 	if s.db != nil {

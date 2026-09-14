@@ -15,6 +15,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
+	"github.com/prasenjeet-symon/ogcode/internal/portmap"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/server"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -216,8 +217,40 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 	if path := config.EnsureProjectFile(dir); path != "" {
 		slog.Info("created project config file", "path", path)
 	}
-	srv := server.New(port, dir, mode)
-	return srv.Start()
+
+	// Per-project port stability. The server walks past a busy port and reports
+	// the one it actually bound, but without memory a project's port depends on
+	// start order. So: an explicit --port wins and becomes this project's port;
+	// otherwise reuse the port the project used last; and a brand-new project is
+	// placed on a port no other project has claimed. Only the first-time case
+	// records the bound port (via OnListen) — once a project has a port, a later
+	// clash makes the server walk for this run without overwriting the remembered
+	// port, so "already running elsewhere" never reassigns the project's home.
+	startPort := port
+	var onListen func(int)
+	switch {
+	case cmd.Flags().Changed("port"):
+		if err := portmap.Save(dir, port); err != nil {
+			slog.Warn("could not record project port", "dir", dir, "err", err)
+		}
+	default:
+		if remembered, ok := portmap.Lookup(dir); ok {
+			startPort = remembered
+		} else {
+			startPort = portmap.SuggestStart(dir, port)
+			onListen = func(bound int) {
+				if err := portmap.Save(dir, bound); err != nil {
+					slog.Warn("could not record project port", "dir", dir, "err", err)
+				}
+			}
+		}
+	}
+	if startPort != port {
+		slog.Info("using this project's port", "dir", dir, "port", startPort)
+	}
+
+	srv := server.NewWithOptions(startPort, dir, mode, server.Options{OnListen: onListen})
+	return srv.Serve(context.Background())
 }
 
 func Execute() error {

@@ -1,0 +1,12 @@
+version: v2
+clean: true
+managed:
+  enabled: false
+plugins:
+  # Locally installed (go install) plugins; on PATH via $GOPATH/bin.
+  - local: protoc-gen-go
+    out: gen
+    opt: paths=source_relative
+  - local: protoc-gen-connect-go
+    out: gen
+    opt: paths=source_relative

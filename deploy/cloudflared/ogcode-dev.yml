@@ -1,0 +1,22 @@
+# Named Cloudflare tunnel for local ogcode dev server (port 9595).
+#
+# Its own file rather than ~/.cloudflared/config.yml, which is already pointed
+# at kavachqr — one config per project, so starting this one cannot silently
+# take that one down.
+#
+#   cloudflared tunnel --config deploy/cloudflared/ogcode-dev.yml run ogcode-dev
+#
+# The DNS record is created once:
+#   cloudflared tunnel route dns ogcode-dev ogcode-dev.ogcode.xyz
+#
+# SECURITY: ogcode has write/shell/file tools — a public subdomain means anyone
+# reaching it controls a shell. Cloudflare Access is configured in front of this
+# hostname so a Cloudflare login is required before traffic reaches ogcode.
+
+tunnel: 0481782a-5241-4fff-9665-276ae52dd6bb
+credentials-file: /Users/prasenjeet/.cloudflared/0481782a-5241-4fff-9665-276ae52dd6bb.json
+
+ingress:
+  - hostname: ogcode-dev.ogcode.xyz
+    service: http://localhost:9595
+  - service: http_status:404

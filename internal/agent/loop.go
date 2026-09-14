@@ -15,6 +15,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/id"
+	"github.com/prasenjeet-symon/ogcode/internal/keepawake"
 	"github.com/prasenjeet-symon/ogcode/internal/memfile"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
@@ -107,6 +108,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	if lr.MaxAutoResumes > 0 {
 		hardMax = maxSteps * (1 + lr.MaxAutoResumes)
 	}
+
+	// Keep the Mac (and its screen) awake for the duration of this turn — an
+	// active generation should never be cut off by display or idle system sleep.
+	// Reference counted, so concurrent turns (server + worker, or a nested
+	// deep_search loop) share one OS assertion released when the last turn ends.
+	// No-op off macOS and when OGCODE_NO_KEEP_AWAKE is set. The defer runs on
+	// every exit path, including panic recovery below.
+	defer keepawake.Acquire("ogcode agent turn")()
 
 	// Always notify the frontend when the loop exits, regardless of reason.
 	// Without this, any early return (DB error, stream error, panic recovery)
@@ -338,6 +347,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	messagesLoaded := false
 	var newMessageIDs []session.MessageID // created in the prior iteration, folded in next
 
+	// Reactive compaction is budgeted across the whole RUN, not per step: a
+	// turn whose kept tail plus fresh tool output overflows the window again
+	// would otherwise compact up to maxCompactions times on every step for the
+	// rest of the turn — the runaway "context auto-compacted" loop. The
+	// proactive path consumes from the same budget below.
+	compactionCount := 0
+
 	for step := 1; step <= hardMax; step++ {
 		if step == maxSteps && hardMax > maxSteps {
 			slog.Warn("agent loop exhausted its step budget; auto-extending so the turn resumes",
@@ -529,7 +545,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		} else {
 			modelMessages = convertMessages(messages, modelSupportsImages, modelID)
 		}
-		if compactionSummary != "" {
+		// Skip when this same summary is already carried this turn by the
+		// watermark's prepended message. Proactive compaction sets the watermark
+		// summary to compactionSummary itself, so appending here too would send it
+		// twice in every request. The agent-driven compact_context watermark
+		// carries a DIFFERENT summary (the agent's own), so the cross-turn
+		// compactionSummary is still appended alongside it — the equality check,
+		// not merely watermark.active(), is what distinguishes the two.
+		if compactionSummary != "" && !(watermark.active() && watermark.summary == compactionSummary) {
 			systemPrompts = append(systemPrompts, compactionSummary)
 		}
 		if prevTurnResponse != "" {
@@ -618,7 +641,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			Thinking: true,
 		}
 
-		compactionCount := 0
+		// Per-step, not per-run: the proactive check may fire on every step
+		// while the run-wide reactive budget still has room, because each step
+		// adds fresh tool output the previous compaction never saw.
+		proactiveCount := 0
 
 		// Proactive compaction: estimate the request body size and compact
 		// before sending if it exceeds a safe threshold. This prevents sending
@@ -640,11 +666,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// tool results not yet reflected in any reported count — so the check errs
 		// toward compacting early rather than overflowing.
 		requestTokens := effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
-		if requestTokens > maxRequestTokens && compactionCount == 0 {
+		if requestTokens > maxRequestTokens && proactiveCount == 0 && compactionCount < maxCompactions {
 			before := len(streamReq.Messages)
 			slog.Info("proactive compaction: request tokens exceed threshold", "session", sessionID, "estimatedTokens", requestTokens, "reportedInputTokens", lastInputTokens, "thresholdTokens", maxRequestTokens, "contextWindow", modelContextWindow, "messages", before)
 			compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
 			compactionCount++
+			proactiveCount++
 			// The reported count describes the request that was just discarded.
 			// effectiveRequestTokens takes the LARGER of estimate and reported, so
 			// leaving it set would keep sizing every remaining step of the turn
@@ -652,6 +679,23 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			lastInputTokens = 0
 			slog.Info("proactive compaction completed", "session", sessionID, "before", before, "after", len(streamReq.Messages), "newEstimatedTokens", estimateRequestTokens(streamReq))
 			requestTokens = effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
+			// Advance the in-turn watermark to the recent tail so the FOLLOWING
+			// steps resume from there plus this summary, instead of rebuilding the
+			// full (still-growing) turn history and re-tripping the threshold on
+			// every step. compactRequest only trims the request it just sent; without
+			// this the next step re-loads the whole turn from turnStartIdx and
+			// compacts again — so one long turn compacts once per step for the rest
+			// of its run, which is the runaway "context auto-compacted" loop users
+			// see. Setting the watermark here is what the agent-driven compact_context
+			// path already does; the proactive path simply never did.
+			if compactionSummary != "" {
+				keep := compactionKeepRecent(modelContextWindow)
+				if b := proactiveCompactionBoundary(messages, turnStartIdx, keep); b >= 0 {
+					if watermark.set(messages[b].Info.ID, compactionSummary, messages) {
+						slog.Info("proactive compaction watermark advanced", "session", sessionID, "step", step, "boundaryIdx", b, "keptTail", len(messages)-b)
+					}
+				}
+			}
 		}
 
 		// Ask for as much output as the model and the remaining window allow.
@@ -663,7 +707,6 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 		var streamCh <-chan provider.StreamEvent
 		var streamErr error
-		const maxCompactions = 2
 		const maxRetries = 3
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			if ctx.Err() != nil {
@@ -716,7 +759,27 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 			slog.Warn("stream chat attempt failed", "session", sessionID, "attempt", attempt, "err", streamErr)
 			// Context length exceeded: summarize old history with the LLM and retry.
+			// The budget is run-wide (maxCompactions per RunLoop), not per step, so
+			// one long turn cannot compact its way through dozens of steps.
 			if compactionCount < maxCompactions && isContextLengthError(streamErr) {
+				// Learn the model's real window from the overflow body before
+				// anything mutates state: the provider states the cap in exactly
+				// these errors ("maximum context length is 8192 tokens"), and
+				// compactRequest below replaces streamReq.Messages. The sanity
+				// check lives here rather than in the parser — only the caller
+				// knows the size of the request that just overflowed, and a
+				// "window" no bigger than a request we just sent cannot be the
+				// window (misreads the wrong number); keeping it disqualifies
+				// the parse. lastInputTokens (provider-reported, from the
+				// previous step) is the more exact prompt size when nonzero.
+				promptTokens := effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
+				if learned := provider.ParseContextWindowFromBody(errorBody(streamErr)); learned > promptTokens {
+					if lerr := session.LearnModelContextWindow(lr.Store.DB(), modelID, learned); lerr != nil {
+						slog.Warn("failed to persist learned context window", "model", modelID, "err", lerr)
+					} else {
+						slog.Info("learned model context window from overflow error", "model", modelID, "contextWindow", learned)
+					}
+				}
 				before := len(streamReq.Messages)
 				slog.Info("context length exceeded, using LLM to compact history", "session", sessionID, "messages", before)
 				compactionSummary = lr.compactRequest(ctx, p, modelID, sessionID, &streamReq, compactionSummary, modelContextWindow)
@@ -1839,9 +1902,17 @@ func (lr *LoopRunner) resolveRunModel(ctx context.Context, sess *session.Session
 	// decide to return an image (e.g. a rendered PDF page) instead of text.
 	supportsImages = lr.resolveImageSupport(ctx, p, modelID)
 	// The active model's context window (0 = unknown), used to size the
-	// proactive-compaction trigger.
+	// proactive-compaction trigger. The catalog is authoritative when it knows
+	// the model; when it is silent (Ollama locals, dynamic OpenAI-compatible
+	// endpoints), a window learned from a previous overflow error fills the gap.
 	if lr.Registry != nil {
 		contextWindow = lr.Registry.ContextWindow(modelID)
+	}
+	if contextWindow <= 0 {
+		if cap, ok, err := session.GetModelCapability(lr.Store.DB(), modelID); err == nil && ok && cap.ContextWindow > 0 {
+			contextWindow = cap.ContextWindow
+			slog.Info("using learned context window", "model", modelID, "contextWindow", contextWindow)
+		}
 	}
 	return p, modelID, supportsImages, contextWindow
 }
@@ -2973,6 +3044,16 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
 		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
+
+		// Public file hosting: the workspace's public/ folder is served over HTTP
+		// at /public. Only meaningful to agents that can drop files there, so it is
+		// gated on the same write capability and lives in the cacheable base because
+		// the dir is fixed for the session.
+		if canWriteFiles {
+			if pp := publicServingPrompt(dir); pp != "" {
+				prompt += "\n\n" + strings.TrimSpace(pp)
+			}
+		}
 	}
 
 	// LaTeX environment: a host probe, but detection is cached for the process
@@ -3149,6 +3230,19 @@ func isContextLengthError(err error) bool {
 		(strings.Contains(lower, "ollama api error 400") && strings.HasSuffix(strings.TrimSpace(lower), "400:"))
 }
 
+// errorBody returns the raw provider text an error carries, for body parsing.
+// For a structured *provider.APIError that is the HTTP response body; for any
+// other error it is the string form — the same text the string-matching
+// classification paths inspect, so a parse never sees text the classifier
+// could not have.
+func errorBody(err error) string {
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Body
+	}
+	return err.Error()
+}
+
 // retryAfterFromError returns the server-provided Retry-After hint carried by a
 // structured provider error, or 0 when none is present.
 func retryAfterFromError(err error) time.Duration {
@@ -3163,6 +3257,8 @@ func retryAfterFromError(err error) time.Duration {
 // verbatim during compaction, scaled to the model's context window: a 200k model
 // can afford far more verbatim recent context than an 8k one. An unknown window
 // keeps the historical default of 12.
+const maxCompactions = 2 // per RunLoop, shared by the proactive and reactive paths
+
 func compactionKeepRecent(contextWindow int) int {
 	const minKeep, maxKeep = 8, 40
 	if contextWindow <= 0 {
@@ -3228,6 +3324,26 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, model
 
 	oldMessages := messages[:len(messages)-keepRecent]
 	recent := messages[len(messages)-keepRecent:]
+
+	// Turn-scoped history (this loop sends only the current user turn) can hold
+	// its only user message — the turn prompt — at index 0, outside any recent
+	// tail. A kept tail that opens with an assistant/tool message is invalid
+	// request structure; without the prompt, compaction used to fall through to
+	// the mechanical truncate — which no-ops on the very same condition — so the
+	// request was never trimmed while "loop.compacted" was still published and
+	// the retry burned out against a request that could not shrink. Keep the
+	// turn prompt verbatim ahead of the tail instead.
+	if len(recent) > 0 && recent[0].Role != "user" && len(messages) > 0 && messages[0].Role == "user" {
+		var lead string
+		if messages[0].Content != nil {
+			json.Unmarshal(messages[0].Content, &lead)
+		}
+		// The watermark's synthetic summary message stands for earlier steps and
+		// is already carried by the system addendum; don't duplicate it here.
+		if !strings.HasPrefix(lead, compactionSummaryPreamble) {
+			recent = append([]provider.ModelMessage{messages[0]}, recent...)
+		}
+	}
 
 	// Ensure recent starts with a user message (required for valid conversation structure)
 	recent = ensureStartsWithUser(recent)

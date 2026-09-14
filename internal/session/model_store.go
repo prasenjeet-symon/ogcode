@@ -68,12 +68,12 @@ func DeleteModelPreference(database *db.DB, id string) error {
 // The second return value is false when no record exists (not yet probed).
 func GetModelCapability(database *db.DB, modelID string) (*ModelCapability, bool, error) {
 	row := database.QueryRow(
-		`SELECT model_id, supports_images, probed_at FROM model_capability WHERE model_id = ?`,
+		`SELECT model_id, supports_images, probed_at, context_window FROM model_capability WHERE model_id = ?`,
 		modelID,
 	)
 	var c ModelCapability
 	var supportsImages int
-	if err := row.Scan(&c.ModelID, &supportsImages, &c.ProbedAt); err != nil {
+	if err := row.Scan(&c.ModelID, &supportsImages, &c.ProbedAt, &c.ContextWindow); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, false, nil
 		}
@@ -84,17 +84,53 @@ func GetModelCapability(database *db.DB, modelID string) (*ModelCapability, bool
 }
 
 // SetModelCapability upserts a probed capability record for a model.
+//
+// The upsert MERGES rather than replaces: supports_images and probed_at are
+// taken from the incoming record (an image probe is authoritative each time it
+// runs), but a learned context window survives a write that carries none —
+// otherwise the image probe (which always writes ContextWindow 0) would erase
+// a window the loop learned from an overflow error. Only an explicit positive
+// ContextWindow in the incoming record overwrites the stored one.
 func SetModelCapability(database *db.DB, c *ModelCapability) error {
 	supportsImages := 0
 	if c.SupportsImages {
 		supportsImages = 1
 	}
 	_, err := database.Exec(
-		`INSERT OR REPLACE INTO model_capability (model_id, supports_images, probed_at)
-		 VALUES (?, ?, ?)`,
-		c.ModelID, supportsImages, c.ProbedAt,
+		`INSERT INTO model_capability (model_id, supports_images, probed_at, context_window)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(model_id) DO UPDATE SET
+		   supports_images = excluded.supports_images,
+		   probed_at = excluded.probed_at,
+		   context_window = CASE WHEN excluded.context_window > 0
+		                          THEN excluded.context_window
+		                          ELSE model_capability.context_window END`,
+		c.ModelID, supportsImages, c.ProbedAt, c.ContextWindow,
 	)
 	return err
+}
+
+// LearnModelContextWindow records a context window discovered from a
+// context-overflow error body, without disturbing whatever else is known about
+// the model. Windows ≤ 0 (nothing parsed) are ignored. When no capability
+// record exists yet, one is created carrying only the window — the image
+// fields stay at their defaults until a probe writes them.
+func LearnModelContextWindow(database *db.DB, modelID string, window int) error {
+	if window <= 0 {
+		return nil
+	}
+	if cap, ok, err := GetModelCapability(database, modelID); err != nil {
+		return err
+	} else if ok {
+		cap.ContextWindow = window
+		cap.ProbedAt = Now()
+		return SetModelCapability(database, cap)
+	}
+	return SetModelCapability(database, &ModelCapability{
+		ModelID:       modelID,
+		ContextWindow: window,
+		ProbedAt:      Now(),
+	})
 }
 
 // DeleteModelCapability clears a model's cached capability so it is re-probed on

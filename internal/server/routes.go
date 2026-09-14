@@ -157,6 +157,10 @@ func (s *Server) routes() http.Handler {
 		s.registerLatexRoutes(r)
 	})
 
+	// Serve the workspace's public/ directory. Registered before the SPA
+	// fallback so /public paths reach real files rather than index.html.
+	s.servePublic(r)
+
 	// Serve embedded web UI (or placeholder for dev)
 	s.serveStatic(r)
 

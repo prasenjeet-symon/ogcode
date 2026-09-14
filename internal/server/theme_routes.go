@@ -22,8 +22,8 @@ type Theme struct {
 	AccentSoft   string `json:"accentSoft"`   // --accent-soft (rgba)
 	AccentRing   string `json:"accentRing"`   // --accent-ring (rgba)
 	OnPrimary    string `json:"onPrimary"`    // text color on accent bg
-	Glow         string `json:"glow"`          // --glow (rgba, for background accents)
-	Tint         string `json:"tint"`          // --tint (rgba, ~5% for sidebar/header)
+	Glow         string `json:"glow"`         // --glow (rgba, for background accents)
+	Tint         string `json:"tint"`         // --tint (rgba, ~5% for sidebar/header)
 }
 
 func parseHex(s string) (r, g, b uint8, err error) {
