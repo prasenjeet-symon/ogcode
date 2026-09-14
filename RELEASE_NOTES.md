@@ -1,3 +1,95 @@
+# Release Notes — v0.36.0
+
+## Major: Remote Agent Workers & Control Plane
+
+### Remote agent workers
+
+`ogcode worker` turns a machine into an agent worker that serves workspaces from
+a control plane over ConnectRPC/HTTP2:
+
+- Workspaces are auto-discovered via `git worktree list`; each worktree hosts a
+  full standalone ogcode server **in-process** (loopback-only, context-driven,
+  no browser).
+- The control plane mints global session ids, routes sessions to worktrees,
+  and reverse-proxies each worktree's UI over multiplexed tunnels keyed
+  `<workerID>-<worktreeLabel>` — the same web UI, reachable through the tunnel.
+- Robust connect semantics: capped-backoff reconnect, re-pair fallback, and a
+  persistent worker token (`~/.ogcode/worker-cred`, `~/.ogcode/worker-id`), so
+  restarts resume rather than re-register.
+- Pairing is secret-based, with the secret passed via file or environment only —
+  never on the command line.
+- Git bootstrap: workspaces absent on the worker are cloned from origin
+  automatically before serving.
+- Permission gating and approval travel over RPC; sessions interrupted by a
+  worker restart are recovered on boot.
+
+### Control plane (standalone daemon)
+
+The control plane ships as a separate binary, `ogcode-control-plane`
+(`controlplane/` module):
+
+- Per-employee accounts (bcrypt + HMAC cookie sessions), operator console at
+  the apex listing workers and their workspaces.
+- **Live session monitor** — `/sessions/<id>` page with an SSE event feed,
+  real-time status pill, and the start-session banner linking straight to it.
+- **Multi-user repo assignment** — `EnsureRepo`/`EnsureUserWorktree` placement,
+  worktree-per-user on `user/<name>` branches, auto-clone on the worker with
+  the most free space, per-user workspace allowlists, and a console users
+  page. (Repo lifecycle — merge back / deprovision — is still pending.)
+
+### Public file hosting
+
+Every server now auto-creates `<workspace>/public/` and serves it at
+`/public` with `Last-Modified`/`Range`/304 revalidation and `HEAD` support.
+Agents are told to drop downloadable artifacts there and return
+`/public/<filename>` URLs, so files a build or report produce are directly
+fetchable by the browser without an API round-trip.
+
+## Minor: Reliability & UX
+
+### Keep-awake
+
+A reference-counted macOS display-sleep assertion is held for the duration of
+each agent turn, so the screen and system stay awake while a generation is
+running. No-op on other platforms or when `OGCODE_NO_KEEP_AWAKE` is set.
+
+### Port memory
+
+`~/.ogcode/ports.json` remembers the port each project's server used last.
+Explicit `--port` always wins and is recorded; known projects reuse their
+remembered port; new projects get a suggested unclaimed port, with the
+actually-bound port recorded at listen time.
+
+### Runaway-compaction fixes
+
+- Compaction is now budgeted **per run** (max 2 per RunLoop, shared across the
+  proactive and reactive paths) — previously the budget reset every step,
+  letting a stuck conversation compact over and over.
+- The proactive compaction watermark advances with the kept slice anchored on
+  an assistant message, so a narrowed history never orphans tool results.
+- `llmCompact` keeps the turn prompt verbatim ahead of the tail, fixing silent
+  no-op compactions on turn-scoped history that burned retries without
+  shrinking the request.
+
+### Server lifecycle
+
+`Server.Serve(ctx)/Stop/Port` and `Options{NoBrowser, Loopback, OnListen}`
+extracted from `Start` so hosted servers (worker-hosted worktrees) are
+context-driven and loopback-only. Interactive `ogcode serve` behavior is
+unchanged.
+
+### Host sessions
+
+Sessions started from the console are recorded as host sessions and resumable
+from the local machine that started them.
+
+### Deploy
+
+`deploy/cloudflared/ogcode-dev.yml` — named tunnel config for the local dev
+server (`ogcode-dev.ogcode.xyz`).
+
+---
+
 # Release Notes — v0.35.0
 
 ## Minor: Learned Context Windows
