@@ -1,3 +1,17 @@
+# Release Notes — v0.36.1
+
+## Patch: Docker image build fix
+
+The v0.36.0 Docker image never published: the main module's new
+`replace ... => ./controlplane` directive made `go mod download` (which runs
+after copying only the root `go.mod`/`go.sum`) fail — the replaced module's
+`go.mod` wasn't in the layer yet. The Dockerfile now copies
+`controlplane/go.mod` and `go.sum` ahead of `go mod download`. GitHub binaries
+were unaffected; this release exists to publish the Docker image
+(`ghcr.io/prasenjeet-symon/ogcode:latest` and `0.36.x` tags).
+
+---
+
 # Release Notes — v0.36.0
 
 ## Major: Remote Agent Workers & Control Plane

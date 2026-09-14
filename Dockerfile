@@ -15,6 +15,9 @@ FROM golang:1.26-alpine AS go-builder
 RUN apk add --no-cache git gcc musl-dev
 WORKDIR /app
 COPY go.mod go.sum ./
+# The main module replaces ogcode-control-plane with ./controlplane, so its
+# go.mod/go.sum must be present before `go mod download` resolves the graph.
+COPY controlplane/go.mod controlplane/go.sum ./controlplane/
 RUN go mod download
 COPY . ./
 COPY --from=web-builder /app/web/dist /app/web/dist
