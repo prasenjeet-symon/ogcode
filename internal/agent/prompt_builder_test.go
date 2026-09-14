@@ -464,6 +464,35 @@ func TestBuildAgent_SystemPrompt_ContainsSharedSections(t *testing.T) {
 	}
 }
 
+// TestBuildAgent_SystemPrompt_ContainsPublicServing verifies writing agents are
+// told about the workspace public/ folder served over HTTP at /public.
+func TestBuildAgent_SystemPrompt_ContainsPublicServing(t *testing.T) {
+	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", "anthropic")
+	if !strings.Contains(p, "Public file hosting") {
+		t.Error("BuildAgent prompt should include the public file hosting section")
+	}
+	if !strings.Contains(p, "/public/<filename>") {
+		t.Error("BuildAgent prompt should name the /public/<filename> URL")
+	}
+	if !strings.Contains(p, "/tmp/testproj/public") {
+		t.Error("BuildAgent prompt should point at the workspace public/ dir")
+	}
+	// A write-capable agent must be told it can simply write into the folder.
+	if !strings.Contains(p, "regular write") {
+		t.Error("BuildAgent prompt should say files go in via the regular write tools")
+	}
+}
+
+// TestReadOnlyAgent_SystemPrompt_OmitsPublicServing pins that the section is
+// gated on writing ability: a read-only agent (no write/edit) must never be
+// told about a /public hosting capability it cannot use.
+func TestReadOnlyAgent_SystemPrompt_OmitsPublicServing(t *testing.T) {
+	p := staticSystemPrompt(NoteAgent, "/tmp/testproj", false, "", "", "")
+	if strings.Contains(p, "Public file hosting") {
+		t.Error("read-only agent must not be offered the public file hosting section")
+	}
+}
+
 func TestBreakdownAgent_SystemPrompt_ContainsNotes(t *testing.T) {
 	// Verify BreakdownAgent mentions project notes and a per-task verification step.
 	if !strings.Contains(BreakdownAgent.System, "Read project notes") {

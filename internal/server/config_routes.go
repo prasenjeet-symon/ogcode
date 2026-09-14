@@ -153,7 +153,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 func (s *Server) configPayload() map[string]any {
 	return map[string]any{
 		"directory":     s.dir,
-		"port":          s.port,
+		"port":          s.port.Load(),
 		"searchEnabled": s.searchBackend != nil,
 		"searchRunning": s.searchBackend != nil,
 	}

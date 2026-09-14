@@ -82,5 +82,6 @@ func (s *Server) serveStatic(r chiRouter) {
 
 type chiRouter interface {
 	Get(pattern string, handler http.HandlerFunc)
+	Head(pattern string, handler http.HandlerFunc)
 	NotFound(handler http.HandlerFunc)
 }

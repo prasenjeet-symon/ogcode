@@ -1,0 +1,337 @@
+syntax = "proto3";
+
+package controlplane.v1;
+
+option go_package = "github.com/prasenjeet-symon/ogcode-control-plane/gen/controlplane/v1;controlplanev1";
+
+// ControlPlaneService is the master (control-plane) API. The WORKER is always
+// the ConnectRPC *client*: it dials the master, authenticates, and opens a
+// single long-lived bidi stream. This inversion is deliberate — workers live on
+// laptops/servers behind NAT and cannot accept inbound connections, so the
+// master can never make a unary call *to* a worker. Every master->worker
+// command therefore travels down the worker-opened WorkerStream, and every
+// worker->master event/result travels back up the same stream.
+service ControlPlaneService {
+  // Register authenticates a worker with the shared pairing secret and returns a
+  // worker id + short-lived worker token. Called once at boot, before the stream.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Heartbeat refreshes liveness and rotates the worker token as it nears
+  // expiry. A missed-heartbeat timeout marks the worker dead and fails its
+  // routed sessions. Unary, worker->master.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // WorkerStream is the one bidi control channel per worker, opened by the
+  // worker right after Register. The worker's FIRST frame MUST be Hello (it
+  // carries the worker token so the master can bind the stream to the
+  // registered worker). Thereafter:
+  //   master->worker: MasterToWorker commands (start/stop/approve/etc.)
+  //   worker->master: WorkerToMaster command results + relayed session bus
+  //                   events + resource frames.
+  // All sessions a worker hosts are multiplexed over this single stream, keyed
+  // by session_id.
+  rpc WorkerStream(stream WorkerToMaster) returns (stream MasterToWorker);
+
+  // Tunnel is a raw, ordered byte pipe the worker opens so the master can reach
+  // the worker's LOCAL ogcode web UI (which listens only on the worker's
+  // loopback). The worker authenticates it with a "worker-token" request
+  // header. Both sides wrap the stream as a net.Conn and run a yamux session
+  // over it (worker = yamux server, master = yamux client): the master opens one
+  // yamux stream per incoming browser connection and reverse-proxies HTTP over
+  // it; the worker splices each accepted stream to its local ogcode server.
+  // This is what makes the drill-down "open a worker's real UI in the browser"
+  // work without the worker exposing any port.
+  rpc Tunnel(stream TunnelChunk) returns (stream TunnelChunk);
+}
+
+// TunnelChunk carries an opaque slice of the multiplexed byte stream. It has no
+// application meaning on its own — it is the transport yamux rides on.
+message TunnelChunk {
+  bytes data = 1;
+  // Route label identifying which hosted worktree server this tunnel serves.
+  // The first frame on a stream carries the worker token in data and, for
+  // per-worktree tunnels, a route label here; the master keys the tunnel under
+  // "<worker_id>-<route>" (hostLabel splits on the first hyphen). Empty route
+  // keys the tunnel under the bare worker id — the legacy single-server form.
+  string route = 2;
+}
+
+message RegisterRequest {
+  // Shared pairing secret, compared in constant time on the master. Replaced by
+  // the returned worker token for all subsequent calls.
+  string pairing_secret = 1;
+  // Human-friendly name for the worker (hostname by default), shown in the panel.
+  string worker_name = 2;
+  // Stable worker id the worker persists across restarts. When present and
+  // well-formed, the master adopts it verbatim so the worker's identity (and
+  // its panel subdomain) survives reconnects; when empty, the master mints a
+  // fresh id. Must be DNS-safe (lowercase alphanumeric + hyphens) since it is
+  // used as a subdomain label.
+  string worker_id = 5;
+  // Workspaces the worker is willing to host sessions in (absolute paths).
+  // May be empty; the master can later ListWorkspaces over the stream.
+  repeated Workspace workspaces = 3;
+  // Free-form capability flags for forward compatibility (e.g. "git", "docker").
+  repeated string capabilities = 4;
+}
+
+message RegisterResponse {
+  string worker_id = 1;
+  string worker_token = 2;
+  // Unix seconds at which worker_token expires; refresh via Heartbeat before then.
+  int64 token_expires_unix = 3;
+}
+
+message HeartbeatRequest {
+  string worker_token = 1;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+  // Non-empty when the master rotated the token; the worker must adopt it.
+  string worker_token = 2;
+  int64 token_expires_unix = 3;
+}
+
+message Workspace {
+  // Absolute path on the worker machine.
+  string path = 1;
+  // Display name (usually the last path segment or repo name).
+  string name = 2;
+  // Current git branch, if the workspace is a git worktree ("" otherwise).
+  string branch = 3;
+  // True when path exists on the worker; false means StartAgent must bootstrap.
+  bool present = 4;
+}
+
+// ---- Stream envelopes -------------------------------------------------------
+
+// MasterToWorker is a command pushed down the stream by the master. request_id
+// correlates it with the WorkerToMaster.CommandResult the worker sends back.
+message MasterToWorker {
+  string request_id = 1;
+  oneof command {
+    StartAgent start_agent = 2;
+    StopAgent stop_agent = 3;
+    AbortSession abort_session = 4;
+    Guidance guidance = 5;
+    ApproveTool approve_tool = 6;
+    RejectTool reject_tool = 7;
+    ListWorkspaces list_workspaces = 8;
+    Ping ping = 9;
+    // Multi-user repos: provision (clone + user worktree) eagerly at
+    // assignment time; the session-time ensure calls are an idempotent backstop.
+    AddUserWorktree add_user_worktree = 10;
+    // Multi-user repos: report the repos this worker manages (clone once per
+    // repo; user worktrees hang off the clone).
+    ListRepos list_repos = 11;
+    // Multi-user repos: report free bytes on the clone/workspace roots so the
+    // master can pick a worker for a new repo.
+    Stats stats = 12;
+    // Multi-user repos: clone a repository now (EnsureRepo) without
+    // provisioning any user worktree — the Repositories page's add flow.
+    CloneRepo clone_repo = 13;
+    // Multi-user repos lifecycle: remove one user's worktree off the shared
+    // clone (their branch is KEPT by default — never destroy work).
+    RemoveUserWorktree remove_user_worktree = 14;
+    // Multi-user repos lifecycle: merge a user's branch back into the repo's
+    // base branch (the operator has already reviewed the work).
+    MergeUserBranch merge_user_branch = 15;
+    // Multi-user repos lifecycle: retire a repo from this worker — remove any
+    // remaining user worktrees and, optionally, the clone itself.
+    DeprovisionRepo deprovision_repo = 16;
+  }
+}
+
+// WorkerToMaster is anything the worker sends up: the initial Hello, replies to
+// commands, and the continuous relay of session events / resource frames.
+message WorkerToMaster {
+  oneof message {
+    Hello hello = 1;
+    CommandResult command_result = 2;
+    SessionEvent session_event = 3;
+    ResourceFrame resource_frame = 4;
+    Pong pong = 5;
+  }
+}
+
+// Hello MUST be the first frame the worker sends on WorkerStream.
+message Hello {
+  string worker_token = 1;
+}
+
+message StartAgent {
+  // Global session id, minted by the master and used everywhere (panel routes,
+  // worker session maps, the worker's own DB). No worker-local alias.
+  string session_id = 1;
+  // Workspace path on the worker to host the session in. Legacy targeting:
+  // an absolute path the worker advertised. When repo_url + user_name are set
+  // (logical targeting) the worker derives the workspace from the user's
+  // worktree and this field is ignored.
+  string workspace = 2;
+  // Agent name (as ogcode understands it); empty means the default agent.
+  string agent_name = 3;
+  // Initial user prompt.
+  string prompt = 4;
+  // Optional git ref to bootstrap (clone/checkout) when the workspace is absent.
+  string ref = 5;
+  int32 viewport_width = 6;
+  int32 viewport_height = 7;
+  // Logical targeting (multi-user repos): the master sends the (repo_url,
+  // user_name) pair — never an absolute path — and the worker resolves it to
+  // the user's worktree off the single clone (clone-once, worktree-per-user).
+  string repo_url = 8;
+  string user_name = 9;
+}
+
+message StopAgent {
+  string session_id = 1;
+}
+
+message AbortSession {
+  string session_id = 1;
+}
+
+message Guidance {
+  string session_id = 1;
+  string text = 2;
+}
+
+message ApproveTool {
+  string session_id = 1;
+  string permission_id = 2;
+}
+
+message RejectTool {
+  string session_id = 1;
+  string permission_id = 2;
+  string reason = 3;
+}
+
+message ListWorkspaces {}
+
+// AddUserWorktree provisions a user's worktree on the worker: clone the repo
+// once (EnsureRepo) and create branch user/<user_name> checked out at
+// <clone>/.ogcode/worktrees/user/<user_name> (EnsureUserWorktree). Sent
+// eagerly at assignment time so the worktree exists before the first session.
+message AddUserWorktree {
+  string repo_url = 1;
+  string user_name = 2;
+  // Branch to cut user/<user_name> from. Empty means the repo's default
+  // branch (the worker's origin/HEAD resolution); otherwise it must name a
+  // branch the clone can see (as written, or as origin/<name>).
+  string base_branch = 3;
+}
+
+// ListRepos asks the worker for the repos it manages (one clone per repo).
+message ListRepos {}
+
+// Stats reports free disk space so the master can pick a worker for a new
+// repo clone.
+message Stats {}
+
+// CloneRepo asks the worker to clone a repository now (EnsureRepo) without
+// provisioning any user worktree. The Repositories page sends it when an
+// operator registers a repo, so the clone is warm before the first user is
+// assigned. Idempotent: an existing usable clone is reused, never re-cloned.
+message CloneRepo {
+  string repo_url = 1;
+}
+
+// RemoveUserWorktree deletes one user's worktree directory off the shared
+// clone. The user's branch is preserved by default (keep_branch) so work is
+// never destroyed; ok=false when a session is still hosted in the worktree.
+message RemoveUserWorktree {
+  string repo_url = 1;
+  string user_name = 2;
+  // Always true from the master today: worktree removal keeps the branch.
+  bool keep_branch = 3;
+}
+
+// MergeUserBranch merges user/<user_name> back into the repo's base branch
+// using a temporary worktree (never disturbing checked-out worktrees), then
+// removes the temp worktree. On ok=true, summary carries what happened
+// ("merged", "already merged", or "pushed" after pushing to origin).
+message MergeUserBranch {
+  string repo_url = 1;
+  string user_name = 2;
+  // Branch to merge INTO. Empty means the repo's default branch.
+  string base_branch = 3;
+  // When true, also push the base branch to origin (requires a pushable
+  // remote). A failed push does not fail the merge.
+  bool push = 4;
+}
+
+// DeprovisionRepo retires a managed repo on the worker: every remaining user
+// worktree is removed (branches kept), and when remove_clone is true the
+// clone directory itself is deleted too. Sessions still hosted in any of
+// those directories make the command fail without removing anything.
+message DeprovisionRepo {
+  string repo_url = 1;
+  // Also delete the single clone (not just the user worktrees).
+  bool remove_clone = 2;
+}
+
+// RepoInfo describes one managed repo clone.
+message RepoInfo {
+  // Logical repo name (e.g. "shop").
+  string name = 1;
+  // Clone URL.
+  string url = 2;
+  // Worker holding the single clone.
+  string worker_id = 3;
+}
+
+// User is one multi-user assignment (which repo a user works on).
+message User {
+  string id = 1;
+  string name = 2;
+  string repo_name = 3;
+}
+
+// CommandResult answers exactly one MasterToWorker (matched by request_id).
+message CommandResult {
+  string request_id = 1;
+  bool ok = 2;
+  // Set when ok=false. For an absent workspace this carries the git-clone hint.
+  string error = 3;
+  // Populated only for a ListWorkspaces command.
+  repeated Workspace workspaces = 4;
+  // Populated only for a ListRepos command (multi-user repos).
+  repeated RepoInfo repos = 5;
+  // Populated only for a Stats command: free bytes on the clone/workspace roots.
+  int64 free_bytes = 6;
+  // Populated only for a MergeUserBranch command: short outcome text
+  // ("merged", "already merged", "merged+pushed").
+  string summary = 7;
+}
+
+// SessionEvent relays one ogcode bus event for a hosted session. The worker's
+// original bus seq is intentionally NOT carried: the master re-publishes onto
+// its own bus, which re-stamps a fresh master-global seq (one numbering must
+// cover the mixed master-local + relayed stream, or the panel's gap-resync
+// would fire on every event).
+message SessionEvent {
+  string session_id = 1;
+  // The ogcode bus event type (e.g. "message.part.delta").
+  string type = 2;
+  // The event's JSON "properties" payload, passed through verbatim.
+  bytes properties = 3;
+}
+
+// ResourceFrame carries a resource.Sampler snapshot for a hosted session. It is
+// a CONTROL frame: the master forwards it to the panel's SSE stream WITHOUT
+// publishing onto the bus, so it never consumes a seq (mirrors ogcode's
+// event_routes.go resource-frame contract).
+message ResourceFrame {
+  string session_id = 1;
+  bytes properties = 2;
+}
+
+message Ping {
+  int64 nonce = 1;
+}
+
+message Pong {
+  int64 nonce = 1;
+}

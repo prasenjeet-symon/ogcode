@@ -1,0 +1,16 @@
+{
+  "master": {
+    "listen": ":8443",
+    "pairingSecret": "change-me-to-a-long-random-string",
+    "operatorPassword": "change-me-operator-password",
+    "sessionTtlSeconds": 43200,
+    "cookieDomain": ".panel.example",
+    "tokenTtlSeconds": 900,
+    "workerTimeoutSeconds": 45,
+    "dbPath": "/var/lib/ogcode-control-plane/controlplane.db",
+    "tls": {
+      "cert": "/etc/ogcode-control-plane/tls/cert.pem",
+      "key": "/etc/ogcode-control-plane/tls/key.pem"
+    }
+  }
+}

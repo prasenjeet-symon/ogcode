@@ -1,0 +1,18 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # WorkerStream is a multiplexed bidi channel; WorkerToMaster / MasterToWorker
+    # name the direction of travel, which reads far better than the generic
+    # WorkerStreamRequest / WorkerStreamResponse the standard rule wants.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    # Tunnel is a bidi byte transport: the same opaque chunk type flows in both
+    # directions — that is the point of a transport; same reasoning as above.
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use:
+    - FILE

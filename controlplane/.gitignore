@@ -1,0 +1,21 @@
+# Binaries
+/bin/
+/ogcode-control-plane
+*.exe
+*.test
+*.out
+
+# Local config & certs (never commit secrets)
+control-plane.json
+*.pem
+*.key
+*.crt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Stray ogcode runtime artifacts (this is not an ogcode project)
+ogcode.json
+.ogcode/
