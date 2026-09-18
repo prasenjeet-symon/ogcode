@@ -113,19 +113,46 @@ export const DocIndexProvider: ParentComponent = (props) => {
   // Poll for progress while building
   let progressTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Consecutive one-second polls reporting "not running" before the build is
+  // treated as over. Covers the gap between starting a build and the server
+  // reporting it.
+  const idleTicksBeforeDone = 5;
+
+  // Ticks seen with the build not running, since the last one that was. Used to
+  // decide when "not running" means finished rather than not started yet.
+  let idleTicks = 0;
+
   function startProgressPolling() {
     stopProgressPolling();
+    idleTicks = 0;
     progressTimer = setInterval(async () => {
       try {
         const status = await getDocIndexBuildStatus();
         if (status.running) {
+          idleTicks = 0;
           setProgress({
             total: status.total ?? 0,
             completed: status.completed ?? 0,
             failed: status.failed ?? 0,
             percent: status.percent ?? 0,
           });
+          return;
         }
+        // Not running. This poller is the fallback for a missed SSE event, so it
+        // cannot rely on docindex.built to stop it — that is the very thing it
+        // exists to cover for. Left to itself it polled once a second forever
+        // and left building() stuck true, showing a build that had finished.
+        //
+        // A few such ticks are tolerated first: the poll starts before the
+        // server has registered the build, so the opening seconds legitimately
+        // report not-running and stopping there would cancel the UI for a build
+        // that is about to begin.
+        idleTicks++;
+        if (idleTicks < idleTicksBeforeDone) return;
+        setBuilding(false);
+        setProgress(null);
+        stopProgressPolling();
+        refresh();
       } catch {
         // ignore polling errors
       }

@@ -248,7 +248,9 @@ func (s *Server) handleAbortSession(w http.ResponseWriter, r *http.Request) {
 // appended to the user's turn message content (not the system prompt) — the
 // model sees it as additional user input within the current turn. The guidance
 // accumulates across iterations so the model continuously sees all guidance
-// sent during this loop run. It is never persisted to the message DB.
+// sent during this loop run. What the model receives is unchanged by the
+// transcript record below: that row is display-only and convertMessages skips
+// it, so the guidance still reaches the model exactly once, via this turn.
 // Optionally cancels the currently-running tool call so the loop can act on
 // the new guidance immediately instead of waiting for the tool to finish.
 func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +289,13 @@ func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
 	// visible before any cancellation can propagate.
 	if strings.TrimSpace(input.Content) != "" {
 		lc.PushGuidance(input.Content)
+		// Record it in the transcript as well. The loop consumes guidance from
+		// the side-channel above and never writes it down, so without this the
+		// user watches their own message vanish: the composer clears, a badge
+		// flashes, and the words they typed appear nowhere in the conversation.
+		// The record is display-only — convertMessages skips it, so what the
+		// model receives is unchanged.
+		s.recordGuidanceMessage(sessionID, input.Content)
 	}
 
 	// Now cancel the in-flight work so the loop can proceed to the next
@@ -310,6 +319,46 @@ func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// recordGuidanceMessage writes mid-loop guidance into the transcript as a
+// display-only user message, so the user can see what they sent.
+//
+// Failures are logged and swallowed: the guidance itself has already been
+// accepted by the running loop at this point, and failing the request over a
+// transcript row would tell the user their steering did not land when it did.
+func (s *Server) recordGuidanceMessage(sessionID session.SessionID, content string) {
+	msg := &session.MessageInfo{
+		ID:          session.NewMessageID(),
+		SessionID:   sessionID,
+		Role:        session.RoleUser,
+		DisplayOnly: true,
+		CreatedAt:   session.Now(),
+	}
+	if err := s.store.CreateMessage(msg); err != nil {
+		slog.Warn("guidance: could not record transcript message", "session", sessionID, "err", err)
+		return
+	}
+	textData, err := json.Marshal(session.TextPartData{Text: content})
+	if err != nil {
+		slog.Warn("guidance: could not encode transcript text", "session", sessionID, "err", err)
+		return
+	}
+	part := &session.Part{
+		ID:        session.NewPartID(),
+		MessageID: msg.ID,
+		SessionID: sessionID,
+		Type:      session.PartText,
+		Data:      textData,
+		CreatedAt: session.Now(),
+		UpdatedAt: session.Now(),
+	}
+	if err := s.store.CreatePart(part); err != nil {
+		slog.Warn("guidance: could not record transcript text", "session", sessionID, "err", err)
+		return
+	}
+	// Tell the clients, so the message appears without waiting for a poll.
+	s.bus.Publish("message.updated", msg)
 }
 
 func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,5 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
-import { createSignal, createEffect, on, onMount, onCleanup } from 'solid-js';
+import { createSignal, createMemo, createEffect, on, onMount, onCleanup, batch } from 'solid-js';
 import {
   type Session,
   type MessageWithParts,
@@ -122,31 +122,60 @@ export const SessionProvider: ParentComponent = (props) => {
   const [activeSession, setActiveSession] = createSignal<Session | null>(null);
   const [sessionMissing, setSessionMissing] = createSignal(false);
   const [messagesRaw, setMessagesRaw] = createSignal<MessageWithParts[]>([]);
-  const messages = messagesRaw;
-  // Version counter: incremented on each session selection.
-  // SSE handler ignores any event whose version doesn't match — this prevents
-  // a race where an SSE event from a previous selection arrives after the new
-  // session's API response overwrites the value.
+
+  // Messages the user has sent but the server has not yet echoed back, held
+  // apart from the server's list rather than inside it.
+  //
+  // They cannot live in messagesRaw: every merge below is driven by what the
+  // server returned, so anything the server does not know about is dropped. A
+  // bubble sent while the model is mid-response is exactly that — the id is
+  // client-side only — and the SSE refresh that fires on the model's next token
+  // would delete it from under the user. Keeping them separate makes them
+  // structurally immune to that instead of relying on the merge to spare them.
+  const [optimistic, setOptimistic] = createSignal<MessageWithParts[]>([]);
+
+  // What the UI renders: the server's messages, then any optimistic bubble the
+  // server has not confirmed yet. Ids are checked in case a fetch does return
+  // one of them, so a confirmed message is never shown twice.
+  const messages = createMemo<MessageWithParts[]>(() => {
+    const pending = optimistic();
+    const confirmed = messagesRaw();
+    if (pending.length === 0) return confirmed;
+    const sessionId = activeSession()?.id;
+    const known = new Set(confirmed.map((m) => m.info.id));
+    return [
+      ...confirmed,
+      // Scoped to the session on screen as well as to what the server has not
+      // confirmed. The switch paths clear this list, but filtering here is what
+      // makes a stray bubble impossible rather than merely unlikely — it can
+      // never surface in a conversation it was not typed into.
+      ...pending.filter((m) => !known.has(m.info.id) && (!sessionId || m.info.sessionId === sessionId)),
+    ];
+  });
 
   // Merge incoming messages with the existing array, keeping object references
   // for unchanged entries so SolidJS's <For> doesn't re-render the whole list
-  // on every poll tick. Never merge across sessions — always verify we're updating
-  // the same session before merging.
-  // Uses functional updater to avoid stale reads when polling and SSE update concurrently.
+  // on every poll tick.
+  //
+  // A write for a session other than the one on screen is DISCARDED. Several
+  // callers fetch by a session id captured before an await, so a slow response
+  // can arrive after the user has moved on; applying it would paint the old
+  // conversation into the new session's view. Returning prev drops it, and the
+  // destination's own next refresh is already on its way.
   const mergeMessages = (prev: MessageWithParts[], incoming: MessageWithParts[]): MessageWithParts[] => {
     const currentSessionId = activeSession()?.id;
 
-    // Safety check: if session changed or no messages yet, don't merge — just use incoming
-    if (!prev || prev.length === 0 || !currentSessionId) {
-      return incoming.map((m) => ({ info: m.info, parts: m.parts || [] }));
+    if (currentSessionId) {
+      for (const msg of incoming) {
+        if (msg.info.sessionId !== currentSessionId) return prev;
+      }
     }
 
-    // Verify all messages are for the current session before merging
-    for (const msg of incoming) {
-      if (msg.info.sessionId !== currentSessionId) {
-        // Message is for a different session — don't merge, return as-is
-        return incoming.map((m) => ({ info: m.info, parts: m.parts || [] }));
-      }
+    // Nothing to merge against — take the incoming list as the new state. This
+    // is the path after a session switch clears the list, which is why the
+    // cross-session check above has to come first rather than after it.
+    if (!prev || prev.length === 0) {
+      return incoming.map((m) => ({ info: m.info, parts: m.parts || [] }));
     }
 
     // Safe to merge now — all messages are for current session
@@ -423,6 +452,7 @@ export const SessionProvider: ParentComponent = (props) => {
     // Refresh messages to pick up the "aborted" finish state and cancelled tool calls
     try {
       const msgs = await getMessages(sess.id);
+      if (activeSession()?.id !== sess.id) return;
       setMessages(msgs);
     } catch (e) {
       console.error('refresh after abort failed:', e);
@@ -536,10 +566,17 @@ export const SessionProvider: ParentComponent = (props) => {
       if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
       setGuidanceActive(false);
       setMessages([]);
+      // Drop unconfirmed bubbles too: a failed send in a session the user has
+      // left would otherwise sit in memory for the life of the page.
+      setOptimistic([]);
     }
     // Re-entering the same session keeps cached messages and refreshes in place.
     try {
       const msgs = await getMessages(id);
+      // The user may have switched sessions while this was in flight. Everything
+      // below belongs to `id`, including the setActiveSession further down that
+      // would otherwise drag the view back to the session they just left.
+      if (activeSession()?.id !== id) return;
       setMessages(msgs);
 
       // Fetch the authoritative session record. listSessions filters by the main
@@ -635,6 +672,7 @@ export const SessionProvider: ParentComponent = (props) => {
     setSessions((prev) => [session, ...prev]);
     setActiveSession(session);
     setMessages([]);
+    setOptimistic([]);
     return session;
   }
 
@@ -769,6 +807,10 @@ export const SessionProvider: ParentComponent = (props) => {
           return;
         }
         const msgs = await getMessages(sessionId);
+        if (activeSession()?.id !== sessionId) {
+          stopFastPoll();
+          return;
+        }
         setMessages(msgs);
 
         const loopActive = isAgentLoopActive(msgs);
@@ -829,19 +871,27 @@ export const SessionProvider: ParentComponent = (props) => {
         },
       ],
     };
-    setMessages((prev) => [...prev, tempUserMsg]);
+    setOptimistic((prev) => [...prev, tempUserMsg]);
 
     try {
       await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight);
       // Immediately fetch to get the real user message + start seeing assistant
       const msgs = await getMessages(session.id);
-      setMessages(msgs);
+      if (activeSession()?.id !== session.id) return;
+      // Swap the bubble for the server's own copy in one update. Batched because
+      // separately they would render an intermediate frame — the message twice
+      // if the list lands first, or missing if the bubble is dropped first.
+      batch(() => {
+        setMessages(msgs);
+        setOptimistic((prev) => prev.filter((m) => m.info.id !== tempId));
+      });
       // Ensure background poll is running, then start the fast poll for the loop
       startBgPoll(session.id);
       startPolling(session.id);
     } catch (e) {
       console.error('send prompt failed:', e);
-      // The optimistic bubble stays on screen, so say what happened to it.
+      // The bubble stays in the optimistic list, unconfirmed, so mark what
+      // happened to it — the server never took it.
       setFailedSends((prev) => new Set(prev).add(tempId));
       setLoadingSessionId('');
     }
@@ -863,6 +913,7 @@ export const SessionProvider: ParentComponent = (props) => {
         return result ?? { resumed: false };
       }
       const msgs = await getMessages(session.id);
+      if (activeSession()?.id !== session.id) return { resumed: true };
       setMessages(msgs);
       startBgPoll(session.id);
       startPolling(session.id);

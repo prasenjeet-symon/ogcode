@@ -635,6 +635,19 @@ function UserMessage(props: { msg: MessageWithParts }) {
           </Show>
           </div>
           <span class="text-micro text-[color:var(--text-muted)] tabular-nums ml-1 mr-1">{timestamp()}</span>
+          {/* Guidance reads as an ordinary message otherwise, and it is not one:
+              it was injected into a turn already in flight rather than starting
+              its own, and it is deliberately absent from what the model is sent
+              on later turns. Saying so is what stops the transcript implying a
+              request-and-reply that never happened. */}
+          <Show when={props.msg.info.displayOnly}>
+            <span
+              class="text-micro text-[color:var(--text-muted)] ml-1 mr-1 italic"
+              title="Sent while the agent was working. It was delivered to the model as part of the turn already running, so it is not a turn of its own."
+            >
+              steered mid-turn
+            </span>
+          </Show>
           <DeliveryTicks msg={props.msg} />
         </div>
       </div>

@@ -92,6 +92,13 @@ export interface MessageInfo {
   interrupted?: Interruption;
   /** How far this turn got on its way to the model. Assistant messages only. */
   delivery?: Delivery;
+  /**
+   * Set on a message that belongs in the transcript but is never sent to a
+   * model. Mid-loop guidance is recorded this way: the text already reached the
+   * model as part of the running turn, so the record exists purely so the user
+   * can see what they sent.
+   */
+  displayOnly?: boolean;
   cost?: number;
   tokens?: TokenCounts;
   createdAt: number;

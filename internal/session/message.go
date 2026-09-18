@@ -41,8 +41,17 @@ type MessageInfo struct {
 	// Delivery records how far this turn got on its way to the model and how
 	// long the model took to start answering. Set on assistant messages only,
 	// and nil on any written before the field existed.
-	Delivery  *Delivery `json:"delivery,omitempty"`
-	CreatedAt int64     `json:"createdAt"`
+	Delivery *Delivery `json:"delivery,omitempty"`
+	// DisplayOnly marks a message that belongs in the transcript but must never
+	// be sent to a model. Mid-loop guidance is the case it exists for: the text
+	// is already folded into the running turn's user message, so persisting it
+	// as an ordinary message would deliver it twice on the next request and
+	// insert a second user row beside one the model is still answering — which
+	// both APIs reject as a break in user/assistant alternation. Recording it
+	// display-only keeps the user's own words in the conversation they typed
+	// them into without changing what any model receives.
+	DisplayOnly bool  `json:"displayOnly,omitempty"`
+	CreatedAt   int64 `json:"createdAt"`
 }
 
 // InterruptReason classifies why a turn stopped short.

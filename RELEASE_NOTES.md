@@ -1,3 +1,14 @@
+# Release Notes — v0.37.3
+
+## Patch: More reliable mid-turn guidance, MCP schemas, and session state
+
+- Persists guidance sent while the agent is working in the session transcript, marks it as `steered mid-turn` in the UI, and prevents it from being delivered to the model a second time on later requests.
+- Sanitizes MCP tool schemas for provider compatibility by removing unsupported validation keywords while preserving useful type, enum, and format guidance, including nested schemas.
+- Protects optimistic session messages from polling and SSE races, keeps failed sends visible, and ignores stale responses after switching sessions.
+- Adds a fallback to stop document-index polling when completion events are missed.
+
+---
+
 # Release Notes — v0.37.2
 
 ## Patch: Safer, more capable file editing

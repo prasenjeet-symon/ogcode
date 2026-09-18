@@ -199,3 +199,58 @@ func TestConvertMessages_UnreadablePartDoesNotPoisonTheRequest(t *testing.T) {
 		}
 	}
 }
+
+// textPart builds a plain text part, the shape a user message carries.
+func textPart(text string) session.Part {
+	data, _ := json.Marshal(session.TextPartData{Text: text})
+	return session.Part{ID: session.NewPartID(), Type: session.PartText, Data: data}
+}
+
+// TestConvertMessages_SkipsDisplayOnly is the contract that lets mid-loop
+// guidance be recorded in the transcript at all.
+//
+// The guidance text already reached the model inside the turn that was running
+// when it was sent. Replaying its transcript row on a later request would send
+// the same instruction twice and — worse — put two user messages next to each
+// other, which both APIs reject as a break in user/assistant alternation. So
+// the row exists for the reader and for nobody else.
+func TestConvertMessages_SkipsDisplayOnly(t *testing.T) {
+	guidance := msgWith(session.RoleUser, textPart("actually use tabs"))
+	guidance.Info.DisplayOnly = true
+
+	msgs := []*session.MessageWithParts{
+		msgWith(session.RoleUser, textPart("format the file")),
+		guidance,
+		msgWith(session.RoleAssistant, textPart("done")),
+	}
+
+	out := convertMessages(msgs, false, "gpt-4o")
+
+	if len(out) != 2 {
+		t.Fatalf("got %d model messages, want 2 (the display-only row must not be sent)", len(out))
+	}
+	for _, m := range out {
+		if strings.Contains(string(m.Content), "actually use tabs") {
+			t.Errorf("guidance text reached the model a second time: %+v", m)
+		}
+	}
+	// The surviving pair must still alternate, which is the reason for skipping
+	// rather than blanking the row.
+	if out[0].Role != "user" || out[1].Role != "assistant" {
+		t.Errorf("roles = %q,%q — want user,assistant", out[0].Role, out[1].Role)
+	}
+}
+
+// TestConvertMessages_KeepsOrdinaryUserMessages guards the other direction: the
+// skip must key on the flag alone, so a normal message written before the field
+// existed (absent → false) is unaffected.
+func TestConvertMessages_KeepsOrdinaryUserMessages(t *testing.T) {
+	msgs := []*session.MessageWithParts{
+		msgWith(session.RoleUser, textPart("first")),
+		msgWith(session.RoleAssistant, textPart("second")),
+		msgWith(session.RoleUser, textPart("third")),
+	}
+	if out := convertMessages(msgs, false, "gpt-4o"); len(out) != 3 {
+		t.Fatalf("got %d model messages, want all 3 kept", len(out))
+	}
+}

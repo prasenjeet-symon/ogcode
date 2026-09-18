@@ -3031,6 +3031,13 @@ func validToolInput(raw json.RawMessage) json.RawMessage {
 func convertMessages(messages []*session.MessageWithParts, modelSupportsImages bool, modelID string) []provider.ModelMessage {
 	var result []provider.ModelMessage
 	for _, m := range messages {
+		// Transcript-only records never reach a model. See MessageInfo.DisplayOnly:
+		// mid-loop guidance is already part of the running turn's user message, so
+		// sending it again would both duplicate the instruction and put two user
+		// messages in a row.
+		if m.Info.DisplayOnly {
+			continue
+		}
 		// Collect text, tool, and reasoning parts
 		var textParts []string
 		var toolCallParts []session.ToolPartData

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,30 @@ import (
 // registry expects; Execute turns each content item in the MCP result into
 // text or an image the host can render.
 func newMCPTool(id, server string, t *mcp.Tool, session *mcp.ClientSession) tool.ToolDef {
-	return mcpTool{id: id, server: server, spec: t, session: session}
+	// Sanitised once, here, rather than on every Parameters() call: the tool list
+	// is rebuilt for every request of every turn, and a server like Cal.com
+	// contributes 61 schemas to it.
+	params, stripped := sanitizeToolSchema(rawToolSchema(t))
+	if len(stripped) > 0 {
+		slog.Info("mcp: removed schema keywords a model provider may reject",
+			"server", server, "tool", id, "keywords", strings.Join(stripped, ","))
+	}
+	return mcpTool{id: id, server: server, spec: t, session: session, params: params}
+}
+
+// rawToolSchema serialises an MCP tool's InputSchema. The SDK stores it as any
+// (unmarshalled into map[string]any on the client side), so it is re-marshalled
+// to get stable JSON. A nil or malformed schema yields an empty object so the
+// tool is still callable.
+func rawToolSchema(t *mcp.Tool) json.RawMessage {
+	if t == nil || t.InputSchema == nil {
+		return json.RawMessage("{}")
+	}
+	b, err := json.Marshal(t.InputSchema)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
 }
 
 // NewTool is the exported constructor for testing: it wraps a live session and
@@ -36,25 +60,23 @@ type mcpTool struct {
 	server  string
 	spec    *mcp.Tool
 	session *mcp.ClientSession
+	// params is the tool's input schema as offered to a model: the server's own
+	// schema with provider-hostile keywords removed. Computed at construction.
+	params json.RawMessage
 }
 
 func (mt mcpTool) ID() string          { return mt.id }
 func (mt mcpTool) Description() string { return mt.spec.Description }
 
-// Parameters returns the MCP tool's input schema as a json.RawMessage. The SDK
-// stores InputSchema as any (unmarshalled into map[string]any on the client
-// side), so we re-marshal it to get the stable JSON the host's tool registry
-// hands to the model. A nil or malformed schema yields an empty object so the
-// tool is still callable.
+// Parameters returns the input schema the host's tool registry hands to the
+// model — sanitised at construction, see newMCPTool. Empty only for a tool
+// built outside that constructor, which falls back to an empty object so the
+// tool stays callable.
 func (mt mcpTool) Parameters() json.RawMessage {
-	if mt.spec.InputSchema == nil {
+	if len(mt.params) == 0 {
 		return json.RawMessage("{}")
 	}
-	b, err := json.Marshal(mt.spec.InputSchema)
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return b
+	return mt.params
 }
 
 // Execute calls the MCP tool and renders its result content into the host's
