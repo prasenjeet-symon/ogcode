@@ -1,4 +1,11 @@
-# Release Notes — v0.37.0
+# Release Notes — v0.37.1
+
+## Patch: Faster release and Docker workflows
+
+- Builds the web UI once per release and reuses it across platform binaries.
+- Builds Docker images natively for amd64 and arm64, smoke-tests the exact amd64 image before publishing, and creates multi-architecture version, major/minor, and `latest` tags.
+- Adds architecture-specific BuildKit caches and passes the release version into Docker image builds.
+
 
 ## Major: Ogcode is now AGPL-3.0 — with a commercial track
 

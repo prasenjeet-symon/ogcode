@@ -25,12 +25,36 @@ env:
   ZIG_SHA256: "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"
 
 jobs:
+  # Build the platform-independent web assets once, then embed the artifact into
+  # every platform binary. This avoids three identical npm installs and Vite builds.
+  build-web:
+    name: Build web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build web UI
+        run: cd web && npm install --legacy-peer-deps && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+          if-no-files-found: error
+
   # ── Build every target with CGO so go-fitz links libmupdf statically. macOS
   #    and Windows build natively on their own runners; Linux cross-compiles
   #    both architectures with zig so the binaries are static (see build-linux).
   #    Binaries are staged at prebuilt/ogcode_<goos>_<goarch>/ogcode[.exe] and
   #    consumed by the release job via the GoReleaser gobinary shim.
   build-linux:
+    needs: build-web
     name: Build (linux)
     runs-on: ubuntu-latest
     steps:
@@ -41,9 +65,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          name: web-dist
+          path: web/dist
       - name: Install zig (C cross-compiler for both Linux targets)
         shell: bash
         run: |
@@ -53,8 +78,6 @@ jobs:
           echo "${ZIG_SHA256}  /tmp/zig.tar.xz" | sha256sum -c -
           mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
           echo "/opt/zig" >> "$GITHUB_PATH"
-      - name: Build web UI
-        run: cd web && npm install --legacy-peer-deps && npm run build
       - name: Build binaries
         shell: bash
         run: |
@@ -102,6 +125,7 @@ jobs:
 
   build-macos:
     name: Build (darwin)
+    needs: build-web
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,11 +135,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Build web UI
-        run: cd web && npm install --legacy-peer-deps && npm run build
+          name: web-dist
+          path: web/dist
       - name: Build binaries
         shell: bash
         run: |
@@ -138,6 +161,7 @@ jobs:
 
   build-windows:
     name: Build (windows)
+    needs: build-web
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -147,9 +171,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          name: web-dist
+          path: web/dist
       - name: Install llvm-mingw (x86_64 + aarch64 windows C toolchains)
         shell: bash
         env:
@@ -179,9 +204,6 @@ jobs:
             command -v "$cc" >/dev/null || { echo "missing compiler: $cc"; exit 1; }
             echo "found: $(command -v "$cc")"
           done
-      - name: Build web UI
-        shell: bash
-        run: cd web && npm install --legacy-peer-deps && npm run build
       - name: Build binaries
         shell: bash
         run: |

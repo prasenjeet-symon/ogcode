@@ -2,7 +2,7 @@
 FROM node:20-alpine AS web-builder
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
-RUN npm install --legacy-peer-deps
+RUN --mount=type=cache,target=/root/.npm npm install --legacy-peer-deps
 COPY web/ ./
 RUN npm run build
 
@@ -21,15 +21,12 @@ COPY controlplane/go.mod controlplane/go.sum ./controlplane/
 RUN go mod download
 COPY . ./
 COPY --from=web-builder /app/web/dist /app/web/dist
-# Version stamp. .dockerignore excludes .git, so `git describe` cannot run here,
-# and an -X carrying an empty value does not fall back to the Go default — it
-# writes "" over it, which IsDev() reads as a dev build and which silently
-# disables the update check. The version this image carries therefore has to come
-# from the tree rather than from the build context, the same source the Makefile
-# falls back to. A tag needs Git metadata this build does not have; the billed CI
-# stamps internal/version itself before this Dockerfile runs, and for a local
-# `docker build` web/package.json is the version in the checked-out tree.
-RUN VERSION=$(cat web/package.json | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1) \
+# Version stamp. Release builds pass the tag explicitly; local builds fall back
+# to web/package.json so the image never silently becomes a blank dev build.
+ARG VERSION
+RUN if [ -z "$VERSION" ]; then \
+      VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' web/package.json | head -1); \
+    fi \
     && VERSION="v${VERSION#v}" \
     && CGO_ENABLED=1 go build -tags musl -ldflags "-s -w -X github.com/prasenjeet-symon/ogcode/internal/version.Version=$VERSION -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o ogcode .
 
