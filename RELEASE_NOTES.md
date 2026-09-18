@@ -1,3 +1,14 @@
+# Release Notes — v0.37.2
+
+## Patch: Safer, more capable file editing
+
+- Extends the `edit` tool with atomic multi-edit batches, `replace_all`, and `expected_count` safeguards.
+- Rejects missing replacement text instead of interpreting it as an accidental deletion, while preserving explicit empty-string deletions.
+- Improves ambiguous-match and whitespace-mismatch diagnostics so repeated workflow steps and similar anchors are easier to repair safely.
+- Updates the coding-agent guidance and regression coverage to match the edit contract.
+
+---
+
 # Release Notes — v0.37.1
 
 ## Patch: Faster release and Docker workflows

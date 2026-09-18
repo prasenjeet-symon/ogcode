@@ -800,14 +800,20 @@ func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
 // and Hard rules is where an agent looks for what it must not do — 60% into a
 // prompt, inside a section about efficiency, is not.
 //
+// The advice itself moved once "edit" learned to take several hunks atomically:
+// the array is the instruction, and separate same-file calls are the fallback
+// that still works. Both must be stated, because a partly-applied refactor is
+// exactly the corruption this rule exists to prevent.
+//
 // Only the write-capable agents carry it, because only they can commit the
 // mistake.
 func TestCodingAgentHardRules_SameFileEditBatching(t *testing.T) {
 	for _, a := range []Agent{BuildAgent, TaskAgent} {
 		hard := a.System[strings.Index(a.System, "## Hard rules"):]
 		for _, want := range []string{
-			"Same-file \"edit\" calls may batch",       // the permission, stated in Hard rules too
-			"serializes mutations to the same path",    // why the permission is safe
+			"\"edits\" array",                          // the atomic form, which is now the advice
+			"all-or-nothing",                           // the property that makes it the advice
+			"serializes mutations to the same path",    // why separate calls remain safe as a fallback
 			"Never batch a \"write\" with an \"edit\"", // the combination still forbidden
 		} {
 			if !strings.Contains(hard, want) {
