@@ -228,6 +228,26 @@ uses `*.localhost` / a `<label>.localhost` host and cleartext HTTP/2 (h2c).
   design (mirroring the worker's own re-seeding): a master restart re-records
   a repo lazily at its next assignment.
 
+- **Container mode (`incus` block, INCUS_WORKERS_PLAN.md §Phase B).** With
+  `master.incus` configured, assignment switches grain: **one Incus container
+  per user-repo assignment**. Assigning a user to a repo creates a container
+  from `imageAlias` with the `profile` profile, seeding it via cloud-init
+  (master URL, pairing secret 0600, repo URL + slug, `worker-id` = container
+  name, optional CA) — the same payload `scripts/incus/assign.sh` emits in
+  Phase A — so the in-guest `ogcode-worker` registers with the master as an
+  ordinary worker whose id IS the container name (`og-<repo>-<user>`, both
+  segments folded to DNS-label-safe form, repo segment trimmed first, 40-byte
+  budget). Container names therefore appear in the panel URL table like any
+  worker id: `https://<containerName>.<panel-host>/`. Readiness is the
+  worker's **Register** (never an Incus operation): the placement starts
+  `provisioning`, flips `ready` when a worker with that id registers, and a
+  reaper fails placements still `provisioning` past `registerTimeoutSeconds`.
+  Unassigning (`Destroy` on the Repositories page) destroys the container and
+  forgets the placement; deprovisioning a repo destroys every container
+  holding it. Capacity is `maxContainersPerHost` live containers. Nothing in
+  the bare-worker flow changes when the block is absent — assignment, sessions
+  and the repositories page behave exactly as before.
+
 ## Configuration
 
 A JSON file (default `control-plane.json`; see `control-plane.example.json`):
@@ -243,7 +263,19 @@ A JSON file (default `control-plane.json`; see `control-plane.example.json`):
     "cookieDomain": ".panel.example.com",   // one login across all worker subdomains
     "tokenTtlSeconds": 900,                 // worker token lifetime (default 15m)
     "workerTimeoutSeconds": 45,             // missed-heartbeat death (default 45s)
-    "tls": { "cert": "…/cert.pem", "key": "…/key.pem" } // omit ⇒ h2c (dev only)
+    "tls": { "cert": "…/cert.pem", "key": "…/key.pem" }, // omit ⇒ h2c (dev only)
+    // Optional container mode (INCUS_WORKERS_PLAN.md §Phase B): one Incus
+    // container per user-repo assignment. Omitting the block keeps bare mode.
+    "incus": {
+      "socket": "/var/lib/incus/incus.socket", // empty = platform default
+      "imageAlias": "ogcode-base",             // default ogcode-base
+      "profile": "ogcode-worker",              // default ogcode-worker
+      "namePrefix": "og-",                     // default og-
+      "maxContainersPerHost": 20,              // live-container cap (default 20)
+      "registerTimeoutSeconds": 600,           // provisioning deadline (default 600)
+      "masterURL": "https://panel.example.com", // URL guests dial (required)
+      "pairingSecret": "…"                     // optional; default = master's own
+    }
   }
 }
 ```
@@ -300,9 +332,11 @@ internal/config/          master config schema + loader
 internal/auth/            operator login: password check + signed session cookie
 internal/pairing/         pairing-secret check + worker token mint/rotate
 internal/tlsreload/       hot-reloading TLS certificate
-internal/registry/        worker registry + session router + heartbeat reaper
+internal/registry/        worker registry + session router + heartbeat reaper + bbolt file
 internal/bus/             seq-stamped lossy event bus
-internal/master/          ConnectRPC handlers, tunnel proxy, auth routes, orchestration
+internal/incus/           Incus socket driver (container mode: create/delete/state/list)
+internal/master/          ConnectRPC handlers, tunnel proxy, auth routes, orchestration,
+                          container-mode placement store + panel
 cmd/ogcode-control-plane/ the `serve` daemon (h2c dev / TLS prod)
 ```
 
@@ -343,13 +377,20 @@ Done:
       user's worktree route label, logical `StartAgent{repo_url, user_name}`
       targeting for user sessions, admin/user roles with console + monitor
       scoping
+- [x] **Merge/deprovision lifecycle**: merging `user/<name>` back, removing a
+      user worktree, deprovisioning a repo (Phase 4 of `MULTI_USER_REPOS_PLAN.md`)
+- [x] **Container mode** (`incus` block, Phase B of `INCUS_WORKERS_PLAN.md`):
+      one Incus container per user-repo assignment — driver over the Incus unix
+      socket, durable placement store in the registry bbolt file, readiness via
+      the worker's Register, provisioning reaper, capacity cap, placements
+      table with Create/Destroy on the Repositories page
 
 Next:
 
-- [ ] Merge/deprovision lifecycle: merging `user/<name>` back, removing a user
-      worktree, deprovisioning a repo (Phase 4 of `MULTI_USER_REPOS_PLAN.md`)
 - [ ] Login rate-limiting/lockout
 - [ ] Built-in ACME DNS-01 auto-issue/renew (currently bring-your-own cert)
 - [ ] Optional friendly subdomains (worker `--name` instead of id)
 - [ ] Eager worktree tunnels: today a worktree UI is reachable only once the
       worker starts hosting a session in it (Phase F)
+- [ ] Container-mode orphan reconciliation + multi-host drivers (Phase C of
+      `INCUS_WORKERS_PLAN.md`)

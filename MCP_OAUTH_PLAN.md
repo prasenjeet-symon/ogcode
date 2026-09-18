@@ -10,8 +10,8 @@ the user pasting a static token.
 1. **Manual-copy in headless** → **implemented** (`manualCodeFetch` in
    `oauth.go`): when no display is detected, the auth URL is printed to stderr
    and the user pastes the full redirected URL on stdin.
-2. **Token store location** → `~/.ogcode/mcp-tokens/` (runtime state, alongside
-   the embed-model cache), overridable via `OGCODE_MCP_TOKEN_DIR`.
+2. **Token store location** → `~/.ogcode/mcp-tokens/` (runtime state under
+   `~/.ogcode/`), overridable via `OGCODE_MCP_TOKEN_DIR`.
 3. **`auth` field name** → `auth` (leaves room for non-OAuth schemes later).
 
 ## Why

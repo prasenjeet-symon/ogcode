@@ -22,6 +22,11 @@ const (
 	operatorReposRmPath          = "/__operator/repos/forget"
 	operatorReposMergePath       = "/__operator/repos/merge"
 	operatorReposDeprovisionPath = "/__operator/repos/deprovision"
+	// Container mode (INCUS_WORKERS_PLAN.md §Phase B): the placements table's
+	// create (assign = create container) and destroy (unassign = delete
+	// container) actions.
+	operatorPlacementsCreatePath  = "/__operator/repos/placements/create"
+	operatorPlacementsDestroyPath = "/__operator/repos/placements/destroy"
 )
 
 // cloneTimeout bounds one CloneRepo round-trip. Like a session start, the
@@ -46,15 +51,27 @@ type repoRow struct {
 
 // reposPageVM is the repositories page view model: the repo table, the online
 // worker options (the add form's placement choices), and the echoed add form
-// fields plus the outcome banner from the mutation that led here.
+// fields plus the outcome banner from the mutation that led here. In container
+// mode the Placements table replaces the repo table's source rows.
 type reposPageVM struct {
-	Repos     []repoRow
-	Workers   []workerOption
-	RepoURL   string
-	Worker    string
-	FlashText string
-	FlashKind string // "ok" or "err"; empty means no banner
-	OpenAdd   bool   // reopen the add-repository dialog (an add attempt failed)
+	Repos      []repoRow
+	Workers    []workerOption
+	RepoURL    string
+	Worker     string
+	FlashText  string
+	FlashKind  string // "ok" or "err"; empty means no banner
+	OpenAdd    bool   // reopen the add-repository dialog (an add attempt failed)
+	Containers []placementRow
+}
+
+// placementRow is one row of the container-mode placements table.
+type placementRow struct {
+	User       string
+	RepoSlug   string
+	RepoURL    string
+	Container  string
+	Status     string
+	CreatedAgo string
 }
 
 // reposPageTmpl renders the repositories page body (inside the shared chrome).
@@ -125,6 +142,48 @@ var reposPageTmpl = template.Must(template.New("repos").Parse(`
     </div>
     {{end}}
 
+    {{if .Containers}}
+    <div class="panel" style="margin-top:24px">
+      <table>
+        <tr><th>Employee</th><th>Repository</th><th>Container</th><th>Status</th><th style="text-align:right">Actions</th></tr>
+        {{range .Containers}}
+        <tr>
+          <td class="name">{{.User}}</td>
+          <td>
+            {{.RepoSlug}}
+            <div class="td-sub"><code>{{.RepoURL}}</code></div>
+          </td>
+          <td style="font-family:var(--mono)">{{.Container}}</td>
+          <td><span class="badge {{if eq .Status "ready"}}online{{else if eq .Status "failed"}}offline{{else}}pending{{end}}">{{.Status}}</span><div class="muted" style="margin-top:5px">{{.CreatedAgo}}</div></td>
+          <td style="text-align:right;white-space:nowrap">
+            <details class="rowmenu">
+              <summary title="Assignment actions" aria-label="Assignment actions">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+              </summary>
+              <div class="rowmenu-pop menu">
+                <form method="post" action="/__operator/repos/placements/create" title="Re-create the container (re-assign; reuses the name)">
+                  <input type="hidden" name="user" value="{{.User}}">
+                  <input type="hidden" name="repo" value="{{.RepoURL}}">
+                  <button type="submit" class="menu-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Create / re-create</button>
+                </form>
+                <form method="post" action="/__operator/repos/placements/destroy" title="Unassign: destroy the container and forget the placement (the branch survives if it was pushed)">
+                  <input type="hidden" name="user" value="{{.User}}">
+                  <input type="hidden" name="repo" value="{{.RepoURL}}">
+                  <button type="submit" class="menu-item danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2"/><path d="M6.5 7l1 12.5a1 1 0 001 .9h7a1 1 0 001-.9L18 7"/></svg>Destroy assignment</button>
+                </form>
+              </div>
+            </details>
+          </td>
+        </tr>
+        {{end}}
+      </table>
+      <div class="cardfoot">
+        <span>{{len .Containers}} {{if eq (len .Containers) 1}}assignment{{else}}assignments{{end}} &middot; one container per employee-repository</span>
+        <span class="live">Container mode</span>
+      </div>
+    </div>
+    {{end}}
+
     <dialog id="add-repo" class="modal">
       <form method="post" action="/__operator/repos/add">
         <div class="modal-head">
@@ -161,10 +220,31 @@ func (s *Server) handleReposPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderReposFlash renders the repositories page, optionally with an outcome
-// banner from a completed mutation. Placement records are in-memory, so a
-// fresh master lists only repos it has seen assigned or added this run; the
-// add flow re-records them eagerly.
+// banner from a completed mutation. Placement records are in-memory (bare
+// mode) or in the placements bucket (container mode), so a fresh master lists
+// only what it has seen this run; the add/assign flows re-record eagerly.
 func (s *Server) renderReposFlash(w http.ResponseWriter, r *http.Request, vm reposPageVM) {
+	if s.incus != nil {
+		if placements, err := s.placements.list(); err == nil {
+			now := time.Now()
+			for _, p := range placements {
+				ago := ""
+				if !p.CreatedAt.IsZero() {
+					ago = "created " + humanSince(now.Sub(p.CreatedAt))
+				}
+				vm.Containers = append(vm.Containers, placementRow{
+					User:       p.User,
+					RepoSlug:   p.RepoSlug,
+					RepoURL:    p.RepoURL,
+					Container:  p.ContainerName,
+					Status:     p.Status,
+					CreatedAgo: ago,
+				})
+			}
+		} else {
+			s.logger.Error("list placements for the page", "err", err)
+		}
+	}
 	entries := s.repos.list()
 	for _, e := range entries {
 		online := false
@@ -391,4 +471,84 @@ func (s *Server) RepoPlacements() []repoEntry { return s.repos.list() }
 // without a live clone (e.g. a worker that rejects the next command) use this.
 func (s *Server) SeedRepoPlacement(repoURL, workerID string) {
 	s.repos.set(repoSlugFromURL(repoURL), repoURL, workerID)
+}
+
+// humanSince renders a duration as a coarse human age ("3m", "2h5m", "4d").
+func humanSince(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// handlePlacementsCreate (re-)creates one user-repo container: the
+// placements table's Create action. In container mode this is AssignUser —
+// idempotent for a live placement, re-provisioning for a missing one. In bare
+// mode the route is not reachable (the action renders only in container mode).
+func (s *Server) handlePlacementsCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	vm := reposPageVM{}
+	fail := func(msg string) {
+		vm.FlashText, vm.FlashKind = msg, "err"
+		s.renderReposFlash(w, r, vm)
+	}
+	user := strings.TrimSpace(r.PostFormValue("user"))
+	repoURL, err := normalizeRepoURL(strings.TrimSpace(r.PostFormValue("repo")))
+	if user == "" || err != nil {
+		fail("Employee and repository are required.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), cloneTimeout)
+	defer cancel()
+	name, err := s.AssignUser(ctx, repoURL, user, "")
+	if err != nil {
+		s.logger.Info("placement create failed via console", "user", user, "repo", repoURL, "err", err)
+		fail(err.Error())
+		return
+	}
+	s.logger.Info("placement created via console", "user", user, "repo", repoURL, "container", name)
+	vm.FlashText = fmt.Sprintf("Container %s created for %s on %s — it registers with the master at boot; the assignment turns ready then.", name, user, repoSlugFromURL(repoURL))
+	vm.FlashKind = "ok"
+	s.renderReposFlash(w, r, vm)
+}
+
+// handlePlacementsDestroy unassigns one user-repo container: the placements
+// table's Destroy action. It deletes the container, forgets the placement,
+// and applies the standard unassignment bookkeeping.
+func (s *Server) handlePlacementsDestroy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	vm := reposPageVM{}
+	fail := func(msg string) {
+		vm.FlashText, vm.FlashKind = msg, "err"
+		s.renderReposFlash(w, r, vm)
+	}
+	user := strings.TrimSpace(r.PostFormValue("user"))
+	repoURL, err := normalizeRepoURL(strings.TrimSpace(r.PostFormValue("repo")))
+	if user == "" || err != nil {
+		fail("Employee and repository are required.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), lifecycleTimeout)
+	defer cancel()
+	if err := s.RemoveUserWorktree(ctx, repoURL, user); err != nil {
+		s.logger.Info("placement destroy failed via console", "user", user, "repo", repoURL, "err", err)
+		fail(err.Error())
+		return
+	}
+	s.logger.Info("placement destroyed via console", "user", user, "repo", repoURL)
+	vm.FlashText = fmt.Sprintf("Assignment of %s to %s destroyed — the container is gone; the branch survives if it was pushed.", user, repoSlugFromURL(repoURL))
+	vm.FlashKind = "ok"
+	s.renderReposFlash(w, r, vm)
 }

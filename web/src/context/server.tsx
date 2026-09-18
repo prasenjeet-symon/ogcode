@@ -1,7 +1,7 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
 import { createSignal } from 'solid-js';
 import { getPath, getConfig, getVCS, getMode, getResources } from '../api/client';
-import type { ResourceSample, ResourceActivity } from '../api/client';
+import type { ResourceSample } from '../api/client';
 import { createSSE, type SSEEvent } from '../api/sse';
 
 interface ServerContextValue {
@@ -30,8 +30,6 @@ export interface ResourceMeta {
   interval: number;
   cores: number;
   uptime: number;
-  // What the server is busy with, when it has said. Null the rest of the time.
-  activity: ResourceActivity | null;
 }
 
 // Mirrors the server's retention so the client window and the backfill it gets
@@ -57,7 +55,6 @@ export const ServerProvider: ParentComponent = (props) => {
     interval: 2000,
     cores: 0,
     uptime: 0,
-    activity: null,
   });
   // Highest event seq seen on this connection, for drop detection. Reset to 0 on
   // reconnect (a new EventSource restarts the server's per-connection numbering).
@@ -88,7 +85,6 @@ export const ServerProvider: ParentComponent = (props) => {
       interval: snap.interval,
       cores: snap.cores,
       uptime: snap.uptime,
-      activity: snap.activity ?? null,
     });
     if (snap.samples?.length) setResources(snap.samples.slice(-RESOURCE_RETAIN));
   }).catch(() => { /* ignore */ });
@@ -140,7 +136,6 @@ export const ServerProvider: ParentComponent = (props) => {
         interval: props.interval,
         cores: props.cores ?? 0,
         uptime: props.uptime ?? 0,
-        activity: props.activity ?? null,
       });
     }
 

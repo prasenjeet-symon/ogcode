@@ -284,27 +284,15 @@ func (s *Server) serve(ctx context.Context) error {
 		registry.Register(p)
 	}
 
-	// Initialize tools
+	// Initialize tools. The core set is shared with every other entry point
+	// (see tool.RegisterCoreTools) so a tool the agents' prompts name by id
+	// cannot be present here and missing there; what follows is what only the
+	// server offers.
 	toolRegistry := tool.NewRegistry()
-	toolRegistry.Register(tool.BashTool{})
-	toolRegistry.Register(tool.ReadTool{})
-	toolRegistry.Register(tool.FileMapTool{})
-	toolRegistry.Register(tool.CheckSyntaxTool{})
-	toolRegistry.Register(tool.WriteTool{})
-	toolRegistry.Register(tool.EditTool{})
-	toolRegistry.Register(tool.GlobTool{})
-	toolRegistry.Register(tool.GrepTool{})
+	tool.RegisterCoreTools(toolRegistry, s.docindexStore)
 	toolRegistry.Register(tool.BreakdownTool{})
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(s.docindexStore))
-	toolRegistry.Register(tool.ReadPdfPageTool{})
-	toolRegistry.Register(tool.NewPdfIndexTool(s.docindexStore))
-	toolRegistry.Register(tool.ReadDocxPageTool{})
-	toolRegistry.Register(tool.NewDocxIndexTool(s.docindexStore))
-	toolRegistry.Register(tool.NewProjectIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.NewMemoryMapTool(memfileStore))
-	toolRegistry.Register(tool.LatexToPdfTool{})
-	toolRegistry.Register(tool.ViewImageTool{})
-	toolRegistry.Register(tool.NewCompactContextTool())
 
 	// Skills: the "skills" section of ogcode.json decides which extra
 	// directories and remote manifests are consulted; the standard project and
@@ -459,6 +447,11 @@ func (s *Server) serve(ctx context.Context) error {
 			}
 			return *cfg
 		},
+		// Whether the agent may compact its own context mid-turn is a per-project
+		// choice, so it is read from the project DB (not the global one), once at
+		// the start of each turn — flipping it in the settings screen applies to
+		// the next turn without a restart.
+		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
 		// Lets the system prompt say up front whether codebase_map has anything
 		// to return, so a session in an unindexed project does not spend a call
 		// finding out. Queried per turn, so building the index mid-session is
@@ -844,43 +837,16 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// buildSearchBackend constructs the concrete web-search backend for cfg. It is
-// the single source of truth for provider selection, called both at startup and
-// on a live provider change, so the two can never drift.
+// buildSearchBackend adapts this server's config to search.BuildBackend, which
+// is the single source of truth for provider selection and chain order — shared
+// with the headless CLI so the two entry points cannot offer deep_search backed
+// by different engines. Called both at startup and on a live provider change.
 //
-// The native engine chain runs the HTTP path first — it presents a real
-// browser's TLS fingerprint, so engines that once refused it no longer do, and
-// it answers in about a second without opening a window. Safari sits behind it
-// for the cases that path cannot win (an engine refusing this IP, a bot
-// challenge, a page that only exists once its scripts run); it costs seconds and
-// opens windows, so it runs only after the fast path finds nothing. On every OS
-// but macOS the Safari constructor returns nil and the chain collapses to the
-// native backend. OGCODE_SEARCH_BROWSER picks a different arrangement: "native"
-// is HTTP only, "safari" tries the browser first.
-//
-// When Tavily is selected with a usable key it runs in front of the native
-// chain, falling back to it on any failure (bad key, exhausted quota, network
-// error) so an answerable query is never lost to a provider outage. The key
-// comes from config, with TAVILY_API_KEY overriding it for scripted and CI runs.
+// The chain itself is documented on search.BuildBackend; the short version is
+// that the native engines are always the last link, so a Tavily failure falls
+// through rather than losing an answerable query.
 func buildSearchBackend(cfg *session.SearchConfig) search.Backend {
-	native := search.NewNativeBackend()
-
-	var nativeChain search.Backend
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_SEARCH_BROWSER"))) {
-	case "native":
-		nativeChain = native
-	case "safari":
-		nativeChain = search.NewFallbackBackend(search.NewSafariBackend(), native)
-	default:
-		nativeChain = search.NewFallbackBackend(native, search.NewSafariBackend())
-	}
-
-	if cfg.Provider == session.SearchProviderTavily {
-		if key := tavilyKeyFor(cfg); key != "" {
-			return search.NewFallbackBackend(search.NewTavilyBackend(key), nativeChain)
-		}
-	}
-	return nativeChain
+	return search.BuildBackend(cfg.Provider, cfg.TavilyAPIKey)
 }
 
 // tavilyKeyFor returns the Tavily key in effect: the environment overrides the

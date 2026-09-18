@@ -5,6 +5,10 @@ ogcode
 # Data directory
 .ogcode/
 
+# Workspace public folder — served over HTTP at /public for the web UI. Runtime
+# and user artifacts land there; it is never part of the source tree.
+public/
+
 # Web build artifacts
 # Dependencies
 node_modules/
@@ -36,6 +40,13 @@ manifests/
 
 # Claude Code CLI
 .claude/
+
+# Demo media — screen recordings and extracted frames kept machine-local;
+# nothing in README/docs references them, so they must never land in the repo.
+ogcode-demo.mp4
+ogcode-live-demo.mov
+ogcode-live-demo.mp4
+demo-recording/
 
 # Local scratch documents — planning notes kept machine-local; untracked now.
 # (GIT_DIFF_PLAN.md was previously listed; the other three are still tracked,

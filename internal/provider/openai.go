@@ -77,159 +77,7 @@ func (p *OpenAIProvider) defaultModel() string {
 	return p.model
 }
 
-func (p *OpenAIProvider) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
-	if len(inputs) == 0 {
-		return nil, nil
-	}
-	model := p.model
-	// Prefer an embedding model if the current model is a chat model.
-	// For OpenAI, users typically use text-embedding-3-small/large.
-	// Allow override via OGCODE_EMBED_MODEL env var.
-	if embedModel := os.Getenv("OGCODE_EMBED_MODEL"); embedModel != "" {
-		model = embedModel
-	} else if !isEmbeddingModel(model) {
-		model = "text-embedding-3-small"
-	}
-
-	// OpenAI embeddings endpoint
-	url := strings.TrimRight(p.baseURL, "/") + "/embeddings"
-
-	type embedRequest struct {
-		Model string   `json:"model"`
-		Input []string `json:"input"`
-	}
-	type embedResponse struct {
-		Data  []embedItem `json:"data"`
-		Usage struct {
-			PromptTokens int `json:"prompt_tokens"`
-			TotalTokens  int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-
-	body, err := json.Marshal(embedRequest{Model: model, Input: inputs})
-	if err != nil {
-		return nil, fmt.Errorf("marshal embed request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create embed request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		token := p.apiKey
-		if !strings.Contains(token, " ") {
-			token = "Bearer " + token
-		}
-		httpReq.Header.Set("Authorization", token)
-	}
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send embed request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("%s embed API error %d: %s", p.id, resp.StatusCode, string(body))
-	}
-
-	var out embedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode embed response: %w", err)
-	}
-
-	vecs, err := assembleEmbeddings(out.Data, len(inputs))
-	if err != nil {
-		return nil, fmt.Errorf("%s embed API: %w", p.id, err)
-	}
-	return vecs, nil
-}
-
-// embedItem is one entry of an embeddings response: an input's embedding vector
-// and the index of the input it corresponds to.
-type embedItem struct {
-	Index     int       `json:"index"`
-	Embedding []float32 `json:"embedding"`
-}
-
-// assembleEmbeddings places each returned embedding at its response index,
-// producing exactly one vector per input in input order. It validates the
-// response rather than trusting it: a provider-supplied index outside [0,n)
-// would otherwise index the result slice out of range and panic (the whole
-// point of this helper), and a duplicate or missing index would silently
-// misalign every embedding with its input. Any of those is an error, consistent
-// with the rest of Embed returning errors instead of a bad result.
-func assembleEmbeddings(data []embedItem, n int) ([][]float32, error) {
-	if len(data) != n {
-		return nil, fmt.Errorf("returned %d embeddings for %d inputs", len(data), n)
-	}
-	vecs := make([][]float32, n)
-	for _, d := range data {
-		if d.Index < 0 || d.Index >= n {
-			return nil, fmt.Errorf("out-of-range index %d for %d inputs", d.Index, n)
-		}
-		if vecs[d.Index] != nil {
-			return nil, fmt.Errorf("duplicate index %d in response", d.Index)
-		}
-		vecs[d.Index] = d.Embedding
-	}
-	return vecs, nil
-}
-
-func (p *OpenAIProvider) EmbedModel() string {
-	if embedModel := os.Getenv("OGCODE_EMBED_MODEL"); embedModel != "" {
-		return embedModel
-	}
-	if isEmbeddingModel(p.model) {
-		return p.model
-	}
-	return "text-embedding-3-small"
-}
-
-func isEmbeddingModel(model string) bool {
-	m := strings.ToLower(model)
-	return strings.Contains(m, "embed")
-}
-
-// NewEmbedProvider creates an OpenAIProvider configured for embedding.
-// providerID must be "openai", "openrouter", or "ollama".
-// If apiKey is non-empty it overrides the env var key.
-// If model is non-empty it is stored as the provider model (used for embedding).
-// Deprecated: Use NewEmbedProviderWithConfig for full control over baseURL.
-func NewEmbedProvider(providerID, apiKey, model string) (*OpenAIProvider, error) {
-	return NewEmbedProviderWithConfig(providerID, apiKey, model, "")
-}
-
-// NewEmbedProviderWithConfig creates an OpenAIProvider configured for embedding with
-// optional apiKey, model, and baseURL overrides. Env-var values are used as the
-// base; non-empty parameters override them.
-func NewEmbedProviderWithConfig(providerID, apiKey, model, baseURL string) (*OpenAIProvider, error) {
-	var p *OpenAIProvider
-	switch providerID {
-	case "openai":
-		p = NewOpenAIProvider()
-	case "openrouter":
-		p = NewOpenRouterProvider()
-	case "ollama":
-		p = NewOllamaProvider()
-	default:
-		return nil, fmt.Errorf("unknown embed provider %q; must be openai, openrouter, or ollama", providerID)
-	}
-	if apiKey != "" {
-		p.apiKey = apiKey
-	}
-	if model != "" {
-		p.model = model
-	}
-	if baseURL != "" {
-		p.baseURL = baseURL
-	}
-	return p, nil
-}
-
+// NewOpenAIProvider creates an OpenAIProvider from the OPENAI_* env vars.
 func NewOpenAIProvider() *OpenAIProvider {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	model := os.Getenv("OPENAI_MODEL")
@@ -688,18 +536,113 @@ func CollectionFromBaseURL(baseURL string) string {
 	return collectionFromBaseURL(baseURL)
 }
 
+// Prompt caching on this code path is two unrelated problems, because one
+// struct serves every OpenAI-compatible endpoint.
+//
+// OpenAI caches automatically and needs no breakpoints, but its cache lives
+// behind a pool of machines and routes by prefix hash; prompt_cache_key is the
+// documented way to keep one conversation landing on the node that already
+// holds its prefix. Without it, hit rate sags exactly when the service is busy.
+//
+// OpenRouter is a passthrough. For its OpenAI and Gemini models caching is
+// automatic and there is nothing to do — but for its Anthropic models it
+// forwards cache_control and invents nothing, so a request with no breakpoints
+// gets NO caching at all. That is the default configuration: OpenRouter's
+// default model here is anthropic/claude-sonnet-4.6 and three Claude models are
+// active by default, so the untouched setup was paying full price for roughly
+// 7.8k tokens of tools plus system on every step of every turn.
+//
+// Both are gated on the endpoint rather than sent everywhere. This struct also
+// serves Ollama, Groq, DeepSeek, Cerebras, SambaNova and anything a user points
+// a base URL at; an unknown top-level field or an unexpected content-part shape
+// is a 400 on a strict server, and breaking a request to save tokens is a bad
+// trade.
+
+// sendsPromptCacheKey reports whether this endpoint understands
+// prompt_cache_key. OpenRouter is included: it accepts the field for its
+// OpenAI-backed models and ignores it elsewhere.
+func (p *OpenAIProvider) sendsPromptCacheKey() bool {
+	u := strings.ToLower(p.baseURL)
+	return strings.Contains(u, "api.openai.com") || strings.Contains(u, "openrouter.ai")
+}
+
+// needsExplicitCacheBreakpoints reports whether this request must carry
+// Anthropic-style cache_control markers to be cached at all: an Anthropic model
+// reached through OpenRouter's passthrough.
+func (p *OpenAIProvider) needsExplicitCacheBreakpoints(model string) bool {
+	return p.isOpenRouter() && strings.HasPrefix(strings.ToLower(model), "anthropic/")
+}
+
+// cachedTextPart renders one string as a content part carrying a cache
+// breakpoint, in the shape OpenRouter forwards to Anthropic.
+func cachedTextPart(text string) map[string]any {
+	return map[string]any{
+		"type":          "text",
+		"text":          text,
+		"cache_control": map[string]any{"type": "ephemeral"},
+	}
+}
+
+// systemMessageFor builds the system message, with a cache breakpoint when the
+// endpoint needs one.
+//
+// The breakpoint goes at the end of entry [0] — the session-static base — and
+// never later. Entries [1:] are the per-turn tail (viewport, index status, the
+// date, the skill list, a compaction summary), so a breakpoint past them would
+// be invalidated by the very content it was meant to protect. This mirrors what
+// the Anthropic provider does with the same entries.
+func systemMessageFor(system []string, breakpoints bool) (oaiMessage, bool) {
+	if len(system) == 0 {
+		return oaiMessage{}, false
+	}
+	if !breakpoints {
+		return oaiMessage{Role: "system", Content: strings.Join(system, "\n\n")}, true
+	}
+	parts := []any{cachedTextPart(system[0])}
+	if rest := strings.Join(system[1:], "\n\n"); rest != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": rest})
+	}
+	return oaiMessage{Role: "system", Content: parts}, true
+}
+
+// attachOAIMessageBreakpoint marks the conversation prefix so a turn's history
+// is cached across its steps, not just the tools and system block.
+//
+// It walks back to the last user or assistant message carrying plain string
+// content. A tool-result message is skipped deliberately: it is the last message
+// on most steps of an agent loop, and its content maps to an Anthropic
+// tool_result block whose part shape is not the one this marker belongs on.
+// Stopping at the message before it still caches nearly all of the history and
+// cannot produce a request the passthrough rejects.
+func attachOAIMessageBreakpoint(messages []oaiMessage) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := &messages[i]
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		if m.ToolCallID != "" {
+			continue
+		}
+		text, ok := m.Content.(string)
+		if !ok || text == "" {
+			continue
+		}
+		m.Content = []any{cachedTextPart(text)}
+		return
+	}
+}
+
 func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error) {
 	model := req.Model
 	if model == "" {
 		model = p.defaultModel()
 	}
 
+	explicitBreakpoints := p.needsExplicitCacheBreakpoints(model)
+
 	messages := make([]oaiMessage, 0, len(req.Messages)+len(req.System))
-	if len(req.System) > 0 {
-		messages = append(messages, oaiMessage{
-			Role:    "system",
-			Content: strings.Join(req.System, "\n\n"),
-		})
+	if sysMsg, ok := systemMessageFor(req.System, explicitBreakpoints); ok {
+		messages = append(messages, sysMsg)
 	}
 	// OpenAI-compatible APIs reject images inside a tool result. Buffer any
 	// images attached to tool results and emit them as a follow-up user message
@@ -787,6 +730,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	// Flush any images from a trailing run of tool results (e.g. the current turn).
 	flushImages()
 
+	if explicitBreakpoints {
+		attachOAIMessageBreakpoint(messages)
+	}
+
 	tools := make([]oaiTool, 0, len(req.Tools))
 	toolNames := make(map[string]bool, len(req.Tools))
 	for _, t := range req.Tools {
@@ -808,6 +755,9 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		Stream:      true,
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
+	}
+	if p.sendsPromptCacheKey() {
+		body.PromptCacheKey = req.CacheKey
 	}
 	// stream_options.include_usage is supported by OpenAI, OpenRouter, and Ollama (v0.5+).
 	// The final chunk will contain a usage object alongside an empty choices array.
@@ -940,9 +890,9 @@ func (p *OpenAIProvider) setChatHeaders(req *http.Request) {
 // Holding both to the same budget aborts healthy long-file turns on the latter.
 func (p *OpenAIProvider) idleTimeout() time.Duration {
 	if p.id == "ollama" || isLocalEndpoint(p.baseURL) {
-		return streamIdleTimeoutBuffered
+		return resolveIdleTimeout(streamIdleTimeoutBuffered)
 	}
-	return streamIdleTimeout
+	return resolveIdleTimeout(streamIdleTimeout)
 }
 
 func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent, cancel context.CancelFunc, toolNames map[string]bool) {
@@ -1072,8 +1022,11 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 	// buffer that was cut off mid-response.
 	if err := scanner.Err(); err != nil {
 		msg := describeStreamReadError(err, idle.Fired(), idle.Timeout())
+		// Count it against the IPv6 path if that is what gave out, so a host
+		// whose IPv6 keeps dropping established connections stops using it.
+		noteIPv6Failure(err)
 		slog.Warn("openai stream read failed", "provider", p.id, "err", err, "idleTimeout", idle.Fired())
-		ch <- StreamEvent{Type: EventError, Error: msg}
+		ch <- StreamEvent{Type: EventError, Error: msg, Err: err}
 		return
 	}
 
@@ -1202,6 +1155,10 @@ type oaiRequest struct {
 	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
 	Temperature   float64           `json:"temperature,omitempty"`
 	MaxTokens     int               `json:"max_tokens,omitempty"`
+	// PromptCacheKey routes a conversation's requests to the cache node that
+	// already holds its prefix. Sent only where it is known to be understood —
+	// see sendsPromptCacheKey.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 type oaiStreamOptions struct {

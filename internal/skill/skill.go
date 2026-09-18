@@ -41,6 +41,11 @@ const (
 // case or separator drift between the three is a lookup miss with no error.
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// envNamePattern is the grammar of a `requires` entry. It matches what a shell
+// can export and what os.Getenv accepts, so a typo is caught at parse time
+// rather than surfacing as a variable that is permanently "not set".
+var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // Source labels where a skill was found, for diagnostics and for the tool's
 // output. It has no effect on lookup.
 type Source string
@@ -67,6 +72,26 @@ type Skill struct {
 	// Content is the markdown body — everything after the frontmatter.
 	Content string
 	Source  Source
+	// Requires names the environment variables the skill's instructions assume
+	// are present — a token its scripts read, an endpoint they call. Nothing is
+	// done with them here beyond recording them: the skill tool checks each is
+	// set before it hands the body to the agent, so a skill whose scripts would
+	// fail on a missing credential says so up front instead of midway through.
+	Requires []string
+}
+
+// MissingEnv returns the required environment variables the process holds no
+// non-empty value for. An empty value counts as missing: a credential exported
+// as the empty string satisfies nothing the skill will do with it, and
+// reporting it as present would move the failure back to the script.
+func (s Skill) MissingEnv() []string {
+	var missing []string
+	for _, name := range s.Requires {
+		if os.Getenv(name) == "" {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // Parse reads a SKILL.md's bytes and returns the skill it defines. dir is the
@@ -124,10 +149,16 @@ func parseContent(data []byte) (Skill, error) {
 		desc = strings.TrimSpace(string(runes[:MaxDescriptionLen])) + "…"
 	}
 
+	requires, err := parseRequires(front)
+	if err != nil {
+		return Skill{}, err
+	}
+
 	return Skill{
 		Name:        name,
 		Description: desc,
 		Content:     strings.TrimSpace(body),
+		Requires:    requires,
 	}, nil
 }
 
@@ -222,6 +253,97 @@ func parseFrontmatter(front string) map[string]string {
 		}
 	}
 	return fields
+}
+
+// parseRequires reads the frontmatter's `requires` list: the environment
+// variables the skill's instructions assume are set. Four spellings are
+// accepted, covering what the frontmatter this package already tolerates can
+// hold — an inline comma list (`requires: FOO, BAR`), a flow sequence
+// (`requires: [FOO, BAR]`), a block sequence of `- FOO` lines, and a block
+// scalar with one name per line.
+//
+// Names are validated here rather than trusted. The list feeds a single
+// question — "is this variable set?" — and a name no shell could export would
+// answer "no" on every load with nothing for the user to correct. Duplicates
+// collapse, so a name listed twice is reported once.
+func parseRequires(front string) ([]string, error) {
+	var names []string
+	seen := map[string]bool{}
+
+	// add takes one comma-separated group and records each name in it.
+	add := func(raw string) error {
+		for _, part := range strings.Split(stripComment(raw), ",") {
+			name := strings.TrimSpace(unquote(strings.TrimSpace(part)))
+			if name == "" {
+				continue
+			}
+			if !envNamePattern.MatchString(name) {
+				return fmt.Errorf("requires entry %q is not a usable environment variable name", name)
+			}
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+		return nil
+	}
+
+	// inBlock is set by a bare `requires:` and stays set while following lines
+	// still belong to the list — an indented line or a `- ` sequence entry.
+	inBlock := false
+	for _, line := range strings.Split(front, "\n") {
+		trimmed := strings.TrimSpace(line)
+		indented := line != "" && (line[0] == ' ' || line[0] == '\t')
+		if inBlock && (trimmed == "" || indented) {
+			// A sequence entry ("- FOO") or a block-scalar line ("FOO") is one
+			// name; either way the leading "-" is optional.
+			if err := add(strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		inBlock = false
+		if trimmed == "" || indented || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		key, rest, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(key) != "requires" {
+			continue
+		}
+		// The comment goes before the brackets: "requires: [FOO] # why" leaves the
+		// closing bracket behind a comment, so trimming it first would miss it.
+		// TrimSpace again after: stripping a comment leaves the space before it,
+		// which would hide the closing bracket from the TrimSuffix below.
+		rest = strings.TrimSpace(stripComment(strings.TrimSpace(rest)))
+		if rest == "" || isBlockIndicator(rest) {
+			inBlock = true
+			continue
+		}
+		rest = strings.TrimSuffix(strings.TrimPrefix(rest, "["), "]")
+		if err := add(rest); err != nil {
+			return nil, err
+		}
+	}
+	return names, nil
+}
+
+// stripComment drops a trailing YAML comment from a scalar. Unlike a
+// description — where a bare # is far more likely to be prose than a comment,
+// so nothing is stripped — a `requires` entry is an environment variable name,
+// which can never contain a #. So the only thing a # can be here is a comment,
+// and treating one as part of the name would reject the whole skill over a note
+// the user wrote beside the list.
+func stripComment(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '#' {
+			continue
+		}
+		if i == 0 || s[i-1] == ' ' || s[i-1] == '\t' {
+			return s[:i]
+		}
+	}
+	return s
 }
 
 // isBlockIndicator reports whether a YAML value position holds a block scalar

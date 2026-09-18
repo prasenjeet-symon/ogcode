@@ -24,6 +24,7 @@ import {
   isNotFoundError,
 } from '../api/client';
 import { useServer } from './server';
+import { capture } from '../lib/posthog';
 
 function shallowEqualPart(a: any, b: any): boolean {
   if (a === b) return true;
@@ -107,7 +108,6 @@ interface SessionContextValue {
   addCustomModel: (id: string, providerId: string, displayName: string, collection?: string) => Promise<void>;
   removeCustomModel: (id: string) => Promise<void>;
   refresh: () => void;
-  memorySavedTokens: () => number;
   modelSlots: () => (string | null)[];
   setModelSlot: (slot: number, modelId: string | null) => void;
   modelSwitchPopup: () => { modelId: string; slot: number } | null;
@@ -121,7 +121,6 @@ export const SessionProvider: ParentComponent = (props) => {
   const [sessions, setSessions] = createSignal<Session[]>([]);
   const [activeSession, setActiveSession] = createSignal<Session | null>(null);
   const [sessionMissing, setSessionMissing] = createSignal(false);
-  const [memorySavedTokens, setMemorySavedTokens] = createSignal(0);
   const [messagesRaw, setMessagesRaw] = createSignal<MessageWithParts[]>([]);
   const messages = messagesRaw;
   // Version counter: incremented on each session selection.
@@ -239,6 +238,10 @@ export const SessionProvider: ParentComponent = (props) => {
   // running loop. Cleared when the loop picks it up (loop.guidance: delivered)
   // or when the loop exits.
   const [guidanceActive, setGuidanceActive] = createSignal(false);
+  // How many times guidance has been sent per session this page-load, so the
+  // analytics event can tell a single course-correction from repeated steering.
+  // In-memory only and never persisted — it is a counter for one metric.
+  const guidanceCount = new Map<string, number>();
   let guidanceTimer: ReturnType<typeof setTimeout> | null = null;
   // Per-session permission queues, keyed by session id. A permission prompt is
   // owned by the session whose agent loop raised it — not by whichever session
@@ -518,9 +521,6 @@ export const SessionProvider: ParentComponent = (props) => {
     // Clear pendingModel when switching sessions so the destination session's
     // own persisted model is used, not whatever was selected in the previous session.
     if (!sameSession) {
-      // Use the locally-cached value as a starting point; the API fetch below will
-      // replace it with the authoritative value, and SSE events will accumulate on top.
-      setMemorySavedTokens(session.memoryTokensSaved ?? 0);
       setPendingModel('');
     }
 
@@ -542,8 +542,7 @@ export const SessionProvider: ParentComponent = (props) => {
       const msgs = await getMessages(id);
       setMessages(msgs);
 
-      // Fetch the authoritative session record so we have the real memoryTokensSaved,
-      // not the potentially-stale cached value. listSessions filters by the main
+      // Fetch the authoritative session record. listSessions filters by the main
       // project directory, so sessions created in task worktrees (which use the
       // worktree path as their directory) won't appear in that list. Fall back to a
       // direct getSession fetch — it queries by session ID, not directory — so the
@@ -568,7 +567,6 @@ export const SessionProvider: ParentComponent = (props) => {
       }
       if (fresh) {
         setActiveSession(fresh);
-        setMemorySavedTokens(fresh.memoryTokensSaved ?? 0);
       }
 
       // Restore any pending permission prompts for this session. Prompts raised
@@ -886,8 +884,22 @@ export const SessionProvider: ParentComponent = (props) => {
   async function guidance(content: string, cancelTool?: boolean): Promise<boolean> {
     const session = activeSession();
     if (!session) return false;
+    // Analytics for mid-loop steering: how many installs use it, and whether
+    // they steer once or repeatedly. Deliberately NOT the guidance text — that
+    // is the user's own prompt and can carry code, paths and secrets. Length is
+    // a measure, not content.
+    const n = (guidanceCount.get(session.id) ?? 0) + 1;
+    guidanceCount.set(session.id, n);
+    const track = (accepted: boolean) => capture('midloop_guidance_sent', {
+      accepted,
+      cancelled_tool: !!cancelTool,
+      length: content.length,
+      nth_in_session: n,
+    });
     try {
       await sendGuidance(session.id, content, cancelTool);
+      // Accepted by the server, whether or not the user has since navigated away.
+      track(true);
       // Guard against session-switch race: if the user navigated to a different
       // session while the request was in flight, don't set the guidance indicator
       // on the destination session — guidance is per-session and must not leak.
@@ -900,7 +912,12 @@ export const SessionProvider: ParentComponent = (props) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // 409 = no running loop — the caller can fall back to a normal prompt.
-      if (msg.includes('409')) return false;
+      // Worth recording: a user reaching for guidance when nothing is running
+      // is a user who expected to be able to steer.
+      if (msg.includes('409')) {
+        track(false);
+        return false;
+      }
       console.error('send guidance failed:', e);
       return false;
     }
@@ -1060,24 +1077,6 @@ export const SessionProvider: ParentComponent = (props) => {
     }, 150);
   }));
 
-  // SSE handler for memory.savings.  Use the numeric event-tick to guard against
-  // re-reactive firings (e.g. on activeSession change) that would otherwise
-  // double-count a delta against the freshly-fetched persisted value.
-  let lastProcessedMemoryTick = 0;
-  createEffect(on(server.eventTick, (tick) => {
-    if (tick === lastProcessedMemoryTick) return;
-    lastProcessedMemoryTick = tick;
-
-    const sess = activeSession();
-    if (!sess) return;
-    const last = server.lastEvent();
-    if (!last || last.type !== 'memory.savings') return;
-    const evtSessionId = (last.properties as any)?.sessionId;
-    if (!evtSessionId || evtSessionId !== sess.id) return;
-    const saved = Number((last.properties as any)?.savedTokens ?? 0);
-    setMemorySavedTokens((prev) => prev + saved);
-  }));
-
   // --- Tool permission prompts ---
   // The backend blocks a mutating tool call (bash/write/edit) until the user
   // approves it, publishing permission.requested and, on resolution,
@@ -1198,7 +1197,6 @@ export const SessionProvider: ParentComponent = (props) => {
     addCustomModel,
     removeCustomModel,
     refresh,
-    memorySavedTokens,
     modelSlots,
     setModelSlot,
     modelSwitchPopup,

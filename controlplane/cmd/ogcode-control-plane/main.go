@@ -23,6 +23,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/auth"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/bus"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/config"
+	"github.com/prasenjeet-symon/ogcode-control-plane/internal/incus"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/master"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/pairing"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/registry"
@@ -140,12 +141,41 @@ func serve(ctx context.Context, configPath string) error {
 		}
 	}
 
+	// Container mode (INCUS_WORKERS_PLAN.md §Phase B): a configured incus
+	// block switches assignment to one container per user-repo assignment.
+	// A nil block keeps the bare-worker behavior byte-for-byte.
+	var incusOpts *master.IncusOptions
+	if inc := cfg.Master.Incus; inc != nil {
+		driver, err := incus.NewDriver(incus.Config{
+			Socket:     inc.Socket,
+			Profile:    inc.IncusProfile(),
+			ImageAlias: inc.IncusImageAlias(),
+		})
+		if err != nil {
+			return err
+		}
+		incusOpts = &master.IncusOptions{
+			Driver:          driver,
+			Profile:         inc.IncusProfile(),
+			ImageAlias:      inc.IncusImageAlias(),
+			NamePrefix:      inc.IncusNamePrefix(),
+			MaxContainers:   inc.IncusMaxContainers(),
+			RegisterTimeout: inc.IncusRegisterTimeout(),
+			MasterURL:       inc.MasterURL,
+			PairingSecret:   inc.IncusSecret(cfg.Master.PairingSecret),
+		}
+		logger.Info("incus container mode enabled", "image", inc.IncusImageAlias(),
+			"profile", inc.IncusProfile(), "maxContainers", inc.IncusMaxContainers(),
+			"registerTimeout", inc.IncusRegisterTimeout())
+	}
+
 	srv := master.New(master.Options{
 		Registry: reg,
 		Auth:     pairAuth,
 		Bus:      eventBus,
 		Logger:   logger,
 		Gate:     gate,
+		Incus:    incusOpts,
 	})
 
 	mux := http.NewServeMux()
@@ -194,6 +224,25 @@ func serve(ctx context.Context, configPath string) error {
 	reapCtx, cancelReap := context.WithCancel(ctx)
 	defer cancelReap()
 	go srv.ReapLoop(reapCtx, cfg.Master.WorkerTimeout(), 0)
+
+	// Placement reaper (container mode only): fail placements whose worker
+	// never registered within the register timeout.
+	if incusOpts != nil {
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-reapCtx.Done():
+					return
+				case now := <-t.C:
+					if _, err := srv.ReapProvisioning(reapCtx, now); err != nil {
+						logger.Error("placement reaper", "err", err)
+					}
+				}
+			}
+		}()
+	}
 
 	// Serve until a signal arrives.
 	errCh := make(chan error, 1)

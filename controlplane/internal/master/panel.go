@@ -37,6 +37,7 @@ func isApexConsole(r *http.Request) bool {
 		operatorUsersAssignRepoPath, operatorUsersUnassignRepoPath, operatorUsersSetPWPath,
 		operatorReposPath, operatorReposAddPath, operatorReposRmPath,
 		operatorReposMergePath, operatorReposDeprovisionPath,
+		operatorPlacementsCreatePath, operatorPlacementsDestroyPath,
 		operatorSessionsPath, operatorSessionsStartPath,
 		operatorUserAssignPath, operatorUserSessionPath:
 		return true
@@ -89,6 +90,10 @@ func (s *Server) handleApexConsole(w http.ResponseWriter, r *http.Request) {
 		s.handleReposMerge(w, r)
 	case operatorReposDeprovisionPath:
 		s.handleReposDeprovision(w, r)
+	case operatorPlacementsCreatePath:
+		s.handlePlacementsCreate(w, r)
+	case operatorPlacementsDestroyPath:
+		s.handlePlacementsDestroy(w, r)
 	case operatorSessionsPath:
 		s.handleSessionsPage(w, r)
 	case operatorSessionsStartPath:

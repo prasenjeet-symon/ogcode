@@ -317,7 +317,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		systemBlocks = append(systemBlocks, anthropicSystemBlock{
 			Type:         "text",
 			Text:         req.System[0],
-			CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+			CacheControl: p.staticPrefixCacheControl(),
 		})
 		for _, s := range req.System[1:] {
 			systemBlocks = append(systemBlocks, anthropicSystemBlock{
@@ -328,11 +328,11 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	} else {
 		// Single entry or empty: join and cache as one block.
 		systemBlocks = []anthropicSystemBlock{
-			{Type: "text", Text: systemPrompt, CacheControl: &anthropicCacheControl{Type: "ephemeral"}},
+			{Type: "text", Text: systemPrompt, CacheControl: p.staticPrefixCacheControl()},
 		}
 	}
 	if len(tools) > 0 {
-		tools[len(tools)-1].CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+		tools[len(tools)-1].CacheControl = p.staticPrefixCacheControl()
 	}
 
 	// Cache the conversation prefix too: mark the end of the message history so
@@ -341,6 +341,11 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	// step. This is the 3rd of Anthropic's 4 allowed breakpoints (tools and the
 	// base system prompt are the other two).
 	attachMessageCacheBreakpoint(messages)
+
+	// After the breakpoint, deliberately: the guidance is the one part of the
+	// tail that changes when the user steers, so it belongs outside the cached
+	// region rather than at its edge.
+	messages = appendGuidanceBlock(messages, req.Guidance)
 
 	var thinking *anthropicThinking
 	if req.Thinking {
@@ -402,6 +407,9 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", p.apiKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	if p.usesExtendedCacheTTL() {
+		httpReq.Header.Set("anthropic-beta", extendedCacheTTLBeta)
+	}
 
 	resp, err := streamHTTPClient.Do(httpReq)
 	if err != nil {
@@ -431,8 +439,9 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 	// hanging. It wraps the body so it resets on bytes read off the wire, not on
 	// lines handed downstream — see idleWatchdog.
 	// Anthropic emits tool-call arguments as a run of input_json_delta events, so
-	// a working stream is never quiet for long: the tight budget applies.
-	idle := newIdleWatchdog(body, cancel, streamIdleTimeout)
+	// a working stream is never quiet for long: the tight budget is the default,
+	// unless the operator has set one of their own (see resolveIdleTimeout).
+	idle := newIdleWatchdog(body, cancel, resolveIdleTimeout(streamIdleTimeout))
 	defer idle.Stop()
 
 	scanner := bufio.NewScanner(idle)
@@ -561,8 +570,11 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 	// to guess at what went wrong.
 	if err := scanner.Err(); err != nil {
 		msg := describeStreamReadError(err, idle.Fired(), idle.Timeout())
+		// Count it against the IPv6 path if that is what gave out, so a host
+		// whose IPv6 keeps dropping established connections stops using it.
+		noteIPv6Failure(err)
 		slog.Warn("anthropic stream read failed", "err", err, "idleTimeout", idle.Fired())
-		ch <- StreamEvent{Type: EventError, Error: msg}
+		ch <- StreamEvent{Type: EventError, Error: msg, Err: err}
 	}
 }
 
@@ -601,6 +613,9 @@ type anthropicSystemBlock struct {
 // and including that block, enabling ~90% cost reduction on repeated prefixes.
 type anthropicCacheControl struct {
 	Type string `json:"type"`
+	// TTL selects the cache lifetime: "" is the default 5 minutes, "1h" the
+	// extended one. Sending it requires the extended-cache-ttl beta header.
+	TTL string `json:"ttl,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -619,6 +634,120 @@ type anthropicMessage struct {
 // from stored JSON), or a plain string (which is normalized into one text block
 // so the marker has somewhere to live). A non-empty content is required; anything
 // else is left untouched.
+// extendedCacheTTLBeta is the header value that unlocks the 1-hour prompt cache.
+const extendedCacheTTLBeta = "extended-cache-ttl-2025-04-11"
+
+// canonicalAnthropicHost is the endpoint the extended TTL is enabled against.
+const canonicalAnthropicHost = "api.anthropic.com"
+
+// usesExtendedCacheTTL reports whether this provider may ask for the 1-hour
+// cache.
+//
+// Why 1 hour at all: the default cache lives 5 minutes, and an agent loop
+// routinely goes longer than that between requests — a full test run, a build, a
+// deep_search (its own timeout is 180s), or simply the developer reading a diff
+// before replying. Every expiry re-reads the whole cacheable prefix, which for
+// the build agent is roughly 7.8k tokens of tools plus system before any
+// history. Writes cost 2x instead of 1.25x, reads stay at 0.1x either way, so
+// the trade pays for itself after about one extra read — and this prefix is
+// re-read on every step of every turn.
+//
+// Why only the canonical host: ANTHROPIC_BASE_URL points a number of proxies and
+// gateways at this code path. An unknown beta header is ignored harmlessly, but
+// an unknown "ttl" field inside cache_control can be a hard 400, which would
+// take the user's whole session down to save them tokens. The default TTL still
+// applies there, so a proxy loses the improvement, not the request.
+func (p *AnthropicProvider) usesExtendedCacheTTL() bool {
+	return strings.Contains(strings.ToLower(p.baseURL), canonicalAnthropicHost)
+}
+
+// staticPrefixCacheControl is the breakpoint for the parts of the request that
+// do not change within a session — the tool definitions and the base system
+// block. These are what the extended TTL is for.
+//
+// The message breakpoint deliberately keeps the 5-minute default: it is rewritten
+// on every step, so a 2x write on content that is superseded seconds later is
+// the one place the longer TTL costs more than it returns. Anthropic also
+// requires 1-hour breakpoints to precede 5-minute ones in the prefix, and the
+// prefix order is tools -> system -> messages, so this arrangement is the only
+// valid way round.
+func (p *AnthropicProvider) staticPrefixCacheControl() *anthropicCacheControl {
+	cc := &anthropicCacheControl{Type: "ephemeral"}
+	if p.usesExtendedCacheTTL() {
+		cc.TTL = "1h"
+	}
+	return cc
+}
+
+// PlacesGuidance reports that this provider positions mid-loop guidance itself.
+//
+// Anthropic is the clean case for it. Tool results already travel as blocks
+// INSIDE a user message here, so the guidance can be one more block appended to
+// that same message — no new message, so nothing about message roles changes and
+// there is no alternation question to get wrong. The OpenAI-shaped providers
+// carry a tool result as its own role:"tool" message, which cannot hold
+// unrelated text, so they keep the caller's fallback until that is done
+// separately.
+func (p *AnthropicProvider) PlacesGuidance() bool { return true }
+
+// appendGuidanceBlock puts the user's mid-loop guidance at the very end of the
+// conversation.
+//
+// The point is where it is NOT. The caller's fallback appends guidance to the
+// turn's first user message, and a prompt cache reuses a request only as far as
+// the bytes still match, so changing the first message throws away every tool
+// result behind it — the whole turn's reading, re-processed at full price on the
+// step immediately after the user steers. Appended at the end there is nothing
+// behind it to invalidate.
+//
+// It must run AFTER attachMessageCacheBreakpoint, so the breakpoint lands on the
+// content that is stable and the guidance sits outside the cached region. With
+// the breakpoint on the guidance instead, changing the guidance would mean no
+// exact match at the breakpoint and the hit would depend on the automatic
+// lookback finding an earlier one.
+//
+// A trailing text block after tool_result blocks is the documented shape: the
+// API requires tool_result to come first in a user message, not to be alone in
+// it. When the conversation happens to end on an assistant message the guidance
+// becomes its own user message, which is ordinary alternation.
+func appendGuidanceBlock(messages []anthropicMessage, guidance string) []anthropicMessage {
+	guidance = strings.TrimSpace(guidance)
+	if guidance == "" {
+		return messages
+	}
+	block := map[string]any{"type": "text", "text": guidance}
+
+	if len(messages) == 0 || messages[len(messages)-1].Role != "user" {
+		return append(messages, anthropicMessage{
+			Role:    "user",
+			Content: []map[string]any{block},
+		})
+	}
+
+	last := &messages[len(messages)-1]
+	switch c := last.Content.(type) {
+	case []map[string]any:
+		last.Content = append(c, block)
+	case []any:
+		last.Content = append(c, block)
+	case string:
+		blocks := []map[string]any{}
+		if c != "" {
+			blocks = append(blocks, map[string]any{"type": "text", "text": c})
+		}
+		last.Content = append(blocks, block)
+	default:
+		// An unexpected content shape is not worth guessing at: a new user
+		// message is always valid, and losing the ideal placement costs a
+		// message, not the request.
+		return append(messages, anthropicMessage{
+			Role:    "user",
+			Content: []map[string]any{block},
+		})
+	}
+	return messages
+}
+
 func attachMessageCacheBreakpoint(messages []anthropicMessage) {
 	if len(messages) == 0 {
 		return

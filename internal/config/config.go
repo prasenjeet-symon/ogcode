@@ -27,6 +27,16 @@ type SkillsConfig struct {
 	URLs []string `json:"urls,omitempty"`
 	// Permissions maps a skill-name glob to "allow", "deny", or "ask".
 	Permissions map[string]string `json:"permissions,omitempty"`
+	// Env supplies the environment variables skills declare in their
+	// frontmatter `requires` list — the credential a skill's scripts read, the
+	// endpoint they call. Values are exported into the process environment at
+	// startup, after which a `requires` name is satisfied exactly as if it had
+	// been exported by the shell. A real environment variable always wins, so a
+	// secret kept in the environment is never overridden by the file.
+	//
+	// The file it lives in is the same one holding provider API keys, and it is
+	// gitignored for the same reason: it is where secrets go.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 // MCPServerConfig configures a single Model Context Protocol server
@@ -147,6 +157,16 @@ func Load(dir string) *Config {
 			}
 			merged.Skills.Permissions[pattern] = action
 		}
+		// Skill env merges like permissions: key by key, project-local last, so a
+		// secret kept in the global config is available to every project without
+		// being restated, and a project can override one name without losing the
+		// rest. Global is read first, so a project value overwrites it.
+		for name, value := range c.Skills.Env {
+			if merged.Skills.Env == nil {
+				merged.Skills.Env = map[string]string{}
+			}
+			merged.Skills.Env[name] = value
+		}
 		// MCP servers merge per-name with project-local taking precedence.
 		// A project names a server the global config did not → it is added;
 		// a project re-states one the global config already had → project-local
@@ -231,7 +251,8 @@ const projectFileTemplate = `{
   "skills": {
     "paths": [],
     "urls": [],
-    "permissions": {}
+    "permissions": {},
+    "env": {}
   },
   "mcp": {}
 }
@@ -282,9 +303,15 @@ func readFile(path string) *Config {
 	return &c
 }
 
-// ApplyEnv exports the config's provider settings as environment variables,
-// for each variable that isn't already set. A real environment variable (or
-// one set earlier from a .env file) always wins over the config file.
+// ApplyEnv exports the config's provider settings and skill requirements as
+// environment variables, for each variable that isn't already set. A real
+// environment variable (or one set earlier from a .env file) always wins over
+// the config file.
+//
+// Skills are exported here rather than at load time because the check a skill
+// declares is a plain "is this variable set?" — exporting at startup makes a
+// `requires` name and an exported secret the same thing, which is what lets a
+// skill's own scripts reach it through the ordinary process environment.
 func (c *Config) ApplyEnv() {
 	for id, pc := range c.Providers {
 		names, ok := envNames[id]
@@ -297,6 +324,12 @@ func (c *Config) ApplyEnv() {
 		if pc.BaseURL != "" && names.BaseURL != "" {
 			setIfUnset(names.BaseURL, pc.BaseURL)
 		}
+	}
+	for name, value := range c.Skills.Env {
+		if name == "" || value == "" {
+			continue
+		}
+		setIfUnset(name, value)
 	}
 }
 

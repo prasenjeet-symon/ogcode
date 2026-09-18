@@ -5,7 +5,6 @@ export interface ProviderDef {
   bg: string;
   ring: string;
   hasBaseURL: boolean;
-  supportsEmbed: boolean;
   // keyOptional providers authenticate some other way (Ollama signs in on the
   // host, or runs unauthenticated locally), so an endpoint alone is a complete
   // configuration — reporting "Not configured" for them is simply wrong.
@@ -18,10 +17,10 @@ export interface ProviderDef {
 }
 
 export const PROVIDER_DEFS: ProviderDef[] = [
-  { id: 'anthropic',  label: 'Anthropic',  dot: 'bg-orange-400',  bg: 'bg-orange-500/10',  ring: 'ring-orange-400/20', hasBaseURL: true,  supportsEmbed: false, firstParty: true,  keyOptional: false },
-  { id: 'openai',     label: 'OpenAI',     dot: 'bg-emerald-400', bg: 'bg-emerald-500/10', ring: 'ring-emerald-400/20', hasBaseURL: true,  supportsEmbed: true,  firstParty: true,  keyOptional: false },
-  { id: 'openrouter', label: 'OpenRouter', dot: 'bg-violet-400',  bg: 'bg-violet-500/10',  ring: 'ring-violet-400/20', hasBaseURL: false, supportsEmbed: true,  firstParty: false, keyOptional: false },
-  { id: 'ollama',     label: 'Ollama',     dot: 'bg-sky-400',     bg: 'bg-sky-500/10',     ring: 'ring-sky-400/20',    hasBaseURL: true,  supportsEmbed: true,  firstParty: false, keyOptional: true  },
+  { id: 'anthropic',  label: 'Anthropic',  dot: 'bg-orange-400',  bg: 'bg-orange-500/10',  ring: 'ring-orange-400/20', hasBaseURL: true,  firstParty: true,  keyOptional: false },
+  { id: 'openai',     label: 'OpenAI',     dot: 'bg-emerald-400', bg: 'bg-emerald-500/10', ring: 'ring-emerald-400/20', hasBaseURL: true,  firstParty: true,  keyOptional: false },
+  { id: 'openrouter', label: 'OpenRouter', dot: 'bg-violet-400',  bg: 'bg-violet-500/10',  ring: 'ring-violet-400/20', hasBaseURL: false, firstParty: false, keyOptional: false },
+  { id: 'ollama',     label: 'Ollama',     dot: 'bg-sky-400',     bg: 'bg-sky-500/10',     ring: 'ring-sky-400/20',    hasBaseURL: true,  firstParty: false, keyOptional: true  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -152,22 +151,6 @@ export function collectionForBaseURL(baseURL: string): string {
   if (u.includes('openrouter.ai')) return 'OpenRouter';
   return '';
 }
-
-// Inbuilt embedder — runs a sentence model inside the ogcode binary. No API
-// key, base URL, or model selection required; always available.
-export const LOCAL_EMBED_PROVIDER = {
-  id: 'local',
-  label: 'Built-in (no setup)',
-  dot: 'bg-zinc-300',
-  bg: 'bg-zinc-400/10',
-  ring: 'ring-zinc-300/20',
-  hasBaseURL: false,
-  supportsEmbed: true,
-};
-
-// Embed providers shown in the settings UI, with the built-in option first so
-// agentic memory works out of the box with zero configuration.
-export const EMBED_PROVIDERS = [LOCAL_EMBED_PROVIDER, ...PROVIDER_DEFS.filter((p) => p.supportsEmbed)];
 
 export const CHAT_PROVIDERS = [
   { id: '', label: 'Use default (your main LLM)' },

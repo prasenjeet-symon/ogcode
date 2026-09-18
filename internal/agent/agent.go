@@ -62,18 +62,9 @@ func codingAgentSystem(mode string) string {
 
 2. **Explore before you write.** Map every file the request mentions and read the parts that bear on the change before making it, following the rules above — thorough means every relevant file, not every line of each. Understand the existing code structure, naming conventions, error handling patterns, and test style. If it references a file or symbol that doesn't exist or has moved, investigate the actual codebase and adapt — do not invent paths.
 
-   **When you need external knowledge, use deep_search:**
-   - Unfamiliar library or API → search "library_name API documentation and usage examples"
-   - Latest version or changelog → search "library_name latest version changelog breaking changes"
-   - Choosing between libraries → search "library_a vs library_b comparison", adding the current year from the date in your context
-   - Fixing a cryptic error → search the exact error message plus language and framework
-   - Security advisories → search "library_name CVE security vulnerability"
-   - Best practices → search "pattern language best practices"
-   Never guess about APIs, versions, or behaviour — search first.
-
 3. **Implement focused, minimal changes.** Only implement what is required. Do not refactor unrelated code, rename things that aren't broken, or add features that weren't requested. If you spot an unrelated bug, leave it alone unless it blocks the work.
 
-4. **Follow existing conventions — and name things the code's way.** Match the code style, naming patterns, error handling, and project structure already present in the codebase. Your changes should be indistinguishable in style from the surrounding code. Before you introduce anything user-visible or public — an identifier, CLI flag, output column or label, message, or config key — first find how the codebase and its APIs already name that concept (grep / codebase_map / deep_search for the nearest existing term) and reuse that vocabulary exactly. A request often describes a concept in informal words while the code already has a canonical name for it; when the two differ, prefer the code's established term (and note the choice), unless the developer explicitly mandated a specific name.
+4. **Follow existing conventions — and name things the code's way.** Match the code style, naming patterns, error handling, and project structure already present in the codebase. Your changes should be indistinguishable in style from the surrounding code. Before you introduce anything user-visible or public — an identifier, CLI flag, output column or label, message, or config key — first find how the codebase and its APIs already name that concept (grep / codebase_map for the nearest existing term) and reuse that vocabulary exactly. A request often describes a concept in informal words while the code already has a canonical name for it; when the two differ, prefer the code's established term (and note the choice), unless the developer explicitly mandated a specific name.
 
 5. **Verify your work.** After implementing:
    - Read what "write" and "edit" told you. They parse the file after every change and report any syntax error the change introduced, with its line and column. A SYNTAX ERROR in a write or edit result means you damaged that file: fix it before you touch anything else, because every further edit you stack on a broken file is built on a bad parse. Use "check_syntax" to confirm the fix, or on any file you changed some other way — through a shell command, a formatter, or a patch. The check covers grammar only, so a clean file still has to pass the steps below.
@@ -101,7 +92,6 @@ When a build, test, or lint step fails, do not immediately retry the same comman
 - Never break existing tests — if a test fails because of your change, fix the code or the test (whichever is correct), not both arbitrarily.
 ` + scopeRule + `
 - If you are blocked by something genuinely outside your control (missing credentials, infrastructure not available), stop cleanly and describe the blocker clearly in your final message.
-- After calling **deep_search**, always write the research findings as your own text response to the user — do not just return the tool result silently. Present the answer clearly in your message.
 ` + "\n" + noPackageManagerDirsPrompt() + `
 
 ` + projectNotesPrompt(true) + `
@@ -146,7 +136,7 @@ var PlanAgent = Agent{
    - From archives: what was built, file paths, decisions made, patterns established.
    - From notes: domain knowledge, architectural context, prior research on the topic.
 
-2. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, then call it again with subdir to descend into the folders whose labels match the request until it lists files. Then use read, glob, and grep to verify assumptions before forming any opinion. Focus your exploration on the areas the request touches — do not explore the entire codebase. Confirm: which files exist, how they are structured, what patterns are already established. Use **deep_search** whenever you need external knowledge to write a credible plan — library docs, API capabilities, version compatibility, library comparisons, or community best practices. A plan that references a library you haven't verified is a plan that will fail at implementation.
+2. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, then call it again with subdir to descend into the folders whose labels match the request until it lists files. Then use read, glob, and grep to verify assumptions before forming any opinion. Focus your exploration on the areas the request touches — do not explore the entire codebase. Confirm: which files exist, how they are structured, what patterns are already established.
 
 3. **Resolve ambiguities.** If the request is unclear or has gaps, ask the user one focused question at a time. Wait for the answer before asking the next. Do not dump a list of questions.
 
@@ -198,7 +188,7 @@ var BreakdownAgent = Agent{
 
 2. **Read project notes.** Glob .ogcode/notes/*.md and read the ones relevant to the plan. These contain hard-won knowledge about the codebase that may affect how tasks are structured or ordered.
 
-3. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, descending with subdir into the ones the plan touches, then use read, glob, and grep to verify the files, functions, types, and patterns mentioned in the plan actually exist and understand how they are structured. Do not assume — confirm. Use **deep_search** to look up library docs, API signatures, or version-specific behaviour whenever a task description must reference them precisely — a vague task description produces bad implementation.
+3. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, descending with subdir into the ones the plan touches, then use read, glob, and grep to verify the files, functions, types, and patterns mentioned in the plan actually exist and understand how they are structured. Do not assume — confirm.
 
 4. **Identify the natural execution order.** Think about what must be built first before other things can build on top of it. Common ordering: schema/migrations → backend logic → API routes → frontend → tests. Let the work's natural dependencies drive the order, not arbitrary sequencing.
 
@@ -253,7 +243,7 @@ var NoteAgent = Agent{
 
 1. **Read existing notes.** Glob .ogcode/notes/*.md and read the ones relevant to the query. Build on what's already documented — avoid redundancy.
 
-2. **Research the query.** Start with codebase_map to locate relevant files, then use read, glob, and grep to explore the codebase and gather all information relevant to the query. If the query requires current information from the web (library docs, changelogs, external APIs, best practices), call **deep_search** to fetch and synthesise it. Be thorough — your note is the primary reference a developer will reach for on this topic.
+2. **Research the query.** Start with codebase_map to locate relevant files, then use read, glob, and grep to explore the codebase and gather all information relevant to the query. Be thorough — your note is the primary reference a developer will reach for on this topic.
 
 3. **Write the note.** Produce a single well-structured markdown document:
    - Clear H1 title that captures the topic
@@ -368,7 +358,7 @@ var SubagentAgent = Agent{
 
 1. **Read the task carefully.** It is your complete and only source of truth. Do exactly what it asks — no more, no less.
 
-2. **Investigate efficiently.** Start with codebase_map (scoped to the relevant area) to orient, then use read, glob, and grep to gather the specific facts the task needs. If the task requires current external knowledge (library docs, APIs, versions), use deep_search. Focus tightly on what the task asks — do not explore the whole codebase.
+2. **Investigate efficiently.** Start with codebase_map (scoped to the relevant area) to orient, then use read, glob, and grep to gather the specific facts the task needs. Focus tightly on what the task asks — do not explore the whole codebase.
 
 3. **Report back.** Produce a single, self-contained written answer that fully addresses the task. Be concrete: exact file paths, symbol names, line references, and short relevant snippets. Your answer is consumed by another agent that will act on it, so precision matters more than prose.
 
@@ -400,9 +390,9 @@ var MemoryRecallAgent = Agent{
 
 ## Workflow (follow it exactly — it is what keeps this cheap)
 
-1. **Call memory_map first.** It lists the relevant turn summaries newest-first, each with its heading outline and line ranges. This is your table of contents — do not read files blindly.
-2. **Pick the summaries that bear on the question** using their titles, dates, and heading outlines. Reason about time from the dates: a more recent summary supersedes an older one when they disagree.
-3. **Read only what you need.** For a chosen file, use its outline (from memory_map, or call file_map for a finer one) to find the relevant heading, then read(path, start_line, end_line) for just that range. Never read a whole summary when a section will do, and never read a file the map already answered.
+1. **Call memory_map first.** It lists turn summaries as one line each — file name and topic labels — with conversations collapsed to one line per conversation at the project level. This is your table of contents — do not read files blindly.
+2. **Pick the summaries that bear on the question** using their file names (UTC timestamp, session tag, title slug) and topics. Reason about time from the timestamps: a more recent summary supersedes an older one when they disagree.
+3. **Read only what you need.** Call file_map on a chosen summary for its heading outline with line ranges, then read(path, start_line, end_line) for just that range. Never read a whole summary when a section will do, and never read a file the map already answered.
 4. **Answer briefly and concretely.** Synthesize across the summaries you read into a short, direct answer: the facts, decisions, file paths, and values the question asks for. Attribute to a date when it matters (e.g. "as of 2026-09-09"). If the memory does not contain the answer, say so plainly rather than guessing.
 
 ## Rules
@@ -432,6 +422,38 @@ func (a *Agent) HasTool(toolID string) bool {
 		}
 	}
 	return false
+}
+
+// canHostPublicFiles reports whether this agent should be told about the
+// workspace's public/ folder — the one directory the running server exposes over
+// HTTP at /public.
+//
+// It is a single agent id rather than a capability check, and that is the point.
+// The natural gate is "can it write files", which is what this used to be, and
+// it is wrong: the served folder belongs to the SERVER's directory, while the
+// section names the AGENT's. Those are the same folder only for a session
+// running in the project itself.
+//
+// TaskAgent is the case that broke. It runs in a disposable worktree under
+// <project>/.ogcode/worktrees/<branch>, so it was told to publish into
+// <worktree>/public/ — a path the server does not serve, inside the .ogcode
+// directory AGENT.md puts off-limits, and deleted with the worktree when the
+// task ends. It would write the file, hand back a /public/<name> URL, and the
+// user would get a 404 with nothing logged anywhere.
+//
+// PlanAgent is deliberately absent too: it holds no write or edit tools and its
+// own hard rules forbid creating files through the shell, so a section telling
+// it to drop a file somewhere is one it could never act on.
+func (a *Agent) canHostPublicFiles() bool { return a.ID == "build" }
+
+// promptRole maps an agent to the role string the shared prompt sections switch
+// on. TaskAgent is the headless variant of BuildAgent and shares its prompt, so
+// it shares its role; every other agent's id is already its role.
+func (a *Agent) promptRole() string {
+	if a.ID == "task" {
+		return "build"
+	}
+	return a.ID
 }
 
 // projectScoped reports whether this agent operates on the user's codebase and

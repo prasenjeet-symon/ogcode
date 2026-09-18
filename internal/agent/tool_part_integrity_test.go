@@ -57,9 +57,6 @@ func (m *badArgsProvider) StreamChat(ctx context.Context, req provider.StreamReq
 // with `unknown variant \`tool\“. Retrying and resuming both reproduce it
 // exactly, because the history is rebuilt the same way each time.
 func TestRunLoop_InvalidToolArgumentsStayPairable(t *testing.T) {
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
-
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -70,11 +67,6 @@ func TestRunLoop_InvalidToolArgumentsStayPairable(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set capability: %v", err)
 	}
-	if err := session.SetModelCacheSupport(database, "mock-badargs-model", "mock-badargs",
-		string(provider.CacheSupported), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
-	}
-
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
 	reg.Register(&badArgsProvider{})

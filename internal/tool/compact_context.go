@@ -12,9 +12,13 @@ import (
 // this text; a one-liner means the work that came before is simply lost.
 const minCompactSummaryChars = 80
 
-// CompactContextTool lets the agent reclaim its own context mid-turn on
-// endpoints that do not cache a repeated prefix, where every step re-pays full
-// price for the entire accumulated history.
+// CompactContextTool lets the agent reclaim its own context mid-turn: it drops
+// the earlier steps of the turn in exchange for a summary the agent writes. It is
+// offered to every read-capable agent on every provider. Shedding finished work
+// keeps the model's reasoning focused on what the task still needs and stops that
+// work being re-sent every step; the token saving is largest where the endpoint
+// does not cache a repeated prefix, but the focus it buys helps a long turn
+// anywhere.
 //
 // The tool itself only validates. The agent loop does the work: seeing this
 // call, it records a watermark at the assistant message that made it, and from

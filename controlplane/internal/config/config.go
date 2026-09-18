@@ -59,6 +59,47 @@ type MasterConfig struct {
 	// the master fully in-memory — acceptable for ephemeral/dev runs, but the
 	// routing table and accounts are then lost on every restart.
 	DBPath string `json:"dbPath,omitempty"`
+	// Incus, when set, switches assignment to container mode: one Incus
+	// container per user-repo assignment, created from ImageAlias with the
+	// Profile profile through the local unix Socket. The worker inside
+	// registers with the master like any ordinary worker; readiness is
+	// signalled by that Register, never by an Incus operation. When nil the
+	// master behaves exactly as before (bare workers, pickWorker heuristic).
+	Incus *IncusConfig `json:"incus,omitempty"`
+}
+
+// IncusConfig configures container mode (INCUS_WORKERS_PLAN.md §Phase B). All
+// timeouts apply to master-side bookkeeping only — no Incus operation is ever
+// awaited through the ConnectRPC command channel.
+type IncusConfig struct {
+	// Socket is the path of the Incus unix socket. Empty means the platform
+	// default (/var/lib/incus/incus.socket or theIncus user socket).
+	Socket string `json:"socket,omitempty"`
+	// Profile is the Incus profile applied to created containers. Defaults to
+	// "ogcode-worker" when empty (baked by scripts/incus/build-image.sh).
+	Profile string `json:"profile,omitempty"`
+	// ImageAlias is the image the containers are created from. Defaults to
+	// "ogcode-base" when empty.
+	ImageAlias string `json:"imageAlias,omitempty"`
+	// NamePrefix prefixes every created container name. Defaults to "og-"
+	// when empty; it must be DNS-label-safe ([a-z0-9-]).
+	NamePrefix string `json:"namePrefix,omitempty"`
+	// MaxContainersPerHost caps how many og-* containers this master keeps.
+	// Assignments beyond the cap fail with a capacity error. Defaults to 20
+	// when <= 0.
+	MaxContainersPerHost int `json:"maxContainersPerHost,omitempty"`
+	// RegisterTimeoutSeconds is how long a placement may sit in provisioning
+	// before the reaper fails it (the container was created but its worker
+	// never registered). Defaults to 600 when <= 0.
+	RegisterTimeoutSeconds int `json:"registerTimeoutSeconds,omitempty"`
+	// MasterURL is the control-plane URL workers dial (the apex/panel host,
+	// e.g. https://panel.example.com). Required — it is written into
+	// /etc/ogcode/master-url in-guest via cloud-init.
+	MasterURL string `json:"masterURL,omitempty"`
+	// PairingSecret is the worker pairing secret passed into the guest
+	// (written to /etc/ogcode/pairing-secret, 0600). Defaults to the master's
+	// own PairingSecret when empty — same secret, one place to rotate it.
+	PairingSecret string `json:"pairingSecret,omitempty"`
 }
 
 // DBFile resolves DBPath, applying the default when it is empty. The returned
@@ -106,6 +147,60 @@ func (m MasterConfig) SessionTTL() time.Duration {
 	return time.Duration(m.SessionTTLSeconds) * time.Second
 }
 
+// IncusProfile returns the configured container profile, defaulting to the
+// image baked by scripts/incus/build-image.sh's companion profile.
+func (c *IncusConfig) IncusProfile() string {
+	if c.Profile == "" {
+		return "ogcode-worker"
+	}
+	return c.Profile
+}
+
+// IncusImageAlias returns the configured image alias, defaulting to the image
+// produced by scripts/incus/build-image.sh.
+func (c *IncusConfig) IncusImageAlias() string {
+	if c.ImageAlias == "" {
+		return "ogcode-base"
+	}
+	return c.ImageAlias
+}
+
+// IncusNamePrefix returns the configured container-name prefix, defaulting to
+// the plan's "og-".
+func (c *IncusConfig) IncusNamePrefix() string {
+	if c.NamePrefix == "" {
+		return "og-"
+	}
+	return c.NamePrefix
+}
+
+// IncusMaxContainers returns the configured container cap, applying the
+// default.
+func (c *IncusConfig) IncusMaxContainers() int {
+	if c.MaxContainersPerHost <= 0 {
+		return 20
+	}
+	return c.MaxContainersPerHost
+}
+
+// IncusRegisterTimeout returns the configured provisioning deadline, applying
+// the default.
+func (c *IncusConfig) IncusRegisterTimeout() time.Duration {
+	if c.RegisterTimeoutSeconds <= 0 {
+		return 600 * time.Second
+	}
+	return time.Duration(c.RegisterTimeoutSeconds) * time.Second
+}
+
+// IncusSecret returns the pairing secret handed to containers, defaulting to
+// the master's own pairing secret.
+func (c *IncusConfig) IncusSecret(masterSecret string) string {
+	if c.PairingSecret != "" {
+		return c.PairingSecret
+	}
+	return masterSecret
+}
+
 // Load reads and validates a config file at path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -132,6 +227,21 @@ func (c *Config) validate() error {
 	if c.Master.TLS != nil {
 		if c.Master.TLS.Cert == "" || c.Master.TLS.Key == "" {
 			return fmt.Errorf("master.tls requires both cert and key")
+		}
+	}
+	if inc := c.Master.Incus; inc != nil {
+		if inc.IncusMaxContainers() <= 0 {
+			return fmt.Errorf("master.incus.maxContainersPerHost must be > 0")
+		}
+		if inc.MasterURL == "" {
+			return fmt.Errorf("master.incus.masterURL is required (workers dial it, e.g. https://panel.example.com)")
+		}
+		prefix := inc.IncusNamePrefix()
+		for i := 0; i < len(prefix); i++ {
+			ch := prefix[i]
+			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
+				return fmt.Errorf("master.incus.namePrefix %q must be [a-z0-9-]", prefix)
+			}
 		}
 	}
 	return nil

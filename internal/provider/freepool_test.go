@@ -68,6 +68,29 @@ func TestFreePoolCacheRoundTrip(t *testing.T) {
 	}
 }
 
+// The cache-root override is OGCODE_CACHE_DIR; the pre-embed-removal name
+// OGCODE_EMBED_MODEL_DIR must keep working so existing deployments that export
+// it don't silently fall back to ~/.ogcode.
+func TestFreePoolCachePathHonoursOverrides(t *testing.T) {
+	t.Setenv("OGCODE_CACHE_DIR", "")
+	t.Setenv("OGCODE_EMBED_MODEL_DIR", "")
+	if got := freePoolCachePath(); !strings.HasSuffix(got, filepath.Join(".ogcode", "free-keys.json")) {
+		t.Fatalf("default path = %q, want under ~/.ogcode", got)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("OGCODE_CACHE_DIR", dir)
+	if got := freePoolCachePath(); got != filepath.Join(dir, "free-keys.json") {
+		t.Fatalf("OGCODE_CACHE_DIR = %q, want %q", got, filepath.Join(dir, "free-keys.json"))
+	}
+
+	t.Setenv("OGCODE_CACHE_DIR", "")
+	t.Setenv("OGCODE_EMBED_MODEL_DIR", dir)
+	if got := freePoolCachePath(); got != filepath.Join(dir, "free-keys.json") {
+		t.Fatalf("legacy OGCODE_EMBED_MODEL_DIR = %q, want %q", got, filepath.Join(dir, "free-keys.json"))
+	}
+}
+
 func TestFreePoolCacheMissingIsNotError(t *testing.T) {
 	defs, err := readFreePoolCache(filepath.Join(t.TempDir(), "nope.json"))
 	if err != nil {
@@ -219,7 +242,7 @@ func TestLoadFreePoolFromNetwork(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("OGCODE_FREE_KEYS_URL", srv.URL)
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 
 	defs, err := loadFreePool(t.Context())
 	if err != nil {
@@ -242,7 +265,7 @@ func TestAddFreePoolProvidersProvisions(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("OGCODE_FREE_KEYS_URL", srv.URL)
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 	ResetFreePoolForTest()
 	t.Cleanup(ResetFreePoolForTest)
 
@@ -270,7 +293,7 @@ func TestAddFreePoolProvidersDoesNotShadowUserOpenAI(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("OGCODE_FREE_KEYS_URL", srv.URL)
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 	ResetFreePoolForTest()
 	t.Cleanup(ResetFreePoolForTest)
 
@@ -313,7 +336,7 @@ func TestLoadFreePoolFallsBackToCache(t *testing.T) {
 
 	dir := t.TempDir()
 	t.Setenv("OGCODE_FREE_KEYS_URL", srv.URL)
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", dir)
+	t.Setenv("OGCODE_CACHE_DIR", dir)
 
 	// Seed the cache.
 	if err := writeFreePoolCache(filepath.Join(dir, "free-keys.json"), []byte(sampleFreePoolJSON())); err != nil {
@@ -337,7 +360,7 @@ func TestLoadFreePoolNoNetworkNoCache(t *testing.T) {
 
 	dir := t.TempDir()
 	t.Setenv("OGCODE_FREE_KEYS_URL", srv.URL)
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", dir)
+	t.Setenv("OGCODE_CACHE_DIR", dir)
 
 	defs, err := loadFreePool(t.Context())
 	if err != nil {

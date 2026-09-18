@@ -72,10 +72,15 @@ func freePoolInstance() *freePool {
 }
 
 // freePoolCacheDir returns the directory for the cached key pool JSON. It
-// honours the OGCODE_EMBED_MODEL_DIR override (shared cache root) and falls
-// back to ~/.ogcode/.
+// honours the OGCODE_CACHE_DIR override (shared cache root) and falls back to
+// ~/.ogcode/. The legacy OGCODE_EMBED_MODEL_DIR name is still accepted (it once
+// pointed at the same shared cache root for the embedding model, which has been
+// removed).
 func freePoolCachePath() string {
-	dir := os.Getenv("OGCODE_EMBED_MODEL_DIR")
+	dir := os.Getenv("OGCODE_CACHE_DIR")
+	if dir == "" {
+		dir = os.Getenv("OGCODE_EMBED_MODEL_DIR")
+	}
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

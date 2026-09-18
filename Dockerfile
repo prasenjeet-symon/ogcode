@@ -21,7 +21,17 @@ COPY controlplane/go.mod controlplane/go.sum ./controlplane/
 RUN go mod download
 COPY . ./
 COPY --from=web-builder /app/web/dist /app/web/dist
-RUN CGO_ENABLED=1 go build -tags musl -ldflags "-s -w -X github.com/prasenjeet-symon/ogcode/internal/cli.version=$(git describe --tags --always) -X github.com/prasenjeet-symon/ogcode/internal/cli.commit=$(git rev-parse --short HEAD) -X github.com/prasenjeet-symon/ogcode/internal/cli.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o ogcode .
+# Version stamp. .dockerignore excludes .git, so `git describe` cannot run here,
+# and an -X carrying an empty value does not fall back to the Go default — it
+# writes "" over it, which IsDev() reads as a dev build and which silently
+# disables the update check. The version this image carries therefore has to come
+# from the tree rather than from the build context, the same source the Makefile
+# falls back to. A tag needs Git metadata this build does not have; the billed CI
+# stamps internal/version itself before this Dockerfile runs, and for a local
+# `docker build` web/package.json is the version in the checked-out tree.
+RUN VERSION=$(cat web/package.json | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1) \
+    && VERSION="v${VERSION#v}" \
+    && CGO_ENABLED=1 go build -tags musl -ldflags "-s -w -X github.com/prasenjeet-symon/ogcode/internal/version.Version=$VERSION -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o ogcode .
 
 # Final stage
 FROM alpine:latest

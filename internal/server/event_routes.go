@@ -93,7 +93,6 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 					"interval": meta.Interval,
 					"cores":    meta.Cores,
 					"uptime":   meta.Uptime,
-					"activity": meta.Activity,
 					"sample":   sample,
 				},
 			})

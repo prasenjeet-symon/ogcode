@@ -8,10 +8,11 @@ import (
 )
 
 // Read pressure is the volume of file, search, and page content the agent has
-// pulled into the current turn. On an endpoint that does not cache a repeated
-// prefix, every byte of it is re-billed on every remaining step, so a long
-// reading phase is the single most expensive thing the agent does — and the one
-// it is least likely to notice, because each individual read looks cheap.
+// pulled into the current turn. All of it stays in the context: it crowds the
+// model's reasoning and is re-sent on every remaining step. A long reading phase
+// is thus both a drag on accuracy and, where the endpoint does not cache a
+// repeated prefix, the most expensive thing the agent does — and the one it is
+// least likely to notice, because each individual read looks cheap.
 //
 // compact_context exists to reclaim exactly that space, but the agent has to
 // remember to reach for it. This tracker watches the reading as it happens and,
@@ -63,9 +64,11 @@ type readPressure struct {
 	bytes     int // the same content measured in bytes, for the reminder text
 	readSteps int // steps since the last reset that returned content
 
-	// offered mirrors whether compact_context is on this step's tool list. The
-	// reminder names a tool, so it must never be attached on a step where the
-	// agent was not given that tool.
+	// offered mirrors whether compact_context is on this turn's tool list. The
+	// reminder names a tool, so it must never be attached when the agent was not
+	// given that tool. Set once per turn (the loop resolves its toolset once, so
+	// the answer cannot change between steps) and deliberately NOT cleared by
+	// reset(), which only zeroes the accumulated volume.
 	offered bool
 
 	armed  bool // a reminder is due on the next content-returning result
@@ -104,7 +107,7 @@ func readPressureThresholdTokens(compactionThreshold int) int {
 	return t
 }
 
-// setOffered records whether compact_context is on the tool list for the step
+// setOffered records whether compact_context is on the tool list for the turn
 // about to run.
 func (rp *readPressure) setOffered(offered bool) {
 	if rp == nil {
@@ -207,13 +210,14 @@ func (rp *readPressure) reset() {
 func readPressureReminder(tokens, bytes, steps int) string {
 	return fmt.Sprintf("\n\n<system-reminder>\n"+
 		"Context pressure: %s of file, search, and page content has entered this turn "+
-		"across %d reading steps (~%s tokens). This endpoint does not cache a repeated "+
-		"prefix, so all of it is re-sent, and re-billed, on every remaining step of this turn.\n\n"+
+		"across %d reading steps (~%s tokens). All of it stays in your context — crowding "+
+		"the reasoning you do from here, and re-sent on every remaining step of this turn.\n\n"+
 		"Decide now, before reading anything else: if you have already taken what you need "+
 		"from that material, call compact_context with a summary that carries every file "+
 		"path, line range, conclusion, decision, and exact value you would otherwise have to "+
-		"look up again — then continue the task from the summary. If you genuinely still need "+
-		"the raw content in front of you, disregard this and carry on.\n"+
+		"look up again — then continue the task from the summary. Do not hold off to save "+
+		"tokens or to keep a cached prefix intact; a focused context is worth more. If you "+
+		"genuinely still need the raw content in front of you, disregard this and carry on.\n"+
 		"</system-reminder>", formatBytes(bytes), steps, formatCount(tokens))
 }
 

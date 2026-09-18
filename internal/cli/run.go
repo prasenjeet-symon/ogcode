@@ -14,8 +14,10 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
+	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
@@ -167,16 +169,14 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL (the community free pool was unreachable)")
 	}
 
-	// Tool registry (same as server, minus BreakdownTool which is a no-op for standalone runs)
+	// Tool registry. The core set is shared with the server (see
+	// tool.RegisterCoreTools) — a headless run offers the build agent the same
+	// prompt as an interactive one, so it has to offer the same tools. What
+	// follows is only what this entry point wires itself; BreakdownTool is
+	// omitted because it is a no-op for standalone runs.
+	docindexStore := docindex.NewStore(database)
 	toolRegistry := tool.NewRegistry()
-	toolRegistry.Register(tool.BashTool{})
-	toolRegistry.Register(tool.ReadTool{})
-	toolRegistry.Register(tool.NewCompactContextTool())
-	toolRegistry.Register(tool.WriteTool{})
-	toolRegistry.Register(tool.EditTool{})
-	toolRegistry.Register(tool.GlobTool{})
-	toolRegistry.Register(tool.GrepTool{})
-	toolRegistry.Register(tool.ViewImageTool{})
+	tool.RegisterCoreTools(toolRegistry, docindexStore)
 
 	// Skills, from the same ogcode.json this command already loads for
 	// provider settings.
@@ -257,6 +257,35 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	events := b.SubscribeAll()
 	defer b.Unsubscribe(events)
 
+	// Web search, on the same terms as the server: OGCODE_SEARCH_ENABLED wins
+	// when set, otherwise the settings-screen toggle decides, and an unreadable
+	// database leaves search on rather than silently stripping the tools.
+	//
+	// A headless run gets this for the same reason it gets the core toolset: it
+	// hands the build agent the identical system prompt, and that prompt tells
+	// the agent to reach for deep_search rather than guess at an API or a
+	// version. Without a bridge here the instruction was unfollowable — the tool
+	// was never registered, so the model was never offered it.
+	searchCfg, err := session.GetSearchConfig(globalDatabase)
+	if err != nil {
+		slog.Warn("failed to read search config from DB; leaving web search enabled on the native engine", "err", err)
+		searchCfg = &session.SearchConfig{Enabled: true, Provider: session.SearchProviderNative}
+	}
+	searchEnabled := searchCfg.Enabled
+	if v := os.Getenv("OGCODE_SEARCH_ENABLED"); v != "" {
+		searchEnabled = strings.EqualFold(v, "true")
+	}
+	// Only ever assign a non-nil implementation: Backend is an interface, and a
+	// typed-nil would compare != nil and get dead tools registered against it.
+	var searchBridge search.Backend
+	if searchEnabled {
+		searchBridge = search.BuildBackend(searchCfg.Provider, searchCfg.TavilyAPIKey)
+		toolRegistry.Register(tool.WebSearchTool{Bridge: searchBridge})
+		toolRegistry.Register(tool.FetchPageTool{Bridge: searchBridge})
+	} else {
+		slog.Info("web search disabled by configuration")
+	}
+
 	lr := &agent.LoopRunner{
 		Store:           store,
 		Bus:             b,
@@ -266,11 +295,39 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		Dir:             dir,
 		MaxSteps:        runMaxTurns,
 		Skills:          skillLoader,
+		SearchBridge:    searchBridge,
+		// The deep-research pipeline reads its fan-out and page budget from the
+		// same stored config the UI writes, so a headless run researches the way
+		// the project is configured to.
+		SearchParams: func() session.SearchConfig { return *searchCfg },
+		// A headless run honours the same per-project switch the UI writes, so
+		// `ogcode run` in a project behaves as that project is configured to.
+		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
+		// Same reporter the server wires. Without it indexedFiles stays -1, the
+		// index-status line is omitted, and a headless run in an unindexed
+		// project is left with a prompt that mandates codebase_map and no line
+		// telling it the index is empty — it has to spend a call finding out.
+		IndexedFileCount: func(dir string) int {
+			paths, err := docindexStore.ListDocPaths(dir)
+			if err != nil {
+				// Unknown beats wrong: -1 omits the line and leaves the agent on
+				// the probe-and-recover path rather than asserting "not indexed"
+				// about a project that may well be.
+				slog.Warn("index status lookup failed, omitting from prompt", "dir", dir, "err", err)
+				return -1
+			}
+			return len(paths)
+		},
 	}
 
-	// Register the task sub-agent tool now that the runner exists (the build
-	// agent advertises it, so it must resolve to avoid an "unknown tool" result).
+	// Register the tools that close over the runner now that it exists (the
+	// build agent advertises both, so they must resolve to avoid an "unknown
+	// tool" result). deep_search is skipped when there is no bridge behind it —
+	// registering it would offer the model a call that can only fail.
 	toolRegistry.Register(tool.TaskTool{Run: lr.RunTaskSession})
+	if searchBridge != nil {
+		toolRegistry.Register(tool.DeepSearchTool{Run: lr.RunSearchSession})
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

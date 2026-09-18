@@ -8,6 +8,7 @@ import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
 import ResourcePill from '../components/resource-pill';
 import SubagentIndicator from '../components/subagent-indicator';
+import ScrcpyStatusPill from '../components/scrcpy-status-pill';
 import { DrawerToggle } from '../components/sidebar-shell';
 import { NotFoundPanel } from './not-found';
 
@@ -67,6 +68,7 @@ function ChatContent() {
             <SubagentIndicator />
             <TokenPill />
             <ResourcePill />
+            <ScrcpyStatusPill />
             <button
               type="button"
               onClick={() => navigate('/settings', { state: { from: location.pathname } })}

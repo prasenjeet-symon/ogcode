@@ -22,6 +22,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode-control-plane/gen/controlplane/v1/controlplanev1connect"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/auth"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/bus"
+	"github.com/prasenjeet-symon/ogcode-control-plane/internal/incus"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/pairing"
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/registry"
 )
@@ -50,6 +51,10 @@ type Server struct {
 	// (sessions are routed in-memory too); a session absent from the map was
 	// started by an admin or before user scoping existed.
 	sessionUsers sync.Map // sessionID (string) -> userID (string)
+
+	// Container mode (INCUS §Phase B). incus nil = bare mode, byte-for-byte.
+	incus      *IncusOptions
+	placements *placementStore
 }
 
 // Options configures a Server. Zero values fall back to sane defaults.
@@ -64,6 +69,25 @@ type Options struct {
 	// Gate is the operator login for the browser-facing UI proxy. When nil or
 	// disabled (no password), the proxy runs unauthenticated.
 	Gate *auth.Gate
+	// Incus switches assignment to container mode (INCUS_WORKERS_PLAN.md
+	// §Phase B): one container per user-repo assignment, provisioned through
+	// Driver and made ready by the worker's Register. When nil — the default —
+	// the master behaves exactly as before (bare workers, pickWorker).
+	Incus *IncusOptions
+}
+
+// IncusOptions carries the container-mode collaborators. Driver is the Incus
+// socket driver; the rest mirror config.IncusConfig's resolved values so the
+// master never reads config after construction.
+type IncusOptions struct {
+	Driver          incus.Driver
+	Profile         string
+	ImageAlias      string
+	NamePrefix      string
+	MaxContainers   int
+	RegisterTimeout time.Duration
+	MasterURL       string
+	PairingSecret   string
 }
 
 // New constructs a Server.
@@ -93,6 +117,18 @@ func New(opts Options) *Server {
 	}
 	if s.cmdTO <= 0 {
 		s.cmdTO = DefaultCommandTimeout
+	}
+	// Container mode: the placement store shares the registry's bbolt file in
+	// its own bucket. A registry without a store (in-memory dev runs) cannot
+	// persist placements — container mode is refused at that point rather
+	// than silently degrading.
+	if opts.Incus != nil {
+		if store := opts.Registry.Store(); store != nil && store.DB() != nil {
+			s.incus = opts.Incus
+			s.placements = newPlacementStore(store.DB())
+		} else {
+			s.logger.Warn("incus configured but no persistent registry store; container mode disabled")
+		}
 	}
 	return s
 }
@@ -137,6 +173,17 @@ func (s *Server) Register(
 	}
 	s.reg.Add(id, req.Msg.GetWorkerName(), req.Msg.GetCapabilities(), fromProtoWorkspaces(req.Msg.GetWorkspaces()), token, now)
 	s.logger.Info("worker registered", "workerID", id, "name", req.Msg.GetWorkerName())
+
+	// Container mode readiness: a registration whose worker id names a
+	// provisioning container completes that placement. Any other registration
+	// — bare workers, unknown og-* ids — completes nothing.
+	if s.placements != nil {
+		if hit, err := s.placements.completePending(id); err != nil {
+			s.logger.Error("complete pending placement", "workerID", id, "err", err)
+		} else if hit.ContainerName != "" {
+			s.logger.Info("container placement ready", "workerID", id, "user", hit.User, "repo", hit.RepoSlug)
+		}
+	}
 	return connect.NewResponse(&cpv1.RegisterResponse{
 		WorkerId:         id,
 		WorkerToken:      token.Value,
@@ -347,8 +394,25 @@ type StartSpec struct {
 // StartUserSession routes a session to the worker holding repoURL's clone and
 // targets it at userName's worktree — the multi-user flow the console's
 // per-user sessions drive. The placement must already be recorded (AssignUser
-// ran earlier); a repo never assigned has no clone to host it.
+// ran earlier); a repo never assigned has no clone to host it. Container mode
+// resolves the placement from the placement store and requires readiness —
+// the worker's Register is the readiness signal, never an Incus operation.
 func (s *Server) StartUserSession(ctx context.Context, repoURL, userName string, spec StartSpec) (string, error) {
+	if s.incus != nil {
+		p, ok, err := s.placements.get(userName, repoURL)
+		if err != nil {
+			return "", fmt.Errorf("read placement: %w", err)
+		}
+		if !ok {
+			return "", fmt.Errorf("no container placement for %s on %s — assign the user first", userName, repoURL)
+		}
+		if p.Status != StatusReady {
+			return "", fmt.Errorf("container %s is not ready yet (status %s) — wait for the worker to register", p.ContainerName, p.Status)
+		}
+		spec.RepoURL = p.RepoURL
+		spec.UserName = userName
+		return s.StartRemoteAgent(ctx, p.ContainerName, spec)
+	}
 	rec, ok := s.repos.get(repoSlugFromURL(repoURL))
 	if !ok {
 		return "", fmt.Errorf("repo %s has no placement — assign the user first", repoURL)

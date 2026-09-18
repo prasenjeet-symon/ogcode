@@ -8,6 +8,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
+	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
 
 // codeFacingAgents are the agents that read a user's source tree. The Index
@@ -58,6 +59,136 @@ func TestAgents_FileMapAccompaniesRead(t *testing.T) {
 		}
 		if !slices.Contains(a.Tools, "file_map") {
 			t.Errorf("%s: has read but not file_map, so it can only pull whole files", a.Name)
+		}
+	}
+}
+
+// lateBoundTools are prompt-mandated tools that RegisterCoreTools deliberately
+// does not register, because their dependencies are built per entry point: the
+// skill loader, and the tools that close over a LoopRunner. Each entry point
+// registers them itself, after the object they need exists.
+//
+// They are listed rather than skipped so that a tool added to
+// mandatoryPromptTools has to land in one bucket or the other on purpose.
+var lateBoundTools = []string{"skill"}
+
+// TestRegistries_ResolvePromptMandatedTools closes the third link in the chain
+// that decides whether an instruction is followable.
+//
+// TestAgents_PromptMandatedToolsAreReachable above checks prompt → Tools. That
+// is necessary and not sufficient: ForAgent resolves against a *Registry*, so a
+// tool can be named by the prompt, listed in Tools, fully built and still never
+// reach the model because the entry point never registered it. That is not
+// hypothetical — `ogcode run` shipped that way for eleven tools, two of them
+// ("codebase_map", "file_map") mandated under a "Mandatory:" heading, with no
+// error raised anywhere.
+//
+// RegisterCoreTools is the single place every entry point now gets that set
+// from, so pinning it here pins it for all of them.
+func TestRegistries_ResolvePromptMandatedTools(t *testing.T) {
+	reg := tool.NewRegistry()
+	// nil store: this test resolves tools, it never executes one, and ID and
+	// Description do not touch the store.
+	tool.RegisterCoreTools(reg, nil)
+
+	for _, a := range codeFacingAgents() {
+		resolved := make(map[string]bool)
+		for _, td := range reg.ForAgent(a.Tools) {
+			resolved[td.ID()] = true
+		}
+		for _, id := range mandatoryPromptTools {
+			if !strings.Contains(a.System, id) || !slices.Contains(a.Tools, id) {
+				continue // not mandated for this agent; the test above covers that
+			}
+			if slices.Contains(lateBoundTools, id) {
+				continue
+			}
+			if !resolved[id] {
+				t.Errorf("%s: system prompt mandates %q and Tools lists it, but the core "+
+					"registry does not provide it, so ForAgent never offers it to the model "+
+					"— add it to tool.RegisterCoreTools or to lateBoundTools", a.Name, id)
+			}
+		}
+	}
+}
+
+// deep_search is the one prompt-named tool an agent's own toolset cannot vouch
+// for: every code-facing agent lists it, but it is registered only when a search
+// backend was built — web search is a setting, and each entry point wires its
+// own — so availability is a fact about the process. The guidance used to be
+// baked into a.System at package init and went out either way, telling six
+// agents to reach for a call the endpoint never offered.
+//
+// This pins both directions: the section appears when the tool is there, and
+// the name does not appear at all when it is not.
+func TestDeepSearchGuidanceTracksAvailability(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		if !slices.Contains(a.Tools, "deep_search") {
+			t.Errorf("%s: expected deep_search in Tools (the test is about it)", a.Name)
+			continue
+		}
+
+		with := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", true)
+		if !strings.Contains(with, "deep_search") {
+			t.Errorf("%s: search is available but the prompt never names deep_search", a.Name)
+		}
+		if !strings.Contains(with, "## External knowledge") {
+			t.Errorf("%s: search is available but the external-knowledge section is missing", a.Name)
+		}
+
+		without := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false)
+		if strings.Contains(without, "deep_search") {
+			t.Errorf("%s: no search backend, but the prompt still names deep_search — "+
+				"the model is told to call something it will never be offered", a.Name)
+		}
+		if strings.Contains(without, "## External knowledge") {
+			t.Errorf("%s: no search backend, but the external-knowledge section is still emitted", a.Name)
+		}
+	}
+}
+
+// An agent that does not hold deep_search must never receive the section, even
+// if the process has a search backend. The Search agent is the case that
+// matters: it researches the web through web_search and fetch_page, and
+// deep_search is the tool that drives *it*.
+func TestDeepSearchGuidanceSkipsAgentsWithoutTheTool(t *testing.T) {
+	for _, a := range []Agent{SearchAgent, IndexAgent, MemoryRecallAgent} {
+		if slices.Contains(a.Tools, "deep_search") {
+			t.Errorf("%s: unexpectedly holds deep_search", a.Name)
+			continue
+		}
+		if p := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", true); strings.Contains(p, "deep_search") {
+			t.Errorf("%s: does not hold deep_search but its prompt names it", a.Name)
+		}
+	}
+}
+
+// The workspace's public/ folder is served from the SERVER's directory, but the
+// prompt section naming it fills in the AGENT's. Those agree only for a session
+// running in the project itself, so the section belongs to exactly one agent.
+//
+// The gate used to be "can it write files", which let TaskAgent in. A task runs
+// in a disposable worktree under <project>/.ogcode/worktrees/<branch>, so it was
+// told to publish into a folder the server does not serve, inside the directory
+// AGENT.md puts off-limits, and deleted when the task ends — it would report a
+// /public/<name> URL that 404s, with nothing logged anywhere.
+func TestPublicFileHostingReachesOnlyTheBuildAgent(t *testing.T) {
+	const heading = "## Public file hosting"
+
+	all := []Agent{
+		BuildAgent, TaskAgent, PlanAgent, BreakdownAgent,
+		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
+	}
+	for _, a := range all {
+		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false), heading)
+		want := a.ID == "build"
+		if got != want {
+			if want {
+				t.Errorf("%s: expected the public-hosting section and did not get it", a.Name)
+			} else {
+				t.Errorf("%s: received the public-hosting section; only the interactive Build "+
+					"session runs in the directory the server actually serves", a.Name)
+			}
 		}
 	}
 }
@@ -268,7 +399,7 @@ func TestBuildSystemPrompt_InstructionSourceBoundaryReachesEveryAgent(t *testing
 // The boundary is the rule most likely to be tested by the next thing the agent
 // reads, so nothing in the cacheable block may sit after it and dilute it.
 func TestBuildSystemPrompt_BoundaryClosesTheStaticBlock(t *testing.T) {
-	prompt := staticSystemPrompt(BuildAgent, "/tmp/test", true, "", "", "anthropic")
+	prompt := staticSystemPrompt(BuildAgent, "/tmp/test", true, "", "", "anthropic", true)
 	idx := strings.Index(prompt, "## Where your instructions come from")
 	if idx < 0 {
 		t.Fatal("boundary section missing from the static block")
@@ -400,8 +531,8 @@ func TestIndexStatusPrompt(t *testing.T) {
 // outside it — otherwise indexing mid-session silently invalidates the cached
 // tools+system prefix for every remaining turn.
 func TestBuildSystemPromptEntries_IndexStatusStaysOutOfCachedPrefix(t *testing.T) {
-	unindexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 0)
-	indexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900)
+	unindexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 0, true)
+	indexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true)
 
 	if unindexed[0] != indexed[0] {
 		t.Error("index status leaked into entry [0]; building the index mid-session " +
@@ -416,12 +547,12 @@ func TestBuildSystemPromptEntries_IndexStatusStaysOutOfCachedPrefix(t *testing.T
 // reports on a tool they were never offered.
 func TestBuildSystemPromptEntries_IndexStatusOnlyForIndexAwareAgents(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		joined := strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 0, 0, "", 7), "\n")
+		joined := strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 0, 0, "", 7, true), "\n")
 		if !strings.Contains(joined, "7 files indexed") {
 			t.Errorf("%s: has codebase_map but never hears the index status", a.Name)
 		}
 	}
-	joined := strings.Join(buildSystemPromptEntries(SearchAgent, "/tmp/proj", false, "", "", 0, 0, "", 7), "\n")
+	joined := strings.Join(buildSystemPromptEntries(SearchAgent, "/tmp/proj", false, "", "", 0, 0, "", 7, true), "\n")
 	if strings.Contains(joined, "files indexed") {
 		t.Error("SearchAgent has no codebase_map but was told the index status")
 	}
@@ -461,9 +592,9 @@ func TestBuildSystemPromptEntries_LatexInfoIsInCachedPrefix(t *testing.T) {
 	}
 
 	setLatexCache(true)
-	withLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1)
+	withLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true)
 	setLatexCache(false)
-	withoutLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1)
+	withoutLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true)
 
 	// The LaTeX environment lives in the cached base (entry [0]), not a per-turn
 	// entry: detection is process-cached (getLatexEnv), so the block is
@@ -549,7 +680,7 @@ func TestSkillGuidancePrompt_EscapesSkillText(t *testing.T) {
 // it must never appear in the entries buildSystemPromptEntries produces.
 func TestBuildSystemPromptEntries_SkillGuidanceStaysOutOfTheCachedPrefix(t *testing.T) {
 	for _, a := range []Agent{BuildAgent, TaskAgent, PlanAgent} {
-		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", -1)
+		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", -1, true)
 		for i, e := range entries {
 			if strings.Contains(e, "<available_skills>") {
 				t.Errorf("%s: skill guidance is in entry [%d]; it changes mid-session and must be appended by the loop", a.Name, i)

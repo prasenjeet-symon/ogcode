@@ -3,8 +3,8 @@
 // the project's .ogcode/memory/, and an incremental index of that folder lets a
 // read-only recall agent find and read the right file cheaply.
 //
-// It is the token-lean successor to the graph/embedding memory in
-// internal/memory. The whole subsystem is gated by TurnMemoryEnabled (env
+// It replaces the removed graph/embedding agentic-memory system. The whole
+// subsystem is gated by TurnMemoryEnabled (env
 // OGCODE_TURN_MEMORY): off by default, so a build with these types linked in
 // behaves exactly as before until the flag is set.
 package memfile
@@ -83,6 +83,13 @@ func sessionTag(sessionID string) string {
 		return "session"
 	}
 	return b.String()
+}
+
+// SessionTag is the exported form of the grouping token Filename embeds in a
+// summary's name: the short tag one conversation's turns share and memory_map
+// groups by when it collapses a conversation to one line.
+func SessionTag(sessionID string) string {
+	return sessionTag(sessionID)
 }
 
 // slugify turns a human title into a lowercase, dash-separated slug capped at a

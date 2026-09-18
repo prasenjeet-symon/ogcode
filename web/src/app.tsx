@@ -23,6 +23,7 @@ import TaskExecution from './pages/task-execution';
 import NotesPage from './pages/notes';
 import NoteDetailPage from './pages/note-detail';
 import DocIndexPage from './pages/docindex';
+import DevicePage from './pages/device';
 import SettingsLayout from './pages/settings/layout';
 import GeneralSettings from './pages/settings/general';
 import ModelsSettings from './pages/settings/models';
@@ -45,6 +46,7 @@ export default function App() {
       <Route path="/notes" component={NotesPage} />
       <Route path="/notes/:id" component={NoteDetailPage} />
       <Route path="/docindex" component={DocIndexPage} />
+      <Route path="/device" component={DevicePage} />
       {/* Skills moved under Settings, where the rest of "what this agent can
           reach for" lives. The old path still resolves so bookmarks and links
           from earlier sessions do not dead-end on the 404 page. */}

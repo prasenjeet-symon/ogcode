@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,7 +9,7 @@ import (
 
 const (
 	memoryMDFilename = "MEMORY.md"
-	maxMemoryMDSize   = 64 * 1024 // 64KB max total across all files
+	maxMemoryMDSize  = 64 * 1024 // 64KB max total across all files
 )
 
 // LoadMemoryMD discovers and loads MEMORY.md files by walking from dir up to
@@ -49,11 +48,6 @@ func LoadMemoryMD(dir string) string {
 			break
 		}
 
-		if len(trimmed) > remaining {
-			trimmed = trimmed[:remaining]
-			slog.Warn("MEMORY.md truncated due to size limit", "path", p, "limit", maxMemoryMDSize)
-		}
-
 		relPath, err := filepath.Rel(dir, p)
 		if err != nil {
 			relPath = p
@@ -64,8 +58,16 @@ func LoadMemoryMD(dir string) string {
 		// the Anthropic prompt-cache prefix byte-for-byte across platforms.
 		relPath = filepath.ToSlash(relPath)
 
-		fmt.Fprintf(&b, "\n\n<memory-md path=\"%s\">\n%s\n</memory-md>", relPath, trimmed)
-		totalSize += len(trimmed)
+		// Rendered rather than formatted in place: the file's own text is
+		// neutralized so it cannot close this block or forge the other one, and
+		// the cut to the remaining budget lands on a rune boundary. See
+		// renderMDBlock.
+		block, used, truncated := renderMDBlock("memory-md", relPath, trimmed, remaining)
+		if truncated {
+			slog.Warn("MEMORY.md truncated due to size limit", "path", p, "limit", maxMemoryMDSize)
+		}
+		b.WriteString(block)
+		totalSize += used
 	}
 
 	return b.String()

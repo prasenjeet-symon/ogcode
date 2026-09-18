@@ -3,13 +3,10 @@
 // costs on their machine.
 //
 // The question is worth answering here because ogcode is not a thin CLI: it is
-// a long-lived local daemon that loads an ONNX embedding model for memory
-// indexing, links CGO parsers (MuPDF, tree-sitter), and spawns tool
-// subprocesses. Most of that never shows up in Go's own heap numbers, and none
-// of it is visible to the user without hunting through Activity Monitor.
-//
-// Sampling runs only while at least one client is watching. Measuring CPU has a
-// cost of its own, and there is no point paying it with no UI open.
+// a long-lived local daemon that links CGO parsers (MuPDF, tree-sitter) and
+// spawns tool subprocesses. Most of that never shows up in Go's own heap
+// numbers, and none of it is visible to the user without hunting through
+// Activity Monitor.
 package resource
 
 import (
@@ -61,11 +58,10 @@ type Activity struct {
 
 // Snapshot is the retained history plus the context needed to read it.
 type Snapshot struct {
-	Interval int       `json:"interval"` // milliseconds between samples
-	Cores    int       `json:"cores"`
-	Uptime   int64     `json:"uptime"` // milliseconds since process start
-	Activity *Activity `json:"activity,omitempty"`
-	Samples  []Sample  `json:"samples"`
+	Interval int      `json:"interval"` // milliseconds between samples
+	Cores    int      `json:"cores"`
+	Uptime   int64    `json:"uptime"` // milliseconds since process start
+	Samples  []Sample `json:"samples"`
 }
 
 const (
@@ -96,7 +92,6 @@ type Sampler struct {
 	samples []Sample
 
 	watchers atomic.Int64
-	activity atomic.Pointer[Activity]
 }
 
 // NewSampler returns a sampler retaining `retain` samples taken `interval`
@@ -136,11 +131,6 @@ func (s *Sampler) Interval() time.Duration { return s.interval }
 // Sampling is suspended while the count is zero.
 func (s *Sampler) AddWatcher()    { s.watchers.Add(1) }
 func (s *Sampler) RemoveWatcher() { s.watchers.Add(-1) }
-
-// SetActivity labels what the process is busy with; ClearActivity removes the
-// label once the work is done. Both are safe to call from any goroutine.
-func (s *Sampler) SetActivity(a Activity) { s.activity.Store(&a) }
-func (s *Sampler) ClearActivity()         { s.activity.Store(nil) }
 
 // Run samples until ctx is cancelled.
 func (s *Sampler) Run(ctx context.Context) {
@@ -245,7 +235,6 @@ func (s *Sampler) Meta() Snapshot {
 		Interval: int(s.interval.Milliseconds()),
 		Cores:    runtime.NumCPU(),
 		Uptime:   time.Since(s.started).Milliseconds(),
-		Activity: s.activity.Load(),
 	}
 }
 

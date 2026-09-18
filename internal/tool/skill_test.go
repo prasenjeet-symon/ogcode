@@ -121,6 +121,62 @@ func TestSkillTool_BuiltInReportsNoBaseDirectory(t *testing.T) {
 	}
 }
 
+// A skill that declares a credential it does not have is refused before its
+// body is handed over. Showing the body with a warning would walk the agent
+// into the failure the declaration exists to prevent, and the refusal has to
+// name the variable so the user can supply it.
+func TestSkillTool_RefusesWhenARequiredVarIsMissing(t *testing.T) {
+	t.Setenv("OGCODE_TEST_PRESENT", "set")
+	project := skillProject(t, map[string]string{
+		"deploy": "---\nname: deploy\ndescription: ship it\nrequires: OGCODE_TEST_PRESENT, OGCODE_TEST_ABSENT\n---\nrun scripts/deploy.sh with the token\n",
+	})
+
+	res := runSkillTool(t, skill.Config{}, project, "deploy")
+
+	if strings.Contains(res.Output, "run scripts/deploy.sh") {
+		t.Error("the body was returned despite a missing requirement")
+	}
+	for _, want := range []string{"OGCODE_TEST_ABSENT", "was not loaded", "skills.env"} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("refusal missing %q:\n%s", want, res.Output)
+		}
+	}
+	// The variable that IS set must not be reported as missing.
+	if strings.Contains(res.Output, "OGCODE_TEST_PRESENT") {
+		t.Errorf("a satisfied requirement was reported missing:\n%s", res.Output)
+	}
+	if missing, ok := res.Metadata["missing"].([]string); !ok || len(missing) != 1 || missing[0] != "OGCODE_TEST_ABSENT" {
+		t.Errorf("metadata missing = %v, want [OGCODE_TEST_ABSENT]", res.Metadata["missing"])
+	}
+}
+
+// The check is the whole feature only if a satisfied declaration loads normally.
+func TestSkillTool_LoadsWhenRequirementsAreSatisfied(t *testing.T) {
+	t.Setenv("OGCODE_TEST_PRESENT", "set")
+	project := skillProject(t, map[string]string{
+		"deploy": "---\nname: deploy\ndescription: ship it\nrequires: OGCODE_TEST_PRESENT\n---\nrun scripts/deploy.sh\n",
+	})
+
+	out := runSkillTool(t, skill.Config{}, project, "deploy").Output
+	if !strings.Contains(out, "run scripts/deploy.sh") {
+		t.Errorf("a satisfied requirement blocked the load:\n%s", out)
+	}
+	if !strings.Contains(out, `<skill_content name="deploy">`) {
+		t.Errorf("expected the normal skill block:\n%s", out)
+	}
+}
+
+// A skill with no `requires` is unaffected — the field is optional and almost
+// every skill omits it.
+func TestSkillTool_SkillWithoutRequirementsLoads(t *testing.T) {
+	project := skillProject(t, map[string]string{
+		"plain": "---\nname: plain\ndescription: nothing needed\n---\nplain body\n",
+	})
+	if out := runSkillTool(t, skill.Config{}, project, "plain").Output; !strings.Contains(out, "plain body") {
+		t.Errorf("a skill with no requirements did not load:\n%s", out)
+	}
+}
+
 func TestSkillTool_RequiresAName(t *testing.T) {
 	tool := NewSkillTool(skill.NewLoader(skill.Config{}))
 	if _, err := tool.Execute(context.Background(), json.RawMessage(`{"name":"  "}`), Context{SessionDir: t.TempDir()}); err == nil {

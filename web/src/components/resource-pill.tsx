@@ -1,6 +1,6 @@
 import { createMemo, createSignal, Show } from 'solid-js';
 import { useServer } from '../context/server';
-import type { ResourceSample, ResourceActivity } from '../api/client';
+import type { ResourceSample } from '../api/client';
 
 function formatBytes(n: number): string {
   if (!n) return '—';
@@ -23,11 +23,6 @@ function formatUptime(ms: number): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ${m % 60}m`;
   return `${Math.floor(h / 24)}d ${h % 24}h`;
-}
-
-function progressPercent(activity: ResourceActivity): number {
-  if (activity.total <= 0) return 0;
-  return Math.min(100, Math.max(0, (activity.done / activity.total) * 100));
 }
 
 // Enough headroom that idle jitter of a few megabytes stays a flat line instead
@@ -108,24 +103,6 @@ export default function ResourcePill() {
           <span class="text-micro text-zinc-500 tabular-nums">
             {formatPercent(sample().cpuPercent)}
           </span>
-          {/* A spike with no explanation reads as a bug. When the server has
-              said what it is busy with, the pill says so inline rather than
-              making the user hover to find out. */}
-          <Show when={server.resourceMeta().activity}>
-            {(activity) => (
-              <>
-                <span class="w-px h-3 bg-[color:var(--border-subtle)] shrink-0" />
-                <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse shrink-0" />
-                <span class="text-micro text-zinc-400 truncate max-w-[8rem]">
-                  {activity().label}
-                </span>
-                <span class="text-micro text-zinc-500 tabular-nums shrink-0">
-                  {activity().done}/{activity().total}
-                </span>
-              </>
-            )}
-          </Show>
-
           {/* Hover/tap breakdown */}
           <div
             class="absolute top-full right-0 mt-1.5 w-64 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl transition"
@@ -138,24 +115,6 @@ export default function ResourcePill() {
             <div class="text-micro uppercase tracking-wider text-zinc-500 font-semibold mb-2">
               ogcode on this machine
             </div>
-            <Show when={server.resourceMeta().activity}>
-              {(activity) => (
-                <div class="mb-2 pb-2 border-b border-[color:var(--border-subtle)]">
-                  <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-meta text-zinc-300">{activity().label}</span>
-                    <span class="text-meta font-mono tabular-nums text-zinc-400">
-                      {activity().done} of {activity().total}
-                    </span>
-                  </div>
-                  <div class="h-1 rounded-full bg-[color:var(--bg-elevated)] overflow-hidden">
-                    <div
-                      class="h-full rounded-full bg-[color:var(--accent)] transition-[width]"
-                      style={{ width: `${progressPercent(activity())}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </Show>
             <Row
               label="CPU"
               value={formatPercent(sample().cpuPercent)}
@@ -178,7 +137,7 @@ export default function ResourcePill() {
                 above, while memory Go has reserved but never touched is not
                 resident at all, so it can sit below. */}
             <p class="mt-2 text-micro leading-snug text-zinc-500">
-              Resident is the OS figure, covering the embedding model and native parsers.
+              Resident is the OS figure, covering the native parsers.
               On macOS it overstates: pages Go has already handed back stay counted until
               something else needs them, so it sits above what Activity Monitor reports.
               Go runtime is the honest total. 100% CPU is one full core.

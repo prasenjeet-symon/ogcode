@@ -23,7 +23,7 @@ func hostTestServer(t *testing.T) *Server {
 		t.Setenv(k, "")
 	}
 	t.Setenv("OGCODE_FREE_KEYS_URL", "http://127.0.0.1:9/free-keys-unavailable")
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 
 	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
 	ctx, cancel := context.WithCancel(context.Background())

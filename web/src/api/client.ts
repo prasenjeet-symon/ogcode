@@ -40,7 +40,6 @@ export interface Session {
   sessionType?: string;
   permission?: string;
   compactionSummary?: string;
-  memoryTokensSaved?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -295,21 +294,12 @@ export interface ResourceSample {
   goroutines: number;
 }
 
-export interface ResourceActivity {
-  /** What the process is busy with, e.g. "embedding memory". */
-  label: string;
-  done: number;
-  total: number;
-}
-
 export interface ResourceSnapshot {
   /** Milliseconds between samples. */
   interval: number;
   cores: number;
   /** Milliseconds since the process started. */
   uptime: number;
-  /** Absent when nothing long-running is labelling itself. */
-  activity?: ResourceActivity | null;
   samples: ResourceSample[];
 }
 
@@ -850,6 +840,35 @@ export function checkForUpdate(): Promise<UpdateInfo> {
   return fetchAPI('/version/check', { method: 'POST' });
 }
 
+// ─── Project Settings API ───
+// General settings scoped to the workspace the server was started in, stored in
+// that project's own database. Unlike provider keys or model preferences (which
+// are the user's and follow them everywhere), these differ from project to
+// project.
+
+export interface ProjectSettings {
+  // Whether the agent is offered compact_context, the tool that drops the
+  // finished part of a turn in exchange for a summary it writes. Turning it off
+  // also withholds the guidance and the read-pressure reminder that name it. It
+  // does not affect the loop's own size-triggered compaction, which is the
+  // safety net against overflowing the context window.
+  compactContext: boolean;
+  updatedAt?: number;
+}
+
+export function getProjectSettings(): Promise<ProjectSettings> {
+  return fetchAPI('/project/settings');
+}
+
+export function setProjectSettings(
+  settings: Omit<ProjectSettings, 'updatedAt'>,
+): Promise<ProjectSettings> {
+  return fetchAPI('/project/settings', {
+    method: 'POST',
+    body: JSON.stringify(settings),
+  });
+}
+
 // Search Config API
 export type SearchProvider = 'native' | 'tavily';
 
@@ -1084,4 +1103,31 @@ export function setMCPEnabled(name: string, enabled: boolean): Promise<MCPServer
     method: 'POST',
     body: JSON.stringify({ enabled }),
   });
+}
+
+// Scrcpy API
+// State of the separately-run ws-scrcpy device UI that /scrcpy proxies to.
+export interface ScrcpyStatus {
+  // True when ws-scrcpy answers HTTP on its port, so the panel can embed it.
+  up: boolean;
+  // Where the reverse proxy forwards (default http://127.0.0.1:8000).
+  target: string;
+}
+
+export function getScrcpyStatus(): Promise<ScrcpyStatus> {
+  return fetchAPI('/scrcpy/status');
+}
+
+// One adb-attached device the device picker can stream.
+export interface ScrcpyDevice {
+  // The adb serial ("emulator-5554", a USB serial, an IP:port).
+  serial: string;
+  // adb's word for it: "device", "offline", "unauthorized", ….
+  state: string;
+  // Human name adb -l reports ("" when it does not).
+  model: string;
+}
+
+export function getScrcpyDevices(): Promise<{ devices: ScrcpyDevice[] }> {
+  return fetchAPI('/scrcpy/devices');
 }

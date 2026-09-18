@@ -16,12 +16,15 @@ import (
 
 // bbolt bucket names. `users` holds the operator accounts (Phase B). It is
 // always created by Open — the corrupt-file policy is bucket-aware at load
-// time, not by bucket presence.
+// time, not by bucket presence. `placements` holds container-mode
+// user-repo assignments (Phase B container mode); the master's placement
+// store owns it.
 var (
-	bucketWorkers  = []byte("workers")
-	bucketTokens   = []byte("tokens")
-	bucketSessions = []byte("sessions")
-	bucketUsers    = []byte("users")
+	bucketWorkers    = []byte("workers")
+	bucketTokens     = []byte("tokens")
+	bucketSessions   = []byte("sessions")
+	bucketUsers      = []byte("users")
+	bucketPlacements = []byte("placements")
 )
 
 // ErrCorrupt is returned by Open when the DB file on disk is structurally
@@ -169,7 +172,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketWorkers, bucketTokens, bucketSessions, bucketUsers} {
+		for _, b := range [][]byte{bucketWorkers, bucketTokens, bucketSessions, bucketUsers, bucketPlacements} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -530,3 +533,10 @@ func (s *Store) ListUsers() ([]string, error) {
 	}
 	return names, nil
 }
+
+// DB exposes the underlying bbolt handle for stores that live outside this
+// package but share the same single-writer file — the master's placement
+// store (container mode) owns the `placements` bucket through it. The
+// registry keeps exclusive write access to ITS buckets; callers must not
+// touch them. Close stays with Open's owner.
+func (s *Store) DB() *bolt.DB { return s.db }

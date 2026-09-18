@@ -14,7 +14,6 @@ type Session struct {
 	SessionType       string    `json:"sessionType,omitempty"`
 	Permission        string    `json:"permission,omitempty"`
 	CompactionSummary string    `json:"compactionSummary,omitempty"`
-	MemoryTokensSaved int       `json:"memoryTokensSaved,omitempty"`
 	CreatedAt         int64     `json:"createdAt"`
 	UpdatedAt         int64     `json:"updatedAt"`
 }

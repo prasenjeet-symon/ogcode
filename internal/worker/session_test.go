@@ -27,7 +27,7 @@ func neutralizeProviderEnv(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	t.Setenv("OGCODE_FREE_KEYS_URL", "http://127.0.0.1:9/free-keys-unavailable")
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 }
 
 // newHostingWorker isolates HOME, neutralizes provider env (the spawned servers

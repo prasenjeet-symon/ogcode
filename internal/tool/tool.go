@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -88,6 +89,13 @@ type ResultImage struct {
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]ToolDef
+	// gen counts membership changes. A turn resolves its toolset once and then
+	// re-resolves only when this moves, so the tool array it sends is
+	// byte-identical on every step that did not actually see a change — which is
+	// what the providers' prompt caches require (on Anthropic tool definitions
+	// lead the cache prefix, so any churn there invalidates the system block and
+	// the message history too).
+	gen uint64
 }
 
 func NewRegistry() *Registry {
@@ -98,6 +106,10 @@ func (r *Registry) Register(t ToolDef) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tools[t.ID()] = t
+	// Bumped unconditionally: re-registering an id can replace its definition,
+	// and ToolDef is an interface so the old and new are not comparable. A
+	// redundant bump costs one re-resolve, which is the cheap direction to err in.
+	r.gen++
 }
 
 // Remove deletes tools by id. It is how a disabled MCP server's tools stop
@@ -107,8 +119,25 @@ func (r *Registry) Remove(ids ...string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, id := range ids {
-		delete(r.tools, id)
+		if _, ok := r.tools[id]; ok {
+			delete(r.tools, id)
+			// Only a real deletion counts. Remove is called speculatively with
+			// ids that may not be registered, and bumping for those would make a
+			// turn re-resolve — and take a cache miss — for nothing.
+			r.gen++
+		}
 	}
+}
+
+// Generation reports a counter bumped on every membership change. It exists so a
+// caller can hold a resolved toolset and cheaply detect that it went stale,
+// instead of choosing between re-resolving every time (which churns the cached
+// prompt prefix) and never re-resolving (which leaves a long turn permanently
+// blind to a server that connected after it started).
+func (r *Registry) Generation() uint64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.gen
 }
 
 func (r *Registry) Get(id string) ToolDef {
@@ -160,10 +189,28 @@ func (r *Registry) ForAgent(toolIDs []string) []ToolDef {
 		if err != nil {
 			continue
 		}
-		for tid, t := range r.tools {
+		// Sorted, never map order. Ranging a Go map is randomized on every
+		// call, so expanding a glob straight into the result hands the provider
+		// a differently-ordered tool array on every step of a turn — and tool
+		// definitions are part of the cached prompt prefix on every provider we
+		// support. On Anthropic the prefix is ordered tools → system → messages,
+		// so a reshuffle invalidates the tool block, the cache_control'd system
+		// block, AND the whole message history on every step; it also moves the
+		// breakpoint anthropic.go pins to the LAST tool onto a different tool
+		// each time. OpenAI documents reordering as breaking the prefix too.
+		//
+		// The id is the only stable key here (Description/Parameters are derived
+		// from it), and skill.Registry.Visible() already sorts for the same
+		// reason — this is the tool registry catching up with it.
+		matched := make([]string, 0, len(r.tools))
+		for tid := range r.tools {
 			if re.MatchString(tid) {
-				add(t)
+				matched = append(matched, tid)
 			}
+		}
+		sort.Strings(matched)
+		for _, tid := range matched {
+			add(r.tools[tid])
 		}
 	}
 	return result

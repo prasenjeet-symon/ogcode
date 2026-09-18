@@ -135,7 +135,8 @@ func TestIndexFileAndScopedLists(t *testing.T) {
 		t.Fatalf("index newer: %v", err)
 	}
 
-	// Newest first across the project.
+	// Newest first across the project. Paths embed the turn's UTC timestamp, so
+	// they order chronologically too.
 	proj, err := s.ListByProject("/proj")
 	if err != nil {
 		t.Fatalf("ListByProject: %v", err)
@@ -143,12 +144,8 @@ func TestIndexFileAndScopedLists(t *testing.T) {
 	if len(proj) != 2 {
 		t.Fatalf("expected 2 project entries, got %d", len(proj))
 	}
-	if proj[0].Title != "Newer Turn" || proj[1].Title != "Older Turn" {
-		t.Fatalf("wrong order: %q then %q", proj[0].Title, proj[1].Title)
-	}
-	// Outline was extracted from the markdown headings.
-	if !strings.Contains(proj[1].Outline, "Request") || !strings.Contains(proj[1].Outline, "Outcome") {
-		t.Errorf("older outline missing headings: %q", proj[1].Outline)
+	if proj[0].Path != pNew || proj[1].Path != pOld {
+		t.Fatalf("wrong order: %q then %q", proj[0].Path, proj[1].Path)
 	}
 
 	// Session scope filters to one conversation.
@@ -156,14 +153,11 @@ func TestIndexFileAndScopedLists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListBySession: %v", err)
 	}
-	if len(sessB) != 1 || sessB[0].Title != "Newer Turn" {
+	if len(sessB) != 1 || sessB[0].Path != pNew {
 		t.Fatalf("session filter wrong: %+v", sessB)
 	}
 
-	// IsIndexed reflects existence; re-indexing the same file stays at one row.
-	if ok, _ := s.IsIndexed(pNew); !ok {
-		t.Errorf("expected %s to be indexed", pNew)
-	}
+	// Re-indexing the same file is idempotent: INSERT OR REPLACE keeps one row.
 	if err := s.IndexFile(pNew, newer); err != nil {
 		t.Fatalf("re-index: %v", err)
 	}
@@ -172,25 +166,82 @@ func TestIndexFileAndScopedLists(t *testing.T) {
 	}
 }
 
-func TestPurgeMissing(t *testing.T) {
+// A summary body's `Topics:` line must land in the index: extracted at
+// IndexFile time, stored as JSON, and returned on the entry — the data that
+// lets memory_map collapse a conversation to one labeled line.
+func TestIndexFileExtractsTopics(t *testing.T) {
 	s := newTestStore(t)
 	dir := t.TempDir()
-	meta := Meta{SessionID: "s", ProjectID: "/proj", SessionType: "build", Title: "Gone", CreatedAt: time.Now()}
-	p, err := Write(dir, meta, "# Gone\nbody\n")
+	meta := Meta{SessionID: "sessA", ProjectID: "/proj", SessionType: "build", Title: "Wired Topics", CreatedAt: time.Now()}
+	body := "# Wired Topics\n\nTopics: memory_map drilldown, SQLite migration, \"recall agent\", memory_map drilldown, , duplicate, a, b, c, d, e\n\n## Request\nfirst\n"
+	p, err := Write(dir, meta, body)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if err := s.IndexFile(p, meta); err != nil {
 		t.Fatalf("index: %v", err)
 	}
-	if err := os.Remove(p); err != nil {
-		t.Fatalf("remove: %v", err)
+	got, err := s.ListByProject("/proj")
+	if err != nil {
+		t.Fatalf("list: %v", err)
 	}
-	if err := s.PurgeMissing("/proj"); err != nil {
-		t.Fatalf("purge: %v", err)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
 	}
-	if left, _ := s.ListByProject("/proj"); len(left) != 0 {
-		t.Fatalf("expected purge to drop the row, %d left", len(left))
+	want := []string{"memory_map drilldown", "SQLite migration", "recall agent", "duplicate", "a", "b", "c", "d"}
+	if len(got[0].Labels) != len(want) {
+		t.Fatalf("labels = %v, want %v (capped, deduped, trimmed)", got[0].Labels, want)
+	}
+	for i := range want {
+		if got[0].Labels[i] != want[i] {
+			t.Fatalf("label[%d] = %q, want %q", i, got[0].Labels[i], want[i])
+		}
+	}
+}
+
+// No Topics line — pre-feature summaries, or a writer that skipped it — must
+// leave the entry unlabeled rather than error or guess.
+func TestIndexFileWithoutTopicsLeavesEntryUnlabeled(t *testing.T) {
+	s := newTestStore(t)
+	dir := t.TempDir()
+	meta := Meta{SessionID: "sessA", ProjectID: "/proj", SessionType: "build", Title: "Old Style", CreatedAt: time.Now()}
+	p, err := Write(dir, meta, "# Old Style\n\n## Request\nfirst\n")
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := s.IndexFile(p, meta); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	got, err := s.ListByProject("/proj")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Labels) != 0 {
+		t.Fatalf("expected unlabeled entry, got %+v", got)
+	}
+}
+
+// A later body section may legitimately start with "Topics" as a heading; only
+// the line right under the H1 is the topic line.
+func TestExtractTopicsOnlyFirstLineCounts(t *testing.T) {
+	body := "# T\n\nTopics: alpha, beta\n\n## Topics discussed later\nmore text\nTopics: gamma\n"
+	got := extractTopics(body)
+	want := []string{"alpha", "beta"}
+	if len(got) != len(want) {
+		t.Fatalf("extractTopics = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("extractTopics[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Frontmatter keys must never leak in as topics, whatever they contain.
+func TestExtractTopicsSkipsFrontmatter(t *testing.T) {
+	body := "---\ntitle: \"Topics: not-a-topic\"\nsession_id: x\n---\n\n# T\n\nTopics: real\n"
+	if got := extractTopics(body); len(got) != 1 || got[0] != "real" {
+		t.Fatalf("extractTopics = %v, want [real]", got)
 	}
 }
 

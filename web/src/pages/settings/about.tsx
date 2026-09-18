@@ -122,6 +122,14 @@ export default function AboutSettings() {
   const commit = createMemo(() => real(info()?.commit));
   const built = createMemo(() => fmtDate(info()?.date));
   const goVersion = createMemo(() => real(info()?.goVersion));
+  // AGPL §13: anyone reaching this interface over a network is entitled to the
+  // source of the build actually running — so pin the link to this commit when the
+  // binary knows it, and fall back to the branch when it does not.
+  const sourceUrl = createMemo(() =>
+    commit()
+      ? `https://github.com/prasenjeet-symon/ogcode/tree/${commit()}`
+      : 'https://github.com/prasenjeet-symon/ogcode',
+  );
 
   return (
     <>
@@ -235,8 +243,16 @@ export default function AboutSettings() {
         <Row label="Interface" hidden={hide('Interface solidjs vite tailwind frontend')}>
           <Value mono={false}>SolidJS · Vite · Tailwind</Value>
         </Row>
-        <Row label="License" hidden={hide('License MIT open source')}>
-          <Value mono={false}>MIT</Value>
+        <Row label="License" hidden={hide('License AGPL GPL open source commercial dual')}>
+          <Value mono={false}>AGPL-3.0</Value>
+          <LinkAction href="https://github.com/prasenjeet-symon/ogcode/blob/main/LICENSING.md">Terms</LinkAction>
+        </Row>
+        <Row
+          label="Source code"
+          helper="The complete corresponding source for this build, as the AGPL requires."
+          hidden={hide('Source code AGPL corresponding license')}
+        >
+          <LinkAction href={sourceUrl()}>Browse</LinkAction>
         </Row>
       </Group>
 

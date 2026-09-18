@@ -308,7 +308,7 @@ func TestLoad_NoSkillsSectionIsUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Load(project)
-	if len(cfg.Skills.Paths) != 0 || len(cfg.Skills.URLs) != 0 || len(cfg.Skills.Permissions) != 0 {
+	if len(cfg.Skills.Paths) != 0 || len(cfg.Skills.URLs) != 0 || len(cfg.Skills.Permissions) != 0 || len(cfg.Skills.Env) != 0 {
 		t.Errorf("expected an empty skills section, got %+v", cfg.Skills)
 	}
 }
@@ -325,5 +325,81 @@ func TestProjectFileTemplate_ParsesIntoAUsableConfig(t *testing.T) {
 	}
 	if c.Skills.Paths == nil || c.Skills.URLs == nil {
 		t.Error("template should show the skills section so the file is self-documenting")
+	}
+	if c.Skills.Env == nil {
+		t.Error("template should show skills.env so a skill's credentials have a documented place to go")
+	}
+}
+
+// skills.env merges key by key, project-local last, so a secret kept in the
+// global config serves every project without being restated and a project can
+// override one name without losing the others.
+func TestLoad_SkillEnvMergesPerNameWithProjectWinning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	globalDir := filepath.Join(home, ".config", "ogcode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(globalDir, "config.json"), `{
+		"skills": { "env": { "GLOBAL_ONLY": "g", "OVERRIDDEN": "global" } }
+	}`)
+
+	project := t.TempDir()
+	writeJSON(t, filepath.Join(project, "ogcode.json"), `{
+		"skills": { "env": { "PROJECT_ONLY": "p", "OVERRIDDEN": "project" } }
+	}`)
+
+	cfg := Load(project)
+	want := map[string]string{
+		"GLOBAL_ONLY":  "g",
+		"PROJECT_ONLY": "p",
+		"OVERRIDDEN":   "project",
+	}
+	if !reflect.DeepEqual(cfg.Skills.Env, want) {
+		t.Errorf("skills.env = %v, want %v (merged per name, project wins)", cfg.Skills.Env, want)
+	}
+}
+
+// ApplyEnv is what makes a `requires:` declaration satisfiable from ogcode.json.
+// Without it the config field would be inert — the skill tool checks the process
+// environment, so a value that never reaches it reads as missing.
+func TestApplyEnv_ExportsSkillEnv(t *testing.T) {
+	t.Setenv("OGCODE_TEST_FROM_CONFIG", "")
+	os.Unsetenv("OGCODE_TEST_FROM_CONFIG")
+
+	cfg := &Config{Skills: SkillsConfig{Env: map[string]string{"OGCODE_TEST_FROM_CONFIG": "from-config"}}}
+	cfg.ApplyEnv()
+
+	if got := os.Getenv("OGCODE_TEST_FROM_CONFIG"); got != "from-config" {
+		t.Errorf("OGCODE_TEST_FROM_CONFIG = %q, want the config value exported", got)
+	}
+}
+
+// A real environment variable beats the config file for skill secrets too. The
+// whole point of the field is that it is a fallback for the file, never an
+// override of what the operator exported.
+func TestApplyEnv_SkillEnvDoesNotOverrideExistingEnv(t *testing.T) {
+	t.Setenv("OGCODE_TEST_EXISTING", "from-the-environment")
+
+	cfg := &Config{Skills: SkillsConfig{Env: map[string]string{"OGCODE_TEST_EXISTING": "from-config"}}}
+	cfg.ApplyEnv()
+
+	if got := os.Getenv("OGCODE_TEST_EXISTING"); got != "from-the-environment" {
+		t.Errorf("OGCODE_TEST_EXISTING = %q, want the environment value preserved", got)
+	}
+}
+
+// An empty entry is not an exported variable. Exporting "" would make the name
+// appear set to an os.Getenv existence check while satisfying nothing — the
+// exact confusion the requires check is meant to remove.
+func TestApplyEnv_SkipsEmptySkillEnvValues(t *testing.T) {
+	os.Unsetenv("OGCODE_TEST_EMPTY_CONFIG")
+	cfg := &Config{Skills: SkillsConfig{Env: map[string]string{"OGCODE_TEST_EMPTY_CONFIG": ""}}}
+	cfg.ApplyEnv()
+
+	if _, ok := os.LookupEnv("OGCODE_TEST_EMPTY_CONFIG"); ok {
+		t.Error("an empty config value must not be exported as a set variable")
 	}
 }

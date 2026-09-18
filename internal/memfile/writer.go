@@ -19,6 +19,7 @@ Write a single, self-contained markdown summary of what happened in this turn, s
 
 STRUCTURE (this is mandatory — the summary is indexed and read by its headings):
 - Begin with exactly one H1 (` + "`# `" + `) title: a short, specific noun phrase naming the turn's subject.
+- Immediately under the H1, add ONE line: ` + "`Topics: <topic>, <topic>, <topic>`" + ` — 3 to 6 short noun-phrase topics (1–4 words each) naming what the turn was actually about: features, subsystems, files, bugs, tools. These are indexed and shown on a conversation's table-of-contents line, so be specific ("memory_map drilldown", "SQLite migration") rather than generic ("coding", "changes"). No other line may start with "Topics:".
 - Group the body under H2 (` + "`## `" + `) sections, and use H3 (` + "`### `" + `) for sub-points within a section. Never skip a level.
 - Suggested sections, included only when they apply: "## Request" (what the developer asked), "## What was done" (the actions taken and why, grounded in the tool calls), "## Key files & symbols" (concrete paths / names touched or examined), "## Outcome" (the result, decisions made, and anything left open).
 - Prefer short paragraphs and tight bullet lists under the deepest relevant heading. Put concrete facts — file paths, symbol names, commands, values, decisions — where they belong in the hierarchy, not in a flat wall of text.

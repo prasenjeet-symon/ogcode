@@ -130,8 +130,6 @@ func TestRunLoop_CompactContextClearsTheReportedInputCount(t *testing.T) {
 // LLM-driven compactions the turn triggered.
 func runBudgetScript(t *testing.T) ([]int, int) {
 	t.Helper()
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -144,12 +142,6 @@ func runBudgetScript(t *testing.T) ([]int, int) {
 	}); err != nil {
 		t.Fatalf("set capability: %v", err)
 	}
-	// Non-caching, so compact_context is offered from step 1 with no observation
-	// window in the way.
-	if err := session.SetModelCacheSupport(database, "budget-model", "budget", string(provider.CacheAbsent), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
-	}
-
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
 	mock := &budgetScriptProvider{}

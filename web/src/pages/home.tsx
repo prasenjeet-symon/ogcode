@@ -406,7 +406,8 @@ function HomeContent() {
                 Discord
               </a>
               <span class="text-zinc-700">·</span>
-              <span class="font-mono">MIT</span>
+              <a href="https://github.com/prasenjeet-symon/ogcode/blob/main/LICENSE" target="_blank" rel="noopener"
+                 class="font-mono hover:text-zinc-300 transition-colors var(--spring-sm)">AGPL-3.0</a>
             </div>
             <div class="text-[10px] text-zinc-700">
               Single binary · Self-hosted · Your code never leaves your machine

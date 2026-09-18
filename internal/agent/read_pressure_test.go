@@ -159,7 +159,7 @@ func TestReadPressure_MarksTheReminderAsHarnessInjected(t *testing.T) {
 
 func TestReadPressure_WithheldWhileCompactContextIsNotOffered(t *testing.T) {
 	rp := newReadPressure(108000)
-	rp.setOffered(false) // caching endpoint: the tool is not on the menu
+	rp.setOffered(false) // an agent without compact_context (e.g. the index agent)
 
 	for i := 0; i < 4; i++ {
 		for _, out := range readStep(rp, "read", chunk(t, 15000)) {
@@ -266,30 +266,19 @@ func (bigGrepTool) Execute(ctx context.Context, args json.RawMessage, tctx tool.
 // every step, so a reminder that was not written into the stored tool output
 // would be silently dropped — invisible to every unit test above.
 func TestRunLoop_ReadPressureReminderReachesTheModel(t *testing.T) {
-	t.Run("delivered on a non-caching endpoint", func(t *testing.T) {
-		reqs := runReadPressureScript(t, provider.CacheAbsent, 8)
-		hits := countReminders(reqs[len(reqs)-1])
-		if hits == 0 {
-			t.Fatal("no read-pressure reminder reached the model after 8 large search rounds")
-		}
-		if hits > readPressureMaxNudges {
-			t.Errorf("%d reminders in one request, want at most %d", hits, readPressureMaxNudges)
-		}
-		// The early requests must be clean: nudging before the agent has read
-		// enough to have anything worth summarizing is noise, not guidance.
-		if got := countReminders(reqs[1]); got != 0 {
-			t.Errorf("%d reminders in the second request, before the threshold could be reached", got)
-		}
-	})
-
-	t.Run("silent on a caching endpoint", func(t *testing.T) {
-		reqs := runReadPressureScript(t, provider.CacheSupported, 8)
-		for i, req := range reqs {
-			if got := countReminders(req); got != 0 {
-				t.Errorf("request %d carries %d reminders on a caching endpoint, where compact_context is withheld", i+1, got)
-			}
-		}
-	})
+	reqs := runReadPressureScript(t, 8)
+	hits := countReminders(reqs[len(reqs)-1])
+	if hits == 0 {
+		t.Fatal("no read-pressure reminder reached the model after 8 large search rounds")
+	}
+	if hits > readPressureMaxNudges {
+		t.Errorf("%d reminders in one request, want at most %d", hits, readPressureMaxNudges)
+	}
+	// The early requests must be clean: nudging before the agent has read
+	// enough to have anything worth summarizing is noise, not guidance.
+	if got := countReminders(reqs[1]); got != 0 {
+		t.Errorf("%d reminders in the second request, before the threshold could be reached", got)
+	}
 }
 
 // countReminders counts tool results in one request that carry the reminder.
@@ -310,12 +299,10 @@ func countReminders(msgs []provider.ModelMessage) int {
 	return n
 }
 
-// runReadPressureScript drives a turn of `rounds` large search rounds against an
-// endpoint with the given cache verdict and returns every request made.
-func runReadPressureScript(t *testing.T, verdict provider.CacheVerdict, rounds int) [][]provider.ModelMessage {
+// runReadPressureScript drives a turn of `rounds` large search rounds and
+// returns every request made.
+func runReadPressureScript(t *testing.T, rounds int) [][]provider.ModelMessage {
 	t.Helper()
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -327,9 +314,6 @@ func runReadPressureScript(t *testing.T, verdict provider.CacheVerdict, rounds i
 		ModelID: "mock-model", SupportsImages: false, ProbedAt: session.Now(),
 	}); err != nil {
 		t.Fatalf("set capability: %v", err)
-	}
-	if err := session.SetModelCacheSupport(database, "mock-model", "mock", string(verdict), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
 	}
 
 	store := session.NewStore(database)

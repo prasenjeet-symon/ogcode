@@ -56,7 +56,7 @@ winget:
     # Don't push a winget manifest for prereleases (e.g. -rc/-beta tags).
     skip_upload: "auto"
     publisher: prasenjeet-symon
-    license: MIT
+    license: AGPL-3.0-only
     license_url: "https://github.com/prasenjeet-symon/ogcode/blob/main/LICENSE"
     short_description: "Agentic coding assistant with web UI"
     description: "ogcode is an agentic coding assistant with a web UI that helps you write, review, and manage code."
@@ -96,7 +96,7 @@ brews:
     directory: Formula
     homepage: "https://github.com/prasenjeet-symon/ogcode"
     description: "Agentic coding assistant with web UI"
-    license: MIT
+    license: AGPL-3.0-only
     test: |
       system "#{bin}/ogcode", "--help"
     caveats: |

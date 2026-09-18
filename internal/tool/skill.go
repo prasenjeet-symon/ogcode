@@ -82,6 +82,25 @@ func (t SkillTool) Execute(ctx context.Context, args json.RawMessage, tctx Conte
 		}, nil
 	}
 
+	// A skill declares the credentials its instructions assume with a
+	// frontmatter `requires` list. Checking it here, before the body is handed
+	// over, turns a missing token into one clear answer instead of a script that
+	// fails halfway through with an error the agent has to reverse-engineer.
+	// The body is withheld rather than shown with a warning: a skill whose steps
+	// read a token would otherwise walk the agent into the same failure.
+	if missing := s.MissingEnv(); len(missing) > 0 {
+		return Result{
+			Title: "Skill: " + s.Name,
+			Metadata: map[string]any{
+				"name":    s.Name,
+				"source":  string(s.Source),
+				"missing": missing,
+			},
+			Output: fmt.Sprintf("The %q skill was not loaded: it requires %s, which %s not set in this environment. Tell the user which variable is missing and how it is supplied — a `skills.env` entry in ogcode.json, or the variable exported in the environment ogcode was started from. Do not retry until it is set.",
+				s.Name, quoteList(missing), pluralIsAre(len(missing))),
+		}, nil
+	}
+
 	return Result{
 		Title: "Skill: " + s.Name,
 		Metadata: map[string]any{
@@ -152,4 +171,26 @@ func availableList(reg *skill.Registry) string {
 		names = append(names, s.Name)
 	}
 	return "Available skills: " + strings.Join(names, ", ") + "."
+}
+
+// quoteList renders env var names for the refusal message: `FOO` or `FOO` and
+// `BAR` for several, so the sentence reads as prose rather than as a dump.
+func quoteList(names []string) string {
+	quoted := make([]string, 0, len(names))
+	for _, n := range names {
+		quoted = append(quoted, "`"+n+"`")
+	}
+	if len(quoted) == 1 {
+		return quoted[0]
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + " and " + quoted[len(quoted)-1]
+}
+
+// pluralIsAre picks the verb matching how many variables are missing, so a
+// single-variable refusal does not read as broken English.
+func pluralIsAre(n int) string {
+	if n == 1 {
+		return "is"
+	}
+	return "are"
 }

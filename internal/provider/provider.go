@@ -7,13 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -34,6 +38,96 @@ const streamIdleTimeout = 120 * time.Second
 // exactly the long-file turns that need it most, so these endpoints get a
 // budget sized to outlast a large generation rather than a network blip.
 const streamIdleTimeoutBuffered = 10 * time.Minute
+
+// idleTimeoutEnv names the environment variable that overrides the built-in
+// idle budgets above, for every endpoint. Those budgets are sized for what a
+// provider's own wire behaviour makes normal, and that is not the same question
+// as what a given machine makes normal: a local model on modest hardware can
+// spend longer than streamIdleTimeoutBuffered in prompt evaluation alone — the
+// connection silent throughout — and until this existed the only way to finish
+// that turn was to rebuild with a larger constant.
+const idleTimeoutEnv = "OGCODE_STREAM_IDLE_TIMEOUT"
+
+// idleTimeoutNever switches the watchdog off. It is an enormous real duration
+// rather than a flag so that every path carrying a budget keeps working
+// unchanged: time.AfterFunc clamps an overflowing deadline to the far future,
+// so the timer arms normally and simply never fires. Zero could not spell this,
+// because newIdleWatchdog reads a non-positive budget as "use the default".
+const idleTimeoutNever = time.Duration(math.MaxInt64)
+
+// idleTimeoutFloor guards the bare-seconds spelling accepted below. "10" means
+// ten seconds, but someone who means ten minutes will type exactly that, and a
+// ten-second budget aborts even healthy streams. A value under the floor is far
+// likelier to be that mistake than an intent, so it is refused and reported
+// rather than honoured into a stream that can never finish.
+const idleTimeoutFloor = 10 * time.Second
+
+// idleTimeoutOverride is the operator's budget, read and parsed once. Zero means
+// no usable override, leaving the built-in budgets in force.
+var idleTimeoutOverride = sync.OnceValue(func() time.Duration {
+	return parseIdleTimeout(os.Getenv(idleTimeoutEnv))
+})
+
+// parseIdleTimeout interprets the value of idleTimeoutEnv. It accepts a Go
+// duration ("15m", "900s"), a bare count of seconds ("900"), or off/none/never
+// to disable the watchdog. Anything it cannot use returns 0 — the built-in
+// budget then applies, so a typo costs a warning rather than the whole stream.
+func parseIdleTimeout(raw string) time.Duration {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if v == "" {
+		return 0
+	}
+	switch v {
+	case "0", "off", "none", "never":
+		return idleTimeoutNever
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		// A bare number means seconds — the spelling people reach for first,
+		// and the one a unit-less value in any other config would have.
+		n, convErr := strconv.ParseInt(v, 10, 64)
+		if convErr != nil {
+			slog.Warn("ignoring unusable idle timeout, keeping the built-in budget",
+				"env", idleTimeoutEnv, "value", raw)
+			return 0
+		}
+		if n > int64(math.MaxInt64/time.Second) {
+			// Too large to express as a Duration in nanoseconds. Multiplying
+			// would silently wrap, so read the obvious intent instead.
+			return idleTimeoutNever
+		}
+		d = time.Duration(n) * time.Second
+	}
+	if d == 0 {
+		// "0s" and "00" reach here rather than the switch above, and mean what
+		// the bare "0" there means.
+		return idleTimeoutNever
+	}
+	if d < idleTimeoutFloor {
+		slog.Warn("ignoring idle timeout below the floor, keeping the built-in budget",
+			"env", idleTimeoutEnv, "value", raw, "floor", idleTimeoutFloor)
+		return 0
+	}
+	return d
+}
+
+// resolveIdleTimeout picks the budget for one stream: the operator's override
+// when they set a usable one, else the budget the endpoint earns on its own
+// behaviour. Raising it trades away detection of a genuinely dead connection,
+// which is why it is opt-in and never inferred.
+func resolveIdleTimeout(builtin time.Duration) time.Duration {
+	return pickIdleTimeout(idleTimeoutOverride(), builtin)
+}
+
+// pickIdleTimeout resolves one budget against an override. It is split out from
+// resolveIdleTimeout so the choice can be tested without the process-wide env
+// read, which sync.OnceValue pins for the life of the process.
+func pickIdleTimeout(override, builtin time.Duration) time.Duration {
+	if override > 0 {
+		return override
+	}
+	return builtin
+}
 
 // isLocalEndpoint reports whether a base URL points at this machine or the
 // local network. Local model servers (Ollama, llama.cpp, LM Studio, vLLM and
@@ -81,7 +175,7 @@ const streamResponseHeaderTimeout = 300 * time.Second
 var streamHTTPClient = &http.Client{
 	Transport: &http.Transport{
 		Proxy:             http.ProxyFromEnvironment,
-		DialContext:       (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		DialContext:       dialStream,
 		ForceAttemptHTTP2: true,
 		MaxIdleConns:      100,
 		// Below the ~60s idle-close observed on local relay endpoints (measured:
@@ -95,6 +189,154 @@ var streamHTTPClient = &http.Client{
 		ResponseHeaderTimeout: streamResponseHeaderTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
 	},
+}
+
+// forceIPv4Env names the environment variable that decides whether provider
+// streams may use IPv6. It has three positions rather than two: unset leaves
+// IPv6 in use with the automatic fallback below armed, a truthy value pins IPv4
+// from the start, and an explicit off keeps IPv6 no matter how badly it behaves
+// — the escape hatch for a host where IPv4 is the broken half.
+const forceIPv4Env = "OGCODE_FORCE_IPV4"
+
+type ipv4Mode int
+
+const (
+	// ipv4Auto is the default: IPv6 is used, and repeated IPv6-path failures
+	// trip the automatic fallback.
+	ipv4Auto ipv4Mode = iota
+	// ipv4Always pins provider streams to IPv4 immediately.
+	ipv4Always
+	// ipv4Never keeps IPv6 and disarms the automatic fallback entirely.
+	ipv4Never
+)
+
+// ipv4Setting is the operator's stance, read once.
+var ipv4Setting = sync.OnceValue(func() ipv4Mode {
+	return parseIPv4Mode(os.Getenv(forceIPv4Env))
+})
+
+// parseIPv4Mode reads the value of forceIPv4Env. Unrecognised text is treated as
+// unset: a typo must not silently disarm a protection the operator was trying
+// to turn on.
+func parseIPv4Mode(raw string) ipv4Mode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return ipv4Always
+	case "0", "false", "no", "off", "never":
+		return ipv4Never
+	default:
+		return ipv4Auto
+	}
+}
+
+// ipv6FallbackStrikes is how many IPv6-path failures are tolerated before the
+// fallback trips. One is a blip — a single rotation, a momentary route loss.
+// Two in one process is a pattern, and the second one has already cost the user
+// a turn.
+const ipv6FallbackStrikes = 2
+
+var (
+	ipv6Strikes  atomic.Int32
+	ipv6FellBack atomic.Bool
+)
+
+// useIPv4 reports whether provider streams should be narrowed to IPv4 right now.
+func useIPv4() bool {
+	switch ipv4Setting() {
+	case ipv4Always:
+		return true
+	case ipv4Never:
+		return false
+	}
+	return ipv6FellBack.Load()
+}
+
+// isIPv6PathFailure reports whether err is the local IPv6 path giving out under
+// a connection to an IPv6 peer, as opposed to any other way a stream can die.
+//
+// The signature is an unreachable-class errno on a socket whose REMOTE address
+// is IPv6. That is what the kernel reports when the route to the peer is gone,
+// and — the case that motivated this — when the temporary IPv6 source address
+// the socket was bound to is rotated out from under an established connection.
+// A peer that resets the connection says nothing about the address family, so
+// it is deliberately not counted here.
+func isIPv6PathFailure(err error) bool {
+	if !errors.Is(err, syscall.EHOSTUNREACH) && !errors.Is(err, syscall.ENETUNREACH) {
+		return false
+	}
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) {
+		return false
+	}
+	addr, ok := opErr.Addr.(*net.TCPAddr)
+	if !ok || addr.IP == nil {
+		return false
+	}
+	// To4 returns non-nil for IPv4 and for v4-mapped addresses, both of which
+	// travel over the IPv4 path and prove nothing about IPv6.
+	return addr.IP.To4() == nil
+}
+
+// noteIPv6Failure records a stream death that looks like the IPv6 path failing,
+// and trips the fallback once they stop looking like coincidence. It is called
+// for MID-STREAM failures only: a connect-time failure is already handled by the
+// dialer's own Happy Eyeballs, which tries IPv4 on its own, while a connection
+// that dies after it was working is exactly what Happy Eyeballs cannot see.
+func noteIPv6Failure(err error) {
+	if ipv4Setting() != ipv4Auto || ipv6FellBack.Load() || !isIPv6PathFailure(err) {
+		return
+	}
+	strikes := ipv6Strikes.Add(1)
+	if strikes < ipv6FallbackStrikes {
+		slog.Warn("provider stream died on the IPv6 path", "strikes", strikes, "err", err)
+		return
+	}
+	// Narrowing to IPv4 on a host that has no IPv4 would turn an intermittent
+	// failure into a total one. Check before committing to it.
+	if !hasGlobalIPv4() {
+		slog.Warn("IPv6 path failing repeatedly, but this host has no usable IPv4 address; staying on IPv6",
+			"strikes", strikes, "env", forceIPv4Env)
+		return
+	}
+	if ipv6FellBack.CompareAndSwap(false, true) {
+		slog.Warn("provider streams falling back to IPv4 after repeated IPv6 failures",
+			"strikes", strikes, "until", "process exit", "override", forceIPv4Env+"=off")
+	}
+}
+
+// hasGlobalIPv4 reports whether this host has an IPv4 address worth dialing
+// from — up, not loopback, not link-local.
+func hasGlobalIPv4() bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP.To4()
+		if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// streamDialer holds the connect-time bounds for provider streams.
+var streamDialer = &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+
+// dialStream opens the TCP connection for a provider request, narrowing to IPv4
+// when the setting or the fallback calls for it. Only the unqualified "tcp" is
+// narrowed: a caller that asked for tcp6 explicitly gets what it asked for
+// rather than a silent contradiction.
+func dialStream(ctx context.Context, network, addr string) (net.Conn, error) {
+	if network == "tcp" && useIPv4() {
+		network = "tcp4"
+	}
+	return streamDialer.DialContext(ctx, network, addr)
 }
 
 // idleWatchdog aborts a stream that stops producing data. It wraps the response
@@ -208,6 +450,13 @@ type StreamEvent struct {
 	FinishReason *string         `json:"finishReason,omitempty"`
 	Usage        *TokenUsage     `json:"usage,omitempty"`
 	Error        string          `json:"error,omitempty"`
+	// Err is the Go error behind Error, carried in-process so a consumer can
+	// match on the error's identity (errors.Is/As, down to the kernel errno)
+	// instead of on its rendered text. Nil when the failure arrived as a
+	// message from the provider rather than as a Go error. Never serialized:
+	// the stream reader and the agent loop share a process, and the string is
+	// what crosses any boundary beyond it.
+	Err error `json:"-"`
 }
 
 type ContentPart struct {
@@ -270,6 +519,41 @@ type StreamRequest struct {
 	// budgets that thinking would spend before reaching an answer, and none of
 	// them is the kind of work reasoning improves.
 	Thinking bool `json:"thinking,omitempty"`
+	// CacheKey identifies the conversation this request belongs to, for
+	// providers whose prompt cache is shared across machines and needs a routing
+	// hint to land a session's requests on the node holding its prefix. Only the
+	// agent loop sets it (to the session id); a provider that has no use for it
+	// ignores it. It is a routing hint, never an identity — it must not carry
+	// anything about the user.
+	CacheKey string `json:"cacheKey,omitempty"`
+	// Guidance is text the user sent mid-turn, already formatted and labelled by
+	// the caller. It is carried beside Messages rather than folded into them
+	// because the best place to put it differs by provider, and the wrong place
+	// is expensive: the caller's fallback appends it to the turn's FIRST user
+	// message, which is the earliest possible byte to change and therefore
+	// discards the whole turn's cached history on the step right after the user
+	// steers — the step they are waiting on.
+	//
+	// A provider that implements GuidancePlacer positions this itself and the
+	// caller leaves Messages alone. Everyone else ignores the field and the
+	// caller folds the same text into Messages as before.
+	Guidance string `json:"guidance,omitempty"`
+}
+
+// GuidancePlacer is implemented by providers that position
+// StreamRequest.Guidance themselves, at the end of the conversation where it
+// costs no cached prefix. The caller checks for it before falling back to
+// mutating the message history.
+type GuidancePlacer interface {
+	// PlacesGuidance reports whether this provider consumes
+	// StreamRequest.Guidance.
+	PlacesGuidance() bool
+}
+
+// PlacesGuidance reports whether p positions guidance itself.
+func PlacesGuidance(p Provider) bool {
+	gp, ok := p.(GuidancePlacer)
+	return ok && gp.PlacesGuidance()
 }
 
 type ModelInfo struct {
@@ -507,7 +791,6 @@ func NewProviderWithConfig(providerID, apiKey, baseURL string) (Provider, error)
 		return nil, fmt.Errorf("unknown provider %q; must be anthropic, openai, openrouter, or ollama", providerID)
 	}
 }
-
 
 // RefreshModels clears cached model lists for all providers that support it,
 // forcing re-fetch on next Models() call.

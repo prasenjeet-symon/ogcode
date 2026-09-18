@@ -1,0 +1,43 @@
+[Unit]
+Description=Clone the assigned repository before ogcode-worker starts
+ConditionPathExists=/etc/ogcode/repo-url
+ConditionPathExists=/etc/ogcode/repo-slug
+After=cloud-init.service
+# Runs after cloud-init has written /etc/ogcode/{repo-url,repo-slug}
+# (assign.sh passes a cloud-init user-data at `incus launch` time; there is no
+# in-guest renderer — Incus cloud images ship cloud-init, and security.guestapi
+# stays at its default ON, so user.* instance keys are operator metadata only
+# and are NOT readable from inside the guest).
+#
+# Clones into /root/.ogcode/repos/<repo-slug> — the worker's DefaultRepoRoot.
+# The slug is computed on the HOST by assign.sh as a byte-identical mirror of
+# safeRepoName (internal/worker/repos.go) == repoSlugFromURL
+# (controlplane/internal/master/repos.go); it is also the <reposlug> segment
+# of the container name. One implementation of the mirror lives in assign.sh —
+# this unit deliberately does NOT re-derive the slug.
+#
+# RemainAfterExit: the unit must stay "active (exited)" so
+# ogcode-worker.service's After=/Requires= ordering is meaningful across
+# worker restarts, and so `systemctl status ogcode-clone` shows the clone
+# state.
+#
+# Branch: assignment and its base branch come from the panel AFTER
+# registration, so this clones the default branch only — enough for the worker
+# to have a repo with an origin to fetch from. Worktree/branch creation is the
+# worker's own job at assignment time.
+#
+# ogcode-worker additionally gates on /root/.ogcode/repos/.cloned
+# (ConditionPathExists), so a slow clone delays worker start instead of
+# racing it.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The worker's default repo root (internal/worker/repos.go DefaultRepoRoot).
+# NOT set as WorkingDirectory: systemd checks it (status=200/CHDIR) before
+# ExecStart runs, and this unit is what creates the directory. ExecStart cds
+# there itself after mkdir -p.
+ExecStart=/bin/sh -ec 'repo="$(cat /etc/ogcode/repo-url)"; slug="$(cat /etc/ogcode/repo-slug)"; mkdir -p /root/.ogcode/repos; cd /root/.ogcode/repos; if [ -d "$slug/.git" ]; then git -C "$slug" remote set-url origin "$repo"; git -C "$slug" fetch --all --prune; echo "existing clone updated (fetch --all --prune)"; else rm -rf "$slug"; git clone "$repo" "$slug"; fi; touch /root/.ogcode/repos/.cloned; echo "clone ready: $slug"'
+
+[Install]
+WantedBy=multi-user.target

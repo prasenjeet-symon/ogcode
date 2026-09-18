@@ -75,8 +75,6 @@ func (m *deliveryScriptProvider) StreamChat(ctx context.Context, req provider.St
 // whole run took.
 func runDeliveryScript(t *testing.T, p *deliveryScriptProvider) (assistant *session.MessageInfo, prompt *session.MessageInfo, elapsed time.Duration) {
 	t.Helper()
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -91,11 +89,6 @@ func runDeliveryScript(t *testing.T, p *deliveryScriptProvider) (assistant *sess
 	}); err != nil {
 		t.Fatalf("set capability: %v", err)
 	}
-	if err := session.SetModelCacheSupport(database, "mock-delivery-model", "mock-delivery",
-		string(provider.CacheSupported), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
-	}
-
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
 	reg.Register(p)

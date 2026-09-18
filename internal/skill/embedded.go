@@ -12,7 +12,7 @@ import (
 // They are stored as raw SKILL.md text and parsed through the same Parse used
 // for files, so a built-in cannot drift into a shape a disk skill would be
 // rejected for.
-var embeddedSources = []string{customizeOgcodeSkill}
+var embeddedSources = []string{customizeOgcodeSkill, updateOgcodeSkill}
 
 var (
 	embeddedOnce sync.Once
@@ -70,7 +70,8 @@ win field by field.
   "skills": {
     "paths": ["./team-skills"],
     "urls": ["https://example.com/skills/index.json"],
-    "permissions": { "internal-*": "deny", "deploy-*": "ask" }
+    "permissions": { "internal-*": "deny", "deploy-*": "ask" },
+    "env": { "DEPLOY_TOKEN": "…" }
   },
   "mcp": {
     "filesystem": {
@@ -177,6 +178,24 @@ must match the directory name. The description is what the agent sees in its
 prompt — it decides from that alone whether to load the skill, so describe when
 to use it, not just what it is.
 
+A skill whose instructions need a credential declares it with a ` + "`requires`" + ` list
+of environment variable names, either as a comma list or a YAML sequence:
+
+` + "```markdown" + `
+---
+name: deploy
+description: Ship to staging.
+requires: DEPLOY_TOKEN
+---
+` + "```" + `
+
+Loading a skill with a missing requirement is refused, and the refusal names the
+variable — the body is withheld because its steps would fail on the same missing
+value. Supply the value under ` + "`skills.env`" + ` in ` + "`ogcode.json`" + `, or export it
+in the environment ogcode was started from (a real environment variable always
+wins). Tell the user which of the two to use; do not retry the load until the
+variable is set.
+
 Files shipped beside SKILL.md (scripts, references) are listed to the agent when
 the skill loads, and relative paths in the body resolve against the skill's own
 directory.
@@ -186,4 +205,85 @@ directory.
 ` + "`.ogcode/`" + ` holds the session database, notes, plan archives, and git
 worktrees. It is written by ogcode. Never hand-edit it, and never put skills or
 configuration there.
+`
+
+// updateOgcodeSkill tells the agent how ogcode itself is updated. A user who
+// asks "update ogcode" or hits a "new version available" banner needs the
+// right command for how their copy was installed, and the agent has no way to
+// guess that from the project files — so the knowledge ships in the binary.
+const updateOgcodeSkill = `---
+name: update-ogcode
+description: How to update ogcode itself — detect the install channel (brew, scoop, cargo, winget, or the install scripts), pick the matching upgrade command, verify with ogcode version, and check for updates. Load this when the user asks to update, upgrade, or reinstall ogcode, or asks about the version they are running.
+---
+
+# Updating ogcode
+
+There is no self-update: ogcode never replaces its own binary. Updating is a
+command run outside the session (or by you through the bash tool), then a
+restart of ogcode to pick up the new build.
+
+## 1. Find the install channel
+
+The channel is visible from where the running binary lives. Check it first,
+before proposing any command:
+
+` + "```sh" + `
+ogcode version
+ls -l "$(command -v ogcode)"
+GO=$(command -v ogcode); ls -l "$GO" 2>/dev/null; readlink -f "$GO" 2>/dev/null || true
+` + "```" + `
+
+` + "readlink -f" + ` resolves a package-manager symlink to the real file, which
+is what carries the channel fingerprint. Match the resolved path against this
+table, narrowest first:
+
+| Resolved binary location | Channel | Update command |
+| --- | --- | --- |
+| ` + "`<scoop-root>\\shims`" + ` or ` + "`<scoop-root>\\apps\\...`" + ` | scoop | ` + "`scoop update ogcode`" + ` |
+| anything containing ` + "`/Cellar/`" + ` | Homebrew | ` + "`brew upgrade ogcode`" + ` |
+| ` + "`/opt/homebrew/bin`" + ` | Homebrew (Apple Silicon) | ` + "`brew upgrade ogcode`" + ` |
+| ` + "`$CARGO_HOME/bin`" + `, by default ` + "`~/.cargo/bin`" + ` | cargo | ` + "`cargo install ogcode --force`" + ` |
+| ` + "`%LOCALAPPDATA%\\ogcode`" + ` | the install.ps1 script | ` + "`irm https://ogcode.xyz/install.ps1 | iex`" + ` |
+| any other Windows location | winget (documented default) | ` + "`winget upgrade ogcode`" + ` |
+| any other macOS/Linux location | the install.sh script | ` + "`curl -fsSL https://ogcode.xyz/install.sh | sh`" + ` |
+
+Scoop's root is ` + "`$env:SCOOP`" + `, ` + "`$env:SCOOP_GLOBAL`" + `, or
+` + "`$env:USERPROFILE\\scoop`" + `. A ` + "`/usr/local/bin/ogcode`" + ` on macOS or Linux
+is a **script install, not Homebrew** — Homebrew-sourced binaries resolve
+through a ` + "`Cellar`" + ` path.
+
+## 2. Check whether an update exists
+
+` + "```sh" + `
+ogcode check-updates
+` + "```" + `
+
+This queries the GitHub releases API and prints Current, Latest, and the
+update command for the detected channel. It exits ` + "`1`" + ` when an update is
+available, ` + "`0`" + ` when current, so it is scriptable. Run it with the bash
+tool and read the result to the user — do not guess whether a release exists.
+
+## 3. Run the update and verify
+
+Run the channel's command from the table with the bash tool, then verify:
+
+` + "```sh" + `
+ogcode version
+` + "```" + `
+
+The running session keeps the old binary until ogcode is restarted, so tell
+the user to restart ogcode to finish the update.
+
+## Notes
+
+- **macOS codesigning:** replacing the binary in place can leave a stale code
+  signature and the next launch dies with ` + "`Killed: 9`" + `. If that happens,
+  re-sign: ` + "`codesign --force --sign - $(command -v ogcode)`" + `. The
+  package-manager and script channels handle this themselves.
+- **go install:** ` + "`go install github.com/prasenjeet-symon/ogcode@latest`" + `
+  works but does not control the CGO setting the build needs; prefer the
+  package-manager or script channels.
+- **Dev builds:** if ` + "`ogcode version`" + ` reports a ` + "`dev`" + ` or
+  dirty-git-describe version, this is a source build — updating means
+  ` + "`git pull`" + ` and a rebuild, not an install command.
 `

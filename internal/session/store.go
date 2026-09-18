@@ -31,11 +31,11 @@ func (s *Store) Create(session *Session) error {
 
 func (s *Store) Get(id SessionID) (*Session, error) {
 	row := s.db.QueryRow(
-		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, memory_tokens_saved, time_created, time_updated
+		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, time_created, time_updated
 		 FROM session WHERE id = ?`, id,
 	)
 	var sess Session
-	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.MemoryTokensSaved, &sess.CreatedAt, &sess.UpdatedAt)
+	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.CreatedAt, &sess.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -47,7 +47,7 @@ func (s *Store) Get(id SessionID) (*Session, error) {
 
 func (s *Store) List(directory string) ([]*Session, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, memory_tokens_saved, time_created, time_updated
+		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, time_created, time_updated
 		 FROM session WHERE directory = ? AND session_type NOT IN ('note', 'index', 'search') ORDER BY time_updated DESC`, directory,
 	)
 	if err != nil {
@@ -58,7 +58,7 @@ func (s *Store) List(directory string) ([]*Session, error) {
 	var sessions []*Session
 	for rows.Next() {
 		var sess Session
-		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.MemoryTokensSaved, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, &sess)
@@ -71,7 +71,7 @@ func (s *Store) List(directory string) ([]*Session, error) {
 // project identity onto nodes written before that column existed.
 func (s *Store) ListAll() ([]*Session, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, memory_tokens_saved, time_created, time_updated
+		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, time_created, time_updated
 		 FROM session ORDER BY time_updated DESC`,
 	)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *Store) ListAll() ([]*Session, error) {
 	var sessions []*Session
 	for rows.Next() {
 		var sess Session
-		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.MemoryTokensSaved, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, &sess)
@@ -94,23 +94,6 @@ func (s *Store) Update(session *Session) error {
 	_, err := s.db.Exec(
 		`UPDATE session SET title = ?, model = ?, session_type = ?, permission = ?, compaction_summary = ?, time_updated = ? WHERE id = ?`,
 		session.Title, session.Model, session.SessionType, session.Permission, session.CompactionSummary, session.UpdatedAt, session.ID,
-	)
-	return err
-}
-
-// UpdateMemoryTokensSaved atomically increments memory_tokens_saved by delta (may be negative).
-// delta is clamped above at 1_000_000_000 to prevent overflow; negative values are
-// preserved so callers can track memory overhead accurately.
-func (s *Store) UpdateMemoryTokensSaved(id SessionID, delta int) error {
-	// Clamp delta so the running total stays in a safe range.
-	// MAX_TOKENS = 1 billion tokens ≈ 4 GB of text — far beyond any realistic session.
-	const maxTokens = 1_000_000_000
-	if delta > maxTokens {
-		delta = maxTokens
-	}
-	_, err := s.db.Exec(
-		`UPDATE session SET memory_tokens_saved = MIN(?, memory_tokens_saved + ?), time_updated = ? WHERE id = ?`,
-		maxTokens, delta, Now(), id,
 	)
 	return err
 }

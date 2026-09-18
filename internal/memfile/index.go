@@ -2,24 +2,24 @@ package memfile
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/prasenjeet-symon/ogcode/internal/codemap"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 )
 
 // Entry is one indexed turn summary. path is the primary key and holds the
-// absolute file path; outline is the rendered markdown heading tree (with line
-// ranges) that lets recall jump straight to a section.
+// absolute file path. Labels are the topics the summary writer called out on
+// its `Topics:` line — what memory_map ranks and shows on a conversation's
+// collapsed line.
 type Entry struct {
 	Path      string
 	SessionID string
 	ProjectID string
-	Title     string
-	Outline   string
+	Labels    []string
 	CreatedAt int64 // unix millis; the turn's time, used for temporal ordering
 	IndexedAt int64 // unix millis; when this row was written
 }
@@ -37,24 +37,15 @@ func NewStore(database *db.DB) *Store {
 	return &Store{db: database}
 }
 
-// IsIndexed reports whether a row already exists for path.
-func (s *Store) IsIndexed(path string) (bool, error) {
-	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM memory_turn_index WHERE path = ?`, path).Scan(&count); err != nil {
-		return false, fmt.Errorf("memfile: check indexed: %w", err)
-	}
-	return count > 0, nil
-}
-
 // Upsert inserts or replaces one index row.
 func (s *Store) Upsert(e *Entry) error {
 	if e.IndexedAt == 0 {
 		e.IndexedAt = time.Now().UnixMilli()
 	}
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO memory_turn_index (path, session_id, project_id, title, outline, created_at, indexed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.Path, e.SessionID, e.ProjectID, e.Title, e.Outline, e.CreatedAt, e.IndexedAt,
+		`INSERT OR REPLACE INTO memory_turn_index (path, session_id, project_id, labels, created_at, indexed_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		e.Path, e.SessionID, e.ProjectID, encodeLabels(e.Labels), e.CreatedAt, e.IndexedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("memfile: upsert: %w", err)
@@ -62,14 +53,10 @@ func (s *Store) Upsert(e *Entry) error {
 	return nil
 }
 
-// IndexFile parses one summary file's heading outline and upserts its row. It is
-// the incremental unit: called once for a freshly written file, it never touches
-// any other row. meta supplies the scoping/attribution the index stores.
+// IndexFile upserts one summary file's index row. It is the incremental unit:
+// called once for a freshly written file, it never touches any other row. meta
+// supplies the scoping/attribution the index stores.
 func (s *Store) IndexFile(path string, meta Meta) error {
-	outline := ""
-	if fm, err := codemap.Outline(path); err == nil {
-		outline = renderOutline(fm)
-	}
 	created := meta.CreatedAt
 	if created.IsZero() {
 		created = time.Now()
@@ -78,8 +65,7 @@ func (s *Store) IndexFile(path string, meta Meta) error {
 		Path:      path,
 		SessionID: meta.SessionID,
 		ProjectID: meta.ProjectID,
-		Title:     meta.Title,
-		Outline:   outline,
+		Labels:    extractTopicsFromFile(path),
 		CreatedAt: created.UTC().UnixMilli(),
 	})
 }
@@ -87,7 +73,7 @@ func (s *Store) IndexFile(path string, meta Meta) error {
 // ListByProject returns every indexed summary for a project, newest first.
 func (s *Store) ListByProject(projectID string) ([]*Entry, error) {
 	return s.query(
-		`SELECT path, session_id, project_id, title, outline, created_at, indexed_at
+		`SELECT path, session_id, project_id, labels, created_at, indexed_at
 		 FROM memory_turn_index WHERE project_id = ? ORDER BY created_at DESC, path DESC`,
 		projectID,
 	)
@@ -96,7 +82,7 @@ func (s *Store) ListByProject(projectID string) ([]*Entry, error) {
 // ListBySession returns every indexed summary for one conversation, newest first.
 func (s *Store) ListBySession(sessionID string) ([]*Entry, error) {
 	return s.query(
-		`SELECT path, session_id, project_id, title, outline, created_at, indexed_at
+		`SELECT path, session_id, project_id, labels, created_at, indexed_at
 		 FROM memory_turn_index WHERE session_id = ? ORDER BY created_at DESC, path DESC`,
 		sessionID,
 	)
@@ -139,30 +125,107 @@ func (s *Store) PurgeMissing(projectID string) error {
 
 func scanEntry(rows *sql.Rows) (*Entry, error) {
 	var e Entry
-	if err := rows.Scan(&e.Path, &e.SessionID, &e.ProjectID, &e.Title, &e.Outline, &e.CreatedAt, &e.IndexedAt); err != nil {
+	var labelsJSON string
+	if err := rows.Scan(&e.Path, &e.SessionID, &e.ProjectID, &labelsJSON, &e.CreatedAt, &e.IndexedAt); err != nil {
 		return nil, fmt.Errorf("memfile: scan: %w", err)
 	}
+	e.Labels = decodeLabels(labelsJSON)
 	return &e, nil
 }
 
-// renderOutline renders a file's heading symbols as an indented outline with
-// line ranges — the same shape file_map prints, so the recall agent reads a
-// familiar format and can jump with read(path, start_line, end_line).
-func renderOutline(fm *codemap.FileMap) string {
-	if fm == nil || len(fm.Symbols) == 0 {
-		return ""
+// topicLabelCap is the maximum number of topics kept from one summary's
+// `Topics:` line. Generous for a single turn — memory_map's per-conversation
+// line re-ranks these across the conversation's turns and caps again there.
+const topicLabelCap = 8
+
+// encodeLabels marshals labels for the labels column, never nil — the column is
+// NOT NULL DEFAULT '[]'.
+func encodeLabels(labels []string) string {
+	if len(labels) == 0 {
+		return "[]"
 	}
-	var b strings.Builder
-	for _, sym := range fm.Symbols {
-		sig := sym.Signature
-		if sig == "" {
-			sig = sym.Name
-		}
-		if sym.StartLine == sym.EndLine {
-			fmt.Fprintf(&b, "%d  %s\n", sym.StartLine, sig)
-		} else {
-			fmt.Fprintf(&b, "%d-%d  %s\n", sym.StartLine, sym.EndLine, sig)
-		}
+	b, err := json.Marshal(labels)
+	if err != nil {
+		return "[]"
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return string(b)
+}
+
+// decodeLabels unmarshals the labels column, mapping any failure (or a null) to
+// an empty slice so one malformed row can never break listing.
+func decodeLabels(raw string) []string {
+	if raw == "" {
+		return []string{}
+	}
+	var labels []string
+	if err := json.Unmarshal([]byte(raw), &labels); err != nil {
+		return []string{}
+	}
+	if labels == nil {
+		return []string{}
+	}
+	return labels
+}
+
+// extractTopicsFromFile reads a summary file and pulls the topics its body
+// called out on a `Topics:` line (SummarySystemPrompt mandates one right under
+// the H1). Read errors and absent lines both yield an empty (unlabeled) entry —
+// the title carries the topical signal then.
+func extractTopicsFromFile(path string) []string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return extractTopics(string(raw))
+}
+
+// extractTopics finds the first `Topics:` line in a summary body and returns its
+// comma-separated items, trimmed, deduplicated (case-insensitively — keep the
+// first spelling), and capped. Everything after the first `Topics:` line is
+// ignored, so a section heading later in the body can't hijack the parse.
+func extractTopics(body string) []string {
+	var (
+		labels   []string
+		seen     = make(map[string]struct{})
+		inFM     bool
+		fmClosed bool
+	)
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !fmClosed {
+			if trimmed == "---" {
+				if inFM {
+					fmClosed = true
+				} else {
+					inFM = true
+				}
+				continue
+			}
+			if inFM {
+				continue // frontmatter keys are not topics
+			}
+		}
+		if !strings.HasPrefix(strings.ToLower(trimmed), "topics:") {
+			continue
+		}
+		items := strings.Split(trimmed[len("topics:"):], ",")
+		for _, item := range items {
+			label := strings.TrimSpace(item)
+			label = strings.Trim(label, `"`)
+			if label == "" {
+				continue
+			}
+			key := strings.ToLower(label)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			labels = append(labels, label)
+			if len(labels) == topicLabelCap {
+				return labels
+			}
+		}
+		return labels // only the first Topics line counts
+	}
+	return labels
 }

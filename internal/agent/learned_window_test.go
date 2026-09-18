@@ -75,9 +75,6 @@ func (m *overflowLearningProvider) StreamChat(ctx context.Context, req provider.
 // run (and every later compaction decision) sizes from a real figure instead
 // of the 128k fallback.
 func TestRunLoop_LearnsContextWindowFromOverflowError(t *testing.T) {
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
-
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -88,10 +85,6 @@ func TestRunLoop_LearnsContextWindowFromOverflowError(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed capability: %v", err)
 	}
-	if err := session.SetModelCacheSupport(database, "mock-learn", "mock", string(provider.CacheSupported), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
-	}
-
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
 	mock := &overflowLearningProvider{overflowN: 1}
@@ -181,9 +174,6 @@ func (m *windowCatalogProvider) StreamChat(ctx context.Context, req provider.Str
 // the catalog is silent; and with neither source the window stays 0 (the
 // compaction threshold then falls back to the fixed 128k cap).
 func TestResolveRunModel_ContextWindowPreference(t *testing.T) {
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
-
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)

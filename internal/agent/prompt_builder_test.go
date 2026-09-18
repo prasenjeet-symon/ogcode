@@ -97,7 +97,7 @@ func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
 	// cache_control — must NOT contain the current date. It is injected as a
 	// separate system-reminder entry so the cached prefix stays byte-for-byte
 	// identical across turns.
-	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", 1920, 1080, "", -1)[0]
+	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", 1920, 1080, "", -1, true)[0]
 	if strings.Contains(prompt, "Current date:") {
 		t.Error("did not expect 'Current date:' in the base system prompt (it should be in a separate system-reminder entry)")
 	}
@@ -467,7 +467,7 @@ func TestBuildAgent_SystemPrompt_ContainsSharedSections(t *testing.T) {
 // TestBuildAgent_SystemPrompt_ContainsPublicServing verifies writing agents are
 // told about the workspace public/ folder served over HTTP at /public.
 func TestBuildAgent_SystemPrompt_ContainsPublicServing(t *testing.T) {
-	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", "anthropic")
+	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", "anthropic", true)
 	if !strings.Contains(p, "Public file hosting") {
 		t.Error("BuildAgent prompt should include the public file hosting section")
 	}
@@ -487,7 +487,7 @@ func TestBuildAgent_SystemPrompt_ContainsPublicServing(t *testing.T) {
 // gated on writing ability: a read-only agent (no write/edit) must never be
 // told about a /public hosting capability it cannot use.
 func TestReadOnlyAgent_SystemPrompt_OmitsPublicServing(t *testing.T) {
-	p := staticSystemPrompt(NoteAgent, "/tmp/testproj", false, "", "", "")
+	p := staticSystemPrompt(NoteAgent, "/tmp/testproj", false, "", "", "", true)
 	if strings.Contains(p, "Public file hosting") {
 		t.Error("read-only agent must not be offered the public file hosting section")
 	}
@@ -751,9 +751,9 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 // entry [0] is the only block providers mark cacheable, and the browser resends
 // its window size with every prompt, so a resize must not change [0] by one byte.
 func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.T) {
-	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1)
-	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1280, 720, "", -1)
-	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 0, 0, "", -1)
+	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1, true)
+	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1280, 720, "", -1, true)
+	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 0, 0, "", -1, true)
 
 	if desktop[0] != laptop[0] {
 		t.Error("resizing the window changed the cacheable prefix — the tools+system cache is invalidated on every resize")
@@ -782,12 +782,12 @@ func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.
 // that moving the viewport could have broken: an output-only agent's format
 // constraint must stay the last thing the model reads.
 func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
-	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1)
+	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1, true)
 	if got := entries[len(entries)-1]; got != NoteAgent.FinalInstruction {
 		t.Errorf("last entry = %q, want the agent's FinalInstruction", got)
 	}
 	// An agent without one must not gain an empty trailing entry.
-	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1) {
+	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1, true) {
 		if strings.TrimSpace(e) == "" {
 			t.Error("assembled entries contain an empty block")
 		}
@@ -878,7 +878,7 @@ func TestMarkdownCapabilities_DoesNotPointAtAnAbsentViewport(t *testing.T) {
 	}
 
 	// End to end: a client that reports no viewport gets neither.
-	bare := strings.Join(buildSystemPromptEntries(BuildAgent, "/proj", false, "", "", 0, 0, "", -1), "\n\n")
+	bare := strings.Join(buildSystemPromptEntries(BuildAgent, "/proj", false, "", "", 0, 0, "", -1, true), "\n\n")
 	if strings.Contains(bare, "viewport dimensions provided below") {
 		t.Error("assembled prompt references viewport dimensions that were never supplied")
 	}
@@ -930,7 +930,7 @@ func TestMemoryMDPrompt_DoesNotNameRecallTools(t *testing.T) {
 	}
 
 	// End to end: Note is project-scoped and holds neither tool.
-	note := strings.Join(buildSystemPromptEntries(NoteAgent, "/proj", true, "", "", 0, 0, "", -1), "\n\n")
+	note := strings.Join(buildSystemPromptEntries(NoteAgent, "/proj", true, "", "", 0, 0, "", -1, true), "\n\n")
 	if strings.Contains(note, "memory_recall") {
 		t.Error("assembled Note prompt names a recall tool it does not have")
 	}
@@ -954,7 +954,7 @@ func TestParallelToolCallsPrompt_ExamplesMatchTheAgentsTools(t *testing.T) {
 	}
 
 	// End to end, against the agent that actually takes this branch.
-	assembled := strings.Join(buildSystemPromptEntries(SearchAgent, "/proj", true, "", "", 0, 0, "", -1), "\n\n")
+	assembled := strings.Join(buildSystemPromptEntries(SearchAgent, "/proj", true, "", "", 0, 0, "", -1, true), "\n\n")
 	for _, unwanted := range []string{"file_map", `"glob"`} {
 		if strings.Contains(assembled, unwanted) {
 			t.Errorf("assembled Search prompt names %q, which it cannot call", unwanted)

@@ -1,0 +1,51 @@
+[Unit]
+Description=ogcode worker agent (registers with the control-plane master)
+After=ogcode-clone.service
+Requires=ogcode-clone.service
+ConditionPathExists=/root/.ogcode/repos/.cloned
+ConditionPathExists=/etc/ogcode/worker.env
+# Runs after ogcode-clone has produced /root/.ogcode/repos/.cloned. Restart=always:
+# if the master is briefly unreachable (restart, TLS rotation), the worker
+# retries forever — registration is also how the control plane learns
+# provisioning readiness, so an exit here must not become a failed unit.
+#
+# Flags mirror internal/cli/worker.go exactly:
+#   --master                  control-plane URL (OGCODE_MASTER_URL from
+#                             /etc/ogcode/worker.env, written by cloud-init)
+#   --name                    display name (OGCODE_WORKER_NAME == container
+#                             name; the worker id itself comes from
+#                             /root/.ogcode/worker-id, also written by
+#                             cloud-init)
+#   --repo-root               where the worker looks for clones (DefaultRepoRoot)
+#   --workspace               containment pairing: --workspace == --repo-root
+#                             keeps every hosted worktree inside the clone dir
+#   --pairing-secret-file     secret is read from a file, never argv/proc
+#   --master-ca               CA bundle for self-signed master TLS; added via
+#                             OGCODE_EXTRA_FLAGS only when a CA was configured
+#                             (cloud-init omits the flag entirely otherwise)
+#
+# The variable bits live in /etc/ogcode/worker.env (an EnvironmentFile), not in
+# templated ExecStart: assign.sh rewrites plain files, not unit definitions. An
+# empty OGCODE_EXTRA_FLAGS expands to nothing; a set one splits on whitespace,
+# so it can carry two words (--master-ca + path).
+#
+# cloud-init's runcmd enables this unit AFTER ogcode-clone has been enabled
+# (ordering inside one runcmd list is sequential); the After=/Requires= below
+# keeps that order across later reboots too.
+
+[Service]
+Type=simple
+# systemd does not set HOME for root services; ogcode's identity file
+# (loadOrCreateWorkerID → ogcodeHomeDir → os.UserHomeDir) needs it even to
+# READ the /root/.ogcode/worker-id that cloud-init baked.
+Environment=HOME=/root
+EnvironmentFile=/etc/ogcode/worker.env
+ExecStartPre=/bin/sh -c 'test -f /etc/ogcode/master-url'
+ExecStartPre=/bin/sh -c 'test -f /etc/ogcode/pairing-secret'
+ExecStartPre=/bin/sh -c 'test -f /root/.ogcode/worker-id'
+ExecStart=/usr/local/bin/ogcode worker --master ${OGCODE_MASTER_URL} --name ${OGCODE_WORKER_NAME} --repo-root /root/.ogcode/repos --workspace /root/.ogcode/repos --pairing-secret-file /etc/ogcode/pairing-secret ${OGCODE_EXTRA_FLAGS}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

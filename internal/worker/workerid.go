@@ -56,7 +56,7 @@ func loadOrCreateWorkerID() (string, error) {
 }
 
 // ogcodeHomeDir returns the ogcode home-directory runtime state dir (~/.ogcode/),
-// mirroring the convention used by the embed-model cache and MCP token store.
+// mirroring the convention used by the MCP token store.
 func ogcodeHomeDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

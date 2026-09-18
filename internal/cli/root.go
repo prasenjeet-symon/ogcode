@@ -151,13 +151,14 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(docindexStore))
 
 	lr := &agent.LoopRunner{
-		Store:           sessionStore,
-		Bus:             b,
-		Registry:        registry,
-		DefaultProvider: defaultProvider,
-		Tools:           toolRegistry,
-		Dir:             dir,
-		MaxSteps:        50,
+		Store:                 sessionStore,
+		Bus:                   b,
+		Registry:              registry,
+		DefaultProvider:       defaultProvider,
+		Tools:                 toolRegistry,
+		Dir:                   dir,
+		MaxSteps:              50,
+		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
 	}
 
 	idx := indexer.New(dir, docindexStore, lr)

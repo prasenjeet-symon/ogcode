@@ -121,15 +121,26 @@ message MasterToWorker {
     Ping ping = 9;
     // Multi-user repos: provision (clone + user worktree) eagerly at
     // assignment time; the session-time ensure calls are an idempotent backstop.
+    //
+    // Deprecated: bare-worker mode only. Container mode (INCUS_WORKERS_PLAN.md
+    // §Phase B) provisions via the master-side Incus driver — the container's
+    // cloud-init clones the repo at boot — and never sends this command. Kept
+    // for bare workers.
     AddUserWorktree add_user_worktree = 10;
     // Multi-user repos: report the repos this worker manages (clone once per
     // repo; user worktrees hang off the clone).
+    //
+    // Deprecated: bare-worker mode only; container mode keeps the placement
+    // table on the master. Kept for bare workers.
     ListRepos list_repos = 11;
     // Multi-user repos: report free bytes on the clone/workspace roots so the
     // master can pick a worker for a new repo.
     Stats stats = 12;
     // Multi-user repos: clone a repository now (EnsureRepo) without
     // provisioning any user worktree — the Repositories page's add flow.
+    //
+    // Deprecated: bare-worker mode only; in container mode the container's
+    // ogcode-clone unit clones at boot. Kept for bare workers.
     CloneRepo clone_repo = 13;
     // Multi-user repos lifecycle: remove one user's worktree off the shared
     // clone (their branch is KEPT by default — never destroy work).

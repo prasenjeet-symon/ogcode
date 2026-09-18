@@ -29,7 +29,7 @@ func newTestServer(t *testing.T) *Server {
 	// Point the free key pool at a dead address so loadProviderMap's free-pool
 	// fetch fails instantly instead of stalling on the real GitHub URL.
 	t.Setenv("OGCODE_FREE_KEYS_URL", "http://127.0.0.1:9/free-keys-unavailable")
-	t.Setenv("OGCODE_EMBED_MODEL_DIR", t.TempDir())
+	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 
 	tmp := t.TempDir()
 	pdb, err := db.Open(filepath.Join(tmp, "ogcode.db"))

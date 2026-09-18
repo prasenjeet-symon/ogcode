@@ -163,6 +163,37 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.configPayload())
 }
 
+// handleGetProjectSettings returns the general settings scoped to this
+// workspace. They live in the project's own database, so the answer is about
+// the directory the server was started in and nothing else.
+func (s *Server) handleGetProjectSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := session.GetProjectSettings(s.db)
+	if err != nil {
+		http.Error(w, "failed to read project settings", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+// handleSetProjectSettings persists the whole settings block. There is no
+// masking or merging to do: every field is a plain user choice the UI already
+// holds in full, so the payload is the new state outright.
+//
+// The change needs no restart. The agent loop reads the setting on every step,
+// so the next step of the next turn already sees it.
+func (s *Server) handleSetProjectSettings(w http.ResponseWriter, r *http.Request) {
+	var incoming session.ProjectSettings
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := session.SetProjectSettings(s.db, &incoming); err != nil {
+		http.Error(w, "failed to save project settings", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, &incoming)
+}
+
 func (s *Server) handleGetSearchConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, err := session.GetSearchConfig(s.globalDB)
 	if err != nil {

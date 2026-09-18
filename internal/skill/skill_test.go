@@ -3,6 +3,7 @@ package skill
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -201,6 +202,65 @@ func TestEmbedded_AllParse(t *testing.T) {
 	}
 }
 
+// The update skill must name every channel detectInstallCommand can emit, and
+// pin the mis-detection the detection was fixed for: a plain /usr/local/bin
+// binary is a script install, not Homebrew. If a channel command changes in
+// internal/version, this fails until the skill's table is updated to match.
+func TestEmbedded_UpdateSkillMatchesDetection(t *testing.T) {
+	skills, _ := Embedded()
+	var update *Skill
+	for i := range skills {
+		if skills[i].Name == "update-ogcode" {
+			update = &skills[i]
+			break
+		}
+	}
+	if update == nil {
+		t.Fatal("the built-in update-ogcode skill is missing")
+	}
+	for _, cmd := range []string{
+		"scoop update ogcode",
+		"brew upgrade ogcode",
+		"cargo install ogcode --force",
+		"winget upgrade ogcode",
+		"irm https://ogcode.xyz/install.ps1 | iex",
+		"curl -fsSL https://ogcode.xyz/install.sh | sh",
+	} {
+		if !strings.Contains(update.Content, cmd) {
+			t.Errorf("update-ogcode skill does not mention channel command %q", cmd)
+		}
+	}
+	if !strings.Contains(update.Content, "script install, not Homebrew") {
+		t.Error("update-ogcode skill lost the /usr/local script-install warning")
+	}
+	if !strings.Contains(update.Content, "ogcode check-updates") {
+		t.Error("update-ogcode skill does not document ogcode check-updates")
+	}
+}
+
+// A skill whose instructions need a credential declares it with `requires`, and
+// the value is supplied through `skills.env`. The built-in skill that documents
+// ogcode.json is the only place an agent learns this, so it has to name both
+// halves — a user asking "why won't this skill load" is answered from this text.
+func TestEmbedded_CustomizeSkillDocumentsRequires(t *testing.T) {
+	skills, _ := Embedded()
+	var customize *Skill
+	for i := range skills {
+		if skills[i].Name == "customize-ogcode" {
+			customize = &skills[i]
+			break
+		}
+	}
+	if customize == nil {
+		t.Fatal("the built-in customize-ogcode skill is missing")
+	}
+	for _, want := range []string{"requires", "skills.env"} {
+		if !strings.Contains(customize.Content, want) {
+			t.Errorf("customize-ogcode does not document %q; an agent could not tell a user how to supply a missing credential", want)
+		}
+	}
+}
+
 // The clamp cuts on a rune boundary. A byte slice through a multi-byte
 // character would put invalid UTF-8 straight into the system prompt — a worse
 // outcome than the long description it was avoiding.
@@ -231,5 +291,138 @@ func TestParse_ToleratesTrailingSpaceOnFences(t *testing.T) {
 	}
 	if s.Name != "demo" || s.Content != "body" {
 		t.Errorf("got name=%q content=%q", s.Name, s.Content)
+	}
+}
+
+// A skill declares the environment variables its instructions assume are set.
+// All four spellings a hand-written frontmatter reaches for must land the same
+// list, because the check the list feeds is a plain membership question and a
+// spelling that silently parsed to nothing would turn the check off.
+func TestParse_RequiresAcceptsEverySpelling(t *testing.T) {
+	cases := []struct {
+		label string
+		front string
+		want  []string
+	}{
+		{"inline comma list", "requires: GITHUB_TOKEN, SLACK_TOKEN", []string{"GITHUB_TOKEN", "SLACK_TOKEN"}},
+		{"inline single", "requires: GITHUB_TOKEN", []string{"GITHUB_TOKEN"}},
+		{"flow sequence", "requires: [GITHUB_TOKEN, SLACK_TOKEN]", []string{"GITHUB_TOKEN", "SLACK_TOKEN"}},
+		{"block sequence", "requires:\n  - GITHUB_TOKEN\n  - SLACK_TOKEN", []string{"GITHUB_TOKEN", "SLACK_TOKEN"}},
+		{"block scalar", "requires: |\n  GITHUB_TOKEN\n  SLACK_TOKEN", []string{"GITHUB_TOKEN", "SLACK_TOKEN"}},
+		{"quoted entries", `requires: ["GITHUB_TOKEN", 'SLACK_TOKEN']`, []string{"GITHUB_TOKEN", "SLACK_TOKEN"}},
+		{"duplicates collapse", "requires: FOO, FOO, BAR", []string{"FOO", "BAR"}},
+		{"none", "description: no requirements here", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			s, err := parseContent([]byte("---\nname: demo\n" + tc.front + "\n---\nbody\n"))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if !reflect.DeepEqual(s.Requires, tc.want) {
+				t.Errorf("requires = %v, want %v", s.Requires, tc.want)
+			}
+		})
+	}
+}
+
+// The block branch has to stop at the next frontmatter key. A `requires:` list
+// that swallowed the keys below it would pull arbitrary later lines in as
+// variable names — and the description is the very next key in a real file.
+func TestParse_RequiresBlockStopsAtTheNextKey(t *testing.T) {
+	s, err := parseContent([]byte("---\nname: demo\nrequires:\n  - TOKEN\ndescription: a thing\n---\nbody\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !reflect.DeepEqual(s.Requires, []string{"TOKEN"}) {
+		t.Errorf("requires = %v, want just [TOKEN]; the description was consumed", s.Requires)
+	}
+	if s.Description != "a thing" {
+		t.Errorf("description = %q, want it intact after a requires block", s.Description)
+	}
+}
+
+// A name no shell could export answers "not set" on every load with nothing for
+// the user to correct, so it is rejected where the mistake is still visible.
+func TestParse_RequiresRejectsUnusableNames(t *testing.T) {
+	for _, bad := range []string{"2STARTS_WITH_DIGIT", "has-dash", "has space", "has.dot"} {
+		t.Run(bad, func(t *testing.T) {
+			_, err := parseContent([]byte("---\nname: demo\nrequires: " + bad + "\n---\nbody\n"))
+			if err == nil {
+				t.Errorf("expected %q to be rejected", bad)
+			}
+			if err != nil && !strings.Contains(err.Error(), "not a usable environment variable name") {
+				t.Errorf("error should explain the name is unusable, got %v", err)
+			}
+		})
+	}
+}
+
+// A note written beside the list is a note, not a name. An environment variable
+// name can never contain a #, so unlike a description — where a bare # is far
+// more likely to be prose than a comment — the only thing it can be here is a
+// comment; reading it as part of the name would reject the whole skill over it.
+func TestParse_RequiresStripsTrailingComments(t *testing.T) {
+	cases := []struct {
+		label string
+		front string
+		want  []string
+	}{
+		{"inline", "requires: TOKEN # the deploy token", []string{"TOKEN"}},
+		{"flow sequence", "requires: [FOO, BAR] # two tokens", []string{"FOO", "BAR"}},
+		{"block sequence", "requires:\n  - TOKEN # why", []string{"TOKEN"}},
+		{"whole-line comment is skipped", "requires: TOKEN\n# a standalone note", []string{"TOKEN"}},
+		{"hash inside a name is not a comment", "requires: FOO", []string{"FOO"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			s, err := parseContent([]byte("---\nname: demo\n" + tc.front + "\n---\nbody\n"))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if !reflect.DeepEqual(s.Requires, tc.want) {
+				t.Errorf("requires = %v, want %v", s.Requires, tc.want)
+			}
+		})
+	}
+}
+
+// MissingEnv is what the skill tool asks before handing over a body. An empty
+// value counts as missing: a credential exported as "" satisfies nothing the
+// skill will do with it, and calling it present would move the failure back
+// into the skill's script.
+func TestSkill_MissingEnvCountsEmptyAsMissing(t *testing.T) {
+	t.Setenv("PRESENT_VAR", "a-value")
+	t.Setenv("EMPTY_VAR", "")
+
+	s := Skill{Requires: []string{"PRESENT_VAR", "EMPTY_VAR", "ABSENT_VAR"}}
+	got := s.MissingEnv()
+	want := []string{"EMPTY_VAR", "ABSENT_VAR"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MissingEnv = %v, want %v", got, want)
+	}
+}
+
+// A skill with no requirements never blocks a load. This is the common case and
+// the check must cost it nothing.
+func TestSkill_MissingEnvEmptyWhenNothingRequired(t *testing.T) {
+	if got := (Skill{}).MissingEnv(); len(got) != 0 {
+		t.Errorf("MissingEnv = %v, want none", got)
+	}
+}
+
+// The requires list is frontmatter, so it must not leak into the body the agent
+// reads — a stray "requires:" line in the instructions is a rule the model would
+// try to follow.
+func TestParse_RequiresStaysOutOfTheBody(t *testing.T) {
+	s, err := parseContent([]byte("---\nname: demo\nrequires: TOKEN\n---\n# Steps\n\n1. Do it.\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if strings.Contains(s.Content, "requires") {
+		t.Errorf("frontmatter leaked into the body: %q", s.Content)
+	}
+	if !strings.HasPrefix(s.Content, "# Steps") {
+		t.Errorf("body = %q", s.Content)
 	}
 }

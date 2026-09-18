@@ -90,9 +90,6 @@ func (m *reactiveCapProvider) StreamChat(ctx context.Context, req provider.Strea
 // maxCompactions for the whole RunLoop and surface the provider's error — not
 // reset the budget each step and compact its way through dozens of steps.
 func TestRunLoop_ReactiveCompactionIsBudgetedPerRun(t *testing.T) {
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
-
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -103,12 +100,6 @@ func TestRunLoop_ReactiveCompactionIsBudgetedPerRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set capability: %v", err)
 	}
-	// A caching verdict keeps compact_context out of the picture: this test is
-	// about the loop's own reactive path, not the agent's tool.
-	if err := session.SetModelCacheSupport(database, "mock-model", "mock", string(provider.CacheSupported), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
-	}
-
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
 	mock := &reactiveCapProvider{warmup: 7} // 7 tool rounds → 15 messages before the first overflow

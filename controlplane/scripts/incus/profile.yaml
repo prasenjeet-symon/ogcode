@@ -1,0 +1,51 @@
+# Incus profile for ogcode worker containers (Phase A, operator-only).
+#
+# Apply it on the Incus host:
+#
+#   incus profile create ogcode-worker   # first time
+#   incus profile edit ogcode-worker < profile.yaml
+#
+# The profile carries the GOLDEN-IMAGE sizing only. Per-container values
+# (master URL, pairing secret, repo URL + slug, worker id, optional CA) travel
+# as cloud-init user-data passed by assign.sh at `incus launch` time — they
+# must NOT live in the profile, or every new worker would inherit the previous
+# assignment's secret and repo. (The user.ogcode.* instance keys assign.sh
+# also sets are operator-facing metadata for `incus list`/reconciliation; the
+# guest reads none of them — the guest API socket only exposes the instance's
+# OWN config, which carries no secrets by design.)
+#
+# WARNING: this file contains NO secrets. assign.sh receives the pairing
+# secret as an environment variable / file and embeds it in the per-instance
+# cloud-init user-data. Anyone with root on the Incus host can read instance
+# user-data — treat the Incus host itself as secret-bearing (this matches the
+# plan's threat model: the operator runs these scripts on the VM they
+# administer).
+config:
+  # "golden image" sizing per INCUS_WORKERS_PLAN.md.
+  limits.cpu: "4"
+  limits.memory: 8GiB
+  limits.memory.swap: "false"
+  # Start on host boot: the worker registers when the VM comes up without an
+  # operator logging in.
+  boot.autostart: "true"
+  # The guest API (/dev/incus socket) must STAY ON: cloud-init's Incus
+  # datasource fetches the user-data assign.sh passes at launch through it —
+  # turning it off (security.guestapi=false, /dev/lxd on LXD) blinds
+  # cloud-init ("disabled by generator", no /etc/ogcode ever written). The
+  # guest can only read ITS OWN instance config through the socket, and that
+  # config carries no secrets by design (the pairing secret never rides a
+  # user.* key — see assign.sh), so exposing it is within the threat model.
+  # (Key name: security.guestapi on Incus 6.0; the same knob is documented as
+  # security.devlxd on newer releases.)
+
+description: ogcode worker profile (ubuntu 24.04, ogcode-base image)
+devices:
+  eth0:
+    name: eth0
+    network: incusbr0
+    type: nic
+  root:
+    path: /
+    pool: default
+    type: disk
+name: ogcode-worker

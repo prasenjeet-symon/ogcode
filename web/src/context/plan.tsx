@@ -34,7 +34,6 @@ interface PlanContextValue {
   // True when the selected plan id doesn't exist on the server, so pages can
   // show a not-found screen instead of a live composer for a ghost plan.
   planMissing: () => boolean;
-  memorySavedTokens: () => number;
   lockError: () => string;
   tasks: () => Task[];
   messages: () => MessageWithParts[];
@@ -88,7 +87,6 @@ export const PlanProvider: ParentComponent = (props) => {
 
   const [loadingPlanId, setLoadingPlanId] = createSignal<string>('');
   const loading = () => loadingPlanId() === activePlan()?.id && loadingPlanId() !== '';
-  const [memorySavedTokens, setMemorySavedTokens] = createSignal(0);
   const [lockError, setLockError] = createSignal('');
 
   // Archive notification: set by the plan.archived SSE event, cleared on plan switch or dismiss.
@@ -306,15 +304,6 @@ export const PlanProvider: ParentComponent = (props) => {
       const msgs = await getPlanMessages(id);
       setMessages(msgs);
 
-      // Restore persisted token savings for this plan's session.
-      if (p.sessionId) {
-        getSession(p.sessionId)
-          .then((sess) => setMemorySavedTokens(sess.memoryTokensSaved ?? 0))
-          .catch(() => setMemorySavedTokens(0));
-      } else {
-        setMemorySavedTokens(0);
-      }
-
       // Load tasks for the plan
       const t = await listTasks(id);
       setTasks(t || []);
@@ -525,17 +514,6 @@ export const PlanProvider: ParentComponent = (props) => {
   // Load plans on mount
   createEffect(on(server.directory, (dir) => {
     if (dir) refresh();
-  }));
-
-  // Track memory token savings for the active plan session
-  createEffect(on(server.eventTick, () => {
-    const last = server.lastEvent();
-    if (!last || last.type !== 'memory.savings') return;
-    const evtSessionId = (last.properties as any)?.sessionId;
-    const plan = activePlan();
-    if (!evtSessionId || !plan || evtSessionId !== plan.sessionId) return;
-    const saved = Number((last.properties as any)?.savedTokens ?? 0);
-    setMemorySavedTokens((prev) => prev + saved);
   }));
 
   // SSE-driven updates for plan conversations
@@ -807,7 +785,6 @@ export const PlanProvider: ParentComponent = (props) => {
     plans,
     activePlan,
     planMissing,
-    memorySavedTokens,
     lockError,
     tasks,
     messages,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -81,7 +82,7 @@ func (m *compactionScriptProvider) StreamChat(ctx context.Context, req provider.
 }
 
 func TestRunLoop_CompactContextNarrowsTheNextRequest(t *testing.T) {
-	reqs, toolLists := runCompactionScript(t, provider.CacheAbsent)
+	reqs, toolLists := runCompactionScript(t)
 
 	if len(reqs) != 4 {
 		t.Fatalf("expected 4 provider calls, got %d", len(reqs))
@@ -89,7 +90,7 @@ func TestRunLoop_CompactContextNarrowsTheNextRequest(t *testing.T) {
 
 	// The tool must actually have been offered, or the whole turn proves nothing.
 	if !containsString(toolLists[0], "compact_context") {
-		t.Fatalf("compact_context was not offered on a non-caching endpoint; tools were %v", toolLists[0])
+		t.Fatalf("compact_context was not offered; tools were %v", toolLists[0])
 	}
 
 	before, after := reqs[2], reqs[3]
@@ -139,30 +140,11 @@ func TestRunLoop_CompactContextNarrowsTheNextRequest(t *testing.T) {
 
 }
 
-func TestRunLoop_CompactContextWithheldOnACachingEndpoint(t *testing.T) {
-	reqs, toolLists := runCompactionScript(t, provider.CacheSupported)
-
-	// On a caching endpoint compacting is a net loss, so the tool must not be on
-	// the menu at all — the agent should never be tempted to invalidate a prefix
-	// it is being billed at a discount for.
-	for i, names := range toolLists {
-		if containsString(names, "compact_context") {
-			t.Errorf("step %d offered compact_context on a caching endpoint: %v", i+1, names)
-		}
-	}
-	// And with the tool withheld, the call is refused and nothing is narrowed:
-	// the last request must still carry the earlier tool rounds.
-	last := reqs[len(reqs)-1]
-	if got := len(toolUseIDs(last)); got < 2 {
-		t.Errorf("final request carries %d tool_use blocks; history was narrowed despite the tool being withheld", got)
-	}
-}
-
 func TestRunLoop_RejectedSummaryLeavesContextIntact(t *testing.T) {
 	// A summary the tool refuses must not move the watermark. Dropping history
 	// for a compaction that never happened would truncate the agent mid-turn
 	// while it believes nothing changed.
-	reqs, toolLists := runCompactionScriptWithSummary(t, provider.CacheAbsent, "too short")
+	reqs, toolLists := runCompactionScriptWithSummary(t, "too short")
 
 	if !containsString(toolLists[0], "compact_context") {
 		t.Fatalf("compact_context was not offered; tools were %v", toolLists[0])
@@ -190,25 +172,25 @@ func containsString(haystack []string, needle string) bool {
 }
 
 // runCompactionScript drives a full four-step turn — two tool rounds, a
-// compact_context call, then a final answer — against an endpoint with the
-// given cache verdict, and returns the messages and tool lists of every request.
-func runCompactionScript(t *testing.T, verdict provider.CacheVerdict) ([][]provider.ModelMessage, [][]string) {
+// compact_context call, then a final answer — and returns the messages and tool
+// lists of every request.
+func runCompactionScript(t *testing.T) ([][]provider.ModelMessage, [][]string) {
 	t.Helper()
-	return runCompactionScriptWithSummary(t, verdict, e2eSummary)
+	return runCompactionScriptWithSummary(t, e2eSummary)
 }
 
-func runCompactionScriptWithSummary(t *testing.T, verdict provider.CacheVerdict, summary string) ([][]provider.ModelMessage, [][]string) {
+func runCompactionScriptWithSummary(t *testing.T, summary string) ([][]provider.ModelMessage, [][]string) {
 	t.Helper()
-	return runCompactionScriptFull(t, verdict, summary, true)
+	return runCompactionScriptFull(t, summary, true, nil)
 }
 
 // runCompactionScriptFull additionally controls whether compact_context is
 // actually registered, so a test can drive the case where the tool is offered
-// but its execution fails.
-func runCompactionScriptFull(t *testing.T, verdict provider.CacheVerdict, summary string, registerTool bool) ([][]provider.ModelMessage, [][]string) {
+// but its execution fails. tweak, when non-nil, adjusts the LoopRunner before
+// the turn starts — used to drive the per-project setting that withholds the
+// tool.
+func runCompactionScriptFull(t *testing.T, summary string, registerTool bool, tweak func(*LoopRunner)) ([][]provider.ModelMessage, [][]string) {
 	t.Helper()
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -222,12 +204,6 @@ func runCompactionScriptFull(t *testing.T, verdict provider.CacheVerdict, summar
 	}); err != nil {
 		t.Fatalf("set capability: %v", err)
 	}
-	// Stand in for an endpoint whose caching behaviour is already known, so the
-	// tool decision is made on step 1 rather than after an observation window.
-	if err := session.SetModelCacheSupport(database, "mock-model", "mock", string(verdict), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
-	}
-
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
 	mock := &compactionScriptProvider{summary: summary}
@@ -242,6 +218,9 @@ func runCompactionScriptFull(t *testing.T, verdict provider.CacheVerdict, summar
 	lr := &LoopRunner{
 		Store: store, Bus: bus.New(64), Registry: reg, Tools: tools,
 		Dir: t.TempDir(), MaxSteps: 20,
+	}
+	if tweak != nil {
+		tweak(lr)
 	}
 	sess := &session.Session{
 		ID: session.NewSessionID(), ProjectID: "p", Directory: t.TempDir(),
@@ -330,7 +309,7 @@ func TestRunLoop_WatermarkRequiresTheToolToHaveActuallyRun(t *testing.T) {
 	// loop would record a watermark on the strength of the call having been made,
 	// and drop the whole turn's history for a compaction that never happened —
 	// truncating the agent mid-turn while it believes nothing changed.
-	reqs, _ := runCompactionScriptFull(t, provider.CacheAbsent, e2eSummary, false)
+	reqs, _ := runCompactionScriptFull(t, e2eSummary, false, nil)
 
 	last := reqs[len(reqs)-1]
 	uses := toolUseIDs(last)
@@ -349,16 +328,202 @@ func TestRunLoop_CompactContextGuidanceShipsWithTheTool(t *testing.T) {
 	// The tool and its guidance must travel together. A tool offered with no
 	// explanation of when to use it, or guidance describing a tool the agent was
 	// never given, are both worse than shipping neither.
-	runCompactionScript(t, provider.CacheAbsent)
+	runCompactionScript(t)
 	if !systemMentions(0, "Reclaiming Your Own Context") {
 		t.Error("compact_context was offered without its guidance in the system prompt")
 	}
 	if !systemMentions(0, "Your summary is the only thing that survives") {
 		t.Error("guidance is present but missing the warning that carries the real risk")
 	}
+}
 
-	runCompactionScript(t, provider.CacheSupported)
-	if systemMentions(0, "Reclaiming Your Own Context") {
-		t.Error("guidance shipped on a caching endpoint, describing a tool that was withheld")
+// TestRunLoop_ProjectSettingWithholdsCompactContext drives the same four-step
+// script in a project that has the setting turned off. The model still asks to
+// compact — the script is fixed — and the turn must simply carry on with its
+// full history, because the tool was never on the wire to begin with.
+func TestRunLoop_ProjectSettingWithholdsCompactContext(t *testing.T) {
+	reqs, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
+		lr.CompactContextEnabled = func() bool { return false }
+	})
+
+	for step, tools := range toolLists {
+		if containsString(tools, "compact_context") {
+			t.Errorf("step %d offered compact_context although the project has it disabled: %v", step, tools)
+		}
 	}
+
+	// The guidance names a tool the agent does not have; sending it would spend
+	// context telling the model about something it cannot call.
+	for step := range lastSystems {
+		if systemMentions(step, "Reclaiming Your Own Context") {
+			t.Errorf("step %d carried the compact_context guidance with the tool disabled", step)
+		}
+	}
+
+	// Nothing was narrowed: the earlier rounds are still in the final request.
+	last := reqs[len(reqs)-1]
+	uses := toolUseIDs(last)
+	for _, kept := range []string{"call_1", "call_2"} {
+		if !containsString(uses, kept) {
+			t.Errorf("%s was dropped even though compaction is disabled for this project", kept)
+		}
+	}
+	var lead string
+	if json.Unmarshal(last[0].Content, &lead) == nil && strings.Contains(lead, "compacted to reclaim context") {
+		t.Error("a compaction summary was prepended although the tool was never offered")
+	}
+}
+
+// The default — no source wired, as in the CLI and every test that predates the
+// setting — must keep offering the tool.
+func TestCompactContextAllowedDefaultsToEnabled(t *testing.T) {
+	if !(&LoopRunner{}).compactContextAllowed() {
+		t.Error("a LoopRunner with no CompactContextEnabled source should allow compaction")
+	}
+	if (&LoopRunner{CompactContextEnabled: func() bool { return false }}).compactContextAllowed() {
+		t.Error("an explicit false should withhold compaction")
+	}
+}
+
+// The project setting is resolved ONCE per turn, never per step. It decides both
+// a tool on the wire and a ~2.5KB system entry, and on OpenAI/Ollama every system
+// entry is joined into messages[0] where the longest-common-prefix cache lives —
+// so a value that changed between steps would hand the model a different tool
+// list and a different system prompt mid-turn, costing the cache for the rest of
+// it. The read also fails OPEN (a DB error reports the default), which is exactly
+// how a single transient error could have flipped one step.
+//
+// The closure here flips on every call. If the loop read it per step, the steps
+// would disagree; resolved per turn, it is called once and every step matches.
+func TestRunLoop_CompactContextSettingIsReadOncePerTurn(t *testing.T) {
+	calls := 0
+	_, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
+		lr.CompactContextEnabled = func() bool {
+			calls++
+			return calls%2 == 1 // true, false, true, false, ...
+		}
+	})
+
+	if calls != 1 {
+		t.Errorf("CompactContextEnabled called %d times; a turn must resolve it once", calls)
+	}
+	if len(toolLists) < 2 {
+		t.Fatalf("need at least 2 steps to compare, got %d", len(toolLists))
+	}
+	first := containsString(toolLists[0], "compact_context")
+	for step, tools := range toolLists {
+		if containsString(tools, "compact_context") != first {
+			t.Errorf("step %d disagrees with step 0 about whether compact_context is offered "+
+				"— the tool list changed mid-turn, which breaks the cached prefix on every provider: %v",
+				step, tools)
+		}
+	}
+
+	// And the guidance block must track the tool list exactly, or the system
+	// prompt churns even when the tool list does not.
+	for step := range lastSystems {
+		if systemMentions(step, "Reclaiming Your Own Context") != first {
+			t.Errorf("step %d disagrees with step 0 about the compact_context guidance block", step)
+		}
+	}
+}
+
+// The cache-critical half of the contract: while the registry is unchanged, every
+// step of a turn must be offered the byte-identical tool array. Tool definitions
+// are part of the cached prompt prefix on every provider — on Anthropic they LEAD
+// it (tools → system → messages), so any churn there invalidates the
+// cache_control'd system block and the entire message history along with it.
+func TestRunLoop_ToolsetIsIdenticalAcrossStepsWhenRegistryIsUnchanged(t *testing.T) {
+	_, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
+		// Several glob-matched tools, so map-iteration order would be visible if
+		// ForAgent ever stopped sorting.
+		for i := 0; i < 12; i++ {
+			lr.Tools.Register(noopNamedTool{fmt.Sprintf("mcp_srv_%02d", i)})
+		}
+	})
+
+	if len(toolLists) < 2 {
+		t.Fatalf("need at least 2 steps to compare, got %d", len(toolLists))
+	}
+	if !containsString(toolLists[0], "mcp_srv_00") {
+		t.Fatalf("mcp_* did not expand; this test would prove nothing: %v", toolLists[0])
+	}
+
+	want := strings.Join(toolLists[0], ",")
+	for step, tools := range toolLists {
+		if got := strings.Join(tools, ","); got != want {
+			t.Errorf("step %d differs from step 0 with an unchanged registry\n  step 0: %s\n  step %d: %s",
+				step, want, step, got)
+		}
+	}
+
+	var mcps []string
+	for _, id := range toolLists[0] {
+		if strings.HasPrefix(id, "mcp_") {
+			mcps = append(mcps, id)
+		}
+	}
+	if !sort.StringsAreSorted(mcps) {
+		t.Errorf("expanded MCP tools are not sorted: %v", mcps)
+	}
+}
+
+// The availability half. A pure snapshot would have been wrong: mid-loop guidance
+// does not start a new turn, so a user steering a working agent keeps feeding the
+// same RunLoop — and a turn can run to 30,000 steps. The case that actually bites
+// is enabling an MCP server *because* the agent needs it right now. So a real
+// registry change must be picked up mid-turn, exactly once.
+func TestRunLoop_ToolsetPicksUpARegistryChangeMidTurn(t *testing.T) {
+	const lateTool = "mcp_late_arrival"
+
+	_, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
+		lr.Tools.Register(noopNamedTool{"mcp_early"})
+		// Overrides the harness's grep with one that registers a tool the first
+		// time it runs — a deterministic stand-in for an MCP server finishing its
+		// dial between two steps. The script calls grep on steps 1 and 2.
+		lr.Tools.Register(&registeringGrepTool{reg: lr.Tools, id: lateTool})
+	})
+
+	if len(toolLists) < 3 {
+		t.Fatalf("need at least 3 steps, got %d", len(toolLists))
+	}
+	if containsString(toolLists[0], lateTool) {
+		t.Fatalf("step 0 already had %s; the test cannot show it being picked up", lateTool)
+	}
+	last := toolLists[len(toolLists)-1]
+	if !containsString(last, lateTool) {
+		t.Errorf("a tool registered mid-turn never reached the agent: final step had %v", last)
+	}
+	// And the earlier tools must survive the re-resolve.
+	if !containsString(last, "mcp_early") {
+		t.Errorf("re-resolve dropped a pre-existing tool: %v", last)
+	}
+}
+
+// noopNamedTool is a registerable stand-in for an MCP-contributed tool.
+type noopNamedTool struct{ id string }
+
+func (n noopNamedTool) ID() string                  { return n.id }
+func (n noopNamedTool) Description() string         { return "noop" }
+func (n noopNamedTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (n noopNamedTool) Execute(ctx context.Context, args json.RawMessage, tctx tool.Context) (tool.Result, error) {
+	return tool.Result{Output: "ok"}, nil
+}
+
+// registeringGrepTool answers "grep" and, on its first call only, registers a new
+// tool — mimicking an MCP server that finishes connecting partway through a turn.
+type registeringGrepTool struct {
+	reg  *tool.Registry
+	id   string
+	once sync.Once
+}
+
+func (g *registeringGrepTool) ID() string          { return "grep" }
+func (g *registeringGrepTool) Description() string { return "grep" }
+func (g *registeringGrepTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object"}`)
+}
+func (g *registeringGrepTool) Execute(ctx context.Context, args json.RawMessage, tctx tool.Context) (tool.Result, error) {
+	g.once.Do(func() { g.reg.Register(noopNamedTool{g.id}) })
+	return tool.Result{Output: "no matches"}, nil
 }

@@ -49,8 +49,6 @@ func (m *reasoningScriptProvider) StreamChat(ctx context.Context, req provider.S
 // stored on the assistant message, in order.
 func runReasoningScript(t *testing.T, script []provider.StreamEvent) []session.ReasoningPartData {
 	t.Helper()
-	resetCacheVerdicts()
-	t.Cleanup(resetCacheVerdicts)
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -63,11 +61,6 @@ func runReasoningScript(t *testing.T, script []provider.StreamEvent) []session.R
 	}); err != nil {
 		t.Fatalf("set capability: %v", err)
 	}
-	if err := session.SetModelCacheSupport(database, "mock-reasoning-model", "mock-reasoning",
-		string(provider.CacheSupported), session.Now()); err != nil {
-		t.Fatalf("seed cache verdict: %v", err)
-	}
-
 	store := session.NewStore(database)
 	reg := provider.NewRegistry()
 	reg.Register(&reasoningScriptProvider{script: script})

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -49,11 +48,6 @@ func LoadAgentMD(dir string) string {
 			break
 		}
 
-		if len(trimmed) > remaining {
-			trimmed = trimmed[:remaining]
-			slog.Warn("AGENT.md truncated due to size limit", "path", p, "limit", maxAgentMDSize)
-		}
-
 		relPath, err := filepath.Rel(dir, p)
 		if err != nil {
 			relPath = p
@@ -64,8 +58,16 @@ func LoadAgentMD(dir string) string {
 		// the Anthropic prompt-cache prefix byte-for-byte across platforms.
 		relPath = filepath.ToSlash(relPath)
 
-		fmt.Fprintf(&b, "\n\n<agent-md path=\"%s\">\n%s\n</agent-md>", relPath, trimmed)
-		totalSize += len(trimmed)
+		// Rendered rather than formatted in place: the file's own text is
+		// neutralized so it cannot close this block or forge the other one, and
+		// the cut to the remaining budget lands on a rune boundary. See
+		// renderMDBlock.
+		block, used, truncated := renderMDBlock("agent-md", relPath, trimmed, remaining)
+		if truncated {
+			slog.Warn("AGENT.md truncated due to size limit", "path", p, "limit", maxAgentMDSize)
+		}
+		b.WriteString(block)
+		totalSize += used
 	}
 
 	return b.String()

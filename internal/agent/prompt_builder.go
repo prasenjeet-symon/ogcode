@@ -126,6 +126,66 @@ This is enforced, not advisory: "read" on a file longer than 200 lines with no r
 **After you edit a file, call "file_map" on it again.** An edit shifts every line below it, silently invalidating any range you were given earlier. The tool itself is never stale — it parses the file on each call and consults no index, so it works in any project, indexed or not.` + shellRule
 }
 
+// deepSearchPrompt returns the external-knowledge section, scoped to the agent's
+// role.
+//
+// It lives here, gated, rather than inline in each agent's prompt because
+// deep_search is the one prompt-named tool whose availability is not decided by
+// the agent's toolset. Every code-facing agent lists it, but the tool is only
+// registered when a search backend was built — web search is a setting, and the
+// headless CLI has its own wiring — so whether the model is offered it is a
+// fact about the *process*, not about the agent. Baked into a.System at package
+// init, the guidance was sent either way: six agents told to reach for
+// deep_search instead of guessing at an API, on an endpoint that never offered
+// the call.
+//
+// Process-constant is the reason it can still sit in the cacheable base:
+// enabling search needs a restart (a backend that was never built cannot be
+// switched on in place), so this cannot flip mid-session.
+//
+// The wording is per-role because what the agents want from the web differs —
+// a build agent is unblocking itself mid-change, a planner is validating a
+// library choice before committing a plan to it.
+func deepSearchPrompt(role string) string {
+	switch role {
+	case "plan":
+		return `## External knowledge
+
+Use "deep_search" whenever you need external knowledge to write a credible plan — library docs, API capabilities, version compatibility, library comparisons, or community best practices. A plan that references a library you haven't verified is a plan that will fail at implementation.`
+
+	case "breakdown":
+		return `## External knowledge
+
+Use "deep_search" to look up library docs, API signatures, or version-specific behaviour whenever a task description must reference them precisely — a vague task description produces bad implementation.`
+
+	case "note":
+		return `## External knowledge
+
+If the query requires current information from the web — library docs, changelogs, external APIs, best practices — call "deep_search" to fetch and synthesise it rather than writing from memory.`
+
+	case "subagent":
+		return `## External knowledge
+
+If the task requires current external knowledge — library docs, APIs, versions — use "deep_search" rather than guessing.`
+
+	default: // "build"
+		return `## External knowledge
+
+**When you need external knowledge, use "deep_search":**
+
+- Unfamiliar library or API → search "library_name API documentation and usage examples"
+- Latest version or changelog → search "library_name latest version changelog breaking changes"
+- Choosing between libraries → search "library_a vs library_b comparison", adding the current year from the date in your context
+- Fixing a cryptic error → search the exact error message plus language and framework
+- Security advisories → search "library_name CVE security vulnerability"
+- Best practices → search "pattern language best practices"
+
+Never guess about APIs, versions, or behaviour — search first.
+
+After calling "deep_search", always write the research findings as your own text response to the user — do not just return the tool result silently. Present the answer clearly in your message.`
+	}
+}
+
 // indexStatusPrompt states whether the project index holds anything, so the
 // agent does not have to spend a call finding out.
 //
@@ -673,14 +733,28 @@ func escapeXML(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
-// systemReminderPrompt returns the per-turn dynamic content (current date) as
-// a <system-reminder> block. This is kept OUT of the main system prompt so the
-// main prompt stays byte-for-byte identical across turns, enabling Anthropic's
-// prompt cache to hit. The date changes every turn and would invalidate the
-// cache if it were in the cached prefix. The working directory and platform are
-// static within a session, so they remain in the main (cacheable) system prompt.
+// systemReminderPrompt returns the dynamic content (current date) as a
+// <system-reminder> block. It is kept OUT of the main system prompt so entry [0]
+// stays byte-for-byte identical across turns, which is what lets Anthropic's
+// cache_control breakpoint hit.
+//
+// DAY granularity, deliberately. This used to format to the second, which was
+// harmless on Anthropic — the block lands at entry index >= 1, outside the
+// cache_control'd prefix — but quietly destroyed caching on OpenAI and Ollama,
+// which are the same OpenAIProvider and join EVERY system entry into a single
+// system message at messages[0] (openai.go, StreamChat). Those endpoints cache
+// by longest common prefix, so a timestamp that changes every step put the first
+// differing byte inside the very first message: every entry after it, and the
+// entire conversation behind it, was re-read at full price on every step of
+// every turn. Rebuilt per step (buildSystemPromptEntries is called inside the
+// step loop), a second-resolution clock could never match twice.
+//
+// A day-resolution date is stable across every step of every turn within a day,
+// so the prefix is too. It still flips once at midnight (and on a DST change),
+// which costs one turn's cache — the right trade for keeping the date at all.
+// An agent that genuinely needs the wall-clock time can ask the shell for it.
 func systemReminderPrompt() string {
-	now := time.Now().Format("Mon Jan 2 15:04:05 MST 2006")
+	now := time.Now().Format("Mon Jan 2 2006")
 	return fmt.Sprintf("<system-reminder>\nCurrent date: %s\n</system-reminder>", now)
 }
 
@@ -785,20 +859,23 @@ func modelFamilyStylePrompt(family string) string {
 }
 
 // compactContextPrompt returns the guidance for reclaiming context mid-turn. It
-// is emitted only for agents actually holding compact_context — i.e. only on
-// endpoints that re-bill the whole prefix on every step — so no agent is told
-// about a call it will never be offered.
+// is emitted for every agent holding compact_context — every read-capable agent,
+// on any endpoint. The case it makes is accuracy first: a context crowded with
+// work the agent is already done with reasons worse, and the token saving is the
+// secondary benefit. It deliberately tells the agent not to withhold the call to
+// preserve a prompt cache, so the decision turns on whether the work is finished,
+// not on how the endpoint bills a repeated prefix.
 //
 // The emphasis is deliberately lopsided. The failure that costs real work is a
 // thin summary that drops something the rest of the turn needed; the failure
-// from compacting too rarely only costs tokens. So the bar to call it is stated
-// plainly, and the standard for the summary is stated at length.
+// from compacting too rarely only costs tokens and focus. So the bar to call it
+// is stated plainly, and the standard for the summary is stated at length.
 func compactContextPrompt() string {
 	return `## Reclaiming Your Own Context
 
-This session runs against an endpoint that does not cache repeated context. Every step re-sends the entire turn so far and pays for all of it again, so context you no longer need is not merely clutter — it is billed on every remaining step of the turn.
+You reason best over a context that holds what the task still needs and little else. As a turn goes on it fills with work you are already done with — files you have read and drawn your conclusions from, searches whose answer you have already noted, an approach you tried and abandoned. Carrying that is not just a token cost; it is an accuracy cost. The more finished detail crowds your context, the more your attention is spread across things that no longer matter, and the easier it is to lose the thread or contradict something you already established.
 
-"compact_context" replaces everything earlier in this turn with a summary you write. Reach for it when a chunk of work is genuinely finished with: files you have read and drawn your conclusions from, searches whose answer you have already noted, an approach you tried and abandoned. A good moment is just after you finish exploring and before you start editing.
+"compact_context" replaces everything earlier in this turn with a summary you write. Reach for it when a chunk of work is genuinely finished with; a good moment is just after you finish exploring and before you start editing. If the tool is offered and you have reached that point, call it — do not hold off to save tokens or to keep a cached prefix intact. A focused, accurate context is worth more than the saving, and reclaiming the space is the whole point.
 
 Do not call it on a short turn, or when the material still in context is what you are actively working from. Two or three large reads behind you is the signal; a couple of small ones is not.
 

@@ -131,6 +131,9 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 		Dir:             dir,
 		Skills:          skillLoader,
 		Permissions:     perm,
+		// Per-project setting, read from this workspace's own DB — a remote
+		// worker follows the same choice the project's settings screen records.
+		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
 	}
 	// The build agent advertises the task sub-agent tool, so it must resolve.
 	toolRegistry.Register(tool.TaskTool{Run: lr.RunTaskSession})

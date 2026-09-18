@@ -56,6 +56,9 @@ func (s *Server) routes() http.Handler {
 		r.Post("/theme", s.handleSetTheme)
 		r.Delete("/theme/{directory}", s.handleDeleteTheme)
 
+		r.Get("/project/settings", s.handleGetProjectSettings)
+		r.Post("/project/settings", s.handleSetProjectSettings)
+
 		r.Get("/search/config", s.handleGetSearchConfig)
 		r.Post("/search/config", s.handleSetSearchConfig)
 		r.Post("/search/config/validate", s.handleValidateSearchKey)
@@ -69,6 +72,8 @@ func (s *Server) routes() http.Handler {
 		r.Get("/pricing", s.handleGetPricing)
 
 		r.Get("/resources", s.handleResources)
+		r.Get("/scrcpy/status", s.handleScrcpyStatus)
+		r.Get("/scrcpy/devices", s.handleScrcpyDevices)
 
 		r.Get("/skills", s.handleListSkills)
 		r.Post("/skills/{name}", s.handleSetSkillEnabled)
@@ -160,6 +165,10 @@ func (s *Server) routes() http.Handler {
 	// Serve the workspace's public/ directory. Registered before the SPA
 	// fallback so /public paths reach real files rather than index.html.
 	s.servePublic(r)
+
+	// Forward /scrcpy/* to the separately-run ws-scrcpy device UI
+	// (http://127.0.0.1:8000). Also before the SPA fallback.
+	s.serveScrcpy(r)
 
 	// Serve embedded web UI (or placeholder for dev)
 	s.serveStatic(r)

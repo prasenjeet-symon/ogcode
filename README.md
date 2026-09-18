@@ -17,7 +17,7 @@ Built for a future where every token counts. Ogcode curates the *relevant* conte
 
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![SolidJS](https://img.shields.io/badge/SolidJS-1.9-2F2E82?logo=solidjs&logoColor=white)](https://www.solidjs.com)
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 
 <br/>
 
@@ -144,7 +144,7 @@ curl -fsSL https://ogcode.xyz/install.sh | sh && ogcode
 | **Token Efficiency**  | Loop-level optimization, ~70% saved, higher accuracy | No                | No            | No            | No           |
 | **Model Choice**      | Claude, GPT, OpenRouter, Ollama | Built-in + custom | Claude only | MS-managed    | Any endpoint   |
 | **Cost**              | BYOK (tokens only)            | $20–$40/mo      | $20–$100/mo   | $19–$39/mo    | Free (BYOK)    |
-| **License**           | **MIT**                       | Proprietary     | Proprietary   | Proprietary   | Apache-2.0     |
+| **License**           | **AGPL-3.0** + commercial     | Proprietary     | Proprietary   | Proprietary   | Apache-2.0     |
 
 Ogcode is the only agentic coding assistant that combines a **browser-native UI** (works with Vim, Emacs, VS Code, JetBrains, or any editor), a **formal Plan Mode** with a visual Kanban board and parallel execution that raises conflict-free PRs directly against your upstream GitHub repo, **git-native parallel execution** that gives every task its own isolated worktree branch with auto-commits and auto-PRs, a **persistent knowledge graph** for long-term memory, **loop-level token optimization** that keeps long-session token use over 70% lower than naive replay *and* sharpens per-turn accuracy, **context engineering** that lets lower-end models match or beat frontier models on clean context, and **single-binary self-hosting** with zero cloud dependencies.
 
@@ -434,6 +434,73 @@ ogcode --ollama-url http://100.x.x.x:11434
 
 Available models: `qwen3`, `codellama`, `llama3.1`, `deepseek-coder-v2`, `mistral`, and any model you've pulled.
 
+### Stream timeout (slow local models)
+
+A streaming reply is watched for silence, so a dead connection ends the turn
+instead of hanging forever. The budget is how long the connection may go with
+**no data at all** — it resets on every byte, so it never cuts short a model
+that is actively producing tokens. Endpoints that batch a whole tool call into
+one frame (Ollama, and anything on localhost or your LAN) get **10 minutes**;
+endpoints that stream tool arguments as deltas get **2 minutes**.
+
+On modest hardware a local model can legitimately outlast that in prompt
+evaluation alone — the wire stays silent the whole time — and the turn ends with
+*"This turn never finished"* and a Resume button. `OGCODE_STREAM_IDLE_TIMEOUT`
+raises the budget for **every** provider:
+
+```bash
+export OGCODE_STREAM_IDLE_TIMEOUT=30m   # a duration
+export OGCODE_STREAM_IDLE_TIMEOUT=1800  # a bare number means seconds
+export OGCODE_STREAM_IDLE_TIMEOUT=off   # no idle watchdog at all
+```
+
+`off`, `none`, `never` and `0` all disable the watchdog. Values below 10 seconds
+and values that don't parse are ignored with a warning, leaving the built-in
+budget in place — so a typo costs you a log line, not a broken stream.
+
+Raising this trades away how quickly a genuinely dead connection is noticed: at
+`30m` a dropped socket ties up the turn for half an hour, and at `off` it hangs
+until you stop it. Set it as high as your slowest model actually needs, not
+higher.
+
+### Dropped connections on flaky IPv6
+
+If turns die mid-response with `read: no route to host` or `network is
+unreachable` — and the addresses in the error are IPv6 — your machine's IPv6
+path is dropping established connections. On a dual-stack host with IPv6 privacy
+addresses enabled, the temporary source address a connection is bound to can be
+rotated out from under it; a model response holds one socket open for minutes,
+which makes it the likeliest casualty. Flaky ISP IPv6 routing looks identical.
+
+Ogcode re-sends a stream that dies before producing any output, so most of these
+never reach you. One that has already streamed text or a tool call is not
+replayed — that would duplicate what you can already see — so it surfaces with a
+Resume button instead.
+
+**It also fixes itself.** When two streams in one run die with an
+unreachable-class error against an IPv6 peer, ogcode stops using IPv6 for
+provider connections for the rest of that process and says so in the log:
+
+```
+WARN provider streams falling back to IPv4 after repeated IPv6 failures strikes=2
+```
+
+One failure is treated as a blip; two is a pattern. It never falls back on a host
+with no usable IPv4 address, since that would turn an intermittent failure into a
+total one. Restarting ogcode gives IPv6 another chance.
+
+`OGCODE_FORCE_IPV4` overrides that judgement in either direction:
+
+```bash
+export OGCODE_FORCE_IPV4=1     # pin to IPv4 from the start, don't wait for failures
+export OGCODE_FORCE_IPV4=off   # keep IPv6 whatever happens, disarm the fallback
+```
+
+`1`, `true`, `yes`, `on` pin IPv4; `0`, `false`, `no`, `off`, `never` keep IPv6.
+Unset leaves the automatic behaviour above in charge. Pin IPv4 only if your IPv6
+is genuinely unreliable — on an IPv6-only or NAT64 network it will stop ogcode
+reaching the provider at all.
+
 ### Config file (optional)
 
 Instead of exporting env vars every time, put provider settings in a JSON file. Ogcode reads two locations and merges them, with the project-local file winning per field:
@@ -476,6 +543,18 @@ description: Draft release notes from merged PRs, bump the version, and push the
 
 The `description` is the entire basis on which the agent decides to load the skill, so say **when to use it**, not just what it is. `name` must be lowercase alphanumeric with single hyphens.
 
+A skill whose instructions need a credential can declare it, so a missing one is reported when the skill loads rather than by a script failing halfway through:
+
+```markdown
+---
+name: deploy
+description: Ship the service to staging. Use when asked to deploy.
+requires: DEPLOY_TOKEN
+---
+```
+
+`requires` lists environment variables the skill assumes are set. When the agent loads a skill with a missing one, ogcode refuses the load and names the variable instead of handing over instructions that cannot run. Supply the value in the `skills.env` block of `ogcode.json` (below) or export it in the environment ogcode was started from — a real environment variable always wins. Either spelling accepts a single name, a comma-separated list, or a YAML sequence.
+
 Ogcode looks in these locations, later ones overriding earlier ones of the same name:
 
 | Scope | Locations |
@@ -488,7 +567,7 @@ Ogcode looks in these locations, later ones overriding earlier ones of the same 
 
 Skills written for Claude Code work unchanged — drop them in `.claude/skills/` or point `skills.paths` at them. Claude Code *plugin* skills live at `~/.claude/plugins/marketplaces/<marketplace>/plugins/<plugin>/skills/`, which is not scanned automatically; add the ones you want as `skills.paths` entries.
 
-ogcode reads only `name` and `description` from the frontmatter. Claude Code's `allowed-tools` and `disable-model-invocation` are ignored: loading a skill in ogcode injects instructions and never changes the agent's toolset, so a skill cannot gain a tool — but it is not restricted to a subset either. Use `"permissions": {"<name>": "ask"}` if you want a skill to require approval before it loads.
+ogcode reads `name`, `description`, and `requires` from the frontmatter. Claude Code's `allowed-tools` and `disable-model-invocation` are ignored: loading a skill in ogcode injects instructions and never changes the agent's toolset, so a skill cannot gain a tool — but it is not restricted to a subset either. Use `"permissions": {"<name>": "ask"}` if you want a skill to require approval before it loads.
 
 Directories are re-scanned at the start of every turn, so a new or edited `SKILL.md` takes effect on your next message. The `skills` config block itself is read once at startup, so changing `paths`, `urls`, or `permissions` needs a restart.
 
@@ -504,6 +583,9 @@ Configure extra sources and per-skill permissions in `ogcode.json`:
     "permissions": {
       "internal-*": "deny",
       "deploy-prod": "ask"
+    },
+    "env": {
+      "DEPLOY_TOKEN": "…"
     }
   }
 }
@@ -514,6 +596,8 @@ Configure extra sources and per-skill permissions in `ogcode.json`:
 - `deny` — hidden from the agent entirely, and refused if it is called anyway.
 
 The most specific matching pattern wins: an exact name beats a glob, a longer glob beats `*`.
+
+`env` supplies values for the variables skills declare in `requires`. They are exported into ogcode's environment at startup, which is also what makes them visible to a skill's own scripts — so a token kept here reaches `scripts/deploy.sh` the same way an exported one would. A variable already set in the environment is never overridden. Since the block holds secrets, it belongs in the same gitignored `ogcode.json` as provider keys: put values you want shared across every project in `~/.config/ogcode/config.json` instead.
 
 A skills URL serves an `index.json` manifest; files are resolved relative to it and cached under `~/.ogcode/cache/skills/`, keyed by version, so a version already downloaded is never fetched twice. If the URL is unreachable, the last cached copy is used.
 
@@ -797,6 +881,8 @@ Contributions are welcome — bug fixes, features, and documentation alike.
 
 Please ensure your code follows the existing Go style and passes `go test ./...`.
 
+Because Ogcode is dual-licensed, pull requests carry an inbound license grant — you keep the copyright in your contribution and grant the maintainer the right to license it under both tracks. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening one.
+
 ---
 
 ## Security
@@ -812,7 +898,14 @@ For security concerns, please open an issue or reach out on Discord.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+Ogcode is **dual-licensed**.
+
+- **[GNU AGPL v3.0](LICENSE)** — free and open source. Run it, modify it, self-host it, at home or at work. The one obligation: if you run a *modified* Ogcode that other people reach over a network, those users are entitled to the source of what you are running (AGPL §13).
+- **Ogcode Commercial License** — for embedding Ogcode in a proprietary product, running it as a hosted or managed service without publishing your changes, or when company policy rules out the AGPL.
+
+**[LICENSING.md](LICENSING.md)** spells out which track applies to you and how to obtain a commercial license. Bundled third-party code is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+> Releases up to and including **v0.36.1** were published under the MIT License and stay MIT — a license change is not retroactive. **v0.37.0 onward is AGPL-3.0-only.**
 
 <br/>
 

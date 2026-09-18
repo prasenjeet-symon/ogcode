@@ -65,6 +65,8 @@ Entry point: `main.go` → `cli.Execute()` → `cli.serve()` → `server.New()` 
 | `OGCODE_EMBED_MODEL` | Embedding model for memory |
 | `OGCODE_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` |
 | `OGCODE_LOG_FORMAT` | Log format: `text` (default), `json` |
+| `OGCODE_STREAM_IDLE_TIMEOUT` | Stream idle budget before a turn is called stalled: a duration (`30m`), bare seconds (`1800`), or `off` to disable. Overrides the per-endpoint defaults (10m local / 2m cloud) |
+| `OGCODE_FORCE_IPV4` | Override IPv6 handling for provider streams: `1`/`true`/`yes`/`on` pins IPv4, `0`/`off`/`never` keeps IPv6. Unset = automatic fallback to IPv4 after two IPv6-path failures |
 
 ---
 
