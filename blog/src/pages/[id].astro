@@ -1,0 +1,104 @@
+---
+import { render } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import { publishedPosts, formatDate, type Post } from '../lib/posts';
+
+export async function getStaticPaths() {
+  const posts = await publishedPosts();
+  return posts.map((post) => ({ params: { id: post.id }, props: { post } }));
+}
+
+interface Props {
+  post: Post;
+}
+
+const { post } = Astro.props;
+const { Content, remarkPluginFrontmatter } = await render(post);
+
+const canonical = `https://ogcode.xyz/blog/${post.id}/`;
+const readingTime = remarkPluginFrontmatter.readingTime as number;
+
+const jsonLd = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.pubDate.toISOString(),
+  ...(post.data.updatedDate && { dateModified: post.data.updatedDate.toISOString() }),
+  author: { '@type': 'Person', name: post.data.author },
+  publisher: { '@type': 'Organization', name: 'Ogcode', url: 'https://ogcode.xyz/' },
+  mainEntityOfPage: canonical,
+  image: post.data.ogImage,
+});
+---
+<Base
+  title={`${post.data.title} — Ogcode Blog`}
+  description={post.data.description}
+  canonical={canonical}
+  ogType="article"
+  ogImage={post.data.ogImage}
+>
+  <Fragment slot="head">
+    <meta property="article:published_time" content={post.data.pubDate.toISOString()} />
+    {post.data.updatedDate && (
+      <meta property="article:modified_time" content={post.data.updatedDate.toISOString()} />
+    )}
+    <meta property="article:author" content={post.data.author} />
+    <script type="application/ld+json" set:html={jsonLd} />
+  </Fragment>
+
+  <article>
+    <header class="post-header">
+      <div class="meta-line">
+        <time datetime={post.data.pubDate.toISOString()}>{formatDate(post.data.pubDate)}</time>
+        <span class="sep">·</span>
+        <span>{readingTime} min read</span>
+        {post.data.draft && (
+          <Fragment>
+            <span class="sep">·</span>
+            <span class="draft-flag" style="margin-left: 0; vertical-align: 0;">DRAFT</span>
+          </Fragment>
+        )}
+      </div>
+      <h1 class="display">{post.data.title}</h1>
+      <p class="post-lede">{post.data.description}</p>
+      <div class="byline">
+        <span class="byline-dot" aria-hidden="true">{post.data.author.charAt(0)}</span>
+        <div>
+          <div class="byline-name">{post.data.author}</div>
+          <div class="byline-role">Building Ogcode</div>
+        </div>
+      </div>
+      {post.data.tags.length > 0 && (
+        <div class="tag-row">
+          {post.data.tags.map((tag) => <span class="tag">{tag}</span>)}
+        </div>
+      )}
+    </header>
+
+    <div class="wrap">
+      <div class="prose">
+        <Content />
+      </div>
+
+      <aside class="post-cta">
+        <h3>Try Ogcode</h3>
+        <p>
+          The coding agent that remembers. One Go binary, any model,
+          runs entirely on your machine.
+        </p>
+        <div class="cta-row">
+          <code class="install"><span class="dollar">$</span>curl -fsSL https://ogcode.xyz/install.sh | sh</code>
+          <a class="btn btn-sm btn-primary" href="https://github.com/prasenjeet-symon/ogcode" target="_blank" rel="noopener">Star on GitHub</a>
+        </div>
+      </aside>
+
+      <nav class="post-nav" aria-label="Blog">
+        <a href="/blog/">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          All posts
+        </a>
+      </nav>
+    </div>
+  </article>
+</Base>

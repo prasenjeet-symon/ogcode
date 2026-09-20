@@ -1,4 +1,4 @@
-.PHONY: dev build clean install
+.PHONY: dev build clean install dev-blog build-blog
 
 dev:
 	@echo "Starting Go server on :9595..."
@@ -10,6 +10,13 @@ dev-web:
 
 build-web:
 	cd web && npm install --legacy-peer-deps --cache /tmp/npm-cache && npm run build
+
+dev-blog:
+	@echo "Starting Astro dev server on :4321 (blog at /blog/)..."
+	cd blog && npm install --cache /tmp/npm-cache && npm run dev
+
+build-blog:
+	cd blog && npm install --cache /tmp/npm-cache && npm run build
 
 build-server:
 	$(eval VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || node -p "require('./web/package.json').version" 2>/dev/null || echo "dev"))
@@ -37,6 +44,7 @@ install: build
 clean:
 	rm -f ogcode
 	rm -rf web/dist web/node_modules web/.solid
+	rm -rf blog/node_modules blog/.astro docs/blog
 	rm -rf .ogcode
 
 test:

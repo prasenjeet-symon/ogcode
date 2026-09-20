@@ -1,0 +1,69 @@
+---
+// Shared shell for every blog page: head metadata, fonts, nav, footer.
+// Zero client-side JavaScript — pages are pure pre-rendered HTML.
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/blog.css';
+
+interface Props {
+  title: string;
+  description: string;
+  /** Absolute canonical URL for this page. */
+  canonical: string;
+  ogType?: 'website' | 'article';
+  ogImage?: string;
+}
+
+const {
+  title,
+  description,
+  canonical,
+  ogType = 'website',
+  ogImage = 'https://ogcode.xyz/media/og.png',
+} = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <link rel="canonical" href={canonical} />
+  <meta name="theme-color" content="#09090b" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="generator" content={Astro.generator} />
+
+  <meta property="og:type" content={ogType} />
+  <meta property="og:site_name" content="Ogcode" />
+  <meta property="og:url" content={canonical} />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:image" content={ogImage} />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content={title} />
+  <meta name="twitter:description" content={description} />
+  <meta name="twitter:image" content={ogImage} />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%235E6AD2'/><path d='M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33' transform='translate(9 9) scale(0.72)' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round'/></svg>" />
+  <link rel="apple-touch-icon" href="/media/logo.png" />
+  <link rel="alternate" type="application/rss+xml" title="Ogcode Blog" href="/blog/rss.xml" />
+
+  <link rel="preload" href="/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/eb-garamond-var.woff2" as="font" type="font/woff2" crossorigin />
+
+  <slot name="head" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <Nav />
+
+  <main>
+    <slot />
+  </main>
+
+  <Footer />
+</body>
+</html>

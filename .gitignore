@@ -16,6 +16,11 @@ web/dist/
 web/build/
 web/.solid/
 
+# Blog build artifacts — the Pages workflow builds blog/ into docs/blog before
+# deploying, so the generated site never lives in the repo.
+docs/blog/
+blog/.astro/
+
 # Release build output (GoReleaser's default work dir — it archives the repo)
 /dist/
 

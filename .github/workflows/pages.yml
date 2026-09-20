@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'blog/**'
   workflow_dispatch:
 
 permissions:
@@ -25,6 +26,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: blog/package-lock.json
+
+      # The blog is an Astro static site that builds into docs/blog (gitignored),
+      # so it must be generated before docs/ is uploaded.
+      - name: Build blog
+        working-directory: blog
+        run: |
+          npm ci
+          npm run build
 
       - name: Upload docs folder as Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -2,3 +2,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://ogcode.xyz/sitemap.xml
+Sitemap: https://ogcode.xyz/blog/sitemap-index.xml

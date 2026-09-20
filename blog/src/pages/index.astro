@@ -1,0 +1,49 @@
+---
+import Base from '../layouts/Base.astro';
+import { publishedPosts, postUrl, formatDate } from '../lib/posts';
+
+const posts = await publishedPosts();
+---
+<Base
+  title="Blog — Ogcode"
+  description="Notes from building Ogcode: context engineering, agent memory, and running coding agents on your own machine."
+  canonical="https://ogcode.xyz/blog/"
+>
+  <header class="blog-head">
+    <div class="wrap">
+      <span class="eyebrow">Field notes</span>
+      <h1 class="display">Notes from the <em>workshop</em></h1>
+      <p class="lede">
+        How Ogcode is built — context engineering, agent memory, and what it takes
+        to run a coding agent entirely on your own machine.
+        Subscribe via <a href="/blog/rss.xml">RSS</a>.
+      </p>
+    </div>
+  </header>
+
+  <section class="post-list">
+    <div class="wrap">
+      {posts.length === 0 && (
+        <div class="blog-empty">
+          <p>The first post is being written.</p>
+          <p class="sub">Grab the <a href="/blog/rss.xml" style="color: var(--text-secondary); border-bottom: 1px solid var(--border-strong);">RSS feed</a> and it will find you when it lands.</p>
+        </div>
+      )}
+      {posts.map((post) => (
+        <a class="post-row" href={postUrl(post)}>
+          <time class="post-date" datetime={post.data.pubDate.toISOString()}>
+            {formatDate(post.data.pubDate)}
+          </time>
+          <div>
+            <h2 class="post-title">
+              {post.data.title}
+              {post.data.draft && <span class="draft-flag">DRAFT</span>}
+            </h2>
+            <p class="post-desc">{post.data.description}</p>
+          </div>
+          <span class="post-meta">{post.data.tags[0] ?? ''}</span>
+        </a>
+      ))}
+    </div>
+  </section>
+</Base>
