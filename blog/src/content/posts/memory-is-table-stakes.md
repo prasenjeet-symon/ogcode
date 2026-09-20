@@ -3,6 +3,9 @@ title: "Memory is table stakes"
 description: "Grok Build just learned to remember your project. Good. Every agent should. Here is how Ogcode remembers: markdown on your disk, one note per turn, recalled only when a turn actually needs it."
 pubDate: 2026-09-20
 tags: ["memory", "context-engine"]
+hero: "/blog/media/memory-is-table-stakes-hero.jpg"
+heroAlt: "A dim archive of note cards on a dark grid; one card floats above the rest, glowing indigo, connected by a thin thread to an empty prompt bar below."
+ogImage: "https://ogcode.xyz/blog/media/memory-is-table-stakes-hero.jpg"
 ---
 
 xAI shipped memory in Grok Build this week: after a session, it writes markdown

@@ -16,6 +16,9 @@ const posts = defineCollection({
     draft: z.boolean().default(false),
     // Absolute URL or site-rooted path; falls back to the site-wide card.
     ogImage: z.string().default('https://ogcode.xyz/media/og.png'),
+    // Site-rooted path to a wide hero image shown under the post header.
+    hero: z.string().optional(),
+    heroAlt: z.string().optional(),
   }),
 });
 

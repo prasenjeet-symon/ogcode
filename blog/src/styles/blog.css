@@ -316,6 +316,19 @@ main { position: relative; z-index: 1; }
   padding: 3px 10px;
 }
 
+/* ── Post hero image ───────────────────────────────────────────── */
+.post-hero {
+  display: block;
+  width: 100%; max-width: 880px; height: auto;
+  margin: 0 auto 52px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+@media (max-width: 560px) {
+  .post-hero { margin-bottom: 36px; border-radius: var(--radius-lg); }
+}
+
 /* ── Prose — rendered markdown ─────────────────────────────────── */
 .prose {
   max-width: var(--width-prose); margin: 0 auto;

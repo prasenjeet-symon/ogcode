@@ -82,6 +82,20 @@ const jsonLd = JSON.stringify({
       )}
     </header>
 
+    {post.data.hero && (
+      <div class="wrap">
+        <img
+          class="post-hero"
+          src={post.data.hero}
+          alt={post.data.heroAlt ?? ''}
+          width="1344"
+          height="768"
+          loading="eager"
+          decoding="async"
+        />
+      </div>
+    )}
+
     <div class="wrap">
       <div class="prose">
         <Content />
