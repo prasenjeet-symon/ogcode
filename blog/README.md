@@ -17,6 +17,9 @@ description: "One or two sentences. Shown on the index, in search results, and o
 pubDate: 2026-09-21
 tags: ["context-engine"]        # optional
 draft: true                     # optional — visible in dev, excluded from builds
+hero: "/blog/media/why-recall-hero.jpg"   # optional — shown on the post page AND as the index thumbnail
+heroAlt: "One sentence describing the image."
+# ogImage should point at the same hero (absolute URL) so shares show it too
 # updatedDate: 2026-09-25      # optional
 # author: "Prasenjeet Kumar"   # optional, this is the default
 # ogImage: "https://ogcode.xyz/media/og.png"  # optional, this is the default

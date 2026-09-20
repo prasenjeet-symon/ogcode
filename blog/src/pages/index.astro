@@ -31,9 +31,12 @@ const posts = await publishedPosts();
       )}
       {posts.map((post) => (
         <a class="post-row" href={postUrl(post)}>
-          <time class="post-date" datetime={post.data.pubDate.toISOString()}>
-            {formatDate(post.data.pubDate)}
-          </time>
+          <div class="post-rail">
+            <time class="post-date" datetime={post.data.pubDate.toISOString()}>
+              {formatDate(post.data.pubDate)}
+            </time>
+            {post.data.tags[0] && <span class="post-meta">{post.data.tags[0]}</span>}
+          </div>
           <div>
             <h2 class="post-title">
               {post.data.title}
@@ -41,7 +44,17 @@ const posts = await publishedPosts();
             </h2>
             <p class="post-desc">{post.data.description}</p>
           </div>
-          <span class="post-meta">{post.data.tags[0] ?? ''}</span>
+          {post.data.hero && (
+            <img
+              class="post-thumb"
+              src={post.data.hero}
+              alt=""
+              width="1344"
+              height="768"
+              loading="lazy"
+              decoding="async"
+            />
+          )}
         </a>
       ))}
     </div>
