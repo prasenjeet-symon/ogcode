@@ -6,8 +6,10 @@ ogcode
 .ogcode/
 
 # Workspace public folder — served over HTTP at /public for the web UI. Runtime
-# and user artifacts land there; it is never part of the source tree.
-public/
+# and user artifacts land there; it is never part of the source tree. Anchored
+# to the repo root so source asset folders (blog/public, web/public) stay
+# trackable.
+/public/
 
 # Web build artifacts
 # Dependencies

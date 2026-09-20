@@ -1,7 +1,9 @@
 ---
 import { render } from 'astro:content';
 import Base from '../layouts/Base.astro';
+import AuthorCard from '../components/AuthorCard.astro';
 import { publishedPosts, formatDate, type Post } from '../lib/posts';
+import { AUTHOR } from '../lib/author';
 
 export async function getStaticPaths() {
   const posts = await publishedPosts();
@@ -63,7 +65,11 @@ const jsonLd = JSON.stringify({
       <h1 class="display">{post.data.title}</h1>
       <p class="post-lede">{post.data.description}</p>
       <div class="byline">
-        <span class="byline-dot" aria-hidden="true">{post.data.author.charAt(0)}</span>
+        {post.data.author === AUTHOR.name ? (
+          <img class="byline-avatar" src={AUTHOR.avatar} alt="" width="30" height="30" />
+        ) : (
+          <span class="byline-dot" aria-hidden="true">{post.data.author.charAt(0)}</span>
+        )}
         <div>
           <div class="byline-name">{post.data.author}</div>
           <div class="byline-role">Building Ogcode</div>
@@ -80,6 +86,8 @@ const jsonLd = JSON.stringify({
       <div class="prose">
         <Content />
       </div>
+
+      {post.data.author === AUTHOR.name && <AuthorCard />}
 
       <aside class="post-cta">
         <h3>Try Ogcode</h3>

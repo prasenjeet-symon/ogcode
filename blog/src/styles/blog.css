@@ -296,6 +296,10 @@ main { position: relative; z-index: 1; }
   margin-top: 18px; font-size: 17.5px; color: var(--text-secondary); line-height: 1.65;
 }
 .byline { display: flex; align-items: center; gap: 10px; margin-top: 26px; }
+.byline-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  border: 1px solid var(--border-default); object-fit: cover;
+}
 .byline-dot {
   width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
   background: var(--accent-soft); border: 1px solid rgba(94,106,210,0.3);
@@ -372,6 +376,29 @@ main { position: relative; z-index: 1; }
   font-size: 13px;
 }
 .prose td { color: var(--text-secondary); }
+
+/* ── Author card — follow the writer ───────────────────────────── */
+.author-card {
+  max-width: var(--width-prose); margin: 64px auto 0;
+  display: flex; gap: 16px; align-items: flex-start;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+  padding: 24px 26px;
+}
+.author-avatar {
+  width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
+  border: 1px solid var(--border-default); object-fit: cover;
+}
+.author-name { font-size: 15.5px; font-weight: 620; letter-spacing: -0.01em; }
+.author-role {
+  margin-top: 4px; font-size: 13.5px; color: var(--text-secondary);
+  line-height: 1.6; max-width: 52ch;
+}
+.author-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.author-links .btn svg { width: 13px; height: 13px; }
+@media (max-width: 560px) {
+  .author-card { flex-direction: column; padding: 20px; }
+}
 
 /* ── End-of-post CTA ───────────────────────────────────────────── */
 .post-cta {

@@ -1,0 +1,26 @@
+---
+// Follow-the-author card shown at the end of every post.
+import { AUTHOR } from '../lib/author';
+---
+<aside class="author-card" aria-label="About the author">
+  <img
+    class="author-avatar"
+    src={AUTHOR.avatar}
+    alt={AUTHOR.name}
+    width="52"
+    height="52"
+    loading="lazy"
+  />
+  <div class="author-body">
+    <div class="author-name">{AUTHOR.name}</div>
+    <p class="author-role">{AUTHOR.role}, in the open. If this post was useful, following is the best way to catch the next one.</p>
+    <div class="author-links">
+      {AUTHOR.links.map((link) => (
+        <a class="btn btn-sm btn-ghost" href={link.url} target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={link.icon} /></svg>
+          {link.label}
+        </a>
+      ))}
+    </div>
+  </div>
+</aside>
