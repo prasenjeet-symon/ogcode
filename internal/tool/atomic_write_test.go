@@ -129,6 +129,41 @@ func TestWriteFileAtomic_PreservesExistingMode(t *testing.T) {
 	}
 }
 
+// The special bits ride along with the permissions. Mode().Perm() masks
+// setuid/setgid/sticky away, so rewriting a file that carried them silently
+// stripped them — a divergence from the in-place write, which never touched
+// the inode's mode at all.
+func TestWriteFileAtomic_PreservesSpecialModeBits(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits don't apply on windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := os.ModeSetuid | os.ModeSticky | 0o755
+	if err := os.Chmod(path, want); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode()&os.ModeSetuid == 0 {
+		t.Skipf("filesystem does not honor setuid for this user (mode %v, err %v)",
+			info.Mode(), err)
+	}
+
+	if err := writeFileAtomic(path, []byte("#!/bin/sh\necho hi\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode() & preservedModeBits; got != want {
+		t.Errorf("mode after write = %v, want %v", got, want)
+	}
+}
+
 // A new file is created through the umask, exactly as os.WriteFile(…, 0o644)
 // was — the temp file must not fix it at os.CreateTemp's private 0600, nor
 // chmod past whatever the umask says.

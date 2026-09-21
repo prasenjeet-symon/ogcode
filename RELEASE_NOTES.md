@@ -1,3 +1,32 @@
+# Release Notes — v0.37.4
+
+## Minor: File edits that explain themselves
+
+- The `edit` tool now takes every change in its `edits` array — one entry per change, and the only form it accepts. A call using the old top-level `old_string`/`new_string` shape is refused with the exact form to send instead, rather than guessed at.
+- An edit whose `new_string` is identical to its `old_string` is rejected instead of reporting a replacement that changed nothing, and a batch whose hunks cancel out fails rather than writing the file back byte-identical.
+- In a uniformly CRLF file, LF-authored hunks are adapted to the file's own line endings before matching: a multi-line anchor that could never match now lands, and a replacement no longer splices LF lines into a CRLF file.
+- A whitespace-only miss now quotes the file's own bytes for the region it found, with the line number, ready to copy — instead of naming the problem and leaving the caller to re-read and guess again. The hint distinguishes wrong indentation from a line-ending mismatch, and reports the case where the anchor matches several places.
+- An anchor carrying the read tool's `… (line truncated)` marker is called out as the marker it is, not reported as text missing from the file.
+- `read` separates the line number from the content with `|` rather than a tab, so an anchor's indentation can be copied exactly; an inverted `start_line`/`end_line` range is rejected, and a window past the end of the file — or an empty file — says so with the file's real extent.
+- Multi-byte characters are no longer split by line-length truncation or by an error message's excerpt, and a rewritten file keeps its setuid/setgid/sticky bits along with its permissions.
+
+## Minor: Failures you can see
+
+- The `bash` tool appends the exit status to its output when a command fails without printing anything — `[exit status 1]`, the signal for a killed process, or a note that the command never ran. A silent failure used to return an empty, success-shaped result, and the agent carried on as if the step had landed.
+
+## Minor: Cross-tool instruction files
+
+- `AGENTS.md` is now read alongside ogcode's own `AGENT.md`, from each directory on the walk from the working directory up to the filesystem root, so a project already using the cross-tool convention needs no ogcode-specific file.
+- Within a directory `AGENTS.md` is added first and `AGENT.md` last, keeping the ogcode-specific file closest to the model. Identical text under both names is included once.
+
+## Patch: Blog, and a version badge that tells the truth
+
+- Adds a fully static blog at `/blog`, built from markdown into `docs/blog` at deploy time.
+- The landing page version badge reads the running build's version from the API, instead of a hardcoded string that had drifted releases behind.
+- The web UI renders an edit's diff from its `edits` array, with a fallback for older sessions that stored one flat pair — those edits had rendered as `+0 −0` since the array landed.
+
+---
+
 # Release Notes — v0.37.3
 
 ## Patch: More reliable mid-turn guidance, MCP schemas, and session state

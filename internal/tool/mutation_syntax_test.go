@@ -11,7 +11,10 @@ import (
 
 func edit(t *testing.T, dir, rel, old, new string) Result {
 	t.Helper()
-	args, _ := json.Marshal(map[string]string{"path": rel, "old_string": old, "new_string": new})
+	args, _ := json.Marshal(map[string]any{
+		"path":  rel,
+		"edits": []map[string]any{{"old_string": old, "new_string": new}},
+	})
 	res, err := EditTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
 	if err != nil {
 		t.Fatalf("edit: %v", err)

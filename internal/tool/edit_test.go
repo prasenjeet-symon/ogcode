@@ -12,10 +12,37 @@ import (
 	"testing"
 )
 
+// editWith runs one edit. For readability most tests below describe a single
+// change with flat old_string/new_string keys; this wraps those into the one
+// form the tool actually takes. Tests that care about the wire shape itself
+// build their JSON directly — see TestEditTool_OnlyTakesTheEditsArray.
 func editWith(t *testing.T, dir string, params map[string]any) (Result, error) {
 	t.Helper()
-	args, _ := json.Marshal(params)
+	args, _ := json.Marshal(asEditsForm(params))
 	return EditTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
+}
+
+// asEditsForm turns {path, old_string, …} into {path, edits:[{old_string, …}]}.
+// Params already using edits pass through untouched.
+func asEditsForm(params map[string]any) map[string]any {
+	if _, ok := params["edits"]; ok {
+		return params
+	}
+	hunk := map[string]any{}
+	out := map[string]any{}
+	for k, v := range params {
+		switch k {
+		case "old_string", "new_string", "replace_all", "expected_count":
+			hunk[k] = v
+		default:
+			out[k] = v
+		}
+	}
+	if len(hunk) == 0 {
+		return params
+	}
+	out["edits"] = []map[string]any{hunk}
+	return out
 }
 
 func TestEditTool_UniqueMatchReplaces(t *testing.T) {
@@ -326,6 +353,15 @@ func TestEditTool_NotFoundHintsWhitespace(t *testing.T) {
 	if !strings.Contains(err.Error(), "indentation") {
 		t.Errorf("error should point at whitespace, got: %v", err)
 	}
+	// Naming the problem is not enough — knowing the whitespace is wrong does not
+	// say what it should be. The file's own bytes have to come back, tab intact,
+	// or the caller spends another round trip guessing again.
+	if !strings.Contains(err.Error(), "\tfmt.Println(\"hi\")") {
+		t.Errorf("error should quote the file's exact text, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "line 2") {
+		t.Errorf("error should say where, got: %v", err)
+	}
 
 	// Text that genuinely is not there gets no such hint, so the hint stays a
 	// signal rather than noise on every miss.
@@ -458,29 +494,6 @@ func TestEditTool_MultiEditSequential(t *testing.T) {
 	}
 }
 
-// TestEditTool_MixedFormsRejected covers the one ambiguity the two request
-// shapes could create. Guessing either way could silently drop an edit the
-// caller believed they had made.
-func TestEditTool_MixedFormsRejected(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "f.txt")
-	mustWriteFile(t, path, "a b\n")
-
-	_, err := editWith(t, dir, map[string]any{
-		"path": path, "old_string": "a", "new_string": "x",
-		"edits": []map[string]any{{"old_string": "b", "new_string": "y"}},
-	})
-	if err == nil || !strings.Contains(err.Error(), "not both") {
-		t.Errorf("expected a mixed-form rejection, got %v", err)
-	}
-	if got, _ := os.ReadFile(path); string(got) != "a b\n" {
-		t.Errorf("file should be unchanged, got %q", got)
-	}
-}
-
-// TestEditTool_ExpectedCount guards the blunt edge of replace_all: an anchor
-// that matches more than the caller believed would otherwise rewrite more of
-// the file than they intended, and the result would look like a success.
 func TestEditTool_ExpectedCount(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
@@ -550,23 +563,18 @@ func TestEditTool_OmittedNewStringRejected(t *testing.T) {
 	original := "func important() { doWork() }\n"
 	mustWriteFile(t, path, original)
 
-	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"old_string":"doWork()"}`)
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"edits":[{"old_string":"doWork()"}]}`)
 	_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
 	if err == nil {
 		t.Fatal("omitting new_string must not be read as a deletion")
 	}
-	if !strings.Contains(err.Error(), "new_string is missing") {
-		t.Errorf("error should name the missing field, got: %v", err)
+	for _, want := range []string{"edits[0]", "new_string is missing"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
 	}
 	if got, _ := os.ReadFile(path); string(got) != original {
 		t.Errorf("file must be untouched, got %q", got)
-	}
-
-	// The same omission inside an edits entry, where it is just as destructive.
-	raw = json.RawMessage(`{"path":` + strconv.Quote(path) + `,"edits":[{"old_string":"doWork()"}]}`)
-	_, err = EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
-	if err == nil || !strings.Contains(err.Error(), "edits[0]") {
-		t.Errorf("an edits entry missing new_string should be rejected and named, got: %v", err)
 	}
 }
 
@@ -578,11 +586,409 @@ func TestEditTool_ExplicitEmptyNewStringDeletes(t *testing.T) {
 	path := filepath.Join(dir, "f.txt")
 	mustWriteFile(t, path, "keep\ndrop\nkeep\n")
 
-	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"old_string":"drop\n","new_string":""}`)
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"edits":[{"old_string":"drop\n","new_string":""}]}`)
 	if _, err := (EditTool{}).Execute(context.Background(), raw, Context{SessionDir: dir}); err != nil {
 		t.Fatalf("an explicit empty new_string should delete: %v", err)
 	}
 	if got, _ := os.ReadFile(path); string(got) != "keep\nkeep\n" {
 		t.Errorf("content = %q, want the line deleted", got)
+	}
+}
+
+func TestEditTool_NotFoundHintQuotesExactBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sqlite.go")
+	body := "\tif _, err := d.Exec(\"PRAGMA busy_timeout = 30000\"); err != nil {\n\t\td.Close()\n"
+	mustWriteFile(t, path, "func open() error {\n"+body+"\t}\n}\n")
+
+	// The same block with spaces where the file has tabs.
+	spaced := strings.ReplaceAll(body, "\t", "    ")
+	_, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": strings.TrimSuffix(spaced, "\n"), "new_string": "x",
+	})
+	if err == nil {
+		t.Fatal("expected a not-found error")
+	}
+
+	// The quoted region must be usable as-is. Recovering it from the message and
+	// re-issuing the edit is exactly what a caller would do next.
+	msg := err.Error()
+	start := strings.Index(msg, "The file has:\n")
+	if start < 0 {
+		t.Fatalf("error did not quote the file: %v", err)
+	}
+	quoted := msg[start+len("The file has:\n"):]
+	quoted = strings.TrimSuffix(quoted, "\nSend that verbatim as old_string.")
+	if quoted != strings.TrimSuffix(body, "\n") {
+		t.Fatalf("quoted text is not the file's bytes:\n got %q\nwant %q", quoted, strings.TrimSuffix(body, "\n"))
+	}
+	if _, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": quoted, "new_string": "\t\treturn nil",
+	}); err != nil {
+		t.Errorf("the quoted text should apply as an anchor: %v", err)
+	}
+}
+
+// TestEditTool_NotFoundHintAmbiguous covers the case where quoting would be
+// misleading: several regions match once indentation is ignored, so there is no
+// single answer to hand back and the caller is pointed at the candidates instead.
+func TestEditTool_NotFoundHintAmbiguous(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.go")
+	mustWriteFile(t, path, "func a() {\n\tdo()\n}\nfunc b() {\n\t\tdo()\n}\n")
+
+	_, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": "      do()", "new_string": "done()",
+	})
+	if err == nil {
+		t.Fatal("expected a not-found error")
+	}
+	if !strings.Contains(err.Error(), "matches 2 places") {
+		t.Errorf("error should report the count, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "lines 2, 5") {
+		t.Errorf("error should name the candidate lines, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "Send that verbatim") {
+		t.Error("must not offer a single answer when several regions match")
+	}
+}
+
+// TestEditTool_OnlyTakesTheEditsArray pins the wire contract directly, without
+// the readability shim the other tests use.
+//
+// This tool used to accept a top-level old_string/new_string as well as the
+// array, and callers routinely sent both — the flat pair out of habit, the array
+// because the tool asked for it — producing a call that could be read two ways
+// and had to be refused. Documenting the exclusivity did not stop it. There is
+// now one form, and a caller reaching for the old one is told exactly what to
+// send rather than left to guess.
+func TestEditTool_OnlyTakesTheEditsArray(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "version.go")
+	original := "import (\n\t\"fmt\"\n\t\"github.com/spf13/cobra\"\n)\n"
+	run := func(body string) (Result, error) {
+		mustWriteFile(t, path, original)
+		raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,` + body + `}`)
+		return EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
+	}
+
+	t.Run("the array applies", func(t *testing.T) {
+		if _, err := run(`"edits":[{"old_string":"\t\"fmt\"","new_string":"\t\"fmt\"\n\t\"internal/version\""}]`); err != nil {
+			t.Fatalf("the single supported form should apply: %v", err)
+		}
+		if got, _ := os.ReadFile(path); !strings.Contains(string(got), "internal/version") {
+			t.Errorf("edit did not apply: %s", got)
+		}
+	})
+
+	// The flat shape is refused whether or not an array came with it, so a
+	// caller can never have half of its intent silently dropped.
+	for name, body := range map[string]string{
+		"flat alone": `"old_string":"\t\"fmt\"","new_string":"x"`,
+		"flat beside an array": `"old_string":"\t\"fmt\"","new_string":"x",` +
+			`"edits":[{"old_string":"cobra","new_string":"y"}]`,
+		"flat with only new_string": `"new_string":"x"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := run(body)
+			if err == nil {
+				t.Fatal("the flat form must be refused")
+			}
+			// The message has to carry the shape to send, or the caller retries
+			// the same thing — which is how the old dual form kept failing.
+			for _, want := range []string{`"edits"`, "old_string", "new_string", "one entry per change"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error should mention %q, got: %v", want, err)
+				}
+			}
+			if got, _ := os.ReadFile(path); string(got) != original {
+				t.Errorf("file must be untouched, got %q", got)
+			}
+		})
+	}
+
+	t.Run("an empty array is refused", func(t *testing.T) {
+		_, err := run(`"edits":[]`)
+		if err == nil || !strings.Contains(err.Error(), "at least one entry") {
+			t.Errorf("expected an empty-array rejection, got %v", err)
+		}
+	})
+}
+
+// TestEditTool_NoOpEditIsRejected covers an edit that finds its anchor and
+// changes nothing.
+//
+// Replacing text with itself used to look identical to real work: the anchor
+// matched, identical bytes were written, and the result said "replaced 1
+// occurrence". A caller told its change landed, then seeing the file unchanged,
+// can only send it again — which in practice produced a run of successful edits
+// that moved nothing at all.
+func TestEditTool_NoOpEditIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "indexing.go")
+	original := "func index() error {\n\treturn nil\n}\n"
+	mustWriteFile(t, path, original)
+
+	_, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": "\treturn nil", "new_string": "\treturn nil",
+	})
+	if err == nil {
+		t.Fatal("an edit that changes nothing must not report success")
+	}
+	if !strings.Contains(err.Error(), "identical to old_string") {
+		t.Errorf("error should say why, got: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file should be untouched, got %q", got)
+	}
+}
+
+// TestEditTool_CancellingHunksRejected is the same lie spread across entries:
+// each hunk resolves, and together they write the file back byte-identical.
+func TestEditTool_CancellingHunksRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "alpha\n"
+	mustWriteFile(t, path, original)
+
+	_, err := editWith(t, dir, map[string]any{
+		"path": path,
+		"edits": []map[string]any{
+			{"old_string": "alpha", "new_string": "beta"},
+			{"old_string": "beta", "new_string": "alpha"},
+		},
+	})
+	if err == nil {
+		t.Fatal("hunks that cancel out must not report success")
+	}
+	if !strings.Contains(err.Error(), "cancel out") {
+		t.Errorf("error should name the cause, got: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file should be untouched, got %q", got)
+	}
+}
+
+// TestEditTool_RealChangeStillApplies guards the boundary: the new checks must
+// reject only edits that achieve nothing, never a genuine one that happens to
+// reuse some of its own text.
+func TestEditTool_RealChangeStillApplies(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.go")
+	mustWriteFile(t, path, "import (\n\t\"fmt\"\n)\n")
+
+	if _, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": "\t\"fmt\"", "new_string": "\t\"fmt\"\n\t\"os\"",
+	}); err != nil {
+		t.Fatalf("an additive edit should apply: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "import (\n\t\"fmt\"\n\t\"os\"\n)\n" {
+		t.Errorf("content = %q", got)
+	}
+}
+
+// Models emit \n; a CRLF file made every multi-line anchor a guaranteed miss,
+// since a bare \n cannot occur where every newline follows a \r. In a
+// uniformly-CRLF file the hunk is adapted to the file's own endings, so the
+// natural LF form simply works — and the file stays CRLF throughout.
+func TestEditTool_CRLFFileTakesLFAnchor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crlf.go")
+	mustWriteFile(t, path, "package x\r\n\r\nfunc A() {\r\n\treturn\r\n}\r\n")
+
+	if _, err := editWith(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "func A() {\n\treturn\n}",
+		"new_string": "func A() {\n\treturn // done\n}",
+	}); err != nil {
+		t.Fatalf("an LF anchor should match a uniformly-CRLF file: %v", err)
+	}
+
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "// done") {
+		t.Fatalf("edit did not apply:\n%q", got)
+	}
+	if strings.Contains(strings.ReplaceAll(string(got), "\r\n", ""), "\n") {
+		t.Errorf("edit introduced bare LF endings into a CRLF file:\n%q", got)
+	}
+}
+
+// The other half of the same damage: a single-line anchor DID match in a CRLF
+// file, so a multi-line LF new_string spliced LF lines into it and left mixed
+// endings that nothing flagged. The replacement must arrive in the file's own
+// endings too.
+func TestEditTool_CRLFFileKeepsItsEndingsOnInsertion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crlf.go")
+	mustWriteFile(t, path, "func A() {\r\n\treturn\r\n}\r\n")
+
+	if _, err := editWith(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "\treturn",
+		"new_string": "\tif ok {\n\t\treturn\n\t}",
+	}); err != nil {
+		t.Fatalf("single-line anchor should still apply: %v", err)
+	}
+
+	got, _ := os.ReadFile(path)
+	if strings.Contains(strings.ReplaceAll(string(got), "\r\n", ""), "\n") {
+		t.Errorf("multi-line new_string left bare LF endings in a CRLF file:\n%q", got)
+	}
+}
+
+// A mixed-endings file has no unambiguous convention to adapt a hunk to — an
+// LF anchor there may be a deliberate reference to one of its LF lines,
+// possibly the caller fixing the endings themselves. Hunks apply exactly as
+// sent.
+func TestEditTool_MixedEndingsFileIsNotSecondGuessed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixed.txt")
+	mustWriteFile(t, path, "a\nb\r\nc\n")
+
+	if _, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": "a\nb", "new_string": "a2\nb2",
+	}); err != nil {
+		t.Fatalf("a literal LF match in a mixed file should apply: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "a2\nb2\r\nc\n" {
+		t.Errorf("content = %q, want the LF lines edited and the CRLF line untouched", got)
+	}
+}
+
+// An LF old_string with a CRLF new_string in a uniformly-CRLF file is a no-op
+// wearing a disguise: under the file's endings both sides are the same bytes.
+// It must be caught like any other no-op, with a message that explains the
+// endings — to the caller the two strings look different, and a bare
+// "identical" would read as a tool fault.
+func TestEditTool_CRLFNoOpDetected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crlf.txt")
+	original := "alpha\r\nbeta\r\n"
+	mustWriteFile(t, path, original)
+
+	_, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": "alpha\nbeta", "new_string": "alpha\r\nbeta",
+	})
+	if err == nil {
+		t.Fatal("an endings-only rewrite of a CRLF file changes nothing and must say so")
+	}
+	if !strings.Contains(err.Error(), "CRLF") {
+		t.Errorf("error should explain the endings, got: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file should be untouched, got %q", got)
+	}
+}
+
+// In a mixed-endings file (where no adaptation happens) a CRLF region missed
+// by an LF anchor must be diagnosed as a line-endings problem. The hint used
+// to assert "only the leading whitespace is wrong" unconditionally, sending
+// the caller hunting through indentation that was right all along while the
+// real difference sat invisibly at the end of every line.
+func TestEditTool_NotFoundHintNamesLineEndings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixed.go")
+	// The leading LF-ended line makes the file mixed, so the CRLF region below
+	// is matched as sent rather than adapted.
+	mustWriteFile(t, path, "// header\nfunc A() {\r\n\tdo()\r\n}\r\n")
+
+	_, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": "func A() {\n\tdo()\n}", "new_string": "func A() {\n\tdone()\n}",
+	})
+	if err == nil {
+		t.Fatal("expected a not-found error")
+	}
+	if !strings.Contains(err.Error(), "CRLF") {
+		t.Errorf("hint should name the line endings, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "only the leading whitespace is wrong") {
+		t.Errorf("hint must not blame indentation for an endings mismatch, got: %v", err)
+	}
+}
+
+// When the matched region is too long to quote whole, the excerpt ends in a
+// cut marker — and the instruction must switch from "send that verbatim" to a
+// re-read, or a literal-minded caller anchors on the marker itself.
+func TestEditTool_OverlongRegionHintSaysReRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+	var fileLines, anchor []string
+	for i := 0; i < 30; i++ {
+		line := strings.Repeat("x", 100) + strconv.Itoa(i)
+		fileLines = append(fileLines, "\t"+line)
+		anchor = append(anchor, line) // same lines, indentation lost
+	}
+	mustWriteFile(t, path, strings.Join(fileLines, "\n")+"\n")
+
+	_, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": strings.Join(anchor, "\n"), "new_string": "gone",
+	})
+	if err == nil {
+		t.Fatal("expected a not-found error")
+	}
+	if strings.Contains(err.Error(), "Send that verbatim") {
+		t.Errorf("a cut excerpt must not be offered verbatim, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "re-read lines 1-30") {
+		t.Errorf("hint should say what to re-read, got: %v", err)
+	}
+}
+
+// An anchor that contains the read tool's truncation marker can never match:
+// the marker replaced the rest of a line longer than read displays. The bare
+// not-found left the caller to re-read and copy the same marker again; the
+// error has to name the marker and the way out.
+func TestEditTool_TruncationMarkerAnchorExplained(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "min.js")
+	longLine := strings.Repeat("a", MaxLineLength+50)
+	mustWriteFile(t, path, longLine+"\n")
+
+	// What a caller copying from read's capped output would actually send.
+	_, err := editWith(t, dir, map[string]any{
+		"path":       path,
+		"old_string": longLine[:MaxLineLength] + lineTruncatedSuffix,
+		"new_string": "x",
+	})
+	if err == nil {
+		t.Fatal("expected a not-found error")
+	}
+	if !strings.Contains(err.Error(), "truncation marker") {
+		t.Errorf("error should name the marker, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "shorter distinctive part") {
+		t.Errorf("error should offer the recovery, got: %v", err)
+	}
+}
+
+// The legacy-shape guard has to watch all four per-hunk fields. A top-level
+// replace_all or expected_count used to be dropped without a word — the
+// dropped expected_count being the worse of the two, an assertion the caller
+// believes is active with nothing checking it.
+func TestEditTool_TopLevelPerHunkFieldsRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "foo\nfoo\n"
+
+	for name, extra := range map[string]string{
+		"replace_all":    `"replace_all":true`,
+		"expected_count": `"expected_count":2`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			mustWriteFile(t, path, original)
+			raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,` + extra +
+				`,"edits":[{"old_string":"foo","new_string":"bar","replace_all":true}]}`)
+			_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
+			if err == nil {
+				t.Fatal("a top-level per-hunk field must be refused, not dropped")
+			}
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("error should name %s among the misplaced fields, got: %v", name, err)
+			}
+			if got, _ := os.ReadFile(path); string(got) != original {
+				t.Errorf("file must be untouched, got %q", got)
+			}
+		})
 	}
 }

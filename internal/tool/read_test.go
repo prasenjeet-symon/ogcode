@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // numbered builds a file whose Nth line is literally "lineN", so a returned
@@ -48,13 +49,13 @@ func TestReadTool_StartEndLineAre1BasedInclusive(t *testing.T) {
 	out := readWith(t, path, map[string]any{"start_line": 5, "end_line": 8})
 
 	for _, want := range []string{"line5", "line6", "line7", "line8"} {
-		if !strings.Contains(out, "\t"+want) {
+		if !strings.Contains(out, lineNumberSep+want) {
 			t.Errorf("window missing %s:\n%s", want, out)
 		}
 	}
-	for _, unwanted := range []string{"\tline4", "\tline9"} {
+	for _, unwanted := range []string{lineNumberSep + "line4", lineNumberSep + "line9"} {
 		if strings.Contains(out, unwanted) {
-			t.Errorf("window included %s, so the range is off by one:\n%s", strings.TrimPrefix(unwanted, "\t"), out)
+			t.Errorf("window included %s, so the range is off by one:\n%s", strings.TrimPrefix(unwanted, lineNumberSep), out)
 		}
 	}
 }
@@ -64,10 +65,10 @@ func TestReadTool_StartEndLineAre1BasedInclusive(t *testing.T) {
 func TestReadTool_SingleLineRange(t *testing.T) {
 	out := readWith(t, numbered(t, 20), map[string]any{"start_line": 12, "end_line": 12})
 
-	if !strings.Contains(out, "\tline12") {
+	if !strings.Contains(out, lineNumberSep+"line12") {
 		t.Errorf("single-line range lost its line:\n%s", out)
 	}
-	if strings.Contains(out, "\tline11") || strings.Contains(out, "\tline13") {
+	if strings.Contains(out, lineNumberSep+"line11") || strings.Contains(out, lineNumberSep+"line13") {
 		t.Errorf("single-line range returned neighbours:\n%s", out)
 	}
 }
@@ -77,10 +78,10 @@ func TestReadTool_SingleLineRange(t *testing.T) {
 func TestReadTool_StartLineWithoutEndLine(t *testing.T) {
 	out := readWith(t, numbered(t, 20), map[string]any{"start_line": 18})
 
-	if !strings.Contains(out, "\tline18") || !strings.Contains(out, "\tline20") {
+	if !strings.Contains(out, lineNumberSep+"line18") || !strings.Contains(out, lineNumberSep+"line20") {
 		t.Errorf("open-ended range lost lines:\n%s", out)
 	}
-	if strings.Contains(out, "\tline17") {
+	if strings.Contains(out, lineNumberSep+"line17") {
 		t.Errorf("open-ended range started too early:\n%s", out)
 	}
 }
@@ -90,7 +91,7 @@ func TestReadTool_StartLineWithoutEndLine(t *testing.T) {
 func TestReadTool_EndLineBeyondEOFClamps(t *testing.T) {
 	out := readWith(t, numbered(t, 20), map[string]any{"start_line": 19, "end_line": 500})
 
-	if !strings.Contains(out, "\tline20") {
+	if !strings.Contains(out, lineNumberSep+"line20") {
 		t.Errorf("clamped read lost the last line:\n%s", out)
 	}
 }
@@ -100,18 +101,29 @@ func TestReadTool_EndLineBeyondEOFClamps(t *testing.T) {
 func TestReadTool_OffsetRemains0Based(t *testing.T) {
 	out := readWith(t, numbered(t, 20), map[string]any{"offset": 5, "limit": 2})
 
-	if !strings.Contains(out, "\tline6") || !strings.Contains(out, "\tline7") {
+	if !strings.Contains(out, lineNumberSep+"line6") || !strings.Contains(out, lineNumberSep+"line7") {
 		t.Errorf("offset=5 limit=2 should yield lines 6-7:\n%s", out)
 	}
 }
 
-// An end_line below start_line is incoherent; falling back to the default
-// window beats returning nothing.
-func TestReadTool_InvertedRangeFallsBack(t *testing.T) {
-	out := readWith(t, numbered(t, 20), map[string]any{"start_line": 10, "end_line": 3})
-
-	if !strings.Contains(out, "\tline10") {
-		t.Errorf("inverted range returned nothing usable:\n%s", out)
+// An end_line below start_line is always a caller slip — no amount of file
+// drift produces one — and either reading of the swapped values is a guess.
+// This used to fall back to the default 2000-line window, which handed back
+// far more than the caller meant with nothing to say end_line was ignored;
+// refusing with both numbers named costs one round trip and removes the guess.
+func TestReadTool_InvertedRangeIsRefused(t *testing.T) {
+	path := numbered(t, 20)
+	args, _ := json.Marshal(map[string]any{"path": path, "start_line": 10, "end_line": 3})
+	_, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+	if err == nil {
+		t.Fatal("an inverted range must be refused, not reinterpreted")
+	}
+	// Both numbers have to come back, or the caller cannot see which argument
+	// to fix; "inverted" names the problem.
+	for _, want := range []string{"10", "3", "inverted"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
 	}
 }
 
@@ -214,12 +226,12 @@ func TestReadTool_LongUnmappableFileStillReads(t *testing.T) {
 func TestReadTool_EndLineWithoutStartLine(t *testing.T) {
 	out := readWith(t, numbered(t, 20), map[string]any{"end_line": 3})
 
-	for _, want := range []string{"\tline1", "\tline2", "\tline3"} {
+	for _, want := range []string{lineNumberSep + "line1", lineNumberSep + "line2", lineNumberSep + "line3"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("window missing %s:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "\tline4") {
+	if strings.Contains(out, lineNumberSep+"line4") {
 		t.Errorf("end_line was not honoured, window ran past it:\n%s", out)
 	}
 }
@@ -242,7 +254,7 @@ func TestReadTool_TrailingNewlineDoesNotInflateLineCount(t *testing.T) {
 	// An unranged read of the whole (short) file must not include a phantom
 	// line 21.
 	full := readWith(t, path, map[string]any{})
-	if strings.Contains(full, fmt.Sprintf("%6d\t", 21)) {
+	if strings.Contains(full, fmt.Sprintf("%6d%s", 21, lineNumberSep)) {
 		t.Errorf("read returned a phantom trailing blank line 21:\n%s", full)
 	}
 }
@@ -342,5 +354,127 @@ func TestReadDescription_StatesTheBareLimitCap(t *testing.T) {
 		if !strings.Contains(desc, want) {
 			t.Errorf("read description missing %q; the bare-limit cap is unstated", want)
 		}
+	}
+}
+
+// TestReadTool_OutputRoundTripsIntoEdit is the property that matters about the
+// numbering format: what a caller strips off the front must be unambiguous, so
+// the text it copies is byte-identical to what is in the file.
+//
+// With a tab separator it was not. A once-indented line of Go came back as the
+// number followed by two adjacent tabs — one the separator, one the code's own
+// indentation — with nothing to mark the boundary, and three levels of nesting
+// made it four. Stripping one too many produced an anchor that was right in
+// every respect except its leading whitespace, which "edit" can only report as
+// text that is not in the file. This test reads a tab-indented Go file, takes
+// the content exactly as the format promises, and requires the edit to apply.
+func TestReadTool_OutputRoundTripsIntoEdit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sqlite.go")
+	src := "func open() error {\n" +
+		"\tif _, err := d.Exec(\"PRAGMA foreign_keys = ON\"); err != nil {\n" +
+		"\t\td.Close()\n" +
+		"\t\treturn fmt.Errorf(\"pragma foreign_keys: %w\", err)\n" +
+		"\t}\n" +
+		"}\n"
+	mustWriteFile(t, path, src)
+
+	out := readWith(t, path, map[string]any{})
+
+	// Take lines 3-4 the way the format says to: everything after the FIRST
+	// separator is literal content.
+	var anchor []string
+	for _, rendered := range strings.Split(out, "\n") {
+		i := strings.Index(rendered, lineNumberSep)
+		if i < 0 {
+			continue
+		}
+		content := rendered[i+len(lineNumberSep):]
+		if strings.Contains(content, "d.Close()") || strings.Contains(content, "pragma foreign_keys") {
+			anchor = append(anchor, content)
+		}
+	}
+	if len(anchor) != 2 {
+		t.Fatalf("expected to recover 2 lines, got %d from:\n%s", len(anchor), out)
+	}
+
+	// Both lines are two tabs deep in the source; the recovered text must say so.
+	for _, line := range anchor {
+		if !strings.HasPrefix(line, "\t\t") {
+			t.Errorf("recovered line lost its indentation: %q", line)
+		}
+	}
+
+	// The real proof: it works as an edit anchor.
+	old := strings.Join(anchor, "\n")
+	if _, err := editWith(t, dir, map[string]any{
+		"path": path, "old_string": old, "new_string": "\t\treturn nil",
+	}); err != nil {
+		t.Fatalf("text copied straight out of read did not match the file: %v", err)
+	}
+}
+
+// Empty output is ambiguous — it reads equally as "empty file", "window past
+// EOF" and "something went wrong" — and a caller acting on the wrong reading
+// can reach for a destructive fix. Both empty-looking cases must say what they
+// are instead of returning "".
+func TestReadTool_EmptyFileSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.txt")
+	mustWriteFile(t, path, "")
+
+	out := readWith(t, path, map[string]any{})
+
+	if out == "" {
+		t.Fatal("an empty file must not read back as empty output")
+	}
+	if !strings.Contains(out, "empty") {
+		t.Errorf("output should say the file is empty, got: %q", out)
+	}
+}
+
+// A window past EOF happens honestly: line numbers go stale whenever an edit
+// shrinks the file. It used to come back as empty output with nothing to say
+// why — from which a caller has concluded "the file is empty" and rewritten
+// it. The reply has to carry the file's real extent so the next call can be
+// ranged correctly.
+func TestReadTool_WindowPastEOFExplains(t *testing.T) {
+	path := numbered(t, 20)
+
+	for name, params := range map[string]map[string]any{
+		"stale start_line": {"start_line": 50, "end_line": 80},
+		"stale offset":     {"offset": 20},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := readWith(t, path, params)
+			if out == "" {
+				t.Fatal("a past-EOF window must not read back as empty output")
+			}
+			for _, want := range []string{"only 20 lines", "past the end"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("output should say %q, got: %q", want, out)
+				}
+			}
+		})
+	}
+}
+
+// The per-line cap slices bytes, and a slice through a multi-byte character
+// used to ship the invalid tail to the provider — corrupted content, from
+// which an edit anchor can never be copied. The cut must land on a rune
+// boundary.
+func TestReadTool_LongLineCapKeepsValidUTF8(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.txt")
+	// A multi-byte rune straddling the MaxLineLength boundary.
+	mustWriteFile(t, path, strings.Repeat("a", MaxLineLength-1)+"→ tail\n")
+
+	out := readWith(t, path, map[string]any{})
+
+	if !utf8.ValidString(out) {
+		t.Error("read output contains invalid UTF-8 — the line cap split a rune")
+	}
+	if !strings.Contains(out, lineTruncatedSuffix) {
+		t.Errorf("the long line should be marked truncated:\n%q", out)
 	}
 }

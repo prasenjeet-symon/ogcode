@@ -12,6 +12,17 @@ const (
 	maxAgentMDSize  = 32 * 1024 // 32KB max total across all files
 )
 
+// agentMDFilenames are the instruction files read from each directory, in the
+// order they are added to the prompt.
+//
+// AGENTS.md is the cross-tool convention several other agents already read, so
+// honouring it means a project that has one needs no ogcode-specific file at
+// all. AGENT.md is ogcode's own name and comes second, which under the
+// root-to-leaf ordering below puts it closer to the model — a project keeping
+// both gets the generic instructions first and its ogcode-specific ones last,
+// matching how the outer-to-inner precedence already works.
+var agentMDFilenames = []string{"AGENTS.md", agentMDFilename}
+
 // LoadAgentMD discovers and loads AGENT.md files by walking from dir up to
 // the filesystem root. Files are returned in root-to-leaf order (outermost
 // first), so that closer/leaf files appear later in the concatenated result
@@ -27,6 +38,12 @@ func LoadAgentMD(dir string) string {
 
 	var b strings.Builder
 	var totalSize int
+	// Content already included, so a project carrying AGENTS.md and AGENT.md with
+	// the same text — a copy, or two tools generating the same file — states its
+	// instructions once rather than twice. Only an exact match is skipped: files
+	// that genuinely differ are both the author's, and dropping either would lose
+	// something they wrote.
+	seen := make(map[string]bool, len(paths))
 
 	for _, p := range paths {
 		content, err := os.ReadFile(p)
@@ -41,6 +58,11 @@ func LoadAgentMD(dir string) string {
 		if trimmed == "" {
 			continue
 		}
+		if seen[trimmed] {
+			slog.Debug("skipping duplicate agent instructions", "path", p)
+			continue
+		}
+		seen[trimmed] = true
 
 		remaining := maxAgentMDSize - totalSize
 		if remaining <= 0 {
@@ -77,13 +99,22 @@ func LoadAgentMD(dir string) string {
 // collecting AGENT.md file paths. Returns paths in root-to-leaf order
 // (outermost first, innermost last).
 func discoverAgentMDPaths(dir string) []string {
-	var paths []string
+	// Per directory, innermost-last overall. Collected as groups so a directory
+	// holding both names keeps them adjacent and in agentMDFilenames order after
+	// the reversal below.
+	var groups [][]string
 
 	current := dir
 	for {
-		candidate := filepath.Join(current, agentMDFilename)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			paths = append(paths, candidate)
+		var found []string
+		for _, name := range agentMDFilenames {
+			candidate := filepath.Join(current, name)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				found = append(found, candidate)
+			}
+		}
+		if len(found) > 0 {
+			groups = append(groups, found)
 		}
 
 		parent := filepath.Dir(current)
@@ -93,10 +124,11 @@ func discoverAgentMDPaths(dir string) []string {
 		current = parent
 	}
 
-	// Reverse to get root-to-leaf order
-	for i, j := 0, len(paths)-1; i < j; i, j = i+1, j-1 {
-		paths[i], paths[j] = paths[j], paths[i]
+	// Reverse to get root-to-leaf order, flattening each directory's group with
+	// its own order intact.
+	var paths []string
+	for i := len(groups) - 1; i >= 0; i-- {
+		paths = append(paths, groups[i]...)
 	}
-
 	return paths
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTruncateOutput_NoTruncationWhenSmall(t *testing.T) {
@@ -70,6 +71,25 @@ func TestTruncateOutput_ByteCapAndLongLine(t *testing.T) {
 	}
 }
 
+// The per-line cap slices bytes; a slice through a multi-byte character used
+// to ship invalid UTF-8 to the provider, which JSON-encodes it as replacement
+// characters. The cut must land on a rune boundary, in this shared path and in
+// read's own numbering loop alike.
+func TestTruncateOutput_LineCapCutsAtRuneBoundary(t *testing.T) {
+	// A multi-byte rune straddling the MaxLineLength boundary.
+	in := strings.Repeat("a", MaxLineLength-1) + "→ tail"
+	out, truncated := TruncateOutput(in, KeepHead)
+	if !truncated {
+		t.Fatal("expected the long line to be cut")
+	}
+	if !utf8.ValidString(out) {
+		t.Error("line cap split a rune and produced invalid UTF-8")
+	}
+	if !strings.Contains(out, lineTruncatedSuffix) {
+		t.Errorf("cut line should carry the truncation marker, got tail: %q", out[len(out)-60:])
+	}
+}
+
 func TestReadTool_DefaultLimitAndFooter(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "big.txt")
@@ -115,7 +135,7 @@ func TestReadTool_SmallFileNotTruncated(t *testing.T) {
 	if res.Truncated {
 		t.Fatalf("small file should not be marked truncated")
 	}
-	if !strings.Contains(res.Output, "     1\ta") {
+	if !strings.Contains(res.Output, "     1"+lineNumberSep+"a") {
 		t.Fatalf("expected line-numbered output, got: %q", res.Output)
 	}
 }

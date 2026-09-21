@@ -13,6 +13,13 @@ import (
 // os.WriteFile was called with before.
 const defaultFileMode os.FileMode = 0o644
 
+// preservedModeBits is what a replaced file keeps of its mode: the permission
+// bits plus setuid/setgid/sticky. Mode().Perm() alone masks the special bits
+// away, so rewriting a setuid or sticky file silently stripped them — the
+// in-place write this pattern replaced left them untouched, since it never
+// touched the inode's mode at all.
+const preservedModeBits = fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky
+
 // maxWriteLinkHops bounds how far resolveWriteTarget will follow a chain of
 // symlinks, so a link that points at itself cannot spin.
 const maxWriteLinkHops = 16
@@ -31,10 +38,11 @@ const maxWriteLinkHops = 16
 //
 // Two properties of the in-place write are preserved deliberately:
 //
-//   - The file's mode. Rename replaces the inode, so a fresh temp file's
-//     permissions would silently become the file's — stripping the executable
-//     bit off every script the agent edits. The existing mode is read first and
-//     applied to the temp file.
+//   - The file's mode, special bits included. Rename replaces the inode, so a
+//     fresh temp file's permissions would silently become the file's —
+//     stripping the executable bit off every script the agent edits, and the
+//     setuid/setgid/sticky bits off the rare file that carries them. The
+//     existing mode is read first and applied to the temp file.
 //
 //   - Symlinks are followed, not replaced. Writing through a link updated its
 //     target and left the link a link; renaming over the link itself would
@@ -56,13 +64,16 @@ func writeFileAtomic(path string, data []byte) error {
 
 	mode, replacing := defaultFileMode, false
 	if info, err := os.Lstat(target); err == nil && info.Mode().IsRegular() {
-		mode, replacing = info.Mode().Perm(), true
+		mode, replacing = info.Mode()&preservedModeBits, true
 	}
 
 	// The temp file has to share the target's directory: rename(2) cannot cross
-	// filesystems, and $TMPDIR frequently is one.
+	// filesystems, and $TMPDIR frequently is one. It is created with the plain
+	// permission bits only; any special bits arrive with the chmod below, once
+	// the content is fully written, so no partially-written setuid file ever
+	// exists.
 	dir := filepath.Dir(target)
-	f, err := createTempFile(dir, mode)
+	f, err := createTempFile(dir, mode.Perm())
 	if err != nil {
 		// A file can be writable inside a directory that is not: the atomic path
 		// has to create a sibling, an in-place write does not. Rather than start

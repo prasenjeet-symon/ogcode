@@ -3,6 +3,7 @@ package tool
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Tool-output size caps. Every tool result that would otherwise flood the model
@@ -35,6 +36,34 @@ const (
 // lineTruncatedSuffix is appended to any individual line trimmed to MaxLineLength.
 const lineTruncatedSuffix = "… (line truncated)"
 
+// cutRuneSafe returns s capped to at most max bytes, cutting at a rune
+// boundary so the cap itself never manufactures invalid UTF-8. It backs up at
+// most utf8.UTFMax-1 bytes, so content that was already invalid is cut as-is:
+// the point is not to repair the input but to avoid corrupting valid input.
+func cutRuneSafe(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && max-cut < utf8.UTFMax && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// truncateLongLine caps one line to MaxLineLength bytes and marks the cut. The
+// boundary is rune-aligned: a byte slice at an arbitrary index can split a
+// multi-byte character, and the resulting invalid UTF-8 reaches the provider
+// as a replacement character — corrupted content, from which an edit anchor
+// can never be copied. The byte-cap path below already repairs its cut with
+// ToValidUTF8; this is the same care applied to the per-line cap.
+func truncateLongLine(ln string) (string, bool) {
+	if len(ln) <= MaxLineLength {
+		return ln, false
+	}
+	return cutRuneSafe(ln, MaxLineLength) + lineTruncatedSuffix, true
+}
+
 // TruncateOutput caps s to MaxToolOutputLines and MaxToolOutputBytes, keeping the
 // requested end, and inserts a one-line notice describing what was dropped. It
 // returns the (possibly unchanged) text and whether any truncation happened.
@@ -48,8 +77,8 @@ func TruncateOutput(s string, dir TruncateDirection) (string, bool) {
 	// 1. Per-line cap: trim pathologically long single lines.
 	lineCut := false
 	for i, ln := range lines {
-		if len(ln) > MaxLineLength {
-			lines[i] = ln[:MaxLineLength] + lineTruncatedSuffix
+		if cut, ok := truncateLongLine(ln); ok {
+			lines[i] = cut
 			lineCut = true
 		}
 	}

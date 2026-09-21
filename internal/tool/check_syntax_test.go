@@ -34,10 +34,11 @@ func Target() error {
 	}
 
 	// An edit that drops the closing brace of the body — the classic damage.
-	args, _ := json.Marshal(map[string]string{
-		"path":       "demo.go",
-		"old_string": "\treturn nil\n}",
-		"new_string": "\treturn nil",
+	args, _ := json.Marshal(map[string]any{
+		"path": "demo.go",
+		"edits": []map[string]any{
+			{"old_string": "\treturn nil\n}", "new_string": "\treturn nil"},
+		},
 	})
 	if _, err := (EditTool{}).Execute(context.Background(), args, Context{SessionDir: dir}); err != nil {
 		t.Fatalf("edit: %v", err)

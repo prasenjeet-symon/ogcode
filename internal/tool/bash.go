@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -90,8 +91,36 @@ func (BashTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		output += "\n" + stderr.String()
 	}
 
-	if err != nil && cmdCtx.Err() == context.DeadlineExceeded {
-		output += "\n[command timed out]"
+	// A failure has to be visible in the output. cmd.Run's error used to be
+	// consulted only to spot a timeout, so a command that failed without
+	// printing anything — a grep with no match, a script dying under set -e, a
+	// build step failing quietly — returned an empty, success-shaped result,
+	// and the model carried on as if the step had landed.
+	if err != nil {
+		var note string
+		var exitErr *exec.ExitError
+		switch {
+		case cmdCtx.Err() == context.DeadlineExceeded:
+			note = "[command timed out]"
+		case cmdCtx.Err() == context.Canceled:
+			note = "[command canceled before completing]"
+		case errors.As(err, &exitErr):
+			if code := exitErr.ExitCode(); code >= 0 {
+				note = fmt.Sprintf("[exit status %d]", code)
+			} else {
+				// Killed by a signal: there is no exit code, but the
+				// ProcessState names the signal.
+				note = fmt.Sprintf("[command terminated: %v]", exitErr.ProcessState)
+			}
+		default:
+			// The command never ran at all (shell missing, spawn failure).
+			note = fmt.Sprintf("[command did not run: %v]", err)
+		}
+		if output == "" {
+			output = note
+		} else {
+			output += "\n" + note
+		}
 	}
 
 	// Cap the output keeping the tail: for build/test/log commands the end

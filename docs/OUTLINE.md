@@ -141,8 +141,10 @@ When `isContextLengthError()` detects token limit:
 
 ### 3.4 AGENT.md & MEMORY.md Discovery
 
-- **`LoadAgentMD(dir)`**: Walks from `dir` up to filesystem root, aggregates all `AGENT.md` files
-- **`LoadMemoryMD(dir)`**: Same pattern for `MEMORY.md` files
+- **`LoadAgentMD(dir)`**: Walks from `dir` up to filesystem root, aggregating `AGENTS.md` and `AGENT.md` from every directory
+- `AGENTS.md` is the cross-tool convention other agents read, so a project already carrying one needs no ogcode-specific file; `AGENT.md` is ogcode's own name
+- Within one directory `AGENTS.md` is added first and `AGENT.md` last, so the ogcode-specific file takes precedence. Identical content across the two names is included once
+- **`LoadMemoryMD(dir)`**: Same walk for `MEMORY.md` files
 - Deeper (project-specific) files override root-level ones
 
 ---

@@ -147,11 +147,11 @@ func TestReadTool_AcceptsIntegralFloatArgs(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	for _, want := range []string{"line6", "line7", "line8"} {
-		if !strings.Contains(res.Output, "\t"+want) {
+		if !strings.Contains(res.Output, lineNumberSep+want) {
 			t.Errorf("window missing %s:\n%s", want, res.Output)
 		}
 	}
-	if strings.Contains(res.Output, "\tline5") || strings.Contains(res.Output, "\tline9") {
+	if strings.Contains(res.Output, lineNumberSep+"line5") || strings.Contains(res.Output, lineNumberSep+"line9") {
 		t.Errorf("window wrong:\n%s", res.Output)
 	}
 }

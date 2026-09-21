@@ -6,6 +6,7 @@ import SessionSidebar from '../components/session-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
 import ModelSelector from '../components/model-selector';
 import Logo from '../components/logo';
+import { getVersion } from '../api/client';
 
 const SUGGESTIONS: string[] = [
   'Explain this codebase',
@@ -93,10 +94,17 @@ function HomeContent() {
 
   const [text, setText] = createSignal('');
   const [submitting, setSubmitting] = createSignal(false);
+  const [version, setVersion] = createSignal('');
   let textareaRef: HTMLTextAreaElement | undefined;
 
   onMount(() => {
     // Don't auto-focus — the hero is a landing experience, not a bare input.
+    getVersion()
+      .then(info => setVersion(info.version.replace(/^v/, '')))
+      .catch(() => {
+        // The version badge is informational; keep the landing page usable if
+        // the version endpoint is temporarily unavailable.
+      });
   });
 
   // Auto-resize textarea
@@ -177,7 +185,7 @@ function HomeContent() {
               </div>
               <span class="text-[14px] font-semibold tracking-tight text-zinc-100">ogcode</span>
               <span class="ml-1.5 px-1.5 py-[1px] rounded text-[9px] font-mono font-medium text-[color:var(--accent)] bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/20">
-                v{''}0.19.1
+                v{version()}
               </span>
             </div>
             <div class="flex items-center gap-3">

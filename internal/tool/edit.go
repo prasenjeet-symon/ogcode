@@ -14,39 +14,41 @@ type EditTool struct{}
 
 func (EditTool) ID() string { return "edit" }
 func (EditTool) Description() string {
-	return "Make one or more search-and-replace edits to a file. Each old_string must match exactly one place unless replace_all is set, so include enough surrounding context to identify the occurrence you mean. Several edits to one file belong in a single call via \"edits\": they apply together or not at all, so a failure part-way cannot leave the file half-changed. The result reports any syntax error the edits introduced, so a broken edit surfaces immediately rather than at the next build."
+	return "Make one or more search-and-replace edits to a file. Every change goes in the \"edits\" array — a single change is an array of one. The edits apply in order and ALL-OR-NOTHING: if any anchor is missing or ambiguous, nothing is written. Each old_string must match exactly one place unless replace_all is set, so include enough surrounding context to identify the occurrence you mean. The result reports any syntax error the edits introduced, so a broken edit surfaces immediately rather than at the next build."
 }
 
 func (EditTool) Parameters() json.RawMessage {
-	// The uniqueness rule is stated here, in the schema, because it is the one
-	// part of this tool's contract a caller cannot infer from the file: a block
-	// that looks unique in the region being read may repeat elsewhere. Left
-	// undocumented, the rule is discovered only by tripping over it, which costs
-	// a failed call on exactly the repetitive files where edits matter most.
+	// There is exactly one way to express an edit here, and that is deliberate.
+	// This tool used to accept a top-level old_string/new_string as well as the
+	// array, and callers routinely filled both — the flat pair out of habit, the
+	// array because the tool asked for it — producing a call that could not be
+	// read either way and had to be refused. Documenting the exclusivity did not
+	// stop it; removing the second form does.
+	//
+	// The uniqueness rule is stated here too, because it is the one part of this
+	// contract a caller cannot infer from the file: a block that looks unique in
+	// the region being read may repeat elsewhere.
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File path to edit"},
-			"old_string": {"type": "string", "description": "Exact text to find, including indentation. Must match EXACTLY ONE place in the file unless replace_all is true. When a block repeats — the same step in several CI jobs, the same line in several functions — extend it with neighbouring lines until only the intended occurrence matches."},
-			"new_string": {"type": "string", "description": "Text to replace it with. Always send it, even when replacing with nothing: \"\" means delete old_string, and omitting the field is rejected rather than read as a deletion."},
-			"replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match. Use when the text genuinely should change everywhere, such as removing one repeated step from every job in a workflow. The result reports how many were replaced."},
-			"expected_count": {"type": "integer", "description": "Optional assertion: fail unless old_string matches exactly this many times. Worth setting alongside replace_all, where a miscounted anchor would otherwise rewrite more of the file than intended."},
 			"edits": {
 				"type": "array",
-				"description": "Several edits to this one file, applied in order and ALL-OR-NOTHING: every one is checked first, and if any fails the file is left untouched. Prefer this over separate edit calls to the same path — it is one round trip and cannot half-apply a refactor. Each entry takes the same old_string / new_string / replace_all / expected_count as above. Later entries match against the result of earlier ones.",
+				"minItems": 1,
+				"description": "Every change to this file, in order. ONE change is an array of one entry — there is no other way to pass an edit. They apply all-or-nothing: each is checked first, and if any fails the file is left untouched, so a refactor can never half-apply. Later entries match against the result of earlier ones.",
 				"items": {
 					"type": "object",
 					"properties": {
-						"old_string": {"type": "string"},
-						"new_string": {"type": "string"},
-						"replace_all": {"type": "boolean"},
-						"expected_count": {"type": "integer"}
+						"old_string": {"type": "string", "description": "Exact text to find, including indentation. Must match EXACTLY ONE place in the file unless replace_all is true. When a block repeats — the same step in several CI jobs, the same line in several functions — extend it with neighbouring lines until only the intended occurrence matches. Write newlines as plain \\n even in a CRLF file: when every line of the file ends in CRLF, the tool matches and writes the file's own endings."},
+						"new_string": {"type": "string", "description": "Text to replace it with. Always send it, even when replacing with nothing: \"\" means delete old_string, and omitting the field is rejected rather than read as a deletion."},
+						"replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match. Use when the text genuinely should change everywhere, such as removing one repeated step from every job in a workflow. The result reports how many were replaced."},
+						"expected_count": {"type": "integer", "description": "Optional assertion: fail unless old_string matches exactly this many times. Worth setting alongside replace_all, where a miscounted anchor would otherwise rewrite more of the file than intended."}
 					},
 					"required": ["old_string", "new_string"]
 				}
 			}
 		},
-		"required": ["path"]
+		"required": ["path", "edits"]
 	}`)
 }
 
@@ -76,23 +78,28 @@ type resolvedHunk struct {
 
 func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var input struct {
-		Path          string     `json:"path"`
-		OldString     string     `json:"old_string"`
-		NewString     *string    `json:"new_string"`
-		ReplaceAll    bool       `json:"replace_all"`
-		ExpectedCount int        `json:"expected_count"`
-		Edits         []editHunk `json:"edits"`
+		Path  string     `json:"path"`
+		Edits []editHunk `json:"edits"`
+		// Decoded only to recognise the flat shape this tool no longer takes, so
+		// a caller reaching for it gets told the exact form to send instead of a
+		// puzzling "edits is required". They are never applied: accepting them
+		// would restore the two competing forms that made a call ambiguous.
+		// All four per-hunk fields are watched, not just the string pair — a
+		// top-level replace_all or expected_count used to be dropped without a
+		// word, leaving the caller certain an assertion was active when nothing
+		// was checking it.
+		LegacyOld        *string `json:"old_string"`
+		LegacyNew        *string `json:"new_string"`
+		LegacyReplaceAll *bool   `json:"replace_all"`
+		LegacyExpected   *int    `json:"expected_count"`
 	}
 	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 
-	hunks, err := collectHunks(input.Edits, editHunk{
-		OldString:     input.OldString,
-		NewString:     input.NewString,
-		ReplaceAll:    input.ReplaceAll,
-		ExpectedCount: input.ExpectedCount,
-	})
+	sawLegacy := input.LegacyOld != nil || input.LegacyNew != nil ||
+		input.LegacyReplaceAll != nil || input.LegacyExpected != nil
+	hunks, err := collectHunks(input.Edits, sawLegacy)
 	if err != nil {
 		return Result{}, err
 	}
@@ -127,6 +134,14 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		content, replaced = next, replaced+n
 	}
 
+	if content == string(data) {
+		// Every hunk resolved, yet the file would be written back byte-identical:
+		// changes that cancel out across entries. Reporting that as an edit is the
+		// same lie as the single no-op above, so it fails here too rather than
+		// leaving the caller to discover it from an empty diff.
+		return Result{}, fmt.Errorf("the edits resolved but cancel out — the file would be unchanged; check that each new_string differs from its old_string")
+	}
+
 	newContent := []byte(content)
 	// Atomic: an edit that fails to write must not consume the file it was
 	// editing. The original is still on disk, untouched, if this returns an
@@ -153,37 +168,29 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 // stays the common case and is simply a one-hunk list; mixing the two forms in
 // one call is rejected rather than guessed at, because either reading of that
 // intent could silently skip an edit the caller believed they had made.
-func collectHunks(edits []editHunk, single editHunk) ([]resolvedHunk, error) {
-	hasSingle := single.OldString != "" || single.NewString != nil
-	switch {
-	case len(edits) > 0 && hasSingle:
-		return nil, fmt.Errorf("pass either edits or a single old_string/new_string, not both")
-	case len(edits) > 0:
-		out := make([]resolvedHunk, 0, len(edits))
-		for i, h := range edits {
-			r, err := resolveHunk(h)
-			if err != nil {
-				return nil, fmt.Errorf("edits[%d]: %w", i, err)
-			}
-			out = append(out, r)
-		}
-		return out, nil
-	case single.OldString == "" && single.NewString == nil:
-		// An empty old_string matches everywhere (Go's Count treats it as
-		// occurring once between every rune), so it either falls into the
-		// "appears N times" ambiguity error with a confusing count, or — on an
-		// empty file, where that count is exactly 1 — silently "succeeds" by
-		// inserting new_string into a file whose content was never actually
-		// matched against anything. Reject it up front with a clear reason
-		// instead of either of those.
-		return nil, fmt.Errorf("old_string must not be empty")
-	default:
-		r, err := resolveHunk(single)
-		if err != nil {
-			return nil, err
-		}
-		return []resolvedHunk{r}, nil
+// collectHunks validates the edit list. It takes sawLegacyFields rather than the
+// old single-edit values because those are no longer a way to express an edit —
+// only a shape worth recognising in order to correct.
+func collectHunks(edits []editHunk, sawLegacyFields bool) ([]resolvedHunk, error) {
+	if sawLegacyFields {
+		return nil, fmt.Errorf(
+			"this tool takes every change in the \"edits\" array — top-level old_string/new_string/" +
+				"replace_all/expected_count are not read. Resend as edits:[{\"old_string\": \"…\", " +
+				"\"new_string\": \"…\"}], one entry per change, with replace_all/expected_count inside " +
+				"the entry they apply to")
 	}
+	if len(edits) == 0 {
+		return nil, fmt.Errorf("edits must contain at least one entry, each with old_string and new_string")
+	}
+	out := make([]resolvedHunk, 0, len(edits))
+	for i, h := range edits {
+		r, err := resolveHunk(h)
+		if err != nil {
+			return nil, fmt.Errorf("edits[%d]: %w", i, err)
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 // resolveHunk validates one hunk and settles its replacement text.
@@ -205,6 +212,22 @@ func resolveHunk(h editHunk) (resolvedHunk, error) {
 // applyHunk resolves one hunk against the current content, returning the new
 // content and how many occurrences it replaced.
 func applyHunk(content string, h resolvedHunk, path string) (string, int, error) {
+	if h.oldStr == h.newStr {
+		// Replacing text with itself finds its anchor, writes identical bytes and
+		// looks exactly like a successful edit — the tool used to report "replaced
+		// 1 occurrence" for it. A caller told its change landed, seeing the file
+		// unchanged, has no option but to send it again, which is how this turned
+		// into a loop of green ticks that moved nothing.
+		return "", 0, fmt.Errorf("new_string is identical to old_string, so this edit would change nothing — send the text you actually want in its place")
+	}
+	h = normalizeHunkEOL(content, h)
+	if h.oldStr == h.newStr {
+		// They differed as sent and became equal only under the file's own line
+		// endings: the region already reads as new_string. Distinct message from
+		// the plain no-op above, because to the caller the two strings look
+		// different and "identical" would read as a tool fault.
+		return "", 0, fmt.Errorf("once matched against this file's CRLF line endings, new_string is identical to old_string — the file already has this content")
+	}
 	count := strings.Count(content, h.oldStr)
 	switch {
 	case count == 0:
@@ -231,6 +254,43 @@ func applyHunk(content string, h resolvedHunk, path string) (string, int, error)
 		n = count
 	}
 	return strings.Replace(content, h.oldStr, h.newStr, n), n, nil
+}
+
+// normalizeHunkEOL adapts an LF-authored hunk to a file whose newlines are
+// uniformly CRLF.
+//
+// Models emit \n. In a CRLF file that made every multi-line old_string a
+// guaranteed miss — a bare \n cannot occur in content where every \n follows
+// a \r — and every multi-line new_string that did land (via a single-line
+// anchor) spliced LF lines into a CRLF file, leaving mixed endings that
+// nothing flagged. Converting the hunk to the file's own endings fixes both,
+// and can never change the outcome of a call that would have succeeded: the
+// unconverted form had no way to match.
+//
+// Only uniformly-CRLF files qualify. In a mixed file an LF anchor may be a
+// deliberate reference to one of its LF lines — possibly the caller fixing
+// the endings themselves — so its hunks are taken exactly as sent. A hunk
+// that carries any \r of its own is likewise left alone: the caller has
+// already chosen its endings.
+func normalizeHunkEOL(content string, h resolvedHunk) resolvedHunk {
+	if !uniformlyCRLF(content) {
+		return h
+	}
+	if strings.Contains(h.oldStr, "\n") && !strings.Contains(h.oldStr, "\r") {
+		h.oldStr = strings.ReplaceAll(h.oldStr, "\n", "\r\n")
+	}
+	if strings.Contains(h.newStr, "\n") && !strings.Contains(h.newStr, "\r") {
+		h.newStr = strings.ReplaceAll(h.newStr, "\n", "\r\n")
+	}
+	return h
+}
+
+// uniformlyCRLF reports whether s has newlines and every one of them is a
+// CRLF pair. Anything mixed is not this function's business: only a file
+// whose convention is unambiguous is safe to adapt a hunk to.
+func uniformlyCRLF(s string) bool {
+	n := strings.Count(s, "\n")
+	return n > 0 && n == strings.Count(s, "\r\n")
 }
 
 // labelHunkError attributes a failure to its hunk, so a caller sending six
@@ -300,33 +360,157 @@ func precedingContext(lines []string, lineNo int) string {
 			continue
 		}
 		if len(s) > maxLen {
-			s = s[:maxLen] + "…"
+			// Cut at a rune boundary: this line is quoted into an error message,
+			// and a byte slice through a multi-byte character would mangle it.
+			s = cutRuneSafe(s, maxLen) + "…"
 		}
 		return s
 	}
 	return ""
 }
 
-// notFoundHint explains a miss that is really a whitespace mismatch. Retyping a
-// block by hand is the usual way old_string goes wrong — a tab rendered as
-// spaces, an indent lost, a CRLF file read as LF — and the bare "not found"
-// sends the caller looking for the wrong thing entirely. Returns "" when the
-// text is genuinely absent.
+// notFoundHint explains a miss that is really a whitespace mismatch, and — when
+// it can identify exactly one candidate — hands back the file's own bytes for
+// that region.
+//
+// Retyping a block is the usual way old_string goes wrong: a tab emitted as
+// spaces, an indent level lost, a CRLF region in a mixed-endings file (a
+// uniformly-CRLF file never reaches here — normalizeHunkEOL adapts the hunk
+// before matching). The bare "not found" sends the caller hunting for text
+// that is, in substance, right there. Naming the problem was still not enough
+// on its own — knowing the whitespace is wrong does not tell you what it
+// should be, so the caller re-reads the file and spends another round trip
+// guessing again. Quoting the region ends that: the answer is in the error,
+// ready to copy.
 func notFoundHint(content, old string) string {
-	n := strings.Count(trimEachLine(content), trimEachLine(old))
-	if n == 0 {
-		return ""
+	// An anchor carrying the read tool's truncation marker can never match: the
+	// marker replaced the rest of a line longer than read shows, so the bytes
+	// the caller anchored on are not the file's. Without this the miss reports
+	// as a bare not-found — the indent-blind pass cannot rescue a cut line
+	// either — and the caller re-reads and copies the same marker again.
+	if strings.Contains(old, lineTruncatedSuffix) {
+		return fmt.Sprintf(" — old_string contains %q, which is the read tool's truncation marker, not file"+
+			" content: the real line continues past what read displayed. Anchor on a shorter distinctive"+
+			" part of that line instead (old_string need not span whole lines), or edit a neighbouring"+
+			" region that avoids the long line", lineTruncatedSuffix)
 	}
-	return fmt.Sprintf(" — but it matches %d place(s) once the indentation of each line is ignored, so the anchor is right and the whitespace is not; re-read the region and copy its exact leading whitespace", n)
+	fileLines := strings.Split(content, "\n")
+	oldLines := strings.Split(old, "\n")
+	// A trailing newline leaves an empty final element that would never match a
+	// line of the file; drop it so the run is what the caller actually anchored on.
+	if len(oldLines) > 1 && strings.TrimSpace(oldLines[len(oldLines)-1]) == "" {
+		oldLines = oldLines[:len(oldLines)-1]
+	}
+	starts := indentBlindMatches(fileLines, oldLines)
+	switch len(starts) {
+	case 0:
+		return ""
+	case 1:
+		excerpt, complete := excerptLines(fileLines, starts[0], len(oldLines))
+		instruction := "Send that verbatim as old_string."
+		if !complete {
+			// A cut excerpt must not carry the "verbatim" instruction: its cut
+			// marker is not file content, and a caller obeying literally would
+			// anchor on it — the very mistake the marker check above unwinds.
+			instruction = fmt.Sprintf("The region is too long to quote in full — re-read lines %d-%d and copy the exact text.",
+				starts[0]+1, starts[0]+len(oldLines))
+		}
+		return fmt.Sprintf(" — but ignoring each line's indentation and line endings it matches exactly one"+
+			" place, at line %d, so %s. The file has:\n%s\n%s",
+			starts[0]+1, describeWhitespaceDiff(fileLines, oldLines, starts[0]), excerpt, instruction)
+	default:
+		return fmt.Sprintf(" — but ignoring each line's indentation it matches %d places (lines %s),"+
+			" so the anchor is right and the whitespace is not; re-read one of those regions and copy its"+
+			" exact leading whitespace", len(starts), formatLineNumbers(starts))
+	}
 }
 
-// trimEachLine strips the leading and trailing whitespace of every line, so two
-// texts can be compared on their content alone. Trailing \r goes with it, which
-// is what makes this catch a CRLF file matched against LF text.
-func trimEachLine(s string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = strings.TrimSpace(l)
+// describeWhitespaceDiff names what actually separates the file's region from
+// the anchor: leading whitespace, line endings, or both. "Only the leading
+// whitespace is wrong" used to be asserted unconditionally, which for a CRLF
+// region sent the caller hunting through indentation that was right all along
+// while the real difference sat invisibly at the end of every line.
+func describeWhitespaceDiff(fileLines, oldLines []string, start int) string {
+	leading, endings := false, false
+	for j, want := range oldLines {
+		got := fileLines[start+j]
+		if strings.TrimRight(got, "\r") != strings.TrimRight(want, "\r") {
+			leading = true
+		}
+		if strings.HasSuffix(got, "\r") != strings.HasSuffix(want, "\r") {
+			endings = true
+		}
 	}
-	return strings.Join(lines, "\n")
+	switch {
+	case leading && endings:
+		return "both the leading whitespace and the line endings differ (this region ends its lines in \\r\\n)"
+	case endings:
+		return "only the line endings differ — this region ends its lines in \\r\\n (CRLF) while old_string uses \\n"
+	default:
+		return "only the leading whitespace is wrong"
+	}
+}
+
+// indentBlindMatches reports every index in fileLines where the run oldLines
+// appears, comparing each line only by its trimmed content. Trimming both ends
+// takes trailing \r with it, which is what lets this catch a CRLF file matched
+// against LF text.
+func indentBlindMatches(fileLines, oldLines []string) []int {
+	if len(oldLines) == 0 || len(oldLines) > len(fileLines) {
+		return nil
+	}
+	const maxReported = 5
+	var starts []int
+	for i := 0; i+len(oldLines) <= len(fileLines); i++ {
+		match := true
+		for j, want := range oldLines {
+			if strings.TrimSpace(fileLines[i+j]) != strings.TrimSpace(want) {
+				match = false
+				break
+			}
+		}
+		if match {
+			starts = append(starts, i)
+			if len(starts) == maxReported {
+				break
+			}
+		}
+	}
+	return starts
+}
+
+// excerptLines renders n lines of the file from start, exactly as they are on
+// disk so the text can be copied straight back. Long blocks are capped: the
+// point is to hand over an anchor, not to reprint the file. complete reports
+// whether every line made it — a caller telling its reader to copy the excerpt
+// verbatim must not do so when part of it is this function's cut marker.
+func excerptLines(fileLines []string, start, n int) (excerpt string, complete bool) {
+	const maxBytes = 2000
+	end := start + n
+	if end > len(fileLines) {
+		end = len(fileLines)
+	}
+	var b strings.Builder
+	complete = true
+	for i := start; i < end; i++ {
+		if b.Len()+len(fileLines[i]) > maxBytes {
+			fmt.Fprintf(&b, "… (%d more lines)", end-i)
+			complete = false
+			break
+		}
+		if i > start {
+			b.WriteString("\n")
+		}
+		b.WriteString(fileLines[i])
+	}
+	return b.String(), complete
+}
+
+// formatLineNumbers renders 0-based indices as 1-based line numbers.
+func formatLineNumbers(starts []int) string {
+	out := make([]string, len(starts))
+	for i, s := range starts {
+		out[i] = strconv.Itoa(s + 1)
+	}
+	return strings.Join(out, ", ")
 }
