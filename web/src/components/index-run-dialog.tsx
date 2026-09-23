@@ -2,7 +2,7 @@ import { createResource, onMount, onCleanup, createMemo, Show, For } from 'solid
 import { useServer } from '../context/server';
 import { useDocIndex } from '../context/docindex';
 import { getIndexPlan, type ModelInfo } from '../api/client';
-import { modelGroup, subProviderLabel } from '../lib/providers';
+import { modelGroup } from '../lib/providers';
 
 /**
  * The run dialog is where indexing gets paid for, so it opens by saying what it
@@ -11,17 +11,16 @@ import { modelGroup, subProviderLabel } from '../lib/providers';
  * — is this run worth starting — somewhere the person clicking could not see it.
  */
 
-// Models group the way they do everywhere else in the app — by collection
-// where there is one — so the free pool reads as "ogcode" rather than leaking
-// raw ids like "ogcode-openrouter" into a heading.
+// Models group the way they do everywhere else in the app — by collection where
+// there is one.
 const GROUP_LABEL: Record<string, string> = {
   anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter',
-  google: 'Google', mistral: 'Mistral', ollama: 'Ollama', ogcode: 'ogcode free pool',
+  google: 'Google', mistral: 'Mistral', ollama: 'Ollama',
 };
 
 const GROUP_COLOR: Record<string, string> = {
   anthropic: '#fb923c', openai: '#34d399', openrouter: '#a78bfa',
-  google: '#60a5fa', mistral: '#f43f5e', ollama: '#14b8a6', ogcode: '#34d399',
+  google: '#60a5fa', mistral: '#f43f5e', ollama: '#14b8a6',
 };
 
 const price = (n: number) => (n % 1 === 0 ? String(n) : n.toFixed(2));
@@ -235,13 +234,6 @@ export default function IndexRunDialog(props: {
                                 </Show>
                               </div>
                               <span class="text-[12.5px] font-medium truncate">{model.name}</span>
-                              <Show when={subProviderLabel(model as ModelInfo)}>
-                                {(label) => (
-                                  <span class="text-[9px] px-1 py-0.5 rounded bg-[color:var(--bg-base)] text-[color:var(--text-muted)] shrink-0">
-                                    {label()}
-                                  </span>
-                                )}
-                              </Show>
                               <Show when={model.default}>
                                 <span class="text-[9px] text-[color:var(--text-muted)] uppercase tracking-wider shrink-0">default</span>
                               </Show>

@@ -67,7 +67,14 @@ func (s *Server) routes() http.Handler {
 		r.Post("/providers/config/{id}", s.handleSetProviderConfig)
 		r.Post("/providers/config/{id}/validate", s.handleValidateProviderConfig)
 		r.Get("/providers/ollama/status", s.handleOllamaStatus)
-		r.Get("/providers/free", s.handleFreeProviders)
+
+		// OGX: the OG Lab plan. Connect hands off to the browser; callback is
+		// the redirect target that browser comes back to (top-level
+		// navigation, not fetch).
+		r.Post("/ogx/connect", s.handleOGXConnect)
+		r.Get("/ogx/callback", s.handleOGXCallback)
+		r.Get("/ogx/status", s.handleOGXStatus)
+		r.Delete("/ogx", s.handleOGXDisconnect)
 
 		r.Get("/pricing", s.handleGetPricing)
 
@@ -96,6 +103,8 @@ func (s *Server) routes() http.Handler {
 				r.Get("/message", s.handleGetMessages)
 				r.Get("/permission", s.handleListPermissions)
 				r.Post("/permission/{permissionID}", s.handlePermissionReply)
+				r.Get("/question", s.handleListQuestions)
+				r.Post("/question/{questionID}", s.handleReplyQuestion)
 			})
 		})
 

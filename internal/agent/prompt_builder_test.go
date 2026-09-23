@@ -1013,3 +1013,38 @@ func TestIndexStatusPromptPointsAtTheDescent(t *testing.T) {
 		t.Errorf("the empty-index line should not send the agent descending: %q", indexStatusPrompt(0))
 	}
 }
+
+// The section used to lead with the prohibition — "most ambiguity is yours to
+// resolve" — and an agent reading it reasoned its way out of asking at all,
+// including for a quiz whose topic was the user's to give. The rule now leads,
+// positively, and the find-it-out-yourself boundary is the qualifier on it. Both
+// halves have to survive: the rule alone turns the tool into a crutch, the
+// boundary alone is what the model already rejected.
+func TestAskUserPrompt_LeadsWithTheRuleAndKeepsTheBoundary(t *testing.T) {
+	p := askUserPrompt()
+
+	for _, want := range []string{
+		"rather than in prose", // the channel, not a last resort
+		"quiz",                 // the interactive case the old text never contemplated
+		"survey",
+		"walk-through",
+		"Ask each step through the tool",
+		"if you can find it out yourself, find it out", // the boundary, stated positively
+		"source code",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("askUserPrompt is missing %q", want)
+		}
+	}
+
+	// The rule must come before the boundary, and the old prohibition text must
+	// not lead — that ordering is the failure this fixes.
+	rule := strings.Index(p, "rather than in prose")
+	limit := strings.Index(p, "find it out yourself")
+	if rule < 0 || limit < 0 || rule > limit {
+		t.Errorf("the section does not lead with the rule before its limit (rule=%d limit=%d)", rule, limit)
+	}
+	if strings.Contains(p, "Most ambiguity is yours to resolve") {
+		t.Error("the old prohibition opener is back, ahead of the rule")
+	}
+}

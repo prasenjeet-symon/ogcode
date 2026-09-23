@@ -1141,64 +1141,6 @@ textarea.auto-resize {
 }
 
 /* ============================================================
-   Settings slider
-   `accent-color` alone paints a native slider in the theme but
-   keeps each platform's own knob. The settings page borrows the
-   phone-style control instead: a thin track and a large round
-   white knob that is easy to grab with a pointer and reads the
-   same on every OS. Both engines need their own selectors, and
-   neither inherits from the other, so the two blocks are not
-   redundant.
-   ============================================================ */
-.slider-ios {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  height: 22px;
-}
-.slider-ios::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-}
-.slider-ios::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  margin-top: -7px;
-  border-radius: 50%;
-  background: #fff;
-  border: none;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  cursor: grab;
-}
-.slider-ios:active::-webkit-slider-thumb {
-  cursor: grabbing;
-}
-.slider-ios::-moz-range-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-}
-.slider-ios::-moz-range-progress {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-.slider-ios::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  border: none;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-}
-.slider-ios:disabled {
-  opacity: 0.5;
-}
-
-/* ============================================================
    Mobile pass
    Two ideas run through this whole section:
    1. Viewport reality — dvh instead of 100vh so iOS Safari's URL bar

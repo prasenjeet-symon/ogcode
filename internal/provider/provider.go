@@ -805,13 +805,13 @@ func (r *Registry) RefreshModels() {
 // ProviderPriority is the stable order used to choose a default provider when a
 // session does not specify a model.
 //
-// User-configured first-party providers always win. Free-tier providers
-// (keyed "ogcode-<collection>") are appended so the app works out-of-the-box
-// with the community key pool, but never override a user's own credentials.
+// A user-configured first-party provider always wins.
+//
+// "ogx" sits with the first-party providers: a connected subscription is a
+// deliberate user choice. It ranks below ollama because a local daemon costs the
+// user nothing per token, while OGX draws on a metered plan.
 var ProviderPriority = []string{
-	"anthropic", "openai", "openrouter", "ollama",
-	"ogcode-openrouter", "ogcode-cerebras", "ogcode-sambanova",
-	"ogcode-github_models", "ogcode-nvidia",
+	"anthropic", "openai", "openrouter", "ollama", "ogx",
 }
 
 // Default returns the highest-priority registered provider, or nil if the
@@ -835,8 +835,8 @@ func (r *Registry) Default() Provider {
 // Ollama when anything else is available. A registered ollama provider only
 // means "the binary exists (or a base URL was saved)" — if the daemon is down
 // and OLLAMA_API_KEY is unset, the first prompt would die with connection
-// refused, and ollama's presence in ProviderPriority would otherwise shadow the
-// community free pool and every usable provider behind it.
+// refused, and ollama's presence in ProviderPriority would otherwise shadow
+// every usable provider behind it.
 //
 // An ollama provider is considered usable when OLLAMA_API_KEY is set or the
 // daemon answers a probe. Non-ollama providers are always considered usable;

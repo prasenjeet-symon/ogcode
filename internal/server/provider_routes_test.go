@@ -26,10 +26,6 @@ func newTestServer(t *testing.T) *Server {
 	} {
 		t.Setenv(k, "")
 	}
-	// Point the free key pool at a dead address so loadProviderMap's free-pool
-	// fetch fails instantly instead of stalling on the real GitHub URL.
-	t.Setenv("OGCODE_FREE_KEYS_URL", "http://127.0.0.1:9/free-keys-unavailable")
-	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 
 	tmp := t.TempDir()
 	pdb, err := db.Open(filepath.Join(tmp, "ogcode.db"))
@@ -44,7 +40,6 @@ func newTestServer(t *testing.T) *Server {
 	t.Cleanup(func() { gdb.Close() })
 
 	srv := &Server{db: pdb, globalDB: gdb, registry: provider.NewRegistry(), dir: tmp}
-	provider.ResetFreePoolForTest()
 	return srv
 }
 
@@ -182,76 +177,6 @@ func TestOllamaStatusEndpoint(t *testing.T) {
 	}
 }
 
-// TestFreePoolProvidersEndToEnd exercises the whole community-key-pool feature
-// through the real registration + HTTP path: a pool JSON is served over HTTP,
-// loadProviderMap fetches it and registers the free providers, and the
-// GET /api/providers/free endpoint reports them in priority order with their
-// pool keys masked out.
-func TestFreePoolProvidersEndToEnd(t *testing.T) {
-	const secretKey = "smb_super_secret_pool_key"
-	poolSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"version": 1,
-			"providers": {
-				"cerebras":      {"collection":"Cerebras","baseURL":"https://api.cerebras.ai/v1","keys":["csk_secret"],"defaultModel":"llama-3.3-70b"},
-				"sambanova":     {"collection":"SambaNova","baseURL":"https://api.sambanova.ai/v1","keys":["` + secretKey + `"],"defaultModel":"Meta-Llama-3.3-70B-Instruct"},
-				"github_models": {"collection":"GitHub Models","baseURL":"https://models.inference.ai.azure.com","keys":["ghp_secret"],"defaultModel":"gpt-4o-mini"}
-			}
-		}`))
-	}))
-	defer poolSrv.Close()
-
-	srv := newTestServer(t)
-	// Override the dead URL that newTestServer installs, then reset the pool
-	// singleton so the next fetch actually hits our live test server.
-	t.Setenv("OGCODE_FREE_KEYS_URL", poolSrv.URL)
-	provider.ResetFreePoolForTest()
-
-	// Rebuild the registry so the free-tier providers get provisioned.
-	srv.reloadProviders()
-
-	// 1) The free providers must be registered under their "ogcode-<id>" IDs.
-	got := map[string]bool{}
-	for _, id := range srv.registry.List() {
-		got[id] = true
-	}
-	for _, want := range []string{"ogcode-cerebras", "ogcode-sambanova", "ogcode-github_models"} {
-		if !got[want] {
-			t.Fatalf("expected free provider %q registered, got registry %v", want, srv.registry.List())
-		}
-	}
-
-	// 2) The endpoint reports them, Cerebras first (highest priority among the
-	//    served providers), with keys never present in the payload.
-	h := srv.routes()
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/providers/free", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/providers/free = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), secretKey) {
-		t.Fatalf("pool key leaked to the client in /api/providers/free response: %s", rec.Body.String())
-	}
-	var free []struct {
-		Collection   string `json:"collection"`
-		BaseURL      string `json:"baseUrl"`
-		DefaultModel string `json:"defaultModel"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &free); err != nil {
-		t.Fatalf("decode free providers: %v (body: %s)", err, rec.Body.String())
-	}
-	if len(free) != 3 {
-		t.Fatalf("expected 3 free providers, got %d (%v)", len(free), free)
-	}
-	if free[0].Collection != "Cerebras" {
-		t.Fatalf("expected Cerebras first (priority order), got %q", free[0].Collection)
-	}
-	if free[0].DefaultModel == "" || free[0].BaseURL == "" {
-		t.Fatalf("free provider payload missing baseUrl/defaultModel: %+v", free[0])
-	}
-}
-
 // stubProvider is a minimal Provider whose Models() returns a fixed list — used
 // to exercise the /api/models handler deterministically without any network.
 type stubProvider struct {
@@ -267,17 +192,17 @@ func (s stubProvider) StreamChat(ctx context.Context, req provider.StreamRequest
 
 // TestModelsSingleGlobalDefault verifies /api/models collapses the several
 // per-provider defaults into exactly one global default — the default model of
-// the highest-priority registered provider (ogcode-openrouter ranks above
-// ogcode-cerebras) — and that this default is enabled for a fresh user.
+// the highest-priority registered provider (openrouter ranks above ollama)
+// — and that this default is enabled for a fresh user.
 func TestModelsSingleGlobalDefault(t *testing.T) {
 	srv := newTestServer(t)
 	srv.registry.ReplaceProviders(map[string]provider.Provider{
-		"ogcode-openrouter": stubProvider{id: "ogcode-openrouter", models: []provider.ModelInfo{
-			{ID: "cohere/north-mini-code:free", ProviderID: "ogcode-openrouter", Default: true, ActiveByDefault: true},
-			{ID: "qwen/qwen3-coder:free", ProviderID: "ogcode-openrouter", ActiveByDefault: true},
+		"openrouter": stubProvider{id: "openrouter", models: []provider.ModelInfo{
+			{ID: "anthropic/claude-sonnet-4-6", ProviderID: "openrouter", Default: true, ActiveByDefault: true},
+			{ID: "qwen/qwen3-coder", ProviderID: "openrouter", ActiveByDefault: true},
 		}},
-		"ogcode-cerebras": stubProvider{id: "ogcode-cerebras", models: []provider.ModelInfo{
-			{ID: "llama-3.3-70b", ProviderID: "ogcode-cerebras", Default: true, ActiveByDefault: true},
+		"ollama": stubProvider{id: "ollama", models: []provider.ModelInfo{
+			{ID: "llama3.1", ProviderID: "ollama", Default: true, ActiveByDefault: true},
 		}},
 	})
 
@@ -296,19 +221,19 @@ func TestModelsSingleGlobalDefault(t *testing.T) {
 		t.Fatalf("decode models: %v", err)
 	}
 	var defaults []string
-	northEnabled := false
+	sonnetEnabled := false
 	for _, m := range models {
 		if m.Default {
 			defaults = append(defaults, m.ID)
 		}
-		if m.ID == "cohere/north-mini-code:free" {
-			northEnabled = m.Enabled
+		if m.ID == "anthropic/claude-sonnet-4-6" {
+			sonnetEnabled = m.Enabled
 		}
 	}
-	if len(defaults) != 1 || defaults[0] != "cohere/north-mini-code:free" {
-		t.Fatalf("expected North Mini Code as the sole default, got %v", defaults)
+	if len(defaults) != 1 || defaults[0] != "anthropic/claude-sonnet-4-6" {
+		t.Fatalf("expected Claude Sonnet as the sole default, got %v", defaults)
 	}
-	if !northEnabled {
-		t.Fatal("the default free model must be enabled for a new user")
+	if !sonnetEnabled {
+		t.Fatal("the default model must be enabled for a new user")
 	}
 }

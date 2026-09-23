@@ -10,6 +10,7 @@ import ResourcePill from '../components/resource-pill';
 import SubagentIndicator from '../components/subagent-indicator';
 import ScrcpyStatusPill from '../components/scrcpy-status-pill';
 import { DrawerToggle } from '../components/sidebar-shell';
+import AskUserDialog from '../components/ask-user-dialog';
 import { NotFoundPanel } from './not-found';
 
 export default function Chat() {
@@ -101,6 +102,11 @@ function ChatContent() {
         <PromptInput />
       </div>
       </Show>
+
+      {/* The agent's question, if it is blocked on one. Rendered above the chat
+          rather than inside it: the batch belongs to the session, not the
+          transcript position, and must stay visible wherever the user scrolled. */}
+      <AskUserDialog />
     </div>
   );
 }

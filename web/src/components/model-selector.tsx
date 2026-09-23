@@ -2,13 +2,14 @@ import { createSignal, For, Show, createMemo } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { useSession } from '../context/session';
 import type { ModelInfo } from '../api/client';
-import { modelGroup, subProviderLabel } from '../lib/providers';
+import { modelGroup } from '../lib/providers';
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   openrouter: 'OpenRouter',
   ollama: 'Ollama',
+  ogx: 'OGX',
   google: 'Google',
   mistral: 'Mistral',
 };
@@ -18,6 +19,7 @@ const PROVIDER_DOT: Record<string, string> = {
   openai: 'bg-emerald-400',
   openrouter: 'bg-violet-400',
   ollama: 'bg-sky-400',
+  ogx: 'bg-cyan-400',
   google: 'bg-blue-400',
   mistral: 'bg-rose-400',
 };
@@ -27,6 +29,7 @@ const PROVIDER_TEXT: Record<string, string> = {
   openai: 'text-emerald-400',
   openrouter: 'text-violet-400',
   ollama: 'text-sky-400',
+  ogx: 'text-cyan-400',
   google: 'text-blue-400',
   mistral: 'text-rose-400',
 };
@@ -35,7 +38,6 @@ const PROVIDER_TEXT: Record<string, string> = {
 // (Gemini, DeepSeek, Groq, …) get their own visual identity in the picker
 // instead of all appearing as "OpenAI".
 const COLLECTION_DOT: Record<string, string> = {
-  ogcode: 'bg-emerald-400',
   Gemini: 'bg-blue-400',
   DeepSeek: 'bg-indigo-400',
   Groq: 'bg-amber-400',
@@ -44,7 +46,6 @@ const COLLECTION_DOT: Record<string, string> = {
 };
 
 const COLLECTION_TEXT: Record<string, string> = {
-  ogcode: 'text-emerald-400',
   Gemini: 'text-blue-400',
   DeepSeek: 'text-indigo-400',
   Groq: 'text-amber-400',
@@ -60,19 +61,6 @@ function groupDot(group: string): string {
 }
 function groupText(group: string): string {
   return COLLECTION_TEXT[group] || PROVIDER_TEXT[group] || 'text-zinc-500';
-}
-
-// Per-model tag styling for the underlying free-pool provider (Groq, OpenRouter,
-// …) shown inside the aggregated "ogcode" group.
-const SUBPROVIDER_STYLE: Record<string, string> = {
-  Groq: 'text-amber-300 bg-amber-500/10',
-  OpenRouter: 'text-violet-300 bg-violet-500/10',
-  Cerebras: 'text-orange-300 bg-orange-500/10',
-  SambaNova: 'text-sky-300 bg-sky-500/10',
-  NVIDIA: 'text-green-300 bg-green-500/10',
-};
-function subProviderStyle(label: string): string {
-  return SUBPROVIDER_STYLE[label] || 'text-zinc-400 bg-zinc-500/10';
 }
 
 interface ModelSelectorProps {
@@ -213,13 +201,6 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
                           {model.name}
                         </span>
                         <div class="flex items-center gap-1 shrink-0">
-                          <Show when={subProviderLabel(model)}>
-                            {(label) => (
-                              <span class={`text-[9px] px-1 py-0.5 rounded font-medium ${subProviderStyle(label())}`}>
-                                {label()}
-                              </span>
-                            )}
-                          </Show>
                           <Show when={model.inputPricePerM > 0 || model.outputPricePerM > 0}>
                             <span class="text-[9px] text-zinc-500 bg-zinc-500/10 px-1 py-0.5 rounded font-mono tabular-nums">
                               ${fmtPrice(model.inputPricePerM)}/${fmtPrice(model.outputPricePerM)}

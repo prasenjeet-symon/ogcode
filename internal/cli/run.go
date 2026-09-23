@@ -155,18 +155,17 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 			registry.Register(p)
 		}
 	}
-
-	// Headless runs deserve the same zero-config experience as the server: pull
-	// in the community free-tier providers when no user credentials exist.
-	freeProviders := make(map[string]provider.Provider)
-	provider.AddFreePoolProviders(context.Background(), freeProviders)
-	for _, p := range freeProviders {
-		registry.Register(p)
+	// A connected OG Lab subscription runs inference through its gateway. Only
+	// a link carrying a plan is registered — see session.OGXAccount.HasPlan.
+	if acct, e := session.GetOGXAccount(globalDatabase); e == nil && acct.HasPlan() {
+		if p, e := provider.NewOGXProvider(acct.Token); e == nil {
+			registry.Register(p)
+		}
 	}
 
 	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
-		return fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL (the community free pool was unreachable)")
+		return fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL")
 	}
 
 	// Tool registry. The core set is shared with the server (see
@@ -296,10 +295,6 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		MaxSteps:        runMaxTurns,
 		Skills:          skillLoader,
 		SearchBridge:    searchBridge,
-		// The deep-research pipeline reads its fan-out and page budget from the
-		// same stored config the UI writes, so a headless run researches the way
-		// the project is configured to.
-		SearchParams: func() session.SearchConfig { return *searchCfg },
 		// A headless run honours the same per-project switch the UI writes, so
 		// `ogcode run` in a project behaves as that project is configured to.
 		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },

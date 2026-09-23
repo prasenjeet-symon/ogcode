@@ -74,6 +74,7 @@ In Build Mode, Ogcode can:
 - Create and edit source code, documentation, configuration, and tests.
 - Run shell commands, builds, tests, formatters, and project-specific workflows.
 - Investigate failures, read the relevant source, and try a different fix instead of blindly retrying.
+- Ask a batched set of clarifying questions when the answer is yours to give and a wrong guess would waste work.
 - Produce a concise summary of what changed and how it was verified.
 
 Sensitive tools can be configured to allow, deny, or ask for approval. Ogcode is powerful enough to modify your machine, so review permissions and deployment boundaries carefully.
@@ -341,6 +342,8 @@ Ogcode detects providers from the environment. Set at least one of:
 
 You can also use `~/.config/ogcode/config.json` for global settings and `ogcode.json` at the project root for project settings. Environment variables override config values.
 
+OGX is the subscription plan sold by OG Lab, connected from the settings screen rather than an environment variable: signing in on the OG Lab side links this install, and the plan's models then run through OG Lab's gateway. `OGX_GATEWAY_URL` overrides the gateway base URL (default `https://ogx.ogcode.xyz/v1`) and `OGX_CONNECT_URL` overrides the connect page.
+
 ```json
 {
   "providers": {
@@ -371,7 +374,7 @@ Agentic memory is enabled with:
 export OGCODE_AGENTIC_MEMORY_MODE=true
 ```
 
-Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. See the [documentation](docs/OUTLINE.md) for provider, skill, search, remote deployment, and control-plane configuration.
+Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. The deep-research pipeline reads four pages of 6000 characters by default; tune it with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and `OGCODE_SEARCH_PAGE_CHARS` (1000–20000). See the [documentation](docs/OUTLINE.md) for provider, skill, search, remote deployment, and control-plane configuration.
 
 ---
 

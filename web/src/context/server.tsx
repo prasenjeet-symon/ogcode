@@ -3,6 +3,7 @@ import { createSignal } from 'solid-js';
 import { getPath, getConfig, getVCS, getMode, getResources } from '../api/client';
 import type { ResourceSample } from '../api/client';
 import { createSSE, type SSEEvent } from '../api/sse';
+import { projectName } from '../lib/paths';
 
 interface ServerContextValue {
   directory: () => string;
@@ -60,9 +61,14 @@ export const ServerProvider: ParentComponent = (props) => {
   // reconnect (a new EventSource restarts the server's per-connection numbering).
   let lastSeq = 0;
 
-  // Load server info
+  // Load server info. The workspace name names the browser tab too, so a window
+  // full of ogcode tabs is told apart by the project each one serves rather
+  // than the single word baked into index.html (which stays as the pre-load
+  // title — the app has no directory until this resolves, and a stale one from
+  // a previous project would be worse than the product's own name).
   getPath().then((info) => {
     setDirectory(info.directory);
+    if (info.directory) document.title = projectName(info.directory);
   }).catch(() => { /* ignore */ });
 
   // Load VCS info

@@ -99,6 +99,19 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
+	// Open the global config DB too. The OGX link (and the provider credentials
+	// the settings UI writes) live there, not in the project DB.
+	home, _ := os.UserHomeDir()
+	globalDBPath := filepath.Join(home, ".ogcode", "config.db")
+	if err := os.MkdirAll(filepath.Dir(globalDBPath), 0o755); err != nil {
+		return fmt.Errorf("create global config dir: %w", err)
+	}
+	globalDatabase, err := db.Open(globalDBPath)
+	if err != nil {
+		return fmt.Errorf("open global config database: %w", err)
+	}
+	defer globalDatabase.Close()
+
 	b := bus.New(256)
 	sessionStore := session.NewStore(database)
 	docindexStore := docindex.NewStore(database)
@@ -129,18 +142,17 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		p, _ := provider.NewProviderWithConfig("ollama", ollamaKey, ollamaBaseURL)
 		registry.Register(p)
 	}
-
-	// Headless runs deserve the same zero-config experience as the server: pull
-	// in the community free-tier providers when no user credentials exist.
-	freeProviders := make(map[string]provider.Provider)
-	provider.AddFreePoolProviders(context.Background(), freeProviders)
-	for _, p := range freeProviders {
-		registry.Register(p)
+	// A connected OG Lab subscription, stored globally and registered only when
+	// the link carries a plan (see session.OGXAccount.HasPlan).
+	if acct, err := session.GetOGXAccount(globalDatabase); err == nil && acct.HasPlan() {
+		if p, err := provider.NewOGXProvider(acct.Token); err == nil {
+			registry.Register(p)
+		}
 	}
 
 	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
-		return fmt.Errorf("no LLM provider configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_API_KEY (the community free pool was unreachable)")
+		return fmt.Errorf("no LLM provider configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_API_KEY")
 	}
 
 	toolRegistry := tool.NewRegistry()

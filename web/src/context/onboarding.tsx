@@ -21,11 +21,9 @@ interface OnboardingContextValue {
 
 const OnboardingContext = createContext<OnboardingContextValue>();
 
-// Onboarding is disabled for new users: the community free-tier key pool makes
-// the app usable out of the box, so nobody is forced through the setup wizard.
-// `needsOnboarding` is therefore always false. The /onboarding page itself
-// stays reachable manually (e.g. from Settings) for users who want to add their
-// own provider keys.
+// Onboarding is disabled: `needsOnboarding` is always false. The /onboarding
+// page itself stays reachable manually (e.g. from Settings) for users who want
+// to add their own provider keys.
 
 export const OnboardingProvider: ParentComponent = (props) => {
   const [loaded, setLoaded] = createSignal(false);
@@ -35,9 +33,9 @@ export const OnboardingProvider: ParentComponent = (props) => {
 
   const refresh = async () => {
     try {
-      // Onboarding is disabled — new users get working free models out of the
-      // box, so they are never forced into the setup wizard. We still probe
-      // Ollama so the (manually reachable) onboarding page can show its status.
+      // Onboarding is disabled, so nobody is ever forced into the setup
+      // wizard. We still probe Ollama so the (manually reachable) onboarding
+      // page can show its status.
       const ollama = await getOllamaStatus().catch(() => null);
       setOllamaStatus(ollama);
       setNeedsOnboarding(false);

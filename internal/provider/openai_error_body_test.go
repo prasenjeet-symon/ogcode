@@ -25,7 +25,7 @@ func TestOpenAIStreamChat_400BodyReachesError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := &OpenAIProvider{id: "ogcode-openrouter", baseURL: srv.URL, model: "test-model"}
+	p := &OpenAIProvider{id: "openrouter", baseURL: srv.URL, model: "test-model"}
 	_, err := p.StreamChat(context.Background(), StreamRequest{
 		Model:    "test-model",
 		Messages: []ModelMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
@@ -83,10 +83,10 @@ func TestOpenAIStreamChat_RetriesTransientBodyError(t *testing.T) {
 }
 
 // TestOpenRouterAttributionHeaders covers the attribution gate. It keyed on the
-// provider id "openrouter", so the community free pool — whose id is
-// "ogcode-openrouter" — reached the same endpoint without the headers and went
-// unattributed. The gate is the base URL now, so every id that points at
-// OpenRouter is credited, and other endpoints still stay clean.
+// provider id, so an OpenAI-compatible provider pointed at OpenRouter by base
+// URL reached the endpoint without the headers and went unattributed. The gate
+// is the base URL now, so every id that points at OpenRouter is credited, and
+// other endpoints still stay clean.
 func TestOpenRouterAttributionHeaders(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -95,7 +95,7 @@ func TestOpenRouterAttributionHeaders(t *testing.T) {
 		want    bool
 	}{
 		{"user's own openrouter provider", "openrouter", "https://openrouter.ai/api/v1", true},
-		{"free pool openrouter provider", "ogcode-openrouter", "https://openrouter.ai/api/v1", true},
+		{"openai-compatible provider aimed at openrouter", "custom-openai", "https://openrouter.ai/api/v1", true},
 		{"openai provider aimed at openrouter", "openai", "https://OpenRouter.ai/api/v1", true},
 		{"local ollama endpoint", "ollama", "http://localhost:11434/v1", false},
 		{"openai proper", "openai", "https://api.openai.com/v1", false},

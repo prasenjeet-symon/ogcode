@@ -6,50 +6,79 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
-	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
 // Deep-research pipeline tuning. searchResultCount / searchMaxCandidates /
-// searchSynthMaxTokens are internal plumbing; fetch-top-K and per-page chars are
-// user-configurable (settings screen → searchTuning).
+// searchSynthMaxTokens are internal plumbing; the two knobs below are fixed at
+// the values that read well across queries — there is deliberately no settings
+// control for them. OGCODE_SEARCH_FETCH_TOP_K and OGCODE_SEARCH_PAGE_CHARS let a
+// deployment that wants to dig deeper (or answer cheaper) say so without a
+// rebuild; values outside the bounds are clamped, and an unparseable one is
+// ignored with a warning rather than failing the search.
 const (
 	searchResultCount    = 20   // results requested for the query from the bridge
 	searchMaxCandidates  = 24   // cap on unique results fed to the ranker
 	searchSynthMaxTokens = 4096 // output budget for the final synthesis call
+
+	defaultSearchFetchTopK = 4    // ranked URLs read in full before synthesis
+	defaultSearchPageChars = 6000 // per-page character cap fed into synthesis
+
+	minSearchFetchTopK, maxSearchFetchTopK = 1, 10
+	minSearchPageChars, maxSearchPageChars = 1000, 20000
 )
 
-// searchTuning holds the user-configurable knobs for one deep-research run.
+// Environment overrides for the two knobs above.
+const (
+	fetchTopKEnv = "OGCODE_SEARCH_FETCH_TOP_K"
+	pageCharsEnv = "OGCODE_SEARCH_PAGE_CHARS"
+)
+
+// searchTuning holds the knobs in effect for one deep-research run.
 type searchTuning struct {
 	fetchTopK int // number of ranked URLs fetched in full
 	pageChars int // per-page character cap fed into synthesis
 }
 
-// tuning resolves the current knobs from SearchParams (fresh from the config DB,
-// so changes apply without a restart), falling back to defaults when unset.
+// tuning resolves the knobs: the built-in defaults, overridden by the
+// environment when it names a usable value. Read per call so a long-lived
+// server picks up an override the same way any other env-configured setting
+// applies, and so tests can drive it with t.Setenv.
 func (lr *LoopRunner) tuning() searchTuning {
-	t := searchTuning{
-		fetchTopK: session.DefaultSearchFetchTopK,
-		pageChars: session.DefaultSearchPageChars,
+	return searchTuning{
+		fetchTopK: envInt(fetchTopKEnv, defaultSearchFetchTopK, minSearchFetchTopK, maxSearchFetchTopK),
+		pageChars: envInt(pageCharsEnv, defaultSearchPageChars, minSearchPageChars, maxSearchPageChars),
 	}
-	if lr.SearchParams != nil {
-		c := lr.SearchParams()
-		// GetSearchConfig already clamps, but guard here too for non-DB callers.
-		if c.FetchTopK > 0 {
-			t.fetchTopK = c.FetchTopK
-		}
-		if c.PageChars > 0 {
-			t.pageChars = c.PageChars
-		}
+}
+
+// envInt reads an integer override from name, falling back to def when it is
+// unset or unparseable and clamping it into [lo, hi] when it is not.
+func envInt(name string, def, lo, hi int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
 	}
-	return t
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		slog.Warn("ignoring unparseable search tuning override", "env", name, "value", raw)
+		return def
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // RunSearchSession runs the deep-research pipeline for a query and returns the

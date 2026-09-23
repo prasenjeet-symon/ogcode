@@ -25,6 +25,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/project"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/question"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
@@ -62,10 +63,6 @@ type LoopRunner struct {
 	// (RunSearchSession) and by web_search and fetch_page. nil when search is
 	// disabled — deep_search is only registered when it is non-nil.
 	SearchBridge search.Backend
-	// SearchParams, when set, returns the current deep-research tuning read fresh
-	// from the global config DB, so settings-screen changes take effect on the next
-	// deep_search without a restart. nil → built-in defaults.
-	SearchParams func() session.SearchConfig
 	// IndexedFileCount, when set, reports how many files the project index holds
 	// for a directory. It lets the system prompt state up front whether
 	// codebase_map has anything to return, instead of making every session in an
@@ -79,6 +76,12 @@ type LoopRunner struct {
 	// only prompts when its context carries WithPermissionGating — so headless
 	// runs (task, breakdown, note, search) never block on an approval UI.
 	Permissions *permission.Manager
+	// Questions carries the ask_user round trip: a batch of questions the agent
+	// cannot answer itself, put to the user through the UI, blocking until they
+	// reply. nil disables it (CLI, tests, sub-agents). Like Permissions, it is
+	// only offered when the context carries WithPermissionGating, so headless
+	// runs never block on a dialog nobody can see.
+	Questions *question.Manager
 	// Skills resolves the skills available in a project directory. nil (CLI,
 	// tests) means no skill is ever listed and the skill tool has nothing to
 	// load, which is the behaviour that predates the feature.
@@ -386,9 +389,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// attached when the agent was actually handed the tool. Turn-constant, so
 	// unlike the toolset this is set once and never revisited.
 	pressure.setOffered(compactContextOffered)
-	toolIDs := agent.Tools
+	// ask_user is offered only where a question manager is wired AND the loop is
+	// interactive — permission gating is set by the server's session loop alone,
+	// which is exactly the context in which a prompt has a user to reach. A
+	// headless run (CLI, indexer) and a sub-agent therefore never see it. Like
+	// compact_context, this decides both a tool on the wire and a system entry,
+	// so it is resolved once per turn and the two stay in step.
+	askUserOffered := agent.canAskUser() && PermissionGatingEnabled(ctx) &&
+		lr.Questions != nil && lr.Tools.Get("ask_user") != nil
+	toolIDs := append([]string{}, agent.Tools...)
 	if compactContextOffered {
-		toolIDs = append(append([]string{}, toolIDs...), "compact_context")
+		toolIDs = append(toolIDs, "compact_context")
+	}
+	if askUserOffered {
+		toolIDs = append(toolIDs, "ask_user")
 	}
 	// The agent as this turn actually sees it. executeTool checks its Tools as an
 	// allowlist, so it must match what was offered on the wire. toolIDs is
@@ -654,6 +668,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// here alongside the other per-step blocks.
 		if compactContextOffered {
 			systemPrompts = appendSystemEntry(systemPrompts, agent, compactContextPrompt())
+		}
+		if askUserOffered {
+			systemPrompts = appendSystemEntry(systemPrompts, agent, askUserPrompt())
 		}
 		// Out here rather than in entry [0] for the same reason: the user can
 		// add or edit a skill while the session is open, and the cached prefix
@@ -2534,6 +2551,45 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 	}
 }
 
+// AskUser puts a batch of questions to the user and blocks until they answer,
+// the loop is cancelled, or the client goes away. It is the ask_user tool's
+// implementation, wired in as tool.AskUserTool{Ask: lr.AskUser} so the tool
+// package keeps no dependency on this one.
+//
+// It mirrors requestPermission exactly: register the pending request, announce
+// it on the bus, then wait on a buffered channel the HTTP handler writes to from
+// another goroutine — the first client to answer wins, because the manager
+// deletes the entry before handing it over.
+func (lr *LoopRunner) AskUser(ctx context.Context, sessionID string, questions []question.Question) (question.Reply, error) {
+	if lr.Questions == nil {
+		return question.Reply{}, fmt.Errorf("ask_user is not available in this environment")
+	}
+	req := question.Request{
+		ID:        question.NewQuestionID(),
+		SessionID: sessionID,
+		Questions: questions,
+	}
+	pr := lr.Questions.Create(req)
+	lr.Bus.Publish("question.requested", req)
+	slog.Info("awaiting user answers", "session", sessionID, "question", req.ID, "count", len(questions))
+
+	select {
+	case <-ctx.Done():
+		// The tool child context was cancelled (mid-loop guidance) or the whole
+		// loop was aborted while we waited. Drop the pending batch so it can't
+		// leak, and let the caller unwind on the context error.
+		lr.Questions.Remove(req.ID)
+		lr.Bus.Publish("question.replied", map[string]string{
+			"sessionId":  sessionID,
+			"questionId": string(req.ID),
+			"response":   "cancelled",
+		})
+		return question.Reply{}, ctx.Err()
+	case reply := <-pr.ReplyCh:
+		return reply, nil
+	}
+}
+
 // riskLLMTimeout bounds the Auto-mode LLM risk check so it can't stall a tool
 // call for long. On timeout/error the verdict is RiskAsk (fail safe).
 const riskLLMTimeout = 12 * time.Second
@@ -3934,9 +3990,13 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 
 	// Run a capped child loop. Strip the parent's LoopControl so the child does
 	// not drain the parent's mid-loop guidance or overwrite its cancel funcs
-	// (same rationale as RunSearchSession), and clear Permissions — the sub-agent
-	// is headless with no UI to answer prompts (and its read-only toolset needs
-	// no gating anyway). Cancellation still propagates via ctx.
+	// (same rationale as RunSearchSession), and clear Permissions and Questions —
+	// the sub-agent is headless with no UI to answer prompts or questions (and
+	// its read-only toolset needs no gating anyway). Clearing Questions is not
+	// redundant with the agent-id check in RunLoop: WithoutLoopControl strips
+	// LoopControl only, NOT the permission-gating value, so the child inherits a
+	// gated context and this nil is what stands between it and a dialog nobody
+	// is watching. Cancellation still propagates via ctx.
 	childCtx := WithoutLoopControl(ctx)
 	childRunner := *lr
 	childRunner.MaxSteps = subagentMaxSteps
@@ -3944,6 +4004,7 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 	// auto-resume, or a runaway sub-agent would silently extend its own budget.
 	childRunner.MaxAutoResumes = 0
 	childRunner.Permissions = nil
+	childRunner.Questions = nil
 	if err := childRunner.RunLoop(childCtx, sess.ID, "subagent", 0, 0); err != nil {
 		return "", fmt.Errorf("subagent loop: %w", err)
 	}
@@ -4036,7 +4097,8 @@ func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scop
 	}
 
 	// Carry the trusted scope on the child context for memory_map, and strip the
-	// parent's loop control/permissions exactly as RunTaskSession does.
+	// parent's loop control, permissions and questions exactly as RunTaskSession
+	// does.
 	childCtx := tool.WithRecallScope(WithoutLoopControl(ctx), tool.RecallScope{
 		Scope:     scope,
 		SessionID: targetSessionID,
@@ -4045,6 +4107,7 @@ func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scop
 	childRunner := *lr
 	childRunner.MaxSteps = subagentMaxSteps
 	childRunner.Permissions = nil
+	childRunner.Questions = nil
 	if err := childRunner.RunLoop(childCtx, sess.ID, "memory-recall", 0, 0); err != nil {
 		return "", fmt.Errorf("memory-recall loop: %w", err)
 	}

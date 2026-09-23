@@ -784,8 +784,8 @@ func noPackageManagerDirsPrompt() string {
 
 // modelFamily classifies a provider/model into a prompt family so the coding
 // prompt can be tuned to how that family follows instructions. Model-name signals
-// win over the provider id, because aggregators (OpenRouter, the free pool) serve
-// Claude, GPT, and Gemini models under a single provider id.
+// win over the provider id, because aggregators such as OpenRouter serve Claude,
+// GPT, and Gemini models under a single provider id.
 func modelFamily(providerID, modelID string) string {
 	p := strings.ToLower(providerID)
 	m := strings.ToLower(modelID)
@@ -890,4 +890,32 @@ Do not call it on a short turn, or when the material still in context is what yo
 Leave out the raw file contents you have already drawn conclusions from — that is the weight you are trying to shed. Keep the conclusions, drop the transcript.
 
 If you find afterwards that the summary is missing something, read it again rather than guessing. That costs one call; guessing costs correctness.`
+}
+
+// askUserPrompt returns the guidance for asking the user a question. It is
+// emitted only when the ask_user tool is actually on the wire — a gated,
+// interactive session whose loop has a question manager — so an agent reading
+// it can always act on it.
+//
+// The rule is stated positively first: a question you would otherwise put to the
+// user in prose belongs in the tool, options and all. The one thing this must
+// not license is the tool as a crutch — a question the agent could have answered
+// itself from the code, a file or the web costs the user a full round trip for
+// nothing — so the "find it out yourself" boundary is stated as the qualifier on
+// the rule rather than as a prohibition ahead of it.
+func askUserPrompt() string {
+	return `## Asking the User
+
+Whatever you need to ask the user, ask it with "ask_user" rather than in prose: it opens the answer dialog, where your options become buttons and one click settles a question. That covers anything the user would otherwise have to type a reply to — a preference or constraint only they know, a choice between approaches with real trade-offs — and equally a back-and-forth the user is meant to play along with: a quiz, a survey, a step-by-step walk-through. Ask each step through the tool, not as prose.
+
+The one limit: **if you can find it out yourself, find it out.** The source code, a file, the web, a command — all of that is yours to read, search and run, and a question there is a round trip spent on something already answered. Ask only what a person's answer is genuinely needed for.
+
+Ask everything you need in **one call**. The batch is shown as a short set of screens in a single dialog, so a second call is a second interruption.
+
+- **Header**: a short title for the screen (2-5 words).
+- **Question**: one clear sentence — state what you are asking and why it matters.
+- **Options**: 2-4 concrete answers you propose, best first, each with a one-line description. Mark "multiSelect" only when several could apply at once; otherwise it is pick-one.
+- **Freeform**: the user can always type an answer of their own, so your options need not be exhaustive — a good set of suggestions is faster to answer than an open field, and never a constraint.
+
+The turn pauses until they answer. A blank answer means the user declined to pick: for a preference that is licence to use your judgement and say what you chose; for a question whose content you actually need — a quiz answer, a fact — they did not answer, so do not invent one.`
 }

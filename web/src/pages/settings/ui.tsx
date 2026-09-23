@@ -267,51 +267,6 @@ export function TextField(props: {
   );
 }
 
-/** A slider with its value set beside it. Dragging a number beats typing one
- *  when the range is small and the effect is felt rather than exact —
- *  `accent-color` paints the native control in the project's own theme. */
-export function Slider(props: {
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  disabled?: boolean;
-  ariaLabel: string;
-  format?: (v: number) => string;
-  onInput: (v: number) => void;
-  onCommit: (v: number) => void;
-}) {
-  const shown = () => (props.format ? props.format(props.value) : String(props.value));
-  return (
-    <span class="flex items-center gap-4 w-full max-w-[24rem]">
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        step={props.step ?? 1}
-        value={props.value}
-        disabled={props.disabled}
-        aria-label={props.ariaLabel}
-        onInput={(e) => props.onInput(Number(e.currentTarget.value))}
-        onChange={(e) => props.onCommit(Number(e.currentTarget.value))}
-        class="slider-ios flex-1 cursor-pointer"
-        style={{
-          // WebKit has no ::-moz-range-progress, so the filled portion is a
-          // hard-stopped gradient positioned from the current value.
-          'background-image': `linear-gradient(var(--accent), var(--accent))`,
-          'background-size': `${((props.value - props.min) / Math.max(1, props.max - props.min)) * 100}% 4px`,
-          'background-position': 'left center',
-          'background-repeat': 'no-repeat',
-          'accent-color': 'var(--accent)',
-        }}
-      />
-      <span class="shrink-0 min-w-[4rem] font-mono text-meta tabular-nums text-[color:var(--text-secondary)]">
-        {shown()}
-      </span>
-    </span>
-  );
-}
-
 export function Select(props: {
   value: string;
   options: Array<{ value: string; label: string }>;

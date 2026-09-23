@@ -6,7 +6,6 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
-	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
 type scriptedSearchProvider struct {
@@ -42,26 +41,34 @@ func TestOneShotLLMReturnsStreamErrors(t *testing.T) {
 }
 
 func TestTuning(t *testing.T) {
-	// nil SearchParams → built-in defaults
+	// No override → the built-in defaults.
 	lr := &LoopRunner{}
-	if got := lr.tuning(); got.fetchTopK != session.DefaultSearchFetchTopK ||
-		got.pageChars != session.DefaultSearchPageChars {
-		t.Fatalf("nil SearchParams: got %+v, want defaults", got)
+	if got := lr.tuning(); got.fetchTopK != defaultSearchFetchTopK ||
+		got.pageChars != defaultSearchPageChars {
+		t.Fatalf("no override: got %+v, want defaults", got)
 	}
 
-	// explicit override is honoured
-	lr.SearchParams = func() session.SearchConfig {
-		return session.SearchConfig{FetchTopK: 8, PageChars: 12000}
-	}
+	// An environment override is honoured, so a deployment can tune the pipeline
+	// without a rebuild.
+	t.Setenv(fetchTopKEnv, "8")
+	t.Setenv(pageCharsEnv, "12000")
 	if got := lr.tuning(); got.fetchTopK != 8 || got.pageChars != 12000 {
 		t.Fatalf("override: got %+v, want {8,12000}", got)
 	}
 
-	// zero values from the accessor fall back to defaults (defensive)
-	lr.SearchParams = func() session.SearchConfig { return session.SearchConfig{} }
-	if got := lr.tuning(); got.fetchTopK != session.DefaultSearchFetchTopK ||
-		got.pageChars != session.DefaultSearchPageChars {
-		t.Fatalf("zero accessor: got %+v, want defaults", got)
+	// Out-of-range values are clamped rather than handed to the pipeline.
+	t.Setenv(fetchTopKEnv, "100")
+	t.Setenv(pageCharsEnv, "50")
+	if got := lr.tuning(); got.fetchTopK != maxSearchFetchTopK || got.pageChars != minSearchPageChars {
+		t.Fatalf("clamped: got %+v, want {%d,%d}", got, maxSearchFetchTopK, minSearchPageChars)
+	}
+
+	// An unparseable value falls back to the default instead of failing the run.
+	t.Setenv(fetchTopKEnv, "lots")
+	t.Setenv(pageCharsEnv, "")
+	if got := lr.tuning(); got.fetchTopK != defaultSearchFetchTopK ||
+		got.pageChars != defaultSearchPageChars {
+		t.Fatalf("unparseable: got %+v, want defaults", got)
 	}
 }
 

@@ -245,6 +245,52 @@ export interface PendingPermissionAPI {
   patterns: string[];
 }
 
+// One option the model proposed for a question. The dialog always offers a
+// free-text field as well, so this set is a suggestion, never a constraint.
+export interface QuestionOptionAPI {
+  label: string;
+  description?: string;
+}
+
+export interface QuestionAPI {
+  header?: string;
+  question: string;
+  options?: QuestionOptionAPI[];
+  multiSelect?: boolean;
+}
+
+// A whole ask_user batch as sent to the UI. It is rendered as one dialog with a
+// screen per question.
+export interface PendingQuestionAPI {
+  questionId: string;
+  sessionId: string;
+  questions: QuestionAPI[];
+}
+
+// The reply to one question: option labels chosen, plus whatever the user typed.
+// Either may be empty — an empty answer means "no preference, proceed".
+export interface QuestionAnswerAPI {
+  selected?: string[];
+  text?: string;
+}
+
+// Answer a pending ask_user batch. The agent loop is blocked waiting on this
+// reply; the backend returns 404 when the batch is already gone (already
+// answered or cancelled), which the caller can safely ignore.
+export function replyQuestion(sessionId: string, questionId: string, answers: QuestionAnswerAPI[]): Promise<void> {
+  return fetchAPI(`/session/${sessionId}/question/${questionId}`, {
+    method: 'POST',
+    body: JSON.stringify({ answers }),
+  });
+}
+
+// List the pending (unanswered) ask_user batches for a session. The UI uses this
+// to restore the dialog when switching back to a session — the agent loop stays
+// blocked on the batch even while it is off-screen.
+export function listPendingQuestions(sessionId: string): Promise<PendingQuestionAPI[]> {
+  return fetchAPI(`/session/${sessionId}/question`);
+}
+
 export function abortSession(sessionId: string): Promise<void> {
   return fetchAPI(`/session/${sessionId}/abort`, { method: 'POST' });
 }
@@ -336,6 +382,29 @@ export function setProviderConfig(id: string, cfg: Omit<ProviderConfig, 'provide
   });
 }
 
+// OGX — the OG Lab plan. Sign-up, payment and plan state live on the web
+// side; these calls only start the browser hand-off and report whether the
+// resulting token is stored locally. The token itself never reaches the UI.
+export interface OGXStatus {
+  connected: boolean;
+  email?: string;
+  plan?: string;
+  connectedAt?: number;
+}
+
+export function getOGXStatus(): Promise<OGXStatus> {
+  return fetchAPI('/ogx/status');
+}
+
+/** Mints a connect state and returns the OG Lab URL to open in a new tab. */
+export function startOGXConnect(): Promise<{ url: string }> {
+  return fetchAPI('/ogx/connect', { method: 'POST' });
+}
+
+export function disconnectOGX(): Promise<OGXStatus> {
+  return fetchAPI('/ogx', { method: 'DELETE' });
+}
+
 export interface ValidateResult {
   ok: boolean;
   error?: string;
@@ -360,21 +429,6 @@ export interface OllamaStatus {
 
 export function getOllamaStatus(): Promise<OllamaStatus> {
   return fetchAPI('/providers/ollama/status');
-}
-
-// Free-tier providers sourced from the shared community key pool (a public
-// GitHub-hosted JSON of OpenAI-compatible providers). Their presence lets the
-// onboarding gate skip the credential wizard — the user can start chatting
-// immediately without configuring any keys. Keys are never exposed by the
-// backend; only the collection, base URL, and default model are returned.
-export interface FreeProvider {
-  collection: string;
-  baseUrl: string;
-  defaultModel: string;
-}
-
-export function getFreeProviders(): Promise<FreeProvider[]> {
-  return fetchAPI('/providers/free');
 }
 
 // Pricing API — returns model ID → USD per 1 million input tokens
@@ -890,9 +944,6 @@ export interface SearchConfig {
   tavilyApiKey: string;
   // True when TAVILY_API_KEY is set in the server's environment (read-only hint).
   tavilyEnvKeySet?: boolean;
-  // Deep-research pipeline tuning (see settings → web search).
-  fetchTopK: number;
-  pageChars: number;
   updatedAt?: number;
 }
 

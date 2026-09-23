@@ -9,12 +9,12 @@ const PROVIDER_DOT: Record<string, string> = {
   openai: 'bg-emerald-400',
   openrouter: 'bg-violet-400',
   ollama: 'bg-sky-400',
+  ogx: 'bg-cyan-400',
   google: 'bg-blue-400',
   mistral: 'bg-rose-400',
 };
 
 const COLLECTION_DOT: Record<string, string> = {
-  ogcode: 'bg-emerald-400',
   Gemini: 'bg-blue-400',
   DeepSeek: 'bg-indigo-400',
   Groq: 'bg-amber-400',

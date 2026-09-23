@@ -2,6 +2,7 @@ import { useNavigate, useLocation, type RouteSectionProps } from '@solidjs/route
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
+import { projectName } from '../../lib/paths';
 import { SettingsShell, type ShellReport } from './ui';
 
 // ---------------------------------------------------------------------------
@@ -343,8 +344,3 @@ export default function SettingsLayout(props: RouteSectionProps) {
   );
 }
 
-/** The project's own name, not the whole path — the full path is one hover
- *  away and a truncated absolute path tells you nothing. */
-function projectName(dir: string): string {
-  return dir.split('/').filter(Boolean).pop() || dir || 'No workspace';
-}

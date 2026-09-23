@@ -42,12 +42,6 @@ const PILLARS = [
   },
 ] as const;
 
-// ── Workflow steps (Plan Mode narrative) ───────────────────────
-const STEPS = [
-  { n: '01', title: 'Describe', desc: 'Open a plan and state your goal. The agent reads your codebase and refines the approach with you.' },
-  { n: '02', title: 'Lock', desc: 'Lock the plan. A breakdown agent turns it into structured tasks with effort estimates and a dependency graph.' },
-  { n: '03', title: 'Execute', desc: 'Each task gets its own git branch and isolated agent. Independent tasks run in parallel — conflict-free PRs.' },
-] as const;
 
 function PillarIcon(props: { name: string }) {
   const common = 'w-5 h-5';
@@ -356,42 +350,6 @@ function HomeContent() {
                   </div>
                 )}
               </For>
-            </div>
-          </section>
-
-          {/* ── Workflow steps ──────────────────────────────────── */}
-          <section class="relative px-6 pb-16 max-w-4xl mx-auto w-full">
-            <div class="rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)]/30 overflow-hidden">
-              <div class="flex items-center justify-between px-6 py-4 border-b border-[color:var(--border-subtle)]">
-                <div class="flex items-center gap-2">
-                  <svg class="w-4 h-4 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4" />
-                  </svg>
-                  <h2 class="text-[13px] font-semibold text-zinc-300">Plan Mode → Parallel PRs</h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigate('/plan')}
-                  class="text-[11px] font-medium text-[color:var(--accent)] hover:text-[#8b9cf7] transition-colors var(--spring-sm)"
-                >
-                  Start a plan →
-                </button>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-[color:var(--border-subtle)]">
-                <For each={STEPS}>
-                  {(s) => (
-                    <div class="p-5">
-                      <div class="flex items-center gap-2.5 mb-2">
-                        <span class="text-[10px] font-mono font-semibold text-[color:var(--accent)] bg-[color:var(--accent-soft)] px-1.5 py-0.5 rounded">
-                          {s.n}
-                        </span>
-                        <span class="text-[13px] font-semibold text-zinc-200">{s.title}</span>
-                      </div>
-                      <p class="text-[12px] text-zinc-500 leading-relaxed">{s.desc}</p>
-                    </div>
-                  )}
-                </For>
-              </div>
             </div>
           </section>
 

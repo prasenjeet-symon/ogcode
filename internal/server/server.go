@@ -30,6 +30,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/plan"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/question"
 	"github.com/prasenjeet-symon/ogcode/internal/resource"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -63,6 +64,7 @@ type Server struct {
 	defaultProvider provider.Provider
 	loopRunner      *agent.LoopRunner
 	permissions     *permission.Manager
+	questions       *question.Manager
 	skillLoader     *skill.Loader
 	mcpManager      *mcp.Manager
 	// toolRegistry is the live tool set the agent loop reads each step. Held so
@@ -78,6 +80,10 @@ type Server struct {
 
 	// Version check manager
 	versionManager *version.Manager
+
+	// ogxPending holds the single-use states of OGX connect flows awaiting
+	// their browser redirect. Zero value ready; see ogx_routes.go.
+	ogxPending ogxPendingStates
 
 	// searchBackend is the active web-search backend, or nil when the user has
 	// turned search off. It is compiled in, so there is no process to manage.
@@ -387,8 +393,8 @@ func (s *Server) serve(ctx context.Context) error {
 	}
 
 	// Determine default provider. DefaultUsable applies the stable priority but
-	// skips an installed-but-stopped Ollama so the community free pool and the
-	// user's own keys are preferred over a daemon that would just refuse.
+	// skips an installed-but-stopped Ollama so the user's own keys are preferred
+	// over a daemon that would just refuse.
 	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
 		slog.Warn("no LLM provider configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, OLLAMA_API_KEY, or install Ollama")
@@ -418,6 +424,7 @@ func (s *Server) serve(ctx context.Context) error {
 	}
 
 	s.permissions = permission.NewManager()
+	s.questions = question.NewManager()
 	s.loopRunner = &agent.LoopRunner{
 		Store:           s.store,
 		Bus:             s.bus,
@@ -438,15 +445,6 @@ func (s *Server) serve(ctx context.Context) error {
 		TurnMemory:     memfile.TurnMemoryEnabled(),
 		NoteStore:      s.noteStore,
 		SearchBridge:   searchBackend,
-		// Read the deep-research tuning fresh from the global config DB on each
-		// call so settings-screen changes apply without a server restart.
-		SearchParams: func() session.SearchConfig {
-			cfg, err := session.GetSearchConfig(globalDatabase)
-			if err != nil || cfg == nil {
-				return session.SearchConfig{}
-			}
-			return *cfg
-		},
 		// Whether the agent may compact its own context mid-turn is a per-project
 		// choice, so it is read from the project DB (not the global one), once at
 		// the start of each turn — flipping it in the settings screen applies to
@@ -468,6 +466,7 @@ func (s *Server) serve(ctx context.Context) error {
 			return len(paths)
 		},
 		Permissions: s.permissions,
+		Questions:   s.questions,
 		Skills:      skillLoader,
 	}
 
@@ -481,6 +480,12 @@ func (s *Server) serve(ctx context.Context) error {
 	// regardless of the search bridge — the sub-agent is a read-only codebase
 	// investigator that only optionally uses deep_search.
 	toolRegistry.Register(tool.TaskTool{Run: s.loopRunner.RunTaskSession})
+
+	// Register ask_user (needs AskUser). It is offered only in an interactive,
+	// permission-gated turn — the agent loop decides that per turn — so
+	// registering it here is harmless for the headless paths that share this
+	// registry.
+	toolRegistry.Register(tool.AskUserTool{Ask: s.loopRunner.AskUser})
 
 	// Memory recall tools delegate to the read-only recall sub-agent over the
 	// project's markdown turn summaries, waiting on the summary barrier first.
@@ -761,13 +766,18 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 			}
 		}
 	}
-	// Auto-provision free-tier providers from the shared community key pool
-	// (a public GitHub-hosted JSON of OpenAI-compatible provider keys). These
-	// give ogcode a zero-friction out-of-the-box experience: the user can start
-	// chatting immediately using a free model without configuring anything.
-	// See AddFreePoolProviders for the collision rules; it mutates the map in
-	// place and is best-effort (bounded fetch, locally cached).
-	provider.AddFreePoolProviders(context.Background(), providers)
+	// OGX: a connected OG Lab subscription, whose gateway serves exactly the
+	// models the plan grants. Registered only when the link carries a plan — a
+	// planless link would register a provider that can serve nothing yet still
+	// outranks the other providers in ProviderPriority.
+	if acct, err := session.GetOGXAccount(s.globalDB); err != nil {
+		slog.Warn("failed to load ogx account", "err", err)
+	} else if acct.HasPlan() {
+		if p, err := provider.NewOGXProvider(acct.Token); err == nil {
+			providers[provider.OGXProviderID] = p
+			slog.Info("registered ogx provider", "plan", acct.Plan)
+		}
+	}
 
 	return providers
 }

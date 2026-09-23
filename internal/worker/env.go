@@ -14,6 +14,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/question"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
@@ -121,6 +122,10 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 	// directory — mirroring server.go:352. The loop only consults it for gated
 	// sessions, so headless task/index runs inside a hosted session are unaffected.
 	perm := permission.NewManager()
+	// ask_user's manager, same lifetime and rationale as the permission one: the
+	// browser reaches this worktree server's HTTP through the master tunnel, so
+	// the question routes work here exactly as in an interactive local server.
+	quest := question.NewManager()
 
 	lr := &agent.LoopRunner{
 		Store:           store,
@@ -131,12 +136,14 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 		Dir:             dir,
 		Skills:          skillLoader,
 		Permissions:     perm,
+		Questions:       quest,
 		// Per-project setting, read from this workspace's own DB — a remote
 		// worker follows the same choice the project's settings screen records.
 		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
 	}
 	// The build agent advertises the task sub-agent tool, so it must resolve.
 	toolRegistry.Register(tool.TaskTool{Run: lr.RunTaskSession})
+	toolRegistry.Register(tool.AskUserTool{Ask: lr.AskUser})
 
 	return &env{dir: dir, db: database, bus: b, store: store, runner: lr, mcp: mcpMgr, permissions: perm}, nil
 }
@@ -152,8 +159,8 @@ func (e *env) Close() {
 }
 
 // buildProviderRegistry replicates runPrompt's provider resolution: env vars win
-// over DB-stored keys, then the community free pool fills the gap. It returns an
-// error when no usable provider is configured.
+// over DB-stored keys. It returns an error when no usable provider is
+// configured.
 func buildProviderRegistry(globalDatabase *db.DB) (*provider.Registry, provider.Provider, error) {
 	dbProviderCfgs, _ := session.GetAllProviderConfigs(globalDatabase)
 	dbProviderMap := make(map[string]*session.ProviderConfig)
@@ -207,16 +214,18 @@ func buildProviderRegistry(globalDatabase *db.DB) (*provider.Registry, provider.
 			registry.Register(p)
 		}
 	}
-
-	freeProviders := make(map[string]provider.Provider)
-	provider.AddFreePoolProviders(context.Background(), freeProviders)
-	for _, p := range freeProviders {
-		registry.Register(p)
+	// OGX is stored in the global config DB (the plan follows the user, not the
+	// project), so it is registered when that DB is available and the link
+	// carries a plan.
+	if acct, e := session.GetOGXAccount(globalDatabase); e == nil && acct.HasPlan() {
+		if p, e := provider.NewOGXProvider(acct.Token); e == nil {
+			registry.Register(p)
+		}
 	}
 
 	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
-		return nil, nil, fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL (the community free pool was unreachable)")
+		return nil, nil, fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL")
 	}
 	return registry, defaultProvider, nil
 }

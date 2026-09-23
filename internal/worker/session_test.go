@@ -16,7 +16,7 @@ func emptySyncMap() *sync.Map {
 }
 
 // neutralizeProviderEnv ensures the spawned per-dir servers never hit the
-// network: no provider keys, free pool unreachable, embed model redirected.
+// network: no provider keys, embed model redirected.
 func neutralizeProviderEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
@@ -26,8 +26,6 @@ func neutralizeProviderEnv(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
-	t.Setenv("OGCODE_FREE_KEYS_URL", "http://127.0.0.1:9/free-keys-unavailable")
-	t.Setenv("OGCODE_CACHE_DIR", t.TempDir())
 }
 
 // newHostingWorker isolates HOME, neutralizes provider env (the spawned servers

@@ -5,6 +5,7 @@
 // web bundle. There is no settings UI, no config API, and no DB storage.
 // All calls are no-ops until init() succeeds, so components can call
 // capture/identify freely without worrying about whether analytics is on.
+import { createSignal } from 'solid-js';
 import posthog from 'posthog-js';
 
 // Hardcoded PostHog project credentials.
@@ -12,6 +13,13 @@ const POSTHOG_API_KEY = 'phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z';
 const POSTHOG_API_HOST = 'https://app.posthog.com';
 
 let initialised = false;
+
+// Bumped every time PostHog hands us a fresh set of flags — on the first load
+// and again after identify() or an explicit reload. Anything rendering a flag
+// watches this so it re-evaluates when the answer arrives: the SDK fetches
+// flags asynchronously, so a component that reads one at mount has almost
+// always read "not loaded yet" first.
+const [flagsVersion, setFlagsVersion] = createSignal(0);
 
 // Stable distinct ID for the browser user, persisted in localStorage.
 // PostHog's project is configured with "Require identified users", so
@@ -44,6 +52,12 @@ export async function initPostHog(): Promise<void> {
       disable_session_recording: false,
     });
     initialised = true;
+    // Flags load asynchronously and again after identify(), so re-evaluate flag
+    // readers on every delivery. Subscribing here — inside the SDK's own setup
+    // rather than from a component — is what makes a flag read safe whenever it
+    // happens, including a deep link to a page that mounts before this runs.
+    posthog.onFeatureFlags(() => setFlagsVersion((v) => v + 1));
+    setFlagsVersion((v) => v + 1);
     // Identify with a stable per-install ID (localStorage-persisted) so the
     // "Require identified users" project setting doesn't drop our events.
     posthog.identify(currentDistinctId());
@@ -90,4 +104,28 @@ export function resetPostHog(): void {
 /** Returns whether PostHog has been initialised and is active. */
 export function posthogActive(): boolean {
   return initialised;
+}
+
+/**
+ * Whether a boolean feature flag is enabled for this install.
+ *
+ * `undefined` means "no answer yet" — either flags have not loaded or the load
+ * failed — and is deliberately distinct from `false`. PostHog caches flags in
+ * localStorage, so only an install's first visit is ever `undefined`.
+ */
+export function featureFlagEnabled(key: string): boolean | undefined {
+  if (!initialised) return undefined;
+  try {
+    return posthog.isFeatureEnabled(key);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A counter that changes whenever PostHog delivers new flag values. Read it
+ * inside a reactive scope to re-evaluate a flag when the answer arrives.
+ */
+export function featureFlagsVersion(): number {
+  return flagsVersion();
 }

@@ -47,6 +47,7 @@ type PartID string
 type PermissionID string
 type PlanID string
 type TaskID string
+type QuestionID string
 
 func NewSessionID() SessionID {
 	return SessionID("ses_" + newULID())
@@ -66,6 +67,10 @@ func NewPermissionID() PermissionID {
 
 func NewPlanID() PlanID {
 	return PlanID("pln_" + newULID())
+}
+
+func NewQuestionID() QuestionID {
+	return QuestionID("qst_" + newULID())
 }
 
 func NewTaskID() TaskID {

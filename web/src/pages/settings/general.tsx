@@ -14,7 +14,6 @@ import {
   Group,
   Row,
   Switch,
-  Slider,
   Select,
   TextField,
   Button,
@@ -35,18 +34,13 @@ const ICONS = {
   workspace: 'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
   palette: 'M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42',
   globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3 7.5 7.03 7.5 12s2.015 9 4.5 9zm-8.716-5.25h17.432M3.284 8.25h17.432',
-  research: 'M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z',
   keyboard: 'M6.75 3.75h.008v.008H6.75v-.008zM6.75 7.5h.008v.008H6.75V7.5zm0 3.75h.008v.008H6.75v-.008zM10.5 3.75h.008v.008H10.5v-.008zM10.5 7.5h.008v.008H10.5V7.5zm0 3.75h.008v.008H10.5v-.008zM14.25 3.75h.008v.008h-.008v-.008zM14.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM17.25 3.75h.008v.008h-.008v-.008zM17.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM4.5 18.75h15a.75.75 0 00.75-.75v-1.5a.75.75 0 00-.75-.75h-15a.75.75 0 00-.75.75v1.5a.75.75 0 00.75.75z',
   hotkey: 'M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zM12 15.75V18m3.75-3.75V18M4.5 4.5h15a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18V6a1.5 1.5 0 011.5-1.5z',
   context: 'M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75',
 };
 
 // Defaults, matching session.SearchConfig in Go.
-const DEFAULTS = { fetchTopK: 4, pageChars: 6000, primaryColor: '#5e6ad2' };
-const BOUNDS = {
-  fetchTopK: { min: 1, max: 10 },
-  pageChars: { min: 1000, max: 20000, step: 500 },
-};
+const DEFAULTS = { primaryColor: '#5e6ad2' };
 
 export default function GeneralSettings() {
   const server = useServer();
@@ -361,7 +355,7 @@ function ContextGroup(props: { hide: Hide }) {
 }
 
 // ---------------------------------------------------------------------------
-// Web search + deep research
+// Web search
 // ---------------------------------------------------------------------------
 
 const SEARCH_PROVIDERS: Array<{ value: SearchProvider; label: string }> = [
@@ -373,12 +367,9 @@ function SearchGroups(props: { hide: Hide }) {
   const server = useServer();
   const [enabled, setEnabled] = createSignal(true);
   const [provider, setProvider] = createSignal<SearchProvider>('native');
-  const [fetchTopK, setFetchTopK] = createSignal(DEFAULTS.fetchTopK);
-  const [pageChars, setPageChars] = createSignal(DEFAULTS.pageChars);
   const [loading, setLoading] = createSignal(true);
   const [saving, setSaving] = createSignal(false);
   const [restartNeeded, setRestartNeeded] = createSignal(false);
-  const [paramsSaved, setParamsSaved] = createSignal(false);
 
   // Tavily credential state. dbKeySet mirrors the server's masked response
   // ('__SET__' means a key is stored); apiKey holds an unsaved edit; envKeySet
@@ -402,8 +393,6 @@ function SearchGroups(props: { hide: Hide }) {
       setProvider(cfg.provider ?? 'native');
       setDbKeySet(cfg.tavilyApiKey === '__SET__');
       setEnvKeySet(!!cfg.tavilyEnvKeySet);
-      if (cfg.fetchTopK) setFetchTopK(cfg.fetchTopK);
-      if (cfg.pageChars) setPageChars(cfg.pageChars);
     } catch {
       // defaults stay in place
     } finally {
@@ -412,8 +401,8 @@ function SearchGroups(props: { hide: Hide }) {
   });
 
   // The key value to send: a freshly typed key wins; otherwise the '__SET__'
-  // sentinel preserves the stored one, and '' when none is stored. So the
-  // deep-research sliders (which also call save) never wipe a saved key.
+  // sentinel preserves the stored one, and '' when none is stored. So a
+  // provider change (which also calls save) never wipes a saved key.
   const resolveKey = () => {
     const typed = apiKey().trim();
     if (typed !== '') return typed;
@@ -423,24 +412,17 @@ function SearchGroups(props: { hide: Hide }) {
   // save persists the full config and signals how the change took effect:
   //   restart — the enable toggle; it changes which tools exist, so it needs one
   //   live    — a provider/key change; the backend is swapped in place, applied now
-  //   params  — the deep-research knobs; read live on the next deep_search
-  const save = async (opts: { restart?: boolean; live?: boolean; params?: boolean; key?: string }) => {
+  const save = async (opts: { restart?: boolean; live?: boolean; key?: string }) => {
     setSaving(true);
     try {
       const result = await setSearchConfig({
         enabled: enabled(),
         provider: provider(),
         tavilyApiKey: opts.key ?? resolveKey(),
-        fetchTopK: fetchTopK(),
-        pageChars: pageChars(),
       });
       setDbKeySet(result.tavilyApiKey === '__SET__');
       if (opts.restart) setRestartNeeded(true);
       if (opts.live) flashApplied();
-      if (opts.params) {
-        setParamsSaved(true);
-        setTimeout(() => setParamsSaved(false), 1600);
-      }
     } finally {
       setSaving(false);
     }
@@ -498,17 +480,6 @@ function SearchGroups(props: { hide: Hide }) {
       setKeyStatus({ ok: false, msg: 'Could not reach the server.' });
     } finally {
       setTesting(false);
-    }
-  };
-
-  // Sliders fire continuously while dragging; only the release writes to the
-  // server, so one drag is one request instead of forty.
-  const commit = async (setter: (v: number) => void, prev: number, v: number) => {
-    setter(v);
-    try {
-      await save({ params: true });
-    } catch {
-      setter(prev);
     }
   };
 
@@ -658,64 +629,6 @@ function SearchGroups(props: { hide: Hide }) {
           </Row>
         </Show>
       </Group>
-
-      {/* Tuning is its own card: it saves live, while the switch above needs a
-          restart — folding them together misled people about what was in
-          effect. */}
-      <Show when={!loading() && enabled()}>
-        <Group
-          id="research"
-          title="Deep research"
-          icon={ICONS.research}
-          description={
-            <>
-              Shapes the <Mono>deep_search</Mono> pipeline. Higher values dig deeper, lower values answer
-              faster. Changes apply to the next search.
-            </>
-          }
-          action={
-            <Show when={paramsSaved()}>
-              <StatusChip tone="ok">Saved</StatusChip>
-            </Show>
-          }
-        >
-          <Row
-            label="Pages fetched"
-            helper="Top-ranked results read in full before the agent answers."
-            stacked
-            hidden={props.hide('Pages fetched', 'deep research top results read in full')}
-          >
-            <Slider
-              value={fetchTopK()}
-              min={BOUNDS.fetchTopK.min}
-              max={BOUNDS.fetchTopK.max}
-              disabled={saving()}
-              ariaLabel="Pages fetched"
-              format={(v) => `${v} page${v === 1 ? '' : 's'}`}
-              onInput={setFetchTopK}
-              onCommit={(v) => commit(setFetchTopK, fetchTopK(), v)}
-            />
-          </Row>
-          <Row
-            label="Characters per page"
-            helper="How much of each fetched page feeds the final synthesis."
-            stacked
-            hidden={props.hide('Characters per page', 'deep research synthesis length')}
-          >
-            <Slider
-              value={pageChars()}
-              min={BOUNDS.pageChars.min}
-              max={BOUNDS.pageChars.max}
-              step={BOUNDS.pageChars.step}
-              disabled={saving()}
-              ariaLabel="Characters per page"
-              format={(v) => v.toLocaleString()}
-              onInput={setPageChars}
-              onCommit={(v) => commit(setPageChars, pageChars(), v)}
-            />
-          </Row>
-        </Group>
-      </Show>
     </>
   );
 }

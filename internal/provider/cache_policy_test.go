@@ -169,21 +169,31 @@ func TestAttachOAIMessageBreakpoint_NoEligibleMessage(t *testing.T) {
 }
 
 // prompt_cache_key is OpenAI's documented routing hint. It goes only where it is
-// understood: an unknown top-level field is a 400 on a strict server.
+// understood: an unknown top-level field is a 400 on a strict server. Ollama is
+// recognised by provider id, never by URL — its endpoints are local addresses
+// (the daemon, the multi-account router) that name no vendor.
 func TestOpenAI_PromptCacheKeyEndpointGate(t *testing.T) {
 	for _, c := range []struct {
+		id      string
 		baseURL string
 		want    bool
 	}{
-		{"https://api.openai.com/v1", true},
-		{"https://openrouter.ai/api/v1", true},
-		{"http://localhost:11434/v1", false},
-		{"https://api.groq.com/openai/v1", false},
-		{"https://api.deepseek.com/v1", false},
+		{"openai", "https://api.openai.com/v1", true},
+		{"openrouter", "https://openrouter.ai/api/v1", true},
+		{"ollama", "http://localhost:11434/v1", true},
+		{"ollama", "http://localhost:8090/v1", true},
+		{"ollama", "http://localhost/llm/v1", true},
+		{"ollama", "https://ollama.com/v1", true},
+		{"x", "https://ollama.com/v1", true},      // custom slot pointed straight at the cloud endpoint
+		{"ogx", "http://127.0.0.1:9999/v1", true}, // the plan's gateway reads the field as session identity
+		{"x", "https://ogx.ogcode.xyz/v1", true},  // custom slot pointed straight at the gateway
+		{"", "http://localhost:11434/v1", false},  // an Ollama-shaped URL without the Ollama identity
+		{"", "https://api.groq.com/openai/v1", false},
+		{"", "https://api.deepseek.com/v1", false},
 	} {
-		p := &OpenAIProvider{baseURL: c.baseURL}
+		p := &OpenAIProvider{id: c.id, baseURL: c.baseURL}
 		if got := p.sendsPromptCacheKey(); got != c.want {
-			t.Errorf("%s: sendsPromptCacheKey = %v, want %v", c.baseURL, got, c.want)
+			t.Errorf("%s @ %s: sendsPromptCacheKey = %v, want %v", c.id, c.baseURL, got, c.want)
 		}
 	}
 }
@@ -291,6 +301,26 @@ func TestWire_OpenRouterGPTStaysPlain(t *testing.T) {
 	}
 	if body["prompt_cache_key"] != "ses_abc" {
 		t.Error("the routing hint still applies to OpenAI-backed models")
+	}
+}
+
+// Ollama rides local or relay URLs, so the key is gated by provider id. Ollama
+// itself ignores the field; a relay in front of ollama.com (the multi-account
+// router) reads it to pin a session's turns to one upstream account's cache.
+func TestWire_OllamaCarriesPromptCacheKey(t *testing.T) {
+	p := &OpenAIProvider{id: "ollama", apiKey: "k", baseURL: "http://localhost:8090/v1"}
+	body, _ := captureWireRequest(t, p, StreamRequest{
+		Model:    "deepseek-v4.1-flash:cloud",
+		System:   []string{"STATIC BASE", "tail"},
+		CacheKey: "ses_abc",
+		Messages: []ModelMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+	})
+	if body["prompt_cache_key"] != "ses_abc" {
+		t.Errorf("prompt_cache_key = %v, want ses_abc", body["prompt_cache_key"])
+	}
+	sys := body["messages"].([]any)[0].(map[string]any)
+	if _, isString := sys["content"].(string); !isString {
+		t.Errorf("system content is %T, want a plain string", sys["content"])
 	}
 }
 

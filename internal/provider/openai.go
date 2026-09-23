@@ -28,7 +28,6 @@ type OpenAIProvider struct {
 	model      string
 	baseURL    string
 	collection string // grouping label for dynamically-fetched models ("" = none)
-	freePool   bool   // provisioned from the community free-tier key pool
 
 	// cachedModels caches models fetched from /v1/models for Ollama cloud.
 	// Nil means not yet fetched; empty slice means fetched but none found.
@@ -140,8 +139,8 @@ func NewOllamaProvider() *OpenAIProvider {
 func (p *OpenAIProvider) ID() string { return p.id }
 
 // BaseURL returns the API base URL the provider is configured to use. Exposed
-// so callers (e.g. the free-pool registration) can compare endpoints without
-// reaching into the unexported field directly.
+// so callers can compare endpoints without reaching into the unexported field
+// directly.
 func (p *OpenAIProvider) BaseURL() string { return p.baseURL }
 
 // RefreshModels clears the cached model list so the next call to Models()
@@ -415,6 +414,25 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 		list = p.cachedModels
 		p.modelsMu.Unlock()
 
+	case OGXProviderID:
+		// The gateway's catalogue is the plan: it reports exactly what the
+		// account can reach. Everything it lists is what the user paid for, so
+		// all of it starts enabled, and there is no static fallback — an empty
+		// or failed fetch means no models, not a guess at what might work.
+		p.modelsOnce.Do(func() {
+			fetched := p.fetchDynamicModels(context.Background())
+			for i := range fetched {
+				fetched[i].ActiveByDefault = true
+			}
+			p.modelsMu.Lock()
+			p.cachedModels = fetched
+			p.resolveDefaultModel(p.cachedModels)
+			p.modelsMu.Unlock()
+		})
+		p.modelsMu.Lock()
+		list = p.cachedModels
+		p.modelsMu.Unlock()
+
 	default: // openai
 		// When the base URL points to a non-OpenAI endpoint (e.g. DeepSeek,
 		// Gemini, Groq — OpenAI-compatible providers configured via a custom
@@ -456,12 +474,6 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 		}
 	}
 
-	// Community free-pool providers: restrict/curate the fetched list so a shared
-	// public key is safe (free models only for OpenRouter) and every model is
-	// enabled by default — a new user lands ready to chat, not on an empty picker.
-	if p.freePool {
-		list = curateFreePoolModels(list, p.baseURL)
-	}
 	def := p.defaultModel()
 	for i := range list {
 		if list[i].ID == def {
@@ -469,35 +481,6 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 		}
 	}
 	return list
-}
-
-// curateFreePoolModels tailors a free-tier community-pool provider's
-// dynamically-fetched model list. For OpenRouter the shared pool key is public
-// and can reach paid models, so the list is restricted to the free (":free")
-// variants — this honours the "use OpenRouter's free models" intent and keeps a
-// public key from being used to drain credits on paid models through the app.
-// Every surviving model is marked ActiveByDefault so a brand-new user lands with
-// usable free models already enabled instead of an empty, all-disabled picker.
-func curateFreePoolModels(fetched []ModelInfo, baseURL string) []ModelInfo {
-	openRouter := strings.Contains(strings.ToLower(baseURL), "openrouter.ai")
-	out := make([]ModelInfo, 0, len(fetched))
-	for _, m := range fetched {
-		if openRouter && !strings.HasSuffix(m.ID, ":free") {
-			continue
-		}
-		m.ActiveByDefault = true
-		out = append(out, m)
-	}
-	// If the free-only filter removed everything (e.g. OpenRouter renamed its
-	// free tier), don't leave the provider empty — enable the raw list instead.
-	if len(out) == 0 {
-		out = make([]ModelInfo, 0, len(fetched))
-		for _, m := range fetched {
-			m.ActiveByDefault = true
-			out = append(out, m)
-		}
-	}
-	return out
 }
 
 // collectionFromBaseURL infers a grouping label from an OpenAI-compatible base
@@ -530,12 +513,6 @@ func collectionFromBaseURL(baseURL string) string {
 	return ""
 }
 
-// CollectionFromBaseURL is the exported form of collectionFromBaseURL for use
-// outside the provider package (e.g. server-side provider registration).
-func CollectionFromBaseURL(baseURL string) string {
-	return collectionFromBaseURL(baseURL)
-}
-
 // Prompt caching on this code path is two unrelated problems, because one
 // struct serves every OpenAI-compatible endpoint.
 //
@@ -552,18 +529,40 @@ func CollectionFromBaseURL(baseURL string) string {
 // active by default, so the untouched setup was paying full price for roughly
 // 7.8k tokens of tools plus system on every step of every turn.
 //
-// Both are gated on the endpoint rather than sent everywhere. This struct also
-// serves Ollama, Groq, DeepSeek, Cerebras, SambaNova and anything a user points
-// a base URL at; an unknown top-level field or an unexpected content-part shape
-// is a 400 on a strict server, and breaking a request to save tokens is a bad
-// trade.
+// Ollama gets the key too, matched by provider id rather than URL: its traffic
+// rides addresses that name no vendor — the local daemon on :11434, or a relay
+// such as the multi-account router on :8090 — so the URL says nothing. Ollama's
+// decoder ignores unknown fields (its OpenAI compatibility layer is a
+// non-strict Go decoder, end-to-end through the router included), and a relay
+// between ogcode and ollama.com can read the key as a ready-made session
+// identity for cache-preserving account affinity, instead of inventing one.
+//
+// Everything else is gated on the endpoint rather than sent everywhere. This
+// struct also serves Groq, DeepSeek, Cerebras, SambaNova and anything a user
+// points a base URL at; an unknown top-level field or an unexpected
+// content-part shape is a 400 on a strict server, and breaking a request to
+// save tokens is a bad trade.
+//
+// OGX is matched by id and by its gateway hostname. The field is not about
+// caching there at all: OG Lab's gateway records prompt_cache_key as the
+// session identity it attributes token spend to, so omitting it would leave the
+// plan's usage unattributed rather than uncached.
 
 // sendsPromptCacheKey reports whether this endpoint understands
 // prompt_cache_key. OpenRouter is included: it accepts the field for its
-// OpenAI-backed models and ignores it elsewhere.
+// OpenAI-backed models and ignores it elsewhere. Ollama is included by id (any
+// base URL) and by its cloud hostname, for a custom slot pointed straight at
+// ollama.com. OGX is included by id and by its gateway hostname, where the
+// field is the session identity rather than a cache hint.
 func (p *OpenAIProvider) sendsPromptCacheKey() bool {
+	if p.id == "ollama" || p.id == OGXProviderID {
+		return true
+	}
 	u := strings.ToLower(p.baseURL)
-	return strings.Contains(u, "api.openai.com") || strings.Contains(u, "openrouter.ai")
+	return strings.Contains(u, "api.openai.com") ||
+		strings.Contains(u, "openrouter.ai") ||
+		strings.Contains(u, "ollama.com") ||
+		strings.Contains(u, "ogx.ogcode.xyz")
 }
 
 // needsExplicitCacheBreakpoints reports whether this request must carry
@@ -855,9 +854,9 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 
 // isOpenRouter reports whether this provider's endpoint is OpenRouter. The gate
 // is the base URL rather than the provider id because OpenRouter is reached
-// under three different ids: the user's own "openrouter", the community free
-// pool's "ogcode-openrouter", and a generic "openai" provider pointed at
-// openrouter.ai by custom base URL. Keying on id attributed only the first.
+// under two different ids: the user's own "openrouter", and a generic "openai"
+// provider pointed at openrouter.ai by custom base URL. Keying on id attributed
+// only the first.
 func (p *OpenAIProvider) isOpenRouter() bool {
 	return strings.Contains(strings.ToLower(p.baseURL), "openrouter.ai")
 }

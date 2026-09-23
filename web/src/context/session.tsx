@@ -14,6 +14,10 @@ import {
   replyPermission,
   listPendingPermissions,
   type PermissionResponse,
+  replyQuestion,
+  listPendingQuestions,
+  type PendingQuestionAPI,
+  type QuestionAnswerAPI,
   getModels,
   refreshModels as apiRefreshModels,
   updateSession,
@@ -57,6 +61,9 @@ export interface PendingPermission {
   input: string;
 }
 
+/** One ask_user batch awaiting an answer, in the shape the dialog renders. */
+export type PendingQuestion = PendingQuestionAPI;
+
 /** Why the agent loop stopped, when nothing in the transcript says so. */
 export type LoopFailure = {
   /** The loop's exit reason: "error", "panic", or any non-clean finish —
@@ -86,6 +93,9 @@ interface SessionContextValue {
   dismissLoopError: () => void;
   pendingPermissions: () => PendingPermission[];
   respondPermission: (permissionId: string, response: PermissionResponse) => Promise<void>;
+  /** ask_user batches the agent loop is blocked on, for the active session. */
+  pendingQuestions: () => PendingQuestion[];
+  respondQuestion: (questionId: string, answers: QuestionAnswerAPI[]) => Promise<void>;
   models: () => ModelInfo[];
   selectedModel: () => string;
   selectModel: (modelId: string) => void;
@@ -283,6 +293,30 @@ export const SessionProvider: ParentComponent = (props) => {
   };
   const setPermQueue = (sessionId: string, updater: (prev: PendingPermission[]) => PendingPermission[]) => {
     setPermQueues((all) => {
+      const prev = all[sessionId] || [];
+      const next = updater(prev);
+      if (next.length === 0 && prev.length === 0) return all;
+      if (next.length === 0) {
+        const { [sessionId]: _drop, ...rest } = all;
+        return rest;
+      }
+      return { ...all, [sessionId]: next };
+    });
+  };
+
+  // Per-session ask_user queues, keyed by session id and owned the same way the
+  // permission queues are: the batch belongs to the session whose agent loop
+  // raised it, and that loop stays blocked until it is answered. ask_user takes
+  // the whole batch in one round trip, so at most one batch is pending per
+  // session at a time — but the queue shape is kept so the restore and SSE paths
+  // match the permission ones.
+  const [questionQueues, setQuestionQueues] = createSignal<Record<string, PendingQuestion[]>>({});
+  const pendingQuestions = () => {
+    const sess = activeSession();
+    return sess ? questionQueues()[sess.id] || [] : [];
+  };
+  const setQuestionQueue = (sessionId: string, updater: (prev: PendingQuestion[]) => PendingQuestion[]) => {
+    setQuestionQueues((all) => {
       const prev = all[sessionId] || [];
       const next = updater(prev);
       if (next.length === 0 && prev.length === 0) return all;
@@ -636,6 +670,24 @@ export const SessionProvider: ParentComponent = (props) => {
         });
       } catch (e) {
         /* non-fatal — the SSE handler will still append future prompts */
+      }
+
+      // Restore any pending ask_user batch for this session, for the same reason
+      // as the permission queue above: the loop is still blocked on it, but the
+      // client may have missed the question.requested event while another session
+      // was on screen. Merge, not replace — an SSE event may land mid-fetch.
+      try {
+        const pending = await listPendingQuestions(id);
+        if (activeSession()?.id !== id) return;
+        const fetchedIds = new Set(pending.map((q) => q.questionId));
+        setQuestionQueue(id, (prev) => {
+          const kept = prev.filter((q) => fetchedIds.has(q.questionId));
+          const have = new Set(kept.map((q) => q.questionId));
+          const added = pending.filter((q) => !have.has(q.questionId));
+          return [...kept, ...added];
+        });
+      } catch (e) {
+        /* non-fatal — the SSE handler will still append future batches */
       }
 
       // Always keep a background poll so the session stays in sync
@@ -1154,6 +1206,20 @@ export const SessionProvider: ParentComponent = (props) => {
       const sid = p.sessionId;
       if (!sid) return;
       setPermQueue(sid, (prev) => prev.filter((x) => x.permissionId !== p.permissionId));
+    } else if (last.type === 'question.requested') {
+      // The whole batch travels in the event (the loop publishes the Request
+      // struct itself), so the dialog can render it without a follow-up fetch.
+      const sid = p.sessionId;
+      if (!sid || !p.questionId) return;
+      setQuestionQueue(sid, (prev) =>
+        prev.some((x) => x.questionId === p.questionId)
+          ? prev
+          : [...prev, { questionId: p.questionId, sessionId: sid, questions: p.questions || [] }],
+      );
+    } else if (last.type === 'question.replied') {
+      const sid = p.sessionId;
+      if (!sid) return;
+      setQuestionQueue(sid, (prev) => prev.filter((x) => x.questionId !== p.questionId));
     }
   }));
 
@@ -1183,6 +1249,21 @@ export const SessionProvider: ParentComponent = (props) => {
       // 404 = already resolved/cancelled server-side — safe to ignore.
       const msg = e instanceof Error ? e.message : String(e);
       if (!msg.includes('404')) console.error('permission reply failed:', e);
+    }
+  }
+
+  async function respondQuestion(questionId: string, answers: QuestionAnswerAPI[]) {
+    const sess = activeSession();
+    // Optimistic dismissal, same as a permission reply; the backend's
+    // question.replied event reconciles any other client.
+    if (sess) setQuestionQueue(sess.id, (prev) => prev.filter((x) => x.questionId !== questionId));
+    if (!sess) return;
+    try {
+      await replyQuestion(sess.id, questionId, answers);
+    } catch (e) {
+      // 404 = already answered/cancelled server-side — safe to ignore.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('404')) console.error('question reply failed:', e);
     }
   }
 
@@ -1229,6 +1310,8 @@ export const SessionProvider: ParentComponent = (props) => {
     dismissLoopError: () => setLoopError(null),
     pendingPermissions,
     respondPermission,
+    pendingQuestions,
+    respondQuestion,
     models,
     selectedModel,
     selectModel,

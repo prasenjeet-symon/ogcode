@@ -227,8 +227,8 @@ func (s *Server) handleSetSearchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Preserve the stored key when the client echoes the mask sentinel, so
-	// saving a provider change (or the deep-research knobs) never wipes a key the
-	// UI never saw. Same convention as handleSetProviderConfig.
+	// saving a provider change never wipes a key the UI never saw. Same
+	// convention as handleSetProviderConfig.
 	if incoming.TavilyAPIKey == session.MaskedAPIKey {
 		incoming.TavilyAPIKey = existing.TavilyAPIKey
 	}
@@ -241,7 +241,7 @@ func (s *Server) handleSetSearchConfig(w http.ResponseWriter, r *http.Request) {
 	// The enable toggle is deliberately not handled here — it changes which tools
 	// are registered, so it still needs a restart; searchSwitch is nil when
 	// search was off at startup, which is exactly that case. SetSearchConfig has
-	// normalised incoming (clampParams), so the comparison uses canonical values.
+	// normalised incoming (normaliseProvider), so the comparison uses canonical values.
 	if s.searchSwitch != nil && (incoming.Provider != existing.Provider || incoming.TavilyAPIKey != existing.TavilyAPIKey) {
 		s.searchSwitch.Set(buildSearchBackend(&incoming))
 		logSearchProvider("web search: provider switched live", &incoming)

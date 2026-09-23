@@ -38,8 +38,8 @@ type storedToken struct {
 }
 
 // tokenDir returns the directory holding per-server token files. It defaults
-// to ~/.ogcode/mcp-tokens/ (runtime state, alongside the free-pool cache) and
-// is overridable via OGCODE_MCP_TOKEN_DIR for tests.
+// to ~/.ogcode/mcp-tokens/ (runtime state) and is overridable via
+// OGCODE_MCP_TOKEN_DIR for tests.
 func tokenDir() (string, error) {
 	if env := os.Getenv("OGCODE_MCP_TOKEN_DIR"); env != "" {
 		return env, nil

@@ -447,6 +447,17 @@ func (a *Agent) HasTool(toolID string) bool {
 // it to drop a file somewhere is one it could never act on.
 func (a *Agent) canHostPublicFiles() bool { return a.ID == "build" }
 
+// canAskUser reports whether this agent may put a question to the user through
+// the ask_user tool.
+//
+// Like canHostPublicFiles, this is an agent id rather than a capability check,
+// and for the same reason: TaskAgent shares BuildAgent's toolset (codingAgentTools)
+// but runs headless, executing one breakdown task in a disposable worktree with
+// nobody to answer. A capability check would hand it a dialog no one can see.
+// The loop still gates the tool on permission gating and a live question
+// manager — this is the outer of the two conditions, not a substitute for them.
+func (a *Agent) canAskUser() bool { return a.ID == "build" }
+
 // promptRole maps an agent to the role string the shared prompt sections switch
 // on. TaskAgent is the headless variant of BuildAgent and shares its prompt, so
 // it shares its role; every other agent's id is already its role.

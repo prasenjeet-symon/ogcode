@@ -1,7 +1,13 @@
-import { For, Index, Show, createSignal, createMemo, createEffect, untrack, onMount, type JSX } from 'solid-js';
+import { For, Index, Show, createSignal, createMemo, createEffect, untrack, onMount, onCleanup, type JSX } from 'solid-js';
 import { useSession } from '../../context/session';
-import type { ModelInfo, ProviderConfig } from '../../api/client';
-import { getProviderConfigs, setProviderConfig } from '../../api/client';
+import type { ModelInfo, ProviderConfig, OGXStatus } from '../../api/client';
+import {
+  getProviderConfigs,
+  setProviderConfig,
+  getOGXStatus,
+  startOGXConnect,
+  disconnectOGX,
+} from '../../api/client';
 import {
   Group,
   Row,
@@ -25,32 +31,44 @@ import {
   PROVIDER_GUIDE,
   COMPATIBLE_PRESETS,
   collectionForBaseURL,
-  subProviderLabel,
   type ProviderDef,
 } from '../../lib/providers';
+import { useFeatureFlag } from '../../lib/feature-flags';
 
 // ---------------------------------------------------------------------------
-// Models — one card per provider.
+// Models — one tab per provider.
 //
 // ogcode speaks four protocols and only four: anthropic, openai, openrouter,
 // ollama (see NewProviderWithConfig, which rejects everything else). Every
 // other vendor — Gemini, DeepSeek, Groq, Together — arrives through the OpenAI
 // slot with a different base URL.
 //
-// Each protocol gets a sheet holding its credentials and its slice of the
-// catalogue, so the whole picture is one scroll rather than a rail you have to
-// click through provider by provider.
+// Each protocol gets a tab holding its credentials and its slice of the
+// catalogue: one provider on screen at a time, the strip under the page title
+// switching between them. A live search opens the first provider whose label,
+// models or credential rows match, so typing a model name finds it wherever it
+// lives; the found tab then stays open.
+//
+// One tab is not a protocol: OGX is the subscription plan sold by OG Lab.
+// Its panel holds an account connection (browser hand-off, token stored
+// server-side) rather than credentials — see OGXSection.
 // ---------------------------------------------------------------------------
 
 const CHIP_ICON =
   'M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z';
 
-/** The bundled free pool arrives as providerId "ogcode-groq", "ogcode-…". */
-const FREE_POOL = 'ogcode';
+/** The OG Lab plan tab — an account connection, not a provider protocol. */
+const OGX_SLOT = 'ogx';
 
-function slotOf(m: ModelInfo): string {
-  return m.providerId.startsWith('ogcode-') ? FREE_POOL : m.providerId;
-}
+/** The OG Lab dashboard. Plan state, billing and token usage live there. */
+const OGX_WEB_URL = 'https://oglab.ogcode.xyz';
+
+/**
+ * PostHog flag gating the OGX tab while the plan feature is unreleased. The
+ * flag has to exist in the ogcode PostHog project for the tab to show at all —
+ * a missing flag, like an unreachable PostHog, reads as off.
+ */
+const OGX_FLAG = 'ogx-tab';
 
 interface Slot {
   id: string;
@@ -65,6 +83,8 @@ export default function ModelsSettings() {
   const shell = useShell();
   const [configs, setConfigs] = createSignal<Record<string, ProviderConfig>>({});
   const [loadingConfigs, setLoadingConfigs] = createSignal(true);
+  const [active, setActive] = createSignal('');
+  const ogxTab = useFeatureFlag(OGX_FLAG);
 
   createEffect(() => shell.report({ noun: 'settings' }));
 
@@ -79,21 +99,28 @@ export default function ModelsSettings() {
     }
   });
 
-  // The page always shows the four real slots, plus the free pool and any
-  // unexpected provider id that turns up in the catalogue — a model the user
-  // can see in the picker must be reachable here, whatever its provider.
+  // The page always shows the four real slots, plus any unexpected provider id
+  // that turns up in the catalogue — a model the user can see in the picker must
+  // be reachable here, whatever its provider.
   const slots = createMemo<Slot[]>(
     () => {
       const base: Slot[] = PROVIDER_DEFS.map((def) => ({ id: def.id, label: def.label, def }));
-      const known = new Set(base.map((s) => s.id));
+      // The plan tab leads rather than rides after the four protocols: it is
+      // the one tab that is not a protocol, and the subscription is what a
+      // fresh install with no keys reaches for first. readOnly: it has no
+      // credential rows — its panel manages the OG Lab account link instead.
+      //
+      // Held behind a PostHog flag while the plan feature is unreleased, and
+      // off is the fail-safe: an install that cannot reach PostHog keeps the
+      // four protocols alone. The id counts as known either way — an install
+      // that already has plan models must not surface them as a generic
+      // provider tab once the flag is off.
+      if (ogxTab()) base.unshift({ id: OGX_SLOT, label: 'OGX', readOnly: true });
+      const known = new Set([...base.map((s) => s.id), OGX_SLOT]);
       const extra = new Set<string>();
       for (const m of session.models()) {
-        const slot = slotOf(m);
+        const slot = m.providerId;
         if (!known.has(slot)) extra.add(slot);
-      }
-      if (extra.has(FREE_POOL)) {
-        base.push({ id: FREE_POOL, label: 'ogcode free pool', readOnly: true });
-        extra.delete(FREE_POOL);
       }
       for (const id of [...extra].sort()) base.push({ id, label: id, readOnly: true });
       return base;
@@ -101,31 +128,60 @@ export default function ModelsSettings() {
     [] as Slot[],
     // Toggling a model rebuilds this list, but the set of provider slots almost
     // never changes as a result. Returning the previous array when the slot ids
-    // still match keeps <For> from re-mounting every ProviderSection on each
-    // toggle — the re-mount is what reset the scroll position and flashed the
-    // whole page.
+    // still match keeps the tab strip from re-rendering and the open section
+    // from re-mounting on each toggle — the re-mount is what reset the scroll
+    // position and flashed the whole page.
     { equals: (a, b) => a.length === b.length && a.every((s, i) => s.id === b[i].id) },
   );
+
+  // The first tab is open until the user picks one. Held as an id, not an
+  // index: a late catalogue fetch can surface an extra provider slot, and the
+  // tab you were reading should stay open if it does.
+  createEffect(() => {
+    if (slots().length > 0 && !slots().some((s) => s.id === active())) {
+      setActive(slots()[0].id);
+    }
+  });
 
   const modelsFor = (slotId: string) =>
     session
       .models()
-      .filter((m) => slotOf(m) === slotId)
+      .filter((m) => m.providerId === slotId)
       // Sorted by name only — never by enabled state, or a row would jump out
       // from under the cursor the moment it was toggled.
       .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Does the query point at this slot? The credential vocabulary only counts
+  // for a slot that has credential rows: "key" or "endpoint" would otherwise
+  // match every slot, and the search opens the first match — which is now the
+  // OGX plan tab, holding no keys at all.
+  const slotSearchMatches = (slot: Slot, q: string) =>
+    matches(q, slot.label, slot.id) ||
+    modelsFor(slot.id).some((m) => modelMatches(m, q)) ||
+    (!slot.readOnly && CREDENTIAL_TERMS.some((t) => matches(q, t)));
 
   /** True when a query is live and nothing anywhere on the page matched it. */
   const nothingMatched = createMemo(() => {
     const q = shell.query().trim();
     if (!q) return false;
-    return !slots().some(
-      (slot) =>
-        matches(q, slot.label, slot.id) ||
-        modelsFor(slot.id).some((m) => modelMatches(m, q)) ||
-        CREDENTIAL_TERMS.some((t) => matches(q, t)),
-    );
+    return !slots().some((slot) => slotSearchMatches(slot, q));
   });
+
+  // A search is a query across every provider, so it has to reach the tabs
+  // that are closed: typing opens the first provider whose label, models or
+  // credential rows match — otherwise a hit on a hidden tab would read as
+  // "nothing happened". The found tab then stays open, including after the
+  // query is cleared — you searched for it, so it is where you are. The
+  // lookups are untracked so this effect does not re-run when the slot list
+  // itself changes.
+  createEffect(() => {
+    const q = shell.query().trim();
+    if (!q) return;
+    const hit = untrack(() => slots().find((slot) => slotSearchMatches(slot, q)));
+    if (hit) untrack(() => setActive(hit.id));
+  });
+
+  const current = () => slots().find((s) => s.id === active()) ?? slots()[0];
 
   return (
     <Show
@@ -138,14 +194,78 @@ export default function ModelsSettings() {
         />
       }
     >
-      <For each={slots()}>
+      {/* One provider at a time, chosen by the strip — the full sheet for the
+          open tab, the others one click away instead of stacked into a scroll
+          the length of the whole catalogue. The strip sticks under the page
+          header, so switching providers never costs a scroll back to the top. */}
+      <div
+        class="sticky top-0 z-10 -mx-3 sm:-mx-6 px-3 sm:px-6 pt-1 pb-3
+               bg-[color:var(--bg-base)]"
+      >
+        <div
+          role="tablist"
+          aria-label="Providers"
+          class="flex gap-1 overflow-x-auto hide-scrollbar border-b border-[color:var(--border-subtle)]"
+        >
+          <For each={slots()}>
+            {(slot) => {
+              const on = () => slot.id === active();
+              return (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={on()}
+                  onClick={() => setActive(slot.id)}
+                  class={`relative flex items-center gap-1.5 h-8 px-2.5 rounded-md text-ui whitespace-nowrap shrink-0
+                          transition-colors duration-150
+                    ${
+                      on()
+                        ? 'text-[color:var(--text-primary)] font-medium'
+                        : 'text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
+                    }`}
+                >
+                  <span
+                    class={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      on() ? 'bg-[color:var(--accent)]' : 'bg-[color:var(--border-strong)]'
+                    }`}
+                  />
+                  {slot.label}
+                  <Show when={modelsFor(slot.id).some((m) => m.enabled)}>
+                    <span class="text-micro tabular-nums text-[color:var(--text-muted)]">
+                      {modelsFor(slot.id).filter((m) => m.enabled).length}
+                    </span>
+                  </Show>
+                  <Show when={on()}>
+                    {/* The accent underline rides the bottom border, not the
+                        tab: the tab itself stays a quiet shape, and the marker
+                        reads as part of the rule it interrupts. */}
+                    <span class="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-[color:var(--accent)]" />
+                  </Show>
+                </button>
+              );
+            }}
+          </For>
+        </div>
+      </div>
+
+      <Show when={current()}>
         {(slot) => (
+          <Show
+            when={slot().id !== OGX_SLOT}
+            fallback={
+              <OGXSection
+                slot={slot()}
+                models={modelsFor(slot().id)}
+                onToggle={(m) => session.toggleModel(m, !m.enabled)}
+              />
+            }
+          >
           <ProviderSection
-            slot={slot}
-            models={modelsFor(slot.id)}
-            config={configs()[slot.id]}
+            slot={slot()}
+            models={modelsFor(slot().id)}
+            config={configs()[slot().id]}
             loadingConfig={loadingConfigs()}
-            onSaved={(c) => setConfigs({ ...configs(), [slot.id]: c })}
+            onSaved={(c) => setConfigs({ ...configs(), [slot().id]: c })}
             onApplied={() => session.reloadModels()}
             onToggle={(m) => session.toggleModel(m, !m.enabled)}
             onRemove={async (m) => {
@@ -153,12 +273,251 @@ export default function ModelsSettings() {
               await session.removeCustomModel(m.id);
             }}
             onAdd={(id, name, collection) =>
-              session.addCustomModel(id, slot.id, name, collection || undefined)
+              session.addCustomModel(id, slot().id, name, collection || undefined)
             }
           />
+          </Show>
         )}
-      </For>
+      </Show>
     </Show>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OGX — the subscription plan by OG Lab.
+//
+// The panel manages one thing: whether this install is linked to an OG Lab
+// account. Connect opens the web side in a new tab (sign-up, sign-in and
+// payment all happen there), the browser is redirected back to the server
+// with a token, and the panel — polling status while the tab is away — flips
+// to active the moment the token lands. The token stays server-side.
+//
+// Once linked, the plan's models are a provider like any other, so the panel
+// also renders their list. Two things there behave differently from a
+// credential tab: the catalogue comes and goes with the account link (so both
+// transitions re-fetch it rather than waiting for a restart), and nothing in it
+// is the user's to add or delete — the plan decides. The slot is readOnly,
+// which hides the add row; the remove path cannot fire because none of these
+// models is custom.
+// ---------------------------------------------------------------------------
+function OGXSection(props: {
+  slot: Slot;
+  models: ModelInfo[];
+  onToggle: (m: ModelInfo) => void | Promise<void>;
+}) {
+  const session = useSession();
+  const shell = useShell();
+  const [status, setStatus] = createSignal<OGXStatus | null>(null);
+  const [connecting, setConnecting] = createSignal(false);
+  const [error, setError] = createSignal('');
+  let pollTimer: number | undefined;
+
+  const refresh = async () => {
+    try {
+      setStatus(await getOGXStatus());
+    } catch {
+      /* leave the last known state on screen */
+    }
+  };
+  onMount(refresh);
+
+  const stopPolling = () => {
+    if (pollTimer !== undefined) {
+      clearInterval(pollTimer);
+      pollTimer = undefined;
+    }
+    setConnecting(false);
+  };
+  onCleanup(stopPolling);
+
+  // Mirrors session.OGXAccount.HasPlan on the server: a plan value of "none"
+  // (or nothing at all) means the account is linked but holds no plan, so the
+  // gateway grants no models. Both sides must agree, or the chip would read
+  // "Active" over an empty list.
+  const planLabel = () => {
+    const p = (status()?.plan || '').trim();
+    return p && p.toLowerCase() !== 'none' ? p : '';
+  };
+
+  const connect = async () => {
+    setError('');
+    try {
+      const { url } = await startOGXConnect();
+      window.open(url, '_blank', 'noopener');
+      setConnecting(true);
+      // Poll while the user is away in the browser. The server-side connect
+      // state lives 15 minutes; polling longer would wait on a flow that can
+      // no longer complete.
+      const startedAt = Date.now();
+      pollTimer = window.setInterval(async () => {
+        const st = await getOGXStatus().catch(() => null);
+        if (st?.connected) {
+          setStatus(st);
+          stopPolling();
+          // The link just landed, so the plan's models exist server-side now.
+          // Fetch them without holding the panel open on a spinner: a failure
+          // leaves the tab showing the connection and an empty list, which the
+          // list itself explains.
+          session.reloadModels().catch(() => {});
+        } else if (Date.now() - startedAt > 15 * 60_000) {
+          stopPolling();
+        }
+      }, 2000);
+    } catch {
+      setError('Could not start the connect flow — is the server reachable?');
+    }
+  };
+
+  const disconnect = async () => {
+    if (!confirm('Disconnect OGX? Your plan stays on your OG Lab account — this only unlinks ogcode.')) return;
+    try {
+      setStatus(await disconnectOGX());
+      // Mirror the connect path: the provider is gone, so the catalogue has to
+      // follow it out of the page.
+      session.reloadModels().catch(() => {});
+    } catch {
+      setError('Could not disconnect.');
+    }
+  };
+
+  const connectedSince = () => {
+    const at = status()?.connectedAt;
+    return at ? new Date(at).toLocaleDateString() : '';
+  };
+
+  // Same two-way split ProviderSection uses: the page-wide search narrows what
+  // is listed, while the list itself still knows the full catalogue (for its
+  // filter box and bulk chips). The row hides only when the search excludes
+  // the provider and everything it holds.
+  const visibleModels = () => props.models.filter((m) => modelMatches(m, shell.query()));
+  const modelsHidden = () =>
+    !matches(shell.query(), 'OGX', OGX_SLOT) &&
+    !matches(shell.query(), 'models', 'catalogue', 'available') &&
+    visibleModels().length === 0;
+
+  return (
+    <div class="page-enter">
+      <Group
+        id={OGX_SLOT}
+        title="OGX"
+        icon={CHIP_ICON}
+        description="The ogcode plan, by OG Lab."
+        action={
+          <Show when={status()?.connected} fallback={<StatusChip tone="muted">Not connected</StatusChip>}>
+            <Show when={planLabel()} fallback={<StatusChip tone="warn">No plan</StatusChip>}>
+              <StatusChip tone="ok">Active · {planLabel()}</StatusChip>
+            </Show>
+          </Show>
+        }
+      >
+        <Show when={error()}>
+          <Banner tone="danger">{error()}</Banner>
+        </Show>
+
+        {/* Not linked yet. One short, centred invitation rather than a lone
+            settings row: an unconfigured provider tab is mostly whitespace, and
+            a single label/button pair in the middle of it reads as unfinished.
+            The paragraph that used to sit here explained the mechanism
+            (sign-up, payment, where the token lives) instead of offering the
+            action, so it is gone — the button is the whole story.
+
+            data-setting matters: the shell hides any section whose rows all
+            filtered out (the :has() rule in index.css keys on that attribute),
+            and this branch has no <Row> left to carry it. */}
+        <Show
+          when={status()?.connected}
+          fallback={
+            <div data-setting class="px-4 py-8 text-center">
+              <span
+                class="mx-auto mb-3 w-10 h-10 rounded-full flex items-center justify-center"
+                style={{
+                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                  color: 'var(--accent)',
+                }}
+              >
+                <svg class="w-[19px] h-[19px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757M6.81 15.312a4.5 4.5 0 011.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757"
+                  />
+                </svg>
+              </span>
+              <p class="text-ui font-medium text-[color:var(--text-primary)]">Connect your ogcode plan</p>
+              <Show
+                when={!connecting()}
+                fallback={
+                  <p class="mt-2 flex items-center justify-center gap-2 text-meta text-[color:var(--text-secondary)]">
+                    <Spinner class="w-3.5 h-3.5" />
+                    Waiting for the browser…
+                    <Button variant="text" onClick={stopPolling}>
+                      Cancel
+                    </Button>
+                  </p>
+                }
+              >
+                <p class="mx-auto mt-1.5 max-w-[24rem] text-meta leading-[1.6] text-[color:var(--text-tertiary)]">
+                  Opens the OG Lab sign-in in a new tab.
+                </p>
+                <div class="mt-4">
+                  <Button onClick={connect} disabled={status() === null}>
+                    Connect OGX
+                  </Button>
+                </div>
+              </Show>
+            </div>
+          }
+        >
+          <Show when={!planLabel()}>
+            <Banner tone="warn">
+              This account is linked but holds no plan, so the gateway grants no models. Choose a
+              plan on the OG Lab side, then disconnect and reconnect here to pick it up.
+            </Banner>
+          </Show>
+          <Row label="Account" helper="The OG Lab account this install is linked to.">
+            <span class="flex items-center gap-2 text-meta">
+              <Mono>{status()?.email || 'connected'}</Mono>
+              <Show when={connectedSince()}>
+                <span class="text-[color:var(--text-muted)]">since {connectedSince()}</span>
+              </Show>
+            </span>
+          </Row>
+          <Row label="Usage" helper="Token spend and plan details live on the OG Lab side.">
+            <Button variant="outlined" href={OGX_WEB_URL}>
+              Check usage
+            </Button>
+          </Row>
+          <Row
+            label="Disconnect"
+            helper="Unlinks ogcode from the account. The plan itself is managed on the web side."
+          >
+            <Button variant="outlined" onClick={disconnect}>
+              Disconnect
+            </Button>
+          </Row>
+          <Row
+            label="Models"
+            helper="Every model your plan grants. Managed on the OG Lab side — none of them is removable here."
+            stacked
+            hidden={modelsHidden()}
+          >
+            <ModelList
+              all={props.models}
+              visible={visibleModels()}
+              slot={props.slot}
+              configured={true}
+              filtering={!!shell.query().trim()}
+              onToggle={props.onToggle}
+              // Never called: the slot is readOnly, so the add row is hidden,
+              // and no plan model is custom, so no row offers a remove button.
+              onRemove={() => {}}
+              onAdd={async () => {}}
+              suggestedCollection=""
+            />
+          </Row>
+        </Show>
+      </Group>
+    </div>
   );
 }
 
@@ -214,6 +573,7 @@ function ProviderSection(props: {
   const configured = () => isConfigured(props.slot, props.config);
 
   return (
+    <div class="page-enter">
     <Group
       id={props.slot.id}
       title={pointedAt() ? `${props.slot.label} → ${pointedAt()}` : props.slot.label}
@@ -269,6 +629,7 @@ function ProviderSection(props: {
         />
       </Row>
     </Group>
+    </div>
   );
 }
 
@@ -741,6 +1102,8 @@ function ModelList(props: {
             : props.configured
             ? props.slot.id === 'ollama'
               ? 'Connected, but the catalogue is empty. Pull a model with `ollama pull qwen2.5-coder`, then Save the endpoint again to refresh.'
+              : props.slot.id === OGX_SLOT
+              ? 'Connected, but your plan grants no models. Pick a plan on the OG Lab side, then disconnect and reconnect to pick it up.'
               : 'Connected, but the catalogue is empty. Save again to re-fetch, or add a model ID by hand below.'
             : props.slot.id === 'ollama'
             ? 'Not connected. Install Ollama, pull a model, and point Base URL at it — no API key needed.'
@@ -792,7 +1155,6 @@ function ModelItem(props: { model: ModelInfo; onToggle: () => void; onRemove: ()
         <Show when={props.model.isCustom}>
           <Tag>custom</Tag>
         </Show>
-        <Show when={subProviderLabel(props.model)}>{(label) => <Tag>{label()}</Tag>}</Show>
       </div>
 
       <span

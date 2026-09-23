@@ -102,7 +102,7 @@ func TestAPIError_IsContextLength(t *testing.T) {
 		// A body-less 400 from a remote provider is an opaque rejection, not an
 		// overflow: reporting it as one sends the user compacting a conversation
 		// that was never too big.
-		{"ogcode-openrouter", 400, "", false},
+		{"openrouter", 400, "", false},
 		{"openai", 400, "", false},
 		{"openai", 400, `{"error":"invalid api key format"}`, false},
 		{"openai", 429, "context length exceeded", false}, // not a 400 → not a context error

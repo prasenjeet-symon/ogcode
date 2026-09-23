@@ -84,6 +84,22 @@ func TestRegistryDefaultPriority(t *testing.T) {
 	}
 }
 
+// TestRegistryOGXPriority pins ogx's seat in ProviderPriority: it is in the
+// list, so it outranks any provider that is not, while a local Ollama daemon —
+// which costs nothing per token — keeps its seat ahead of a metered plan.
+func TestRegistryOGXPriority(t *testing.T) {
+	r := NewRegistry()
+	r.Register(newFake("deepseek", "deepseek-chat"))
+	r.Register(newFake("ogx", "glm-5.3-flash"))
+	if got := r.Default(); got == nil || got.ID() != "ogx" {
+		t.Fatalf("Default() = %v, want ogx to outrank an unlisted provider", got)
+	}
+	r.Register(newFake("ollama", "llama"))
+	if got := r.Default(); got == nil || got.ID() != "ollama" {
+		t.Fatalf("Default() = %v, want ollama ahead of ogx", got)
+	}
+}
+
 // TestRegistryConcurrentReplaceAndRead drives ReplaceProviders against the
 // lock-protected read paths concurrently. Run with -race, this fails if the
 // providers map is accessed without synchronization.
@@ -115,10 +131,10 @@ func TestRegistryDefaultUsable(t *testing.T) {
 	t.Run("down ollama yields to later priority provider", func(t *testing.T) {
 		r := NewRegistry()
 		r.Register(mustOllamaProvider(t, deadURL))
-		r.Register(newFake("ogcode-openrouter", "free/model"))
+		r.Register(newFake("ogx", "glm-5.3-flash"))
 		got := r.DefaultUsable()
-		if got == nil || got.ID() != "ogcode-openrouter" {
-			t.Fatalf("DefaultUsable() = %v, want ogcode-openrouter (stopped ollama must not shadow the free pool)", got)
+		if got == nil || got.ID() != "ogx" {
+			t.Fatalf("DefaultUsable() = %v, want ogx (stopped ollama must not shadow a priority provider)", got)
 		}
 	})
 
@@ -135,7 +151,7 @@ func TestRegistryDefaultUsable(t *testing.T) {
 	t.Run("live ollama keeps default", func(t *testing.T) {
 		r := NewRegistry()
 		r.Register(mustOllamaProvider(t, liveOllama(t)+"/v1"))
-		r.Register(newFake("ogcode-openrouter", "free/model"))
+		r.Register(newFake("ogx", "glm-5.3-flash"))
 		got := r.DefaultUsable()
 		if got == nil || got.ID() != "ollama" {
 			t.Fatalf("DefaultUsable() = %v, want ollama (daemon answers, it stays default)", got)
@@ -146,7 +162,7 @@ func TestRegistryDefaultUsable(t *testing.T) {
 		t.Setenv("OLLAMA_API_KEY", "test-key")
 		r := NewRegistry()
 		r.Register(mustOllamaProvider(t, deadURL))
-		r.Register(newFake("ogcode-openrouter", "free/model"))
+		r.Register(newFake("ogx", "glm-5.3-flash"))
 		got := r.DefaultUsable()
 		if got == nil || got.ID() != "ollama" {
 			t.Fatalf("DefaultUsable() = %v, want ollama (keyed remote endpoint counts as usable)", got)

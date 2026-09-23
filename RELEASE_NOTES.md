@@ -1,3 +1,69 @@
+# Release Notes — v0.38.0
+
+## Minor: OGX — the OG Lab plan as a provider
+
+OGX is the subscription plan sold by OG Lab, and it is now a provider you connect
+from the settings screen instead of configuring with an environment variable.
+Signing in on the OG Lab side links this install; the plan's models then run
+through OG Lab's gateway, which speaks the OpenAI Chat Completions API, so the
+provider is an ordinary OpenAI-compatible endpoint pointed at that gateway with
+the token the connect flow stored.
+
+The plan *is* the catalogue. The gateway's `/v1/models` returns exactly the
+models the account's plan grants, and there is deliberately **no static
+fallback** — an empty catalogue means the plan carries nothing, and a fallback
+would present models the account cannot reach. Registration is gated the same
+way: a link that carries no plan contributes no provider at all, so it can never
+become the default ahead of a provider that works.
+
+Connecting and disconnecting swap the provider into the running registry with no
+restart. The OGX tab leads the settings sidebar and shows the connect
+invitation, the plan's models with their toggles, and a **Check usage** link
+through to OG Lab. `OGX_GATEWAY_URL` overrides the gateway base URL and
+`OGX_CONNECT_URL` overrides the connect page.
+
+## Minor: ask_user — questions as a first-class round trip
+
+The `ask_user` tool puts a small batch of questions to the user in **one** call
+and blocks until they answer. Each question carries a short header, the question
+text, and two to four options you propose — the user can always type their own —
+and the batch is shown as a short set of screens in a single dialog. The answers
+come back to the model as the tool result, verbatim.
+
+It is offered to interactive sessions only: the Build agent, under permission
+gating. Headless runs (`ogcode run`, the indexer) and sub-agents never see it, so
+a scripted run cannot stall on a question nobody is there to answer. A blank
+answer means "no preference, use your judgement" for a preference, and "did not
+answer" for a question of fact — the model is not to invent one.
+
+## Minor: The community free key pool is gone
+
+The shared free-tier key pool — a public list of third-party provider keys the
+app provisioned automatically as `ogcode-*` providers — is removed, UI and
+back-end. Quietly registering provider keys the user never entered is not
+something an install should do on its own, and the OGX plan is the supported way
+to chat with zero configuration. The `ogcode-*` provider ids, the settings UI
+that folded them into a single slot, and the `GET /api/providers/free` route go
+with it, and `OGCODE_FREE_KEYS_URL` and `OGCODE_CACHE_DIR` are no longer read.
+
+## Minor: Web search limits move out of the settings screen
+
+The deep-research page-fetch and characters-per-page limits leave the settings
+screen and become fixed defaults — four pages of 6000 characters — overridable
+per deployment with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and
+`OGCODE_SEARCH_PAGE_CHARS` (1000–20000). A value outside its range is clamped
+and an unparseable one warns and falls back to the default, so a bad value can
+never fail a search. Migration `045` drops the two columns that held the old
+per-session settings.
+
+## Other changes
+
+- The workspace directory names the browser tab, so a window full of ogcode tabs
+  is told apart by the project each one serves.
+- The landing page drops its Plan Mode narrative section.
+
+---
+
 # Release Notes — v0.37.4
 
 ## Minor: File edits that explain themselves
