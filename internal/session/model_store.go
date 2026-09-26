@@ -41,6 +41,11 @@ func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 }
 
 // SetModelPreference upserts a model preference into the database.
+//
+// Keyed by (id, provider_id): the same model id can be served by two providers
+// (glm-5.3-flash exists under both the OGX plan and a custom OpenAI-compatible
+// endpoint), and each provider's enabled state is its own — a toggle on one
+// must not overwrite the other's row.
 func SetModelPreference(database *db.DB, p *ModelPreference) error {
 	enabled := 0
 	if p.Enabled {
@@ -51,16 +56,25 @@ func SetModelPreference(database *db.DB, p *ModelPreference) error {
 		isCustom = 1
 	}
 	_, err := database.Exec(
-		`INSERT OR REPLACE INTO model_preference (id, enabled, provider_id, display_name, is_custom, collection, time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO model_preference (id, enabled, provider_id, display_name, is_custom, collection, time_created, time_updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id, provider_id) DO UPDATE SET
+			enabled = excluded.enabled,
+			display_name = excluded.display_name,
+			is_custom = excluded.is_custom,
+			collection = excluded.collection,
+			time_updated = excluded.time_updated`,
 		p.ID, enabled, p.ProviderID, p.DisplayName, isCustom, p.Collection, p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }
 
-// DeleteModelPreference removes a model preference from the database.
-func DeleteModelPreference(database *db.DB, id string) error {
-	_, err := database.Exec(`DELETE FROM model_preference WHERE id = ?`, id)
+// DeleteModelPreference removes the one provider's preference for a model; the
+// same id under another provider keeps its own row.
+func DeleteModelPreference(database *db.DB, id string, providerID string) error {
+	_, err := database.Exec(
+		`DELETE FROM model_preference WHERE id = ? AND provider_id = ?`, id, providerID,
+	)
 	return err
 }
 

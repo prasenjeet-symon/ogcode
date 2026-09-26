@@ -36,6 +36,11 @@ type Context struct {
 	// Model is the model ID the parent session is using. Tools that spawn child
 	// sessions (e.g. deep_search) should inherit this so they run on the same model.
 	Model string
+	// Provider is the provider that serves Model. It rides along with Model so a
+	// child session resolves the same provider: a model id can be served by more
+	// than one provider (a plan model by both OGX and an OpenAI-compatible
+	// endpoint), so the id alone does not identify one.
+	Provider string
 }
 
 // PermissionRequest is sent when a tool needs user approval.

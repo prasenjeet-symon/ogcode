@@ -8,6 +8,12 @@ type PageEntry struct {
 	Keywords  []string `json:"keywords"`
 	Labels    []string `json:"labels"`
 	IndexedAt int64    `json:"indexedAt"`
+	// ModTime is the file's modification time in Unix milliseconds as it stood
+	// when the page was indexed. It is what lets a later run recognise a file
+	// that has been rewritten and re-index it, rather than skipping it because
+	// its path is already known. 0 means no time was recorded (a row written
+	// before the column existed, or a stat that failed), which reads as stale.
+	ModTime int64 `json:"modTime"`
 }
 
 // DocSummary holds a document's metadata for the UI listing.

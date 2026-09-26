@@ -230,7 +230,7 @@ export default function Onboarding() {
         /* non-fatal */
       }
     }
-    session.selectModel(modelId); // persists as the default (localStorage)
+    session.selectModel(modelId, model?.providerId); // persists as the default (localStorage)
     await onboarding.refresh(); // clears needs-onboarding so the gate won't bounce
     navigate('/', { replace: true });
   };

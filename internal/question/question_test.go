@@ -143,3 +143,101 @@ func TestManager_ConcurrentCreateReply(t *testing.T) {
 		t.Errorf("%d requests still pending after every one was answered", len(got))
 	}
 }
+
+// A condition with no options matches any answer at all — a selection or typed
+// text — and `not` inverts the whole match.
+func TestCondition_Match(t *testing.T) {
+	answers := map[string]Answer{
+		"store":  {Selected: []string{"Postgres"}},
+		"region": {Text: "eu-west-1"},
+	}
+	cases := []struct {
+		name string
+		c    *Condition
+		want bool
+	}{
+		{"nil condition always shows", nil, true},
+		{"label picked", &Condition{Question: "store", Options: []string{"Postgres"}}, true},
+		{"label not picked", &Condition{Question: "store", Options: []string{"MySQL"}}, false},
+		{"any of several labels", &Condition{Question: "store", Options: []string{"MySQL", "Postgres"}}, true},
+		{"not inverts a hit", &Condition{Question: "store", Options: []string{"Postgres"}, Not: true}, false},
+		{"not inverts a miss", &Condition{Question: "store", Options: []string{"MySQL"}, Not: true}, true},
+		{"no options matches typed text", &Condition{Question: "region"}, true},
+		{"no options misses a blank answer", &Condition{Question: "missing"}, false},
+		{"not, no options, blank answer", &Condition{Question: "missing", Not: true}, true},
+	}
+	for _, tc := range cases {
+		if got := tc.c.Match(answers); got != tc.want {
+			t.Errorf("%s: Match = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A branch is evaluated from the answers to the questions before it, so a screen
+// whose own branch was skipped is skipped too — its condition reads a blank
+// answer rather than a stale one.
+func TestVisibility_SkipsTheWholeSubtree(t *testing.T) {
+	qs := []Question{
+		{ID: "store", Question: "Which store?"},
+		{ID: "pg", Question: "Postgres version?", ShowWhen: &Condition{Question: "store", Options: []string{"Postgres"}}},
+		{ID: "pg_pool", Question: "Pool size?", ShowWhen: &Condition{Question: "pg", Options: []string{"15"}}},
+		{ID: "mysql", Question: "Charset?", ShowWhen: &Condition{Question: "store", Options: []string{"MySQL"}}},
+	}
+
+	// Chose MySQL: the postgres branch and everything gated behind it is off.
+	got := Visibility(qs, map[string]Answer{"store": {Selected: []string{"MySQL"}}})
+	want := []bool{true, false, false, true}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("MySQL path: visibility[%d] = %v, want %v (%v)", i, got[i], want[i], got)
+		}
+	}
+
+	// Chose Postgres and then gave no version: the nested pool question is off.
+	got = Visibility(qs, map[string]Answer{"store": {Selected: []string{"Postgres"}}})
+	want = []bool{true, true, false, false}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Postgres path: visibility[%d] = %v, want %v (%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// AnswersByID keys the positional reply by the question id, and leaves a
+// question with no id out — nothing can branch on it.
+func TestAnswersByID(t *testing.T) {
+	qs := []Question{{ID: "a"}, {Question: "no id"}, {ID: "b"}}
+	reply := Reply{Answers: []Answer{{Text: "one"}, {Text: "two"}, {Text: "three"}}}
+
+	got := AnswersByID(qs, reply)
+	if len(got) != 2 || got["a"].Text != "one" || got["b"].Text != "three" {
+		t.Errorf("AnswersByID = %+v, want a and b keyed to their answers", got)
+	}
+	if _, ok := got[""]; ok {
+		t.Error("an id-less question should not be keyed")
+	}
+}
+
+// The branching fields ride on the existing wire shape, and are omitted when
+// absent so a batch that does not branch is byte-for-byte what it was.
+func TestRequestJSONBranchingShape(t *testing.T) {
+	plain, _ := json.Marshal(Question{Question: "Which store?"})
+	if strings.Contains(string(plain), `"showWhen"`) {
+		t.Errorf("an unconditional question should omit showWhen: %s", plain)
+	}
+
+	branched, _ := json.Marshal(Question{
+		ID:       "pg",
+		Question: "Postgres version?",
+		ShowWhen: &Condition{Question: "store", Options: []string{"Postgres"}},
+	})
+	s := string(branched)
+	for _, want := range []string{`"id":"pg"`, `"showWhen"`, `"question":"store"`, `"options":["Postgres"]`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("branched question is missing %s: %s", want, s)
+		}
+	}
+	if strings.Contains(s, `"not"`) {
+		t.Error("not should be omitted when false")
+	}
+}

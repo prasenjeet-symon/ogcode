@@ -558,6 +558,25 @@ The server exposes a single workspace folder over HTTP at /public. Place any fil
 Return that path (or a full URL made from it) when you produce a file the user may want to download or view in the browser. The folder is served deliberately-exposed: reachable on the LAN during interactive serve and through the user's tunnel in hosted worktrees, so do not put secrets in it. Writing to the folder can be done with the regular write/bash tools; there is no separate upload tool.`, dir)
 }
 
+// previewServingPrompt returns a section advertising the live-preview proxy: a
+// service the agent starts on a loopback port is served by this server at
+// /preview/<port>/, so the agent can hand the user a URL that opens the running
+// app. The prefix is fixed for the whole install, so this belongs in the
+// cacheable base.
+func previewServingPrompt() string {
+	return `
+## Live service preview
+
+A local service you start on a loopback port is reachable through this server at /preview/<port>/ — a dev server, a player, a dashboard. The port is the one the process listens on:
+
+  /preview/3000/          ->  http://127.0.0.1:3000/
+  /preview/3000/app.js    ->  http://127.0.0.1:3000/app.js
+
+The path after the port is forwarded unchanged (WebSockets and streaming responses included), so return a /preview/<port>/ URL when something is running that the user should open in the browser. Only loopback targets are reachable this way, and the port must be listening before the URL will load.
+
+Starting several services at once is fine: the user's Preview page lists every service running on a loopback port as a grid of tiles, so they can open each one without a URL from you. Label each service meaningfully in its page title, which becomes the tile's name.`
+}
+
 // viewportPrompt returns a section telling the agent about the user's
 // rendering viewport so it can make responsive design decisions.
 func viewportPrompt(width, height int) string {
@@ -870,12 +889,20 @@ func modelFamilyStylePrompt(family string) string {
 // thin summary that drops something the rest of the turn needed; the failure
 // from compacting too rarely only costs tokens and focus. So the bar to call it
 // is stated plainly, and the standard for the summary is stated at length.
+//
+// Once a reminder has fired — on read volume or on accumulated re-send cost —
+// compacting stops being a judgement call: the reminder is not advice, and it
+// keeps arriving until the tool is called. The one exception — nothing finished
+// left in context — is named here so the agent can recognise it as the exception
+// rather than a licence to ignore every reminder.
 func compactContextPrompt() string {
 	return `## Reclaiming Your Own Context
 
 You reason best over a context that holds what the task still needs and little else. As a turn goes on it fills with work you are already done with — files you have read and drawn your conclusions from, searches whose answer you have already noted, an approach you tried and abandoned. Carrying that is not just a token cost; it is an accuracy cost. The more finished detail crowds your context, the more your attention is spread across things that no longer matter, and the easier it is to lose the thread or contradict something you already established.
 
-"compact_context" replaces everything earlier in this turn with a summary you write. Reach for it when a chunk of work is genuinely finished with; a good moment is just after you finish exploring and before you start editing. If the tool is offered and you have reached that point, call it — do not hold off to save tokens or to keep a cached prefix intact. A focused, accurate context is worth more than the saving, and reclaiming the space is the whole point.
+"compact_context" replaces everything earlier in this turn with a summary you write. Reach for it when a chunk of work is genuinely finished with. If the tool is offered and you have reached that point, call it — do not hold off to save tokens or to keep a cached prefix intact. A focused, accurate context is worth more than the saving, and reclaiming the space is the whole point.
+
+A reminder appended to a tool result is a directive, not a suggestion. It is headed **Context pressure** when it fires on the volume of what you have read, and **Re-send cost** when it fires on how often the whole context has been sent back to the model. Either way it fires once this much finished material has already accumulated, and it keeps arriving — it is deliberately never capped — until you call the tool. When you see it, compact now; do not read anything else first. "Disregard this and carry on" is not one of your options. The single exception is the case the reminder cannot see: nothing finished is left in your context, and every item still in front of you is in active use for the immediate next action, so a summary would lose something still needed. If that is not true, compact.
 
 Do not call it on a short turn, or when the material still in context is what you are actively working from. Two or three large reads behind you is the signal; a couple of small ones is not.
 
@@ -916,6 +943,8 @@ Ask everything you need in **one call**. The batch is shown as a short set of sc
 - **Question**: one clear sentence — state what you are asking and why it matters.
 - **Options**: 2-4 concrete answers you propose, best first, each with a one-line description. Mark "multiSelect" only when several could apply at once; otherwise it is pick-one.
 - **Freeform**: the user can always type an answer of their own, so your options need not be exhaustive — a good set of suggestions is faster to answer than an open field, and never a constraint.
+
+**When one screen depends on an earlier answer, say so in the batch.** Give the earlier question an "id", then set "showWhen" on the later one ({"question": "<id>", "options": ["<label>"]} — add "not": true to show it when none of those labels was picked, or omit "options" to match any answer at all). The dialog evaluates this as the user answers, so they only ever see the branch that applies, and the tool result tells you which screens were shown and which were skipped for not matching. Branch only on an earlier question; do not expect the user to answer a screen whose branch did not apply.
 
 The turn pauses until they answer. A blank answer means the user declined to pick: for a preference that is licence to use your judgement and say what you chose; for a question whose content you actually need — a quiz answer, a fact — they did not answer, so do not invent one.`
 }

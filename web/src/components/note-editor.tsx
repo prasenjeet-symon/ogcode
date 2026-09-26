@@ -119,6 +119,7 @@ interface NoteEditorProps {
   placeholder?: string;
   autofocus?: boolean;
   model?: string;
+  provider?: string;
 }
 
 // ── Grip icon ─────────────────────────────────────────────────────────────────
@@ -470,7 +471,7 @@ export default function NoteEditor(props: NoteEditorProps) {
     setTransformLoading(true);
     setTransformResult(null);
     try {
-      const res = await apiTransformText(ss.text, instruction, props.model || undefined);
+      const res = await apiTransformText(ss.text, instruction, props.model || undefined, props.provider || undefined);
       setTransformResult(res.result);
     } catch (err) {
       console.error('transform error', err);

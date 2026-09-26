@@ -98,12 +98,14 @@ interface SessionContextValue {
   respondQuestion: (questionId: string, answers: QuestionAnswerAPI[]) => Promise<void>;
   models: () => ModelInfo[];
   selectedModel: () => string;
-  selectModel: (modelId: string) => void;
-  permissionMode: () => 'auto' | 'ask';
-  setPermissionMode: (mode: 'auto' | 'ask') => Promise<void>;
+  /** The provider chosen with the model; '' means resolve it from the model id. */
+  selectedProvider: () => string;
+  selectModel: (modelId: string, providerId?: string) => void;
+  permissionMode: () => 'auto' | 'ask' | 'yolo';
+  setPermissionMode: (mode: 'auto' | 'ask' | 'yolo') => Promise<void>;
   selectSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
-  newSession: (model?: string) => Promise<Session>;
+  newSession: (model?: string, provider?: string) => Promise<Session>;
   prompt: (content: string, images?: ImagePartData[]) => Promise<void>;
   /** True when this optimistic message never reached the server. */
   sendFailed: (messageId: string) => boolean;
@@ -116,7 +118,7 @@ interface SessionContextValue {
   reloadModels: () => Promise<void>;
   toggleModel: (model: ModelInfo, enabled: boolean) => Promise<void>;
   addCustomModel: (id: string, providerId: string, displayName: string, collection?: string) => Promise<void>;
-  removeCustomModel: (id: string) => Promise<void>;
+  removeCustomModel: (id: string, providerId?: string) => Promise<void>;
   refresh: () => void;
   modelSlots: () => (string | null)[];
   setModelSlot: (slot: number, modelId: string | null) => void;
@@ -336,6 +338,13 @@ export const SessionProvider: ParentComponent = (props) => {
   const [pendingModel, setPendingModel] = createSignal<string>(
     typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) || '' : ''
   );
+  // The provider chosen alongside pendingModel. A model id can be served by more
+  // than one provider, so the id alone does not pin an endpoint; persisted next
+  // to the model so a restart resumes the same one.
+  const PROVIDER_STORAGE_KEY = 'ogcode-selected-provider';
+  const [pendingProvider, setPendingProvider] = createSignal<string>(
+    typeof localStorage !== 'undefined' ? localStorage.getItem(PROVIDER_STORAGE_KEY) || '' : ''
+  );
 
   // Model hotkey slots — up to 4 models that can be switched to with Alt+1–4.
   // Persisted in localStorage so assignments survive app restarts.
@@ -417,18 +426,34 @@ export const SessionProvider: ParentComponent = (props) => {
     return '';
   };
 
-  async function selectModel(modelId: string) {
+  // The provider paired with the selected model, in the same precedence order:
+  // an explicit pending pick, then the session's stored provider, then the
+  // catalog's own providerId for the resolved model. '' lets the server resolve
+  // by model id.
+  const selectedProvider = (): string => {
+    if (pendingProvider()) return pendingProvider();
+    const sess = activeSession();
+    if (sess?.provider) return sess.provider;
+    const id = selectedModel();
+    return models().find((m) => m.id === id)?.providerId || '';
+  };
+
+  async function selectModel(modelId: string, providerId?: string) {
     // Set pendingModel immediately (optimistic) so selectedModel() reflects the change
     // before the network request completes — prevents the old model from being sent if
     // the user sends a prompt quickly after changing the model.
     setPendingModel(modelId);
+    if (providerId) setPendingProvider(providerId);
     // Persist the selection so it survives app restarts — this is the default model
     // for the home page and new sessions.
-    try { localStorage.setItem(STORAGE_KEY, modelId); } catch (_e) { /* ignore quota errors */ }
+    try {
+      localStorage.setItem(STORAGE_KEY, modelId);
+      if (providerId) localStorage.setItem(PROVIDER_STORAGE_KEY, providerId);
+    } catch (_e) { /* ignore quota errors */ }
     const sess = activeSession();
     if (!sess) return;
     try {
-      const updated = await updateSession(sess.id, { model: modelId });
+      const updated = await updateSession(sess.id, providerId ? { model: modelId, provider: providerId } : { model: modelId });
       setActiveSession(updated);
     } catch (e) {
       console.error('update model failed:', e);
@@ -436,12 +461,15 @@ export const SessionProvider: ParentComponent = (props) => {
   }
 
   // Permission mode for the active session: 'ask' (prompt before every mutating
-  // tool — the default) or 'auto' (auto-run low-risk tools, ask only for risky
-  // ones). Persisted on the session's `permission` field.
-  const permissionMode = (): 'auto' | 'ask' =>
-    activeSession()?.permission === 'auto' ? 'auto' : 'ask';
+  // tool — the default), 'auto' (auto-run low-risk tools, ask only for risky
+  // ones), or 'yolo' (run everything without asking or classifying). Persisted
+  // on the session's `permission` field.
+  const permissionMode = (): 'auto' | 'ask' | 'yolo' => {
+    const p = activeSession()?.permission;
+    return p === 'auto' || p === 'yolo' ? p : 'ask';
+  };
 
-  async function setPermissionMode(mode: 'auto' | 'ask') {
+  async function setPermissionMode(mode: 'auto' | 'ask' | 'yolo') {
     const sess = activeSession();
     if (!sess || (sess.permission ?? 'ask') === mode) return;
     setActiveSession({ ...sess, permission: mode }); // optimistic
@@ -553,9 +581,9 @@ export const SessionProvider: ParentComponent = (props) => {
     }
   }
 
-  async function removeCustomModel(id: string) {
+  async function removeCustomModel(id: string, providerId?: string) {
     try {
-      await deleteModelPreference(id);
+      await deleteModelPreference(id, providerId || '');
       await refreshModels();
     } catch (e) {
       console.error('remove custom model failed:', e);
@@ -586,6 +614,7 @@ export const SessionProvider: ParentComponent = (props) => {
     // own persisted model is used, not whatever was selected in the previous session.
     if (!sameSession) {
       setPendingModel('');
+      setPendingProvider('');
     }
 
     // Stop any existing polling from previous session when switching
@@ -714,13 +743,13 @@ export const SessionProvider: ParentComponent = (props) => {
     }
   }
 
-  async function newSession(model?: string) {
+  async function newSession(model?: string, provider?: string) {
     stopPolling();
     setLoadingSessionId('');
     setCompacted(false);
     setLoopError(null);
     if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
-    const session = await createSession(server.directory(), model || selectedModel());
+    const session = await createSession(server.directory(), model || selectedModel(), provider || selectedProvider());
     setSessions((prev) => [session, ...prev]);
     setActiveSession(session);
     setMessages([]);
@@ -926,7 +955,7 @@ export const SessionProvider: ParentComponent = (props) => {
     setOptimistic((prev) => [...prev, tempUserMsg]);
 
     try {
-      await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight);
+      await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider());
       // Immediately fetch to get the real user message + start seeing assistant
       const msgs = await getMessages(session.id);
       if (activeSession()?.id !== session.id) return;
@@ -1180,6 +1209,46 @@ export const SessionProvider: ParentComponent = (props) => {
     }, 150);
   }));
 
+  // --- Model catalogue updates ---
+  // The server refreshes every provider's catalogue in the background (at startup
+  // and after a credential change) and publishes models.updated when the new list
+  // lands. Re-read the list so an open picker reflects it without a manual
+  // reload — this is what lets the fetch happen off the UI's critical path.
+  let lastProcessedModelsTick = 0;
+  createEffect(on(server.eventTick, (tick) => {
+    if (tick === lastProcessedModelsTick) return;
+    lastProcessedModelsTick = tick;
+    const last = server.lastEvent();
+    if (!last || last.type !== 'models.updated') return;
+    refreshModels();
+  }));
+
+  // --- Session row updates ---
+  // Utility calls (title generation, command risk assessment, compaction) spend
+  // tokens recorded on the session row, not on a message, so nothing in the
+  // message stream carries them. The server publishes session.updated when that
+  // changes; re-read the active session so the token view reflects it. Ignore
+  // updates for other sessions — this only ever touches the one on screen.
+  // Debounced: the risk gate can fire several times in one Auto turn, and one
+  // fetch of the accumulated total is enough.
+  let lastProcessedSessionTick = 0;
+  let sessionRowRefreshDebounce: ReturnType<typeof setTimeout> | null = null;
+  createEffect(on(server.eventTick, (tick) => {
+    if (tick === lastProcessedSessionTick) return;
+    lastProcessedSessionTick = tick;
+    const last = server.lastEvent();
+    if (!last || last.type !== 'session.updated') return;
+    const id = last.properties?.id;
+    if (!id || activeSession()?.id !== id) return;
+    if (sessionRowRefreshDebounce) clearTimeout(sessionRowRefreshDebounce);
+    sessionRowRefreshDebounce = setTimeout(() => {
+      if (activeSession()?.id !== id) return;
+      getSession(id).then((fresh) => {
+        if (activeSession()?.id === id) setActiveSession(fresh);
+      }).catch(() => { /* transient — keep the cached record */ });
+    }, 150);
+  }));
+
   // --- Tool permission prompts ---
   // The backend blocks a mutating tool call (bash/write/edit) until the user
   // approves it, publishing permission.requested and, on resolution,
@@ -1284,9 +1353,9 @@ export const SessionProvider: ParentComponent = (props) => {
     e.preventDefault();
     e.stopPropagation();
     // Only switch if the model is currently enabled
-    const enabled = models().some((m) => m.id === modelId && m.enabled);
-    if (!enabled) return;
-    selectModel(modelId);
+    const target = models().find((m) => m.id === modelId);
+    if (!target?.enabled) return;
+    selectModel(modelId, target.providerId);
     showModelSwitchPopup(modelId, slot + 1);
   };
 
@@ -1314,6 +1383,7 @@ export const SessionProvider: ParentComponent = (props) => {
     respondQuestion,
     models,
     selectedModel,
+    selectedProvider,
     selectModel,
     permissionMode,
     setPermissionMode,

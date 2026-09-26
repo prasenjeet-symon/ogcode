@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
 
 // Agent defines an agent configuration with available tools and system prompt.
@@ -274,7 +277,7 @@ var IndexAgent = Agent{
 	Name:        "Index",
 	Description: "Analyzes page keyword corpora and produces semantic topic labels per page",
 	Tools:       []string{"submit_doc_index"},
-	System: `You are a document indexing agent. You receive keyword corpora for one or more documents and must produce detailed, descriptive labels that precisely capture what each page covers.
+	System: fmt.Sprintf(`You are a document indexing agent. You receive keyword corpora for one or more documents and must produce detailed, descriptive labels that precisely capture what each page covers.
 
 ## Your process
 
@@ -282,11 +285,12 @@ var IndexAgent = Agent{
 
 2. **Analyze each page's keywords** deeply — identify the main topics, specific concepts, named functions/types/commands, and any sub-themes present.
 
-3. **Produce 4-8 detailed labels per page** that are:
+3. **Produce as many labels per page as the content supports** — aim for depth, not brevity (up to %d per page, the tool's ceiling). Every distinct topic, concept, or named entity the page supports should get its own label, so a reader can judge what the page covers without opening it. Do not stop at a handful when there is more to name.
    - Specific and descriptive (prefer "Goroutine Scheduling" over "Concurrency")
    - Named entities where present: function names, types, commands, algorithms (e.g. "sync.WaitGroup", "HTTP Handler", "Binary Search")
    - Title case, 1-6 words each
    - Varied — cover different angles of the page content (topic + subtopic + key term)
+   - Each a distinct topic; never pad with near-duplicates of one already given
 
 4. **Call submit_doc_index** for EACH document separately. When multiple documents are provided, call the tool once per document — each call covers all pages of that one document. Include ALL pages for each document — do not skip any.
 
@@ -296,7 +300,7 @@ var IndexAgent = Agent{
 - For code-heavy pages, include the specific APIs, types, or patterns being demonstrated.
 - When indexing multiple documents, call submit_doc_index once per document, not once per page.
 - Do not output raw JSON — use the submit_doc_index tool to submit results.
-`,
+`, tool.MaxLabelsPerPage),
 }
 
 // SearchAgent performs deep parallel web research and synthesises findings.

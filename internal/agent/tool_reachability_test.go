@@ -163,6 +163,26 @@ func TestDeepSearchGuidanceSkipsAgentsWithoutTheTool(t *testing.T) {
 	}
 }
 
+// The live-preview section shares the public-serving gate, since the same
+// interactive Build session in the server's own directory is the one where a
+// locally-started process is the user's to open. Pinned separately so a later
+// change to one heading's gate cannot silently leave the other behind.
+func TestLivePreviewReachesOnlyTheBuildAgent(t *testing.T) {
+	const heading = "## Live service preview"
+
+	all := []Agent{
+		BuildAgent, TaskAgent, PlanAgent, BreakdownAgent,
+		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
+	}
+	for _, a := range all {
+		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false), heading)
+		want := a.ID == "build"
+		if got != want {
+			t.Errorf("%s: preview-hosting section = %v, want %v", a.Name, got, want)
+		}
+	}
+}
+
 // The workspace's public/ folder is served from the SERVER's directory, but the
 // prompt section naming it fills in the AGENT's. Those agree only for a session
 // running in the project itself, so the section belongs to exactly one agent.

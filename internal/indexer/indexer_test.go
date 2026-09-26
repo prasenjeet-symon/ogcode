@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
@@ -353,7 +354,9 @@ func TestPurgeDeletedDocs_NilStore(t *testing.T) {
 // name once. A project that tracks one of them was silently missing it from its
 // index with nothing to explain why. Now the same names are indexed unless
 // .gitignore excludes them, and the second half of this test shows the same
-// tree going quiet the moment it does.
+// tree going quiet the moment it does. (Ogcode's own state directory is the one
+// by-name exception, and it is not a name a project has any business tracking —
+// see TestCollectFiles_SkipsOgcodeStateDirectory.)
 func TestCollectFiles_NoDirectoryIsExcludedByName(t *testing.T) {
 	files := map[string]string{
 		"node_modules/pkg/index.js": "module.exports = {}",
@@ -383,11 +386,15 @@ func TestCollectFiles_NoDirectoryIsExcludedByName(t *testing.T) {
 	}
 }
 
-// The repository's own metadata is the one thing still excluded, and not as a
-// policy of the indexer's: git does not treat .git as part of the working tree,
-// so a matcher that let a walk descend into it would be modelling git wrongly.
-// It holds no indexable file on any real repository — this one has 549 files in
-// .git and zero of them index — so the exclusion costs nothing but the walk.
+// The repository's own metadata is excluded, and not as a policy of the
+// indexer's: git does not treat .git as part of the working tree, so a matcher
+// that let a walk descend into it would be modelling git wrongly. It holds no
+// indexable file on any real repository — this one has 549 files in .git and
+// zero of them index — so the exclusion costs nothing but the walk.
+//
+// Ogcode's state directory (.ogcode/) is the other unconditional skip, for the
+// same shape of reason: it is not part of the working set. See
+// TestCollectFiles_SkipsOgcodeStateDirectory.
 func TestCollectFiles_ExcludesTheGitDirectory(t *testing.T) {
 	root := indexTree(t, map[string]string{
 		".git/config":            "[core]",
@@ -517,6 +524,50 @@ func TestCollectFiles_NoGitignoreIndexesEverything(t *testing.T) {
 	want := []string{"README.md", "src/main.go"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("collected %v, want %v", got, want)
+	}
+}
+
+// ogcode's own state directory is skipped whether or not the project has a
+// .gitignore, because it is not part of the project. It holds the project
+// database, notes and plan archives, and — the reason this cannot be left to a
+// default .gitignore entry — the git worktrees tasks are checked out into,
+// which are a full second copy of every file in the tree. Indexing that would
+// import the whole repository twice, under paths that vanish when the task
+// ends.
+func TestCollectFiles_SkipsOgcodeStateDirectory(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		// Deliberately no .gitignore: the exclusion must not depend on one.
+		"src/main.go":                              "package main",
+		".ogcode/memory/turn.md":                   "# memory",
+		".ogcode/notes/note.md":                    "# note",
+		".ogcode/archives/plan.md":                 "# plan",
+		".ogcode/worktrees/task/t1/src/main.go":    "package main",
+		".ogcode/worktrees/task/t1/nested/deep.go": "package deep",
+	})
+
+	got := collected(t, New(root, nil, nil), root)
+	want := []string{"src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want just %v — ogcode's state directory is not the project", got, want)
+	}
+}
+
+// Like .git, the state directory cannot be brought back by a rule. The prune
+// happens before .gitignore is consulted, so a ! re-include aimed at it is
+// simply never reached — which is the correct reading, since the directory was
+// never inside the project's working set to begin with.
+func TestCollectFiles_StateDirectoryCannotBeReincluded(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		// An explicit attempt to re-include the memory subtree after excluding it.
+		".gitignore":             ".ogcode/\n!.ogcode/memory/\n",
+		".ogcode/memory/turn.md": "# memory",
+		"src/main.go":            "package main",
+	})
+
+	got := collected(t, New(root, nil, nil), root)
+	want := []string{"src/main.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want just %v — no rule can re-include ogcode's state directory", got, want)
 	}
 }
 
@@ -666,7 +717,6 @@ func TestPreviewCountsWork(t *testing.T) {
 		}
 		return full
 	}
-
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("skipped/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -677,13 +727,23 @@ func TestPreviewCountsWork(t *testing.T) {
 
 	store := newTestDocStore(t)
 	// One file already in the index, and one entry whose file is gone: the two
-	// cases a run treats differently and a preview has to tell apart.
-	for _, path := range []string{a, filepath.Join(dir, "deleted.go")} {
-		if err := store.Upsert(&docindex.PageEntry{
-			DocPath: path, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
-		}); err != nil {
-			t.Fatalf("upsert %s: %v", path, err)
-		}
+	// cases a run treats differently and a preview has to tell apart. a.go is
+	// recorded at its own mtime, which is what an indexed file carries now, so it
+	// reads as unchanged; deleted.go has no mtime and no file, so it is stale.
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		t.Fatalf("stat a.go: %v", err)
+	}
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: a, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+		ModTime: aInfo.ModTime().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("upsert %s: %v", a, err)
+	}
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: filepath.Join(dir, "deleted.go"), PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+	}); err != nil {
+		t.Fatalf("upsert deleted.go: %v", err)
 	}
 
 	plan, err := New(dir, store, nil).Preview()
@@ -727,7 +787,6 @@ func TestFileList_MarksIndexedAndSkipsGitignored(t *testing.T) {
 		}
 		return full
 	}
-
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("skipped/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -776,5 +835,146 @@ func TestFileList_MarksIndexedAndSkipsGitignored(t *testing.T) {
 	}
 	if !seenA {
 		t.Errorf("a.go missing from the list")
+	}
+}
+
+// A file the agent (or the user) rewrote after it was indexed must be picked
+// back up by the next run. Before the index recorded a modification time, the
+// path alone decided, so an edited file was skipped forever and only a full
+// rebuild ever refreshed it.
+func TestFilesToIndex_PicksUpModifiedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := newTestDocStore(t)
+	idx := New(dir, store, nil)
+
+	// Indexed as of a moment ago: the file has not changed since, so it is
+	// skipped.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: path, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+		ModTime: info.ModTime().UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	toIndex, changed, err := idx.filesToIndex(context.Background(), []string{path})
+	if err != nil {
+		t.Fatalf("filesToIndex: %v", err)
+	}
+	if len(toIndex) != 0 || changed != 0 {
+		t.Errorf("unchanged file was selected for indexing: %v (changed=%d)", toIndex, changed)
+	}
+
+	// Rewrite the file with a mtime ahead of the recorded one, the way any
+	// editor or the agent's own write would.
+	future := info.ModTime().Add(time.Hour)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	toIndex, changed, err = idx.filesToIndex(context.Background(), []string{path})
+	if err != nil {
+		t.Fatalf("filesToIndex after edit: %v", err)
+	}
+	if len(toIndex) != 1 || toIndex[0] != path {
+		t.Fatalf("modified file was not selected for re-indexing: %v", toIndex)
+	}
+	if changed != 1 {
+		t.Errorf("changed count = %d, want 1", changed)
+	}
+	// Its stale rows are dropped so the re-index starts clean rather than
+	// stacking a second set of pages on the first.
+	if indexed, _ := store.IsDocIndexed(path); indexed {
+		t.Error("stale rows survived; the re-index would land on top of them")
+	}
+}
+
+// An untouched indexed file is still skipped, and a brand-new file is still
+// taken: the modification-time check must not turn every run into a full one.
+func TestFilesToIndex_SkipsUnchangedAndTakesNew(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "old.go")
+	newFile := filepath.Join(dir, "new.go")
+	for _, p := range []string{old, newFile} {
+		if err := os.WriteFile(p, []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store := newTestDocStore(t)
+	info, err := os.Stat(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: old, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+		ModTime: info.ModTime().UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	toIndex, changed, err := New(dir, store, nil).filesToIndex(context.Background(), []string{old, newFile})
+	if err != nil {
+		t.Fatalf("filesToIndex: %v", err)
+	}
+	if changed != 0 {
+		t.Errorf("changed = %d, want 0 — nothing was modified", changed)
+	}
+	if len(toIndex) != 1 || toIndex[0] != newFile {
+		t.Errorf("toIndex = %v, want just the new file", toIndex)
+	}
+}
+
+// A row written before mod_time existed carries 0, which must read as stale so
+// every pre-existing project refreshes once instead of never.
+func TestFilesToIndex_ZeroModTimeReadsAsStale(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := newTestDocStore(t)
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: path, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	toIndex, changed, err := New(dir, store, nil).filesToIndex(context.Background(), []string{path})
+	if err != nil {
+		t.Fatalf("filesToIndex: %v", err)
+	}
+	if len(toIndex) != 1 || changed != 1 {
+		t.Errorf("a row with no recorded mod time must refresh: toIndex=%v changed=%d", toIndex, changed)
+	}
+}
+
+// The gate is off by default and turned off by the documented values, matching
+// memfile.TurnMemoryEnabled so the two per-turn jobs are turned off the same way.
+func TestAutoIndexEnabled(t *testing.T) {
+	t.Setenv("OGCODE_AUTO_INDEX", "")
+	if !AutoIndexEnabled() {
+		t.Error("auto-index must be on when the variable is unset")
+	}
+	for _, off := range []string{"0", "false", "no", "off", "OFF", " False "} {
+		t.Setenv("OGCODE_AUTO_INDEX", off)
+		if AutoIndexEnabled() {
+			t.Errorf("OGCODE_AUTO_INDEX=%q should disable auto-index", off)
+		}
+	}
+	for _, on := range []string{"1", "true", "yes", "on", "anything"} {
+		t.Setenv("OGCODE_AUTO_INDEX", on)
+		if !AutoIndexEnabled() {
+			t.Errorf("OGCODE_AUTO_INDEX=%q should leave auto-index on", on)
+		}
 	}
 }

@@ -187,8 +187,7 @@ func runCompactionScriptWithSummary(t *testing.T, summary string) ([][]provider.
 // runCompactionScriptFull additionally controls whether compact_context is
 // actually registered, so a test can drive the case where the tool is offered
 // but its execution fails. tweak, when non-nil, adjusts the LoopRunner before
-// the turn starts — used to drive the per-project setting that withholds the
-// tool.
+// the turn starts.
 func runCompactionScriptFull(t *testing.T, summary string, registerTool bool, tweak func(*LoopRunner)) ([][]provider.ModelMessage, [][]string) {
 	t.Helper()
 
@@ -337,18 +336,17 @@ func TestRunLoop_CompactContextGuidanceShipsWithTheTool(t *testing.T) {
 	}
 }
 
-// TestRunLoop_ProjectSettingWithholdsCompactContext drives the same four-step
-// script in a project that has the setting turned off. The model still asks to
+// TestRunLoop_CompactContextEnvWithholdsTheTool drives the same four-step
+// script with OGCODE_COMPACT_CONTEXT turned off. The model still asks to
 // compact — the script is fixed — and the turn must simply carry on with its
 // full history, because the tool was never on the wire to begin with.
-func TestRunLoop_ProjectSettingWithholdsCompactContext(t *testing.T) {
-	reqs, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
-		lr.CompactContextEnabled = func() bool { return false }
-	})
+func TestRunLoop_CompactContextEnvWithholdsTheTool(t *testing.T) {
+	t.Setenv(compactContextEnv, "false")
+	reqs, toolLists := runCompactionScriptFull(t, e2eSummary, true, nil)
 
 	for step, tools := range toolLists {
 		if containsString(tools, "compact_context") {
-			t.Errorf("step %d offered compact_context although the project has it disabled: %v", step, tools)
+			t.Errorf("step %d offered compact_context although the environment has it disabled: %v", step, tools)
 		}
 	}
 
@@ -365,7 +363,7 @@ func TestRunLoop_ProjectSettingWithholdsCompactContext(t *testing.T) {
 	uses := toolUseIDs(last)
 	for _, kept := range []string{"call_1", "call_2"} {
 		if !containsString(uses, kept) {
-			t.Errorf("%s was dropped even though compaction is disabled for this project", kept)
+			t.Errorf("%s was dropped even though compaction is disabled by the environment", kept)
 		}
 	}
 	var lead string
@@ -374,56 +372,19 @@ func TestRunLoop_ProjectSettingWithholdsCompactContext(t *testing.T) {
 	}
 }
 
-// The default — no source wired, as in the CLI and every test that predates the
-// setting — must keep offering the tool.
-func TestCompactContextAllowedDefaultsToEnabled(t *testing.T) {
-	if !(&LoopRunner{}).compactContextAllowed() {
-		t.Error("a LoopRunner with no CompactContextEnabled source should allow compaction")
-	}
-	if (&LoopRunner{CompactContextEnabled: func() bool { return false }}).compactContextAllowed() {
-		t.Error("an explicit false should withhold compaction")
-	}
-}
-
-// The project setting is resolved ONCE per turn, never per step. It decides both
-// a tool on the wire and a ~2.5KB system entry, and on OpenAI/Ollama every system
-// entry is joined into messages[0] where the longest-common-prefix cache lives —
-// so a value that changed between steps would hand the model a different tool
-// list and a different system prompt mid-turn, costing the cache for the rest of
-// it. The read also fails OPEN (a DB error reports the default), which is exactly
-// how a single transient error could have flipped one step.
-//
-// The closure here flips on every call. If the loop read it per step, the steps
-// would disagree; resolved per turn, it is called once and every step matches.
-func TestRunLoop_CompactContextSettingIsReadOncePerTurn(t *testing.T) {
-	calls := 0
-	_, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
-		lr.CompactContextEnabled = func() bool {
-			calls++
-			return calls%2 == 1 // true, false, true, false, ...
-		}
-	})
-
-	if calls != 1 {
-		t.Errorf("CompactContextEnabled called %d times; a turn must resolve it once", calls)
-	}
-	if len(toolLists) < 2 {
-		t.Fatalf("need at least 2 steps to compare, got %d", len(toolLists))
-	}
-	first := containsString(toolLists[0], "compact_context")
-	for step, tools := range toolLists {
-		if containsString(tools, "compact_context") != first {
-			t.Errorf("step %d disagrees with step 0 about whether compact_context is offered "+
-				"— the tool list changed mid-turn, which breaks the cached prefix on every provider: %v",
-				step, tools)
+// The default — no OGCODE_COMPACT_CONTEXT in the environment — must keep
+// offering the tool. Only an explicit falsey value turns it off.
+func TestCompactContextEnabledDefaultsToOn(t *testing.T) {
+	for _, env := range []string{"", " ", "1", "true", "yes"} {
+		t.Setenv(compactContextEnv, env)
+		if !compactContextEnabled() {
+			t.Errorf("OGCODE_COMPACT_CONTEXT=%q should leave compaction on", env)
 		}
 	}
-
-	// And the guidance block must track the tool list exactly, or the system
-	// prompt churns even when the tool list does not.
-	for step := range lastSystems {
-		if systemMentions(step, "Reclaiming Your Own Context") != first {
-			t.Errorf("step %d disagrees with step 0 about the compact_context guidance block", step)
+	for _, env := range []string{"0", "false", "no", "off", "FALSE", " Off "} {
+		t.Setenv(compactContextEnv, env)
+		if compactContextEnabled() {
+			t.Errorf("OGCODE_COMPACT_CONTEXT=%q should withhold compaction", env)
 		}
 	}
 }

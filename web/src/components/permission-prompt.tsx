@@ -94,7 +94,7 @@ export default function PermissionPrompt() {
                 type="button"
                 onClick={() => session.respondPermission(req().permissionId, 'always')}
                 class="inline-flex h-8 pointer-coarse:h-10 pointer-coarse:flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-meta font-medium text-[color:var(--text-secondary)] transition-all hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)] active:scale-[0.97]"
-                title={`Always allow ${req().tool} for this session`}
+                title={`Always allow ${req().pattern && req().pattern !== '*' ? req().pattern : req().tool}, in every session`}
               >
                 Always
                 <kbd class="hidden sm:inline rounded border border-current px-1 font-mono text-[9.5px] leading-[14px] opacity-55">A</kbd>

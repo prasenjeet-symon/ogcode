@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -514,10 +515,16 @@ type StreamRequest struct {
 	Temperature float64          `json:"temperature,omitempty"`
 	MaxTokens   int              `json:"maxTokens,omitempty"`
 	// Thinking asks for the model's reasoning mode, where the provider and the
-	// model support one. Only the agent loop sets it. The short utility calls —
-	// titles, the auto-mode risk gate, compaction — run on tight max_tokens
-	// budgets that thinking would spend before reaching an answer, and none of
-	// them is the kind of work reasoning improves.
+	// model support one. Only the agent loop's main request sets it; the short
+	// utility calls — titles, compaction, the auto-mode risk gate — leave it
+	// off, because none of them is the kind of work reasoning improves.
+	//
+	// Leaving it off does NOT mean no reasoning happens: a reasoning model may
+	// emit its chain of thought anyway, into the same output budget, before it
+	// writes an answer. A utility call must therefore size MaxTokens for the
+	// thinking plus the answer, or it gets empty content and finish=length. (The
+	// auto-mode risk gate was sent 8 tokens on this assumption and silently
+	// failed to judge any command; see riskLLMMaxTokens.)
 	Thinking bool `json:"thinking,omitempty"`
 	// CacheKey identifies the conversation this request belongs to, for
 	// providers whose prompt cache is shared across machines and needs a routing
@@ -584,10 +591,26 @@ type Provider interface {
 	StreamChat(ctx context.Context, req StreamRequest) (<-chan StreamEvent, error)
 }
 
-// ModelRefresher is an optional interface that providers can implement
-// to support dynamic model list refreshing.
-type ModelRefresher interface {
-	RefreshModels()
+// CatalogRefresher is implemented by providers whose model catalogue is fetched
+// from their endpoint rather than compiled in. RefreshCatalog performs that
+// fetch and installs the result as the provider's cached catalogue, returning
+// the models so the caller can persist them. It is the ONLY path that reaches
+// the network for models — Models() is a pure read, so a refresh can run in the
+// background without blocking anyone reading the picker.
+//
+// A nil return means there was no live catalogue to install (the fetch failed,
+// or this provider serves a compiled-in list); the caller persists nothing and
+// the provider keeps whatever it already had.
+type CatalogRefresher interface {
+	RefreshCatalog(ctx context.Context) []ModelInfo
+}
+
+// CatalogSetter is implemented by providers whose in-memory catalogue can be
+// seeded from a persisted copy, so the picker is populated on startup before the
+// first background refresh completes. SeedCatalog is a pure in-memory write and
+// never touches the network.
+type CatalogSetter interface {
+	SetCatalog(models []ModelInfo)
 }
 
 type Registry struct {
@@ -639,9 +662,71 @@ func (r *Registry) snapshot() []Provider {
 	return ps
 }
 
+// providerRank returns a provider id's seat in ProviderPriority, or
+// len(ProviderPriority) for an id the list does not name. The tail rank keeps
+// an unlisted provider last while still giving it a stable position, which is
+// what makes orderedSnapshot total: every provider sorts by (rank, id).
+func providerRank(id string) int {
+	for i, pid := range ProviderPriority {
+		if pid == id {
+			return i
+		}
+	}
+	return len(ProviderPriority)
+}
+
+// orderedSnapshot returns the registered providers in a deterministic order:
+// ProviderPriority first, then provider id alphabetically. Every path that must
+// pick ONE provider among several that serve the same model id walks this
+// rather than snapshot(), whose map iteration order is random — the source of
+// the bug where a model served by both a metered OGX plan and an out-of-credit
+// third-party endpoint resolved to either one run to run.
+func (r *Registry) orderedSnapshot() []Provider {
+	ps := r.snapshot()
+	sort.Slice(ps, func(i, j int) bool {
+		ri, rj := providerRank(ps[i].ID()), providerRank(ps[j].ID())
+		if ri != rj {
+			return ri < rj
+		}
+		return ps[i].ID() < ps[j].ID()
+	})
+	return ps
+}
+
+// lookupModel finds the provider that serves modelID, preferring an entry the
+// provider marks ActiveByDefault. ActiveByDefault is the provider's own
+// statement that this model is the one a user gets by default (OGX marks every
+// catalogue model so), so it outranks ProviderPriority: the list is a default
+// for a session with no model at all, while this is a choice about this model.
+// Without the preference, "openai" (Z.ai among its collections) would outrank
+// "ogx" and route a plan model to an out-of-credit endpoint. Returns false when
+// no provider lists the model.
+func (r *Registry) lookupModel(modelID string) (Provider, ModelInfo, bool) {
+	if modelID == "" {
+		return nil, ModelInfo{}, false
+	}
+	var first Provider
+	var firstModel ModelInfo
+	found := false
+	for _, p := range r.orderedSnapshot() {
+		for _, m := range p.Models() {
+			if m.ID != modelID {
+				continue
+			}
+			if m.ActiveByDefault {
+				return p, m, true
+			}
+			if !found {
+				first, firstModel, found = p, m, true
+			}
+		}
+	}
+	return first, firstModel, found
+}
+
 func (r *Registry) ListModels() []ModelInfo {
 	var models []ModelInfo
-	for _, p := range r.snapshot() {
+	for _, p := range r.orderedSnapshot() {
 		models = append(models, p.Models()...)
 	}
 	return models
@@ -650,34 +735,19 @@ func (r *Registry) ListModels() []ModelInfo {
 // ModelSupportsImages reports whether the given model accepts image input.
 // Unknown models default to false.
 func (r *Registry) ModelSupportsImages(modelID string) bool {
-	if modelID == "" {
-		return false
-	}
-	for _, p := range r.snapshot() {
-		for _, m := range p.Models() {
-			if m.ID == modelID {
-				return m.SupportsImages
-			}
-		}
-	}
-	return false
+	_, m, ok := r.lookupModel(modelID)
+	return ok && m.SupportsImages
 }
 
 // ContextWindow returns the model's total context length in tokens, or 0 when
 // unknown (dynamically-fetched models without catalog metadata). Callers treat
 // 0 as "fall back to a size heuristic".
 func (r *Registry) ContextWindow(modelID string) int {
-	if modelID == "" {
+	_, m, ok := r.lookupModel(modelID)
+	if !ok {
 		return 0
 	}
-	for _, p := range r.snapshot() {
-		for _, m := range p.Models() {
-			if m.ID == modelID {
-				return m.ContextWindow
-			}
-		}
-	}
-	return 0
+	return m.ContextWindow
 }
 
 // MaxOutputTokens returns the model's output ceiling in tokens, or 0 when
@@ -685,17 +755,11 @@ func (r *Registry) ContextWindow(modelID string) int {
 // apply its own default" — overstating a ceiling makes every request fail, so
 // unknown must never be guessed upward.
 func (r *Registry) MaxOutputTokens(modelID string) int {
-	if modelID == "" {
+	_, m, ok := r.lookupModel(modelID)
+	if !ok {
 		return 0
 	}
-	for _, p := range r.snapshot() {
-		for _, m := range p.Models() {
-			if m.ID == modelID {
-				return m.MaxOutputTokens
-			}
-		}
-	}
-	return 0
+	return m.MaxOutputTokens
 }
 
 func (r *Registry) RegisterCustomModel(modelID, providerID string) {
@@ -721,28 +785,52 @@ func (r *Registry) IsCustomModel(modelID string) bool {
 	return ok
 }
 
+// ResolveProvider resolves a model id with no stored provider preference, the
+// shape every legacy session, plan and task row has (provider is empty there).
+// It is the deterministic fallback described on ResolveProviderFor.
 func (r *Registry) ResolveProvider(modelID string) Provider {
+	return r.ResolveProviderFor(modelID, "")
+}
+
+// ResolveProviderFor resolves which provider serves a model, in this order:
+//
+//  1. A custom-model registration for the id, which is an explicit user routing
+//     decision and therefore wins outright.
+//  2. The stored providerID, when a session, plan or task recorded one and it
+//     is still registered. A recorded provider is what a user chose for this
+//     work, so it beats any inference from the model id — and it is the fix for
+//     a model served by two providers, where the id alone is ambiguous.
+//  3. The model id itself, preferring a provider that marks it ActiveByDefault
+//     and otherwise the highest-priority provider that lists it (see
+//     lookupModel).
+//  4. The highest-priority registered provider, when the model is unknown.
+//
+// A providerID that is no longer registered falls through to the model-id walk
+// rather than failing: a removed provider must not make every stored session
+// unresolvable.
+func (r *Registry) ResolveProviderFor(modelID, providerID string) Provider {
 	// Check custom model routing first
 	r.customMu.RLock()
-	providerID, customOk := r.customModels[modelID]
+	customProvider, customOk := r.customModels[modelID]
 	r.customMu.RUnlock()
 	if customOk {
+		if p := r.Get(customProvider); p != nil {
+			return p
+		}
+	}
+	// An explicitly recorded provider wins over any inference from the id.
+	if providerID != "" {
 		if p := r.Get(providerID); p != nil {
 			return p
 		}
 	}
-	ps := r.snapshot()
-	// Then check built-in models
-	for _, p := range ps {
-		for _, m := range p.Models() {
-			if m.ID == modelID {
-				return p
-			}
-		}
-	}
-	// Fallback to first provider
-	for _, p := range ps {
+	// Then the provider that actually serves the model
+	if p, _, ok := r.lookupModel(modelID); ok {
 		return p
+	}
+	// Fallback to the highest-priority provider
+	if ps := r.orderedSnapshot(); len(ps) > 0 {
+		return ps[0]
 	}
 	return nil
 }
@@ -792,14 +880,24 @@ func NewProviderWithConfig(providerID, apiKey, baseURL string) (Provider, error)
 	}
 }
 
-// RefreshModels clears cached model lists for all providers that support it,
-// forcing re-fetch on next Models() call.
-func (r *Registry) RefreshModels() {
-	for _, p := range r.snapshot() {
-		if refresher, ok := p.(ModelRefresher); ok {
-			refresher.RefreshModels()
+// RefreshCatalogs fetches the live catalogue from every provider that has one,
+// returning the models keyed by provider id. Providers without a live catalogue
+// (a compiled-in list, or one whose fetch failed) are absent from the result.
+//
+// This is the single network path for model lists. It is expected to be called
+// from a background goroutine (or the explicit /models/refresh handler), never
+// from a read path — an unreachable endpoint costs up to the fetch timeout here,
+// and nothing reading Models() should pay that.
+func (r *Registry) RefreshCatalogs(ctx context.Context) map[string][]ModelInfo {
+	out := make(map[string][]ModelInfo)
+	for _, p := range r.orderedSnapshot() {
+		if refresher, ok := p.(CatalogRefresher); ok {
+			if models := refresher.RefreshCatalog(ctx); models != nil {
+				out[p.ID()] = models
+			}
 		}
 	}
+	return out
 }
 
 // ProviderPriority is the stable order used to choose a default provider when a

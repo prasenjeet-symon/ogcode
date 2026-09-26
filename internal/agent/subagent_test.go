@@ -70,7 +70,7 @@ func TestRunTaskSession_ReturnsFinalTextAndCleansUp(t *testing.T) {
 	}
 	done := make(chan res, 1)
 	go func() {
-		a, e := lr.RunTaskSession(context.Background(), "investigate X", "find where X is used and report back", dir, "mock-model")
+		a, e := lr.RunTaskSession(context.Background(), "investigate X", "find where X is used and report back", dir, "mock-model", "")
 		done <- res{a, e}
 	}()
 

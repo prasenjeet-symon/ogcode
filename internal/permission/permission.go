@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"log/slog"
 	"sync"
 
 	"github.com/prasenjeet-symon/ogcode/internal/id"
@@ -98,16 +99,40 @@ type PendingRequest struct {
 type Manager struct {
 	mu        sync.Mutex
 	pending   map[PermissionID]*PendingRequest
-	rulesets  map[string]Ruleset // sessionID -> ruleset ("always" grants append here)
+	rulesets  map[string]Ruleset // sessionID -> config-seeded rules (see EnsureRules)
 	riskCache map[string]Risk    // Auto-mode LLM risk verdicts, keyed by command
+	store     *Store             // global config DB; nil persists nothing
+	global    Ruleset            // stored "always allow" grants, applied to every session
 }
 
-func NewManager() *Manager {
-	return &Manager{
+// NewManager returns a manager backed by store. A nil store (tests, headless
+// runs) persists nothing: grants stay in-memory and session-scoped, exactly as
+// they did before the store existed.
+func NewManager(store *Store) *Manager {
+	m := &Manager{
 		pending:   make(map[PermissionID]*PendingRequest),
 		rulesets:  make(map[string]Ruleset),
 		riskCache: make(map[string]Risk),
+		store:     store,
 	}
+	m.loadGrants()
+	return m
+}
+
+// loadGrants reads the persisted "always allow" grants into memory so every
+// session sees them. A read failure leaves the manager with none rather than
+// failing construction: an unreadable database should degrade to asking, not to
+// a server that will not start.
+func (m *Manager) loadGrants() {
+	if m.store == nil {
+		return
+	}
+	grants, err := m.store.Grants()
+	if err != nil {
+		slog.Warn("failed to load stored permission grants", "err", err)
+		return
+	}
+	m.global = grants
 }
 
 // CachedRisk returns a previously-computed Auto-mode risk verdict for a command.
@@ -187,27 +212,66 @@ func (m *Manager) Reply(id PermissionID, response string) bool {
 	return true
 }
 
-// Ruleset returns the effective ruleset for a session — the stored one if any
-// "always" grants have been recorded, otherwise the default.
+// Ruleset returns the effective ruleset for a session: the persisted "always
+// allow" grants first, then the session's config-seeded rules, then the
+// defaults. The stored grants come first because the user gave them explicitly,
+// and a later configured ask would otherwise be shadowed by the catch-all Allow
+// in the defaults.
 func (m *Manager) Ruleset(sessionID string) Ruleset {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if rs, ok := m.rulesets[sessionID]; ok {
-		return rs
-	}
-	return DefaultRuleset()
-}
-
-// AddRule prepends a grant to a session's ruleset so it takes precedence over
-// the defaults. Used to honor an "always allow" reply for the rest of a session.
-func (m *Manager) AddRule(sessionID string, rule Rule) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	base, ok := m.rulesets[sessionID]
 	if !ok {
 		base = DefaultRuleset()
 	}
+	if len(m.global) == 0 {
+		return base
+	}
+	return append(append(Ruleset{}, m.global...), base...)
+}
+
+// AddRule records an "always allow" grant. With a store attached the grant is
+// durable and machine-wide: it is written once and reaches every session (this
+// one included) through the merge in Ruleset, so there is a single source of
+// truth for it. Without a store — tests, headless runs — it stays in-memory and
+// session-scoped, as before. A failed write still grants it for this session, so
+// an unwritable database costs the user a repeated prompt, not a lost approval.
+func (m *Manager) AddRule(sessionID string, rule Rule) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.store != nil {
+		if err := m.store.AddGrant(rule); err == nil {
+			m.global = append(Ruleset{rule}, m.global...)
+			return
+		} else {
+			slog.Warn("failed to persist permission grant; applying for this session only", "err", err)
+		}
+	}
+	base, ok := m.rulesets[sessionID]
+	if !ok {
+		base = DefaultRuleset()
+	}
 	m.rulesets[sessionID] = append(Ruleset{rule}, base...)
+}
+
+// DefaultMode is the Ask/Auto/Yolo mode a newly created session starts in. It
+// is a starting point, not a live setting: an existing session keeps the mode
+// on its own row, so changing this does not move sessions already in progress.
+// A nil manager (a server built without one, as some tests do) reads as Ask.
+func (m *Manager) DefaultMode() string {
+	if m == nil || m.store == nil {
+		return ModeAsk
+	}
+	return m.store.DefaultMode()
+}
+
+// SetDefaultMode records the Ask/Auto/Yolo mode new sessions start in. Called
+// when a user flips the mode toggle in any session — last choice wins.
+func (m *Manager) SetDefaultMode(mode string) error {
+	if m == nil || m.store == nil {
+		return nil
+	}
+	return m.store.SetDefaultMode(mode)
 }
 
 // matchGlob does simple glob matching (* matches any sequence).

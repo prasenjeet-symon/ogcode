@@ -8,6 +8,7 @@ interface Totals {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
+  utility: number;
   total: number;
 }
 
@@ -31,7 +32,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
 
   const totals = createMemo<Totals>(() => {
     const out: Totals = {
-      input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0,
+      input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, utility: 0, total: 0,
     };
     for (const m of getMessages()) {
       const t = m.info.tokens;
@@ -41,6 +42,22 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
       out.reasoning  += t.reasoning ?? 0;
       out.cacheRead  += t.cacheRead ?? 0;
       out.cacheWrite += t.cacheWrite ?? 0;
+    }
+    // Utility calls (title generation, command risk assessment, compaction)
+    // spend tokens recorded on the session row rather than on a message. Fold
+    // them into the components so the total below includes them, and keep the
+    // utility subtotal to show how much of the session was utility work. Only
+    // when the caller did not supply its own message list (the plan view does).
+    if (!props.messages) {
+      const u = session.activeSession()?.utilityTokens;
+      if (u) {
+        out.input      += u.input ?? 0;
+        out.output     += u.output ?? 0;
+        out.reasoning  += u.reasoning ?? 0;
+        out.cacheRead  += u.cacheRead ?? 0;
+        out.cacheWrite += u.cacheWrite ?? 0;
+        out.utility = (u.input ?? 0) + (u.cacheWrite ?? 0) + (u.output ?? 0);
+      }
     }
     // Cache read is excluded: cached tokens were already counted as input when
     // first sent, so summing them over a session re-counts the same context
@@ -83,6 +100,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
           <Row label="Reasoning" value={totals().reasoning} dot="bg-violet-400" dim={totals().reasoning === 0} />
           <Row label="Cache read" value={totals().cacheRead} dot="bg-amber-400" dim={totals().cacheRead === 0} />
           <Row label="Cache write" value={totals().cacheWrite} dot="bg-orange-400" dim={totals().cacheWrite === 0} />
+          <Row label="Utility" value={totals().utility} dot="bg-sky-400" dim={totals().utility === 0} />
           <div class="mt-2 pt-2 border-t border-[color:var(--border-subtle)] flex items-center justify-between">
             <span class="text-micro font-semibold text-zinc-200">Total</span>
             <span class="text-meta font-mono tabular-nums text-zinc-100">

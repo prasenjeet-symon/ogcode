@@ -29,10 +29,11 @@ type OpenAIProvider struct {
 	baseURL    string
 	collection string // grouping label for dynamically-fetched models ("" = none)
 
-	// cachedModels caches models fetched from /v1/models for Ollama cloud.
-	// Nil means not yet fetched; empty slice means fetched but none found.
+	// cachedModels is the provider's model catalogue: the list last fetched from
+	// the endpoint (or seeded from the persisted copy at startup). Models() is a
+	// pure read of it and never touches the network. Nil means nothing has been
+	// loaded yet, so Models() answers from the compiled-in fallback instead.
 	cachedModels []ModelInfo
-	modelsOnce   sync.Once
 	modelsMu     sync.Mutex
 
 	// modelExplicit records that `model` came from configuration rather than a
@@ -143,13 +144,123 @@ func (p *OpenAIProvider) ID() string { return p.id }
 // directly.
 func (p *OpenAIProvider) BaseURL() string { return p.baseURL }
 
-// RefreshModels clears the cached model list so the next call to Models()
-// will re-fetch from the endpoint (for cloud providers).
-// Not safe to call concurrently with Models().
-func (p *OpenAIProvider) RefreshModels() {
+// SetCatalog seeds the in-memory catalogue from a persisted copy, so Models()
+// answers with the last known list immediately on startup instead of waiting for
+// a fetch that has not run yet. An empty list is ignored — it must never wipe a
+// live catalogue a refresh has already installed.
+func (p *OpenAIProvider) SetCatalog(models []ModelInfo) {
+	if len(models) == 0 {
+		return
+	}
+	p.storeCatalog(models)
+}
+
+// RefreshCatalog fetches the endpoint's live model list, installs it as the
+// cached catalogue, and returns it so the caller can persist it. It is the ONLY
+// path that talks to the network for models — Models() never does.
+//
+// A nil return means "no live catalogue": the fetch failed, or this provider has
+// a compiled-in list that needs no fetch. The cached catalogue is left untouched
+// in that case, so a transient failure never wipes a good list — Models() falls
+// back to the compiled-in one. A non-nil (possibly empty) return is a real
+// answer to persist, including an empty plan that grants nothing.
+func (p *OpenAIProvider) RefreshCatalog(ctx context.Context) []ModelInfo {
+	switch p.id {
+	case "openrouter":
+		// Fetch all live models; mark the curated subset active by default.
+		fetched := p.fetchDynamicModels(ctx)
+		if len(fetched) == 0 {
+			return nil
+		}
+		for i := range fetched {
+			fetched[i].ActiveByDefault = openRouterActiveDefaults[fetched[i].ID]
+		}
+		p.storeCatalog(fetched)
+		return fetched
+
+	case "ollama":
+		// The instance's own /v1/models reports only what has been pulled. The
+		// cloud catalog adds every hosted model, and a signed-in instance
+		// resolves those remotely without a pull — so the picker ends up showing
+		// what is actually usable, not just what happens to be on disk.
+		fetched := p.fetchDynamicModels(ctx)
+		for i := range fetched {
+			// Local: the user pulled these deliberately, so enable them.
+			// A cloud endpoint returns a long list — curate instead.
+			fetched[i].ActiveByDefault = !isCloudURL(p.baseURL)
+		}
+
+		var catalog []ModelInfo
+		if ollamaCatalogEnabled() {
+			c, err := FetchOllamaCloudCatalog(ctx, p.baseURL)
+			if err != nil {
+				// Undocumented endpoint — a failure here is routine, not
+				// something to surface. The static fallbacks still apply.
+				slog.Debug("ollama cloud catalog unavailable", "err", err)
+			} else {
+				catalog = c
+			}
+		}
+
+		// With nothing pulled locally, every model would arrive disabled and
+		// the user would land on an empty picker. Enable the cheapest few —
+		// the catalog is sorted smallest-first — so the endpoint works out
+		// of the box.
+		if len(fetched) == 0 {
+			for i := range catalog {
+				if i >= ollamaCatalogDefaultActive {
+					break
+				}
+				catalog[i].ActiveByDefault = true
+			}
+		}
+
+		merged := mergeOllamaModels(fetched, catalog)
+		if len(merged) == 0 {
+			return nil
+		}
+		p.storeCatalog(merged)
+		return merged
+
+	case OGXProviderID:
+		// The gateway's catalogue is the plan: it reports exactly what the
+		// account can reach. Everything it lists is what the user paid for, so
+		// all of it starts enabled, and there is no static fallback — an empty
+		// or failed fetch means no models, not a guess at what might work.
+		fetched := p.fetchDynamicModels(ctx)
+		if fetched == nil {
+			return nil // failed: keep the last known plan
+		}
+		for i := range fetched {
+			fetched[i].ActiveByDefault = true
+		}
+		p.storeCatalog(fetched)
+		return fetched
+
+	default: // openai
+		// When the base URL points to a non-OpenAI endpoint (e.g. DeepSeek,
+		// Gemini, Groq — OpenAI-compatible providers configured via a custom
+		// OPENAI_BASE_URL), fetch the model list so the user sees the actual
+		// models that endpoint serves. The canonical api.openai.com endpoint
+		// has a compiled-in catalogue and fetches nothing.
+		if isCloudURL(p.baseURL) && p.baseURL != "https://api.openai.com/v1" {
+			fetched := p.fetchDynamicModels(ctx)
+			if len(fetched) > 0 {
+				p.storeCatalog(fetched)
+				return fetched
+			}
+		}
+		return nil
+	}
+}
+
+// storeCatalog installs list as the cached catalogue and re-resolves the
+// default model from it. The list is not copied: it is freshly built by the
+// caller and owned by the provider from here on.
+func (p *OpenAIProvider) storeCatalog(list []ModelInfo) {
 	p.modelsMu.Lock()
-	p.cachedModels = nil
-	p.modelsOnce = sync.Once{}
+	p.cachedModels = list
+	p.resolveDefaultModel(list)
 	p.modelsMu.Unlock()
 }
 
@@ -281,6 +392,20 @@ var openRouterActiveDefaults = map[string]bool{
 	"meta-llama/llama-3.3-70b-instruct": true,
 }
 
+// openRouterStaticCatalog is the compiled-in fallback used when the endpoint
+// cannot be reached (or has not been reached yet). Every entry starts enabled,
+// since it is the curated list the user sees on a fresh install.
+var openRouterStaticCatalog = []ModelInfo{
+	{ID: "anthropic/claude-sonnet-4.6", Name: "Anthropic: Claude Sonnet 4.6", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "anthropic/claude-opus-4.6", Name: "Anthropic: Claude Opus 4.6", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "anthropic/claude-haiku-4.5", Name: "Anthropic: Claude Haiku 4.5", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "openai/gpt-4o", Name: "OpenAI: GPT-4o", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "openai/o4-mini", Name: "OpenAI: o4 Mini", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "google/gemini-2.5-pro", Name: "Google: Gemini 2.5 Pro", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "deepseek/deepseek-r1", Name: "DeepSeek: R1", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "meta-llama/llama-3.3-70b-instruct", Name: "Meta: Llama 3.3 70B Instruct", ProviderID: "openrouter", ActiveByDefault: false},
+}
+
 // ollamaLocalFallback is used when local Ollama is not running or has no models pulled.
 // visionModelHints are substrings of model IDs from known multimodal families.
 // Used to infer image support for dynamically-fetched models (OpenRouter/Ollama)
@@ -325,160 +450,79 @@ var ollamaCloudFallback = []ModelInfo{
 	{ID: "mistral-large-3", Name: "Mistral Large 3", ProviderID: "ollama", ActiveByDefault: false},
 }
 
+// Models returns the provider's model catalogue. It is a PURE READ: it never
+// touches the network. The catalogue is populated by RefreshCatalog (the
+// background refresh) or SetCatalog (the persisted copy seeded at startup), and
+// callers get whatever is currently known — the compiled-in fallback until the
+// first refresh lands.
+//
+// This used to fetch synchronously behind a sync.Once, which made every read
+// block on a 10s network call — the source of the UI freeze. Nothing on a read
+// path may block on a fetch now.
 func (p *OpenAIProvider) Models() []ModelInfo {
-	var list []ModelInfo
+	p.modelsMu.Lock()
+	cached := p.cachedModels
+	p.modelsMu.Unlock()
 
-	switch p.id {
-	case "openrouter":
-		// Fetch all live models once; mark curated subset as active by default.
-		p.modelsOnce.Do(func() {
-			fetched := p.fetchDynamicModels(context.Background())
-			p.modelsMu.Lock()
-			if len(fetched) > 0 {
-				for i := range fetched {
-					fetched[i].ActiveByDefault = openRouterActiveDefaults[fetched[i].ID]
-				}
-				p.cachedModels = fetched
-			} else {
-				// Fallback: static curated list, all active
-				p.cachedModels = []ModelInfo{
-					{ID: "anthropic/claude-sonnet-4.6", Name: "Anthropic: Claude Sonnet 4.6", ProviderID: "openrouter", ActiveByDefault: true},
-					{ID: "anthropic/claude-opus-4.6", Name: "Anthropic: Claude Opus 4.6", ProviderID: "openrouter", ActiveByDefault: true},
-					{ID: "anthropic/claude-haiku-4.5", Name: "Anthropic: Claude Haiku 4.5", ProviderID: "openrouter", ActiveByDefault: true},
-					{ID: "openai/gpt-4o", Name: "OpenAI: GPT-4o", ProviderID: "openrouter", ActiveByDefault: true},
-					{ID: "openai/o4-mini", Name: "OpenAI: o4 Mini", ProviderID: "openrouter", ActiveByDefault: true},
-					{ID: "google/gemini-2.5-pro", Name: "Google: Gemini 2.5 Pro", ProviderID: "openrouter", ActiveByDefault: true},
-					{ID: "deepseek/deepseek-r1", Name: "DeepSeek: R1", ProviderID: "openrouter", ActiveByDefault: true},
-					{ID: "meta-llama/llama-3.3-70b-instruct", Name: "Meta: Llama 3.3 70B Instruct", ProviderID: "openrouter", ActiveByDefault: false},
-				}
-			}
-			p.modelsMu.Unlock()
-		})
-		p.modelsMu.Lock()
-		list = p.cachedModels
-		p.modelsMu.Unlock()
-
-	case "ollama":
-		// The instance's own /v1/models reports only what has been pulled. The
-		// cloud catalog adds every hosted model, and a signed-in instance
-		// resolves those remotely without a pull — so the picker ends up showing
-		// what is actually usable, not just what happens to be on disk.
-		p.modelsOnce.Do(func() {
-			fetched := p.fetchDynamicModels(context.Background())
-			for i := range fetched {
-				// Local: the user pulled these deliberately, so enable them.
-				// A cloud endpoint returns a long list — curate instead.
-				fetched[i].ActiveByDefault = !isCloudURL(p.baseURL)
-			}
-
-			var catalog []ModelInfo
-			if ollamaCatalogEnabled() {
-				c, err := FetchOllamaCloudCatalog(context.Background(), p.baseURL)
-				if err != nil {
-					// Undocumented endpoint — a failure here is routine, not
-					// something to surface. The static fallbacks still apply.
-					slog.Debug("ollama cloud catalog unavailable", "err", err)
-				} else {
-					catalog = c
-				}
-			}
-
-			// With nothing pulled locally, every model would arrive disabled and
-			// the user would land on an empty picker. Enable the cheapest few —
-			// the catalog is sorted smallest-first — so the endpoint works out
-			// of the box.
-			if len(fetched) == 0 {
-				for i := range catalog {
-					if i >= ollamaCatalogDefaultActive {
-						break
-					}
-					catalog[i].ActiveByDefault = true
-				}
-			}
-
-			merged := mergeOllamaModels(fetched, catalog)
-
-			p.modelsMu.Lock()
-			switch {
-			case len(merged) > 0:
-				p.cachedModels = merged
-			case isCloudURL(p.baseURL):
-				p.cachedModels = ollamaCloudFallback
-			default:
-				p.cachedModels = ollamaLocalFallback
-			}
-			p.resolveDefaultModel(p.cachedModels)
-			p.modelsMu.Unlock()
-		})
-		p.modelsMu.Lock()
-		list = p.cachedModels
-		p.modelsMu.Unlock()
-
-	case OGXProviderID:
-		// The gateway's catalogue is the plan: it reports exactly what the
-		// account can reach. Everything it lists is what the user paid for, so
-		// all of it starts enabled, and there is no static fallback — an empty
-		// or failed fetch means no models, not a guess at what might work.
-		p.modelsOnce.Do(func() {
-			fetched := p.fetchDynamicModels(context.Background())
-			for i := range fetched {
-				fetched[i].ActiveByDefault = true
-			}
-			p.modelsMu.Lock()
-			p.cachedModels = fetched
-			p.resolveDefaultModel(p.cachedModels)
-			p.modelsMu.Unlock()
-		})
-		p.modelsMu.Lock()
-		list = p.cachedModels
-		p.modelsMu.Unlock()
-
-	default: // openai
-		// When the base URL points to a non-OpenAI endpoint (e.g. DeepSeek,
-		// Gemini, Groq — OpenAI-compatible providers configured via a custom
-		// OPENAI_BASE_URL), fetch the model list dynamically so the user sees
-		// the actual models that endpoint serves. Fall back to the static
-		// OpenAI catalog for the canonical api.openai.com endpoint.
-		if isCloudURL(p.baseURL) && p.baseURL != "https://api.openai.com/v1" {
-			p.modelsOnce.Do(func() {
-				fetched := p.fetchDynamicModels(context.Background())
-				p.modelsMu.Lock()
-				if len(fetched) > 0 {
-					p.cachedModels = fetched
-				} else {
-					p.cachedModels = nil // fallback to static catalog below
-				}
-				p.modelsMu.Unlock()
-			})
-			p.modelsMu.Lock()
-			cached := p.cachedModels
-			p.modelsMu.Unlock()
-			if len(cached) > 0 {
-				list = cached
-				break
-			}
-		}
-		list = make([]ModelInfo, 0, len(OpenAIModels))
-		for _, m := range OpenAIModels {
-			list = append(list, ModelInfo{
-				ID:              m.ID,
-				Name:            m.Name,
-				ProviderID:      "openai",
-				ActiveByDefault: m.ActiveByDefault,
-				InputPricePerM:  m.InputPricePerM,
-				OutputPricePerM: m.OutputPricePerM,
-				SupportsImages:  m.SupportsImages,
-				ContextWindow:   m.ContextWindow,
-				MaxOutputTokens: m.MaxOutputTokens,
-			})
-		}
+	list := cached
+	if len(list) == 0 {
+		list = p.staticFallback()
 	}
 
+	// Copy before stamping Default. The compiled-in fallbacks are package-level
+	// slices shared by every provider instance, so mutating one in place would
+	// both race and leak one provider's default onto another; the cached list is
+	// the provider's own but is re-stamped on every read, so it must not be
+	// edited either.
+	out := make([]ModelInfo, len(list))
+	copy(out, list)
+
 	def := p.defaultModel()
-	for i := range list {
-		if list[i].ID == def {
-			list[i].Default = true
+	for i := range out {
+		out[i].Default = out[i].ID == def
+	}
+	return out
+}
+
+// staticFallback returns the compiled-in list for this provider, used before any
+// catalogue has been fetched or seeded. It is the same catalogue RefreshCatalog
+// leaves in place on a failed fetch, so a cold start and a failed refresh show
+// the user the same thing. OGX deliberately has none — a planless gateway serves
+// nothing, and a guess at what might work is worse than an empty list.
+func (p *OpenAIProvider) staticFallback() []ModelInfo {
+	switch p.id {
+	case "openrouter":
+		return openRouterStaticCatalog
+	case "ollama":
+		if isCloudURL(p.baseURL) {
+			return ollamaCloudFallback
 		}
+		return ollamaLocalFallback
+	case OGXProviderID:
+		return nil
+	}
+	// openai: the canonical endpoint and a custom OpenAI-compatible one alike
+	// fall back to the compiled-in catalogue until a fetch lands (a custom
+	// endpoint's real list replaces it via RefreshCatalog). This mirrors the
+	// pre-existing behavior of showing the OpenAI list rather than nothing.
+	return openAICatalog()
+}
+
+// openAICatalog renders the compiled-in OpenAI model list.
+func openAICatalog() []ModelInfo {
+	list := make([]ModelInfo, 0, len(OpenAIModels))
+	for _, m := range OpenAIModels {
+		list = append(list, ModelInfo{
+			ID:              m.ID,
+			Name:            m.Name,
+			ProviderID:      "openai",
+			ActiveByDefault: m.ActiveByDefault,
+			InputPricePerM:  m.InputPricePerM,
+			OutputPricePerM: m.OutputPricePerM,
+			SupportsImages:  m.SupportsImages,
+			ContextWindow:   m.ContextWindow,
+			MaxOutputTokens: m.MaxOutputTokens,
+		})
 	}
 	return list
 }
@@ -1193,6 +1237,8 @@ type oaiUsage struct {
 	PromptTokens            int                        `json:"prompt_tokens"`
 	CompletionTokens        int                        `json:"completion_tokens"`
 	TotalTokens             int                        `json:"total_tokens"`
+	PromptCacheHitTokens    int                        `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens   int                        `json:"prompt_cache_miss_tokens,omitempty"`
 	PromptTokensDetails     *oaiPromptTokensDetails    `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *oaiCompletionTokenDetails `json:"completion_tokens_details,omitempty"`
 }
@@ -1224,10 +1270,18 @@ func usageFromOAI(u *oaiUsage) *TokenUsage {
 		InputTokens:  u.PromptTokens,
 		OutputTokens: u.CompletionTokens,
 	}
-	if u.PromptTokensDetails != nil {
-		usage.CacheReadTokens = u.PromptTokensDetails.CachedTokens
+	// The cache hit count is reported two ways in the wild: OpenAI nests
+	// cached_tokens inside prompt_tokens_details, while DeepSeek's native API
+	// puts a top-level prompt_cache_hit_tokens beside it. Prefer the nested
+	// field when it carries a count and fall back to the top-level one.
+	cached := u.PromptCacheHitTokens
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
+		cached = u.PromptTokensDetails.CachedTokens
+	}
+	if cached > 0 {
+		usage.CacheReadTokens = cached
 		usage.InputTokens -= usage.CacheReadTokens
-		// A server that reports cached_tokens exclusive of prompt_tokens, or
+		// A server that reports the cached count exclusive of prompt_tokens, or
 		// simply reports the two inconsistently, must not drive input negative.
 		if usage.InputTokens < 0 {
 			usage.InputTokens = 0

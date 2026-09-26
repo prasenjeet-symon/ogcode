@@ -66,6 +66,7 @@ func (s *Server) handleSetModelPreference(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleDeleteModelPreference(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	providerID := r.URL.Query().Get("providerId")
 
 	// Only allow deleting custom models
 	prefs, _ := session.GetModelPreferences(s.globalDB)
@@ -81,7 +82,7 @@ func (s *Server) handleDeleteModelPreference(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := session.DeleteModelPreference(s.globalDB, id); err != nil {
+	if err := session.DeleteModelPreference(s.globalDB, id, providerID); err != nil {
 		slog.Error("delete model preference", "err", err)
 		http.Error(w, "failed to delete preference", http.StatusInternalServerError)
 		return

@@ -52,10 +52,15 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	builtIn := s.registry.ListModels()
 
 	// Model preferences live in the global config DB (shared across projects).
+	// Keyed by (model id, provider id), not the id alone: the same model id can
+	// be served by two providers — glm-5.3-flash exists under both OGX and a
+	// custom OpenAI-compatible endpoint — and a toggle on one must not flip the
+	// other, or a disable somewhere else would darken a plan model the user
+	// never touched.
 	prefs, _ := session.GetModelPreferences(s.globalDB)
 	prefMap := make(map[string]*session.ModelPreference)
 	for _, p := range prefs {
-		prefMap[p.ID] = p
+		prefMap[p.ID+"\x00"+p.ProviderID] = p
 	}
 
 	availableProviders := make(map[string]bool)
@@ -79,7 +84,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	var result []ModelEntry
 	for _, m := range builtIn {
 		defaultEnabled := m.ActiveByDefault
-		if pref, ok := prefMap[m.ID]; ok {
+		if pref, ok := prefMap[m.ID+"\x00"+m.ProviderID]; ok {
 			defaultEnabled = pref.Enabled
 		}
 		// Prefer a probed/cached capability; otherwise fall back to the catalog
@@ -161,37 +166,6 @@ func (s *Server) configPayload() map[string]any {
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.configPayload())
-}
-
-// handleGetProjectSettings returns the general settings scoped to this
-// workspace. They live in the project's own database, so the answer is about
-// the directory the server was started in and nothing else.
-func (s *Server) handleGetProjectSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := session.GetProjectSettings(s.db)
-	if err != nil {
-		http.Error(w, "failed to read project settings", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, settings)
-}
-
-// handleSetProjectSettings persists the whole settings block. There is no
-// masking or merging to do: every field is a plain user choice the UI already
-// holds in full, so the payload is the new state outright.
-//
-// The change needs no restart. The agent loop reads the setting on every step,
-// so the next step of the next turn already sees it.
-func (s *Server) handleSetProjectSettings(w http.ResponseWriter, r *http.Request) {
-	var incoming session.ProjectSettings
-	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	if err := session.SetProjectSettings(s.db, &incoming); err != nil {
-		http.Error(w, "failed to save project settings", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, &incoming)
 }
 
 func (s *Server) handleGetSearchConfig(w http.ResponseWriter, r *http.Request) {
@@ -285,9 +259,18 @@ func (s *Server) handleValidateSearchKey(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// handleModelsRefresh performs an explicit live refresh of every provider's
+// catalogue. It runs the fetch through the same guarded path the background
+// refresh uses, so it can never overlap another refresh — but unlike the
+// background path it returns the refreshed list inline, since the caller asked
+// for it and expects the new models in the response.
+//
+// Models() is a pure read, so the fetch happening here (rather than inside the
+// listing) is what keeps GET /api/models instant. When another refresh already
+// holds the guard, this returns the current list immediately: the in-flight one
+// will publish models.updated when it lands.
 func (s *Server) handleModelsRefresh(w http.ResponseWriter, r *http.Request) {
-	s.registry.RefreshModels()
-	// Return the updated model list
+	s.refreshModelCatalogsNow(r.Context())
 	s.handleModels(w, r)
 }
 

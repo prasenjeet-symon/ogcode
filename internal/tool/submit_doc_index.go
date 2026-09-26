@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
@@ -19,21 +20,33 @@ func NewSubmitDocIndexTool(store *docindex.Store) SubmitDocIndexTool {
 	return SubmitDocIndexTool{Store: store}
 }
 
+// MaxLabelsPerPage is the ceiling on the labels the index agent may attach to a
+// single page — the one limit on label production. It exists only to stop a
+// runaway model filling the store with near-duplicates; the agent is asked for
+// every distinct topic the page supports, and a well-indexed page sits far
+// below this. Every mention of it (the tool description, the JSON schema, the
+// project map's textLabelCap) is derived from this constant, so a change here
+// cannot leave one of them behind.
+const MaxLabelsPerPage = 30
+
 func (SubmitDocIndexTool) ID() string { return "submit_doc_index" }
 
 func (SubmitDocIndexTool) Description() string {
-	return `Submit semantic page labels for an indexed document (PDF, DOCX, or text/code file).
+	return fmt.Sprintf(`Submit semantic page labels for an indexed document (PDF, DOCX, or text/code file).
 
 Call this tool once you have analyzed all page keyword corpora and determined
-2-5 concise semantic labels per page. Include ALL pages — do not skip any.
+the labels for each page — every distinct topic the content supports, up to %d
+per page. Include ALL pages — do not skip any.
 
 Parameters:
 - doc_path: absolute path to the document being indexed
-- pages: array of {page_num, labels} objects covering every page`
+- pages: array of {page_num, labels} objects covering every page`, MaxLabelsPerPage)
 }
 
 func (SubmitDocIndexTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{
+	// Built with the constant rather than a literal, so the advertised ceiling
+	// cannot drift from the one the agent is told about in Description.
+	return json.RawMessage(fmt.Sprintf(`{
 		"type": "object",
 		"required": ["doc_path", "pages"],
 		"properties": {
@@ -54,14 +67,15 @@ func (SubmitDocIndexTool) Parameters() json.RawMessage {
 						},
 						"labels": {
 							"type": "array",
-							"description": "2-5 concise semantic labels for this page",
+							"description": "Semantic labels for this page — every distinct topic the content supports, up to %d",
+							"maxItems": %d,
 							"items": {"type": "string"}
 						}
 					}
 				}
 			}
 		}
-	}`)
+	}`, MaxLabelsPerPage, MaxLabelsPerPage))
 }
 
 func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ Context) (Result, error) {
@@ -84,6 +98,14 @@ func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ C
 
 	var updated int
 	now := time.Now().UnixMilli()
+	// Record the file's modification time with its rows, so a later incremental
+	// run can tell this file from a rewritten one. A stat that fails leaves 0,
+	// which reads as stale and simply costs one re-index rather than hiding an
+	// edit.
+	var modTime int64
+	if info, err := os.Stat(params.DocPath); err == nil {
+		modTime = info.ModTime().UnixMilli()
+	}
 	for _, p := range params.Pages {
 		labels := p.Labels
 		if labels == nil {
@@ -96,6 +118,7 @@ func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ C
 			Keywords:  []string{},
 			Labels:    labels,
 			IndexedAt: now,
+			ModTime:   modTime,
 		}); err != nil {
 			return Result{}, fmt.Errorf("upsert labels for page %d: %w", p.PageNum, err)
 		}

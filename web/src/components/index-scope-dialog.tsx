@@ -5,11 +5,21 @@ import { getGitignoreInfo } from '../api/client';
 
 /**
  * The scope panel explains what the index reads, and it leads with .gitignore
- * because that is what actually decides. The indexer has no built-in skip list;
- * it consults .gitignore and the handful of patterns a user adds here. A panel
- * that opened straight onto an "add pattern" box would teach the opposite —
- * that this list is the mechanism — and every project would end up maintaining
- * its ignore rules twice, in two places that drift apart.
+ * because that is what decides for a project's own files. Alongside it ogcode
+ * ships a short list of defaults — dependency folders, build output, generated
+ * bundles and lockfiles — seeded into the patterns list on the right, where
+ * each one is marked and any of them can be removed.
+ *
+ * The panel still leads with .gitignore rather than with that list: the defaults
+ * are a floor for the generated directory a project forgot, not the mechanism.
+ * A panel that opened straight onto an "add pattern" box would teach the
+ * opposite, and every project would end up maintaining its ignore rules twice,
+ * in two places that drift apart.
+ *
+ * The one thing skipped without being asked, and without appearing in any list,
+ * is ogcode's own state directory: it is not a project file at all, and it is
+ * called out under the rules so the panel is not describing a narrower index
+ * than the one that runs.
  */
 
 // Six patterns chosen to cover the shapes people actually get wrong: what a
@@ -28,7 +38,12 @@ const SYNTAX: { pattern: string; meaning: string }[] = [
 // starting point rather than applied: which of these a project wants is a
 // question about that project, and answering it on their behalf is how an
 // index ends up quietly missing a directory somebody meant to track.
-const STARTER = ['node_modules/', 'dist/', 'build/', '.env', '*.log'].join('\n');
+//
+// These are the names ogcode's own defaults deliberately leave to the project —
+// a tracked vendor tree, a target directory, a framework cache. The generated
+// directories the defaults already cover (node_modules, build output, lockfiles)
+// are not repeated here, so this is not a second, drifting copy of that list.
+const STARTER = ['vendor/', 'target/', '.next/', '.cache/', 'Pods/'].join('\n');
 
 const RULES: { title: string; body: string }[] = [
   {
@@ -50,6 +65,14 @@ const RULES: { title: string; body: string }[] = [
   {
     title: '.git/ is always skipped',
     body: 'It sits outside the working tree, and no rule can bring it back.',
+  },
+  {
+    title: '.ogcode/ is always skipped',
+    body: "It holds ogcode's own state — the project database, notes, plan archives, and the worktrees tasks are checked out into. It is not part of your project, so a rule neither hides nor reveals it.",
+  },
+  {
+    title: 'A few defaults ship with ogcode',
+    body: 'Dependency folders, build output, generated bundles and lockfiles are excluded out of the box. They are ordinary patterns you can see and remove under Extra patterns, marked default.',
   },
 ];
 
@@ -126,7 +149,7 @@ export default function IndexScopeDialog(props: { onClose: () => void; onRebuild
               <div class="min-w-0">
                 <h2 class="text-[14px] font-semibold text-[color:var(--text-primary)] leading-tight">Index scope</h2>
                 <p class="text-[11.5px] text-[color:var(--text-tertiary)] mt-1 leading-relaxed">
-                  Your <span class="font-mono text-[color:var(--text-secondary)]">.gitignore</span> decides what gets indexed. One list, already under review, shared with git.
+                  Your <span class="font-mono text-[color:var(--text-secondary)]">.gitignore</span> decides what gets indexed, plus a few defaults ogcode ships for generated files.
                 </p>
               </div>
             </div>
@@ -183,7 +206,7 @@ export default function IndexScopeDialog(props: { onClose: () => void; onRebuild
                         <div class="min-w-0">
                           <p class="text-[12.5px] font-medium text-[color:var(--text-primary)]">This workspace has no .gitignore</p>
                           <p class="text-[11.5px] text-[color:var(--text-tertiary)] mt-1 leading-relaxed">
-                            Every readable file is being indexed, apart from <span class="font-mono">.git/</span>. Create one at{' '}
+                            Every readable file is being indexed, apart from <span class="font-mono">.git/</span> and ogcode's own defaults. Create one at{' '}
                             <span class="font-mono text-[color:var(--text-secondary)]">{info()?.path}</span> and the next run will respect it.
                           </p>
                           <div class="mt-2.5 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-base)] overflow-hidden">
@@ -329,6 +352,8 @@ export default function IndexScopeDialog(props: { onClose: () => void; onRebuild
             <div class="px-5 py-4 flex flex-col gap-3.5">
               <p class="text-[11.5px] text-[color:var(--text-tertiary)] leading-relaxed">
                 For files git tracks but the index shouldn't carry — a committed fixture, a vendored bundle.
+                Ogcode's own defaults for generated files and dependency folders are listed here too, each
+                marked <span class="text-[color:var(--text-secondary)]">default</span> and removable like any other.
                 These are matched against <span class="text-[color:var(--text-secondary)]">file and folder names only</span>, so{' '}
                 <code class="font-mono text-[color:var(--accent)]">logs</code> and{' '}
                 <code class="font-mono text-[color:var(--accent)]">*.test.js</code> work, while a path like{' '}
@@ -358,7 +383,8 @@ export default function IndexScopeDialog(props: { onClose: () => void; onRebuild
                   when={docIndex.excludes().length > 0}
                   fallback={
                     <p class="text-[11.5px] text-[color:var(--text-muted)] text-center py-7 px-4 leading-relaxed">
-                      No extra patterns. <span class="font-mono">.gitignore</span> is doing all the work — which is where it belongs.
+                      No patterns in force. Every default has been removed, so{' '}
+                      <span class="font-mono">.gitignore</span> is doing all the work — which is where it belongs.
                     </p>
                   }
                 >
@@ -368,7 +394,17 @@ export default function IndexScopeDialog(props: { onClose: () => void; onRebuild
                         class="flex items-center justify-between gap-2 px-3 py-2 hover:bg-[color:var(--bg-elevated)] group transition"
                         classList={{ 'border-t border-[color:var(--border-subtle)]': i() > 0 }}
                       >
-                        <span class="text-[11.5px] font-mono text-[color:var(--text-secondary)] truncate">{entry.pattern}</span>
+                        <span class="flex items-center gap-2 min-w-0">
+                          <span class="text-[11.5px] font-mono text-[color:var(--text-secondary)] truncate">{entry.pattern}</span>
+                          <Show when={entry.default}>
+                            <span
+                              class="px-1.5 py-px rounded bg-[color:var(--bg-base)] border border-[color:var(--border-subtle)] text-[9.5px] uppercase tracking-wider text-[color:var(--text-muted)] shrink-0"
+                              title="Ships with ogcode. Remove it and it stays removed."
+                            >
+                              default
+                            </span>
+                          </Show>
+                        </span>
                         <button
                           onClick={() => docIndex.deleteExclude(entry.id)}
                           class="w-6 h-6 rounded flex items-center justify-center text-[color:var(--text-muted)] hover:text-[color:var(--danger)] hover:bg-[color:var(--danger)]/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition shrink-0"

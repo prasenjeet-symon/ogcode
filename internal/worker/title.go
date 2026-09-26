@@ -33,7 +33,7 @@ func (e *env) generateTitle(ctx context.Context, sess *session.Session) {
 	// default provider (the same way startAgent runs the loop).
 	var p provider.Provider
 	if sess.Model != "" {
-		p = e.runner.Registry.ResolveProvider(sess.Model)
+		p = e.runner.Registry.ResolveProviderFor(sess.Model, sess.Provider)
 	}
 	if p == nil {
 		p = e.runner.DefaultProvider
@@ -75,14 +75,33 @@ func (e *env) generateTitle(ctx context.Context, sess *session.Session) {
 		return
 	}
 
+	sessionID := sess.ID
 	var title strings.Builder
+	var usage *provider.TokenUsage
 	for evt := range ch {
 		if evt.Type == provider.EventTextDelta {
 			title.WriteString(evt.Text)
 		}
+		if evt.Type == provider.EventUsage {
+			usage = evt.Usage
+		}
 		if evt.Type == provider.EventError {
 			slog.Warn("generateTitle: stream error", "err", evt.Error)
 			return
+		}
+	}
+	// Record what the title call spent: like the server's title generation, the
+	// risk check and compaction, it streams usage the main-turn accounting never
+	// sees. Recorded regardless of whether the title is kept below.
+	if e.runner.Store != nil && usage != nil {
+		if err := e.runner.Store.AddUtilityUsage(sessionID, session.TokenCounts{
+			Input:      usage.InputTokens,
+			Output:     usage.OutputTokens,
+			Reasoning:  usage.ReasoningTokens,
+			CacheRead:  usage.CacheReadTokens,
+			CacheWrite: usage.CacheWriteTokens,
+		}); err != nil {
+			slog.Warn("record utility usage", "err", err)
 		}
 	}
 

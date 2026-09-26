@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -22,6 +23,7 @@ import (
 type Indexer struct {
 	dir      string
 	model    string // optional model override for the IndexAgent
+	provider string // optional provider override for the IndexAgent
 	excludes []string
 	// gitignore skips whatever the repository already declares as noise. It is
 	// always consulted, not opt-in: a .gitignore is the one place a project has
@@ -63,6 +65,15 @@ func (idx *Indexer) WithModel(model string) *Indexer {
 	return idx
 }
 
+// WithProvider sets the provider override for sessions created by the indexer.
+// It travels with WithModel: a model id alone can be served by more than one
+// registered provider, so naming the provider is what keeps the index on the
+// endpoint the triggering turn ran on.
+func (idx *Indexer) WithProvider(provider string) *Indexer {
+	idx.provider = provider
+	return idx
+}
+
 // WithExcludes sets additional patterns to skip during the directory walk.
 // Patterns are matched against directory names and file basenames using filepath.Match.
 func (idx *Indexer) WithExcludes(patterns []string) *Indexer {
@@ -86,10 +97,68 @@ func (idx *Indexer) WithMaxKeywordsBatch(n int) *Indexer {
 	return idx
 }
 
+// AutoIndexEnabled reports whether the project index refreshes itself in the
+// background after each completed turn. It is on by default — a fresh project
+// gets an index without anyone pressing a button — and a single process-wide
+// env gate turns it OFF (OGCODE_AUTO_INDEX=0/false/no/off) for a deployment
+// that would rather index on demand. It mirrors memfile.TurnMemoryEnabled, the
+// gate on the other background-per-turn job, so the two are turned off the same
+// way.
+//
+// It gates only the automatic refresh. The manual "Build index" button and
+// `ogcode index` always run, so an install with auto-index off is not an
+// install without an index.
+func AutoIndexEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_AUTO_INDEX"))) {
+	case "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
+
 // Progress returns the progress tracker for external monitoring.
 func (idx *Indexer) Progress() *ProgressTracker {
 	return idx.progress
 }
+
+// fileChangedSince reports whether the file on disk has been modified since it
+// was indexed at recordedModTime (Unix milliseconds).
+//
+// It is the single place the "is this file stale?" decision lives, so Run and
+// Preview cannot drift: a preview that counted a file as pending while the run
+// skipped it — or the reverse — would be a number the dialog shows and the run
+// contradicts.
+//
+// A stat that fails returns false (unchanged). Without a mtime there is no way
+// to tell whether the file moved, and treating an unreadable file as changed
+// would re-index it on every run — a transient permission or IO error turned
+// into unbounded repeated model calls. Leaving a stale row is the cheaper err.
+func fileChangedSince(path string, recordedModTime int64) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.ModTime().UnixMilli() > recordedModTime
+}
+
+// StateDirName is ogcode's own runtime-state directory. It is created inside a
+// project but is not part of it.
+//
+// It holds the project database, notes, plan archives, per-turn memory and the
+// git worktrees tasks are checked out into — so its contents are either
+// ogcode's bookkeeping or a full duplicate checkout of the repository, never
+// something a search should answer from. A worktree in particular is a second
+// copy of every file in the tree, which would be imported a second time under a
+// path that disappears when the task ends.
+//
+// It is excluded unconditionally rather than offered as a user-configurable
+// default, because it is not a judgement about the project: unlike the seeded
+// defaults this package does ship (see docindex.defaultExcludePatterns), there
+// is nothing here a project could have chosen to track, and ogcode's own files
+// are not the project's to index. The name is exported so the index-scope panel,
+// which describes what a run reads, prunes the same directory instead of
+// reporting a .gitignore from inside it that no run ever opens.
+const StateDirName = ".ogcode"
 
 // isExcluded reports whether a file or directory name matches any user-configured exclude pattern.
 func (idx *Indexer) isExcluded(name string) bool {
@@ -106,13 +175,20 @@ func (idx *Indexer) isExcluded(name string) bool {
 
 // collectFiles walks the workspace and returns every file worth indexing.
 //
-// What is excluded is decided by the repository, not by this package. There is
-// no built-in list of directories to skip: a hardcoded one is a second, unwritten
-// exclusion policy that a project cannot see, cannot change, and does not agree
-// with — it hides files a project chose to track and, being invisible, gives no
-// hint about why they never turn up in a search. .gitignore is where a project
-// has already written this down, so .gitignore is what decides, alongside the
-// excludes the user configures directly.
+// What is excluded is decided by the repository first: .gitignore is where a
+// project has already written down which of its files are noise, deliberately
+// and under review, and it is the primary statement. Alongside it, ogcode ships
+// a short list of defaults for the names that are generated in every project and
+// holds files the index would otherwise read — dependency folders, build output,
+// generated bundles and lockfiles. Those arrive as ordinary, visible,
+// deletable patterns (docindex.defaultExcludePatterns, seeded into
+// index_excludes), not as a second policy hidden in this package, so a project
+// can see them, disagree with one, and remove it for good.
+//
+// What is still skipped without being asked, and without appearing in a list, is
+// ogcode's own state directory (StateDirName): it is not part of the project at
+// all — bookkeeping and duplicate worktrees rather than files anyone could have
+// meant to index — so there is nothing for a project to configure.
 //
 // An ignored directory is pruned rather than walked into — which is faster, and
 // is what git does, since a directory excluded from above cannot have its
@@ -125,6 +201,11 @@ func (idx *Indexer) collectFiles() ([]string, error) {
 		}
 		if d.IsDir() {
 			if path != idx.dir {
+				// ogcode's own state directory is not part of the project, so
+				// it is pruned before any policy is consulted. See StateDirName.
+				if d.Name() == StateDirName {
+					return filepath.SkipDir
+				}
 				if idx.isExcluded(d.Name()) {
 					return filepath.SkipDir
 				}
@@ -202,27 +283,21 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		slog.Warn("purge deleted docs failed, continuing", "err", err)
 	}
 
-	// Filter out already-indexed documents.
-	var toIndex []string
-	for _, filePath := range allFiles {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		indexed, err := idx.docStore.IsDocIndexed(filePath)
-		if err != nil {
-			slog.Warn("could not check index status, skipping", "path", filePath, "err", err)
-			continue
-		}
-		if indexed {
-			slog.Info("skipping already-indexed document", "path", filePath)
-			continue
-		}
-		toIndex = append(toIndex, filePath)
+	// Filter to the documents that need (re-)indexing: the ones the index does
+	// not hold yet, plus the ones whose file has been rewritten since it was
+	// indexed. A changed file's rows are dropped first so the new run does not
+	// stack a second set of pages on top of the stale ones.
+	toIndex, changed, err := idx.filesToIndex(ctx, allFiles)
+	if err != nil {
+		return err
 	}
 
 	if len(toIndex) == 0 {
 		slog.Info("all documents already indexed", "dir", idx.dir)
 		return nil
+	}
+	if changed > 0 {
+		slog.Info("re-indexing modified documents", "count", changed)
 	}
 
 	// Extract text and build corpora for all files to index.
@@ -299,6 +374,52 @@ func (idx *Indexer) Run(ctx context.Context) error {
 	idx.publishProgress(ctx, "done")
 	slog.Info("indexing complete", "dir", idx.dir, "total", len(items))
 	return nil
+}
+
+// filesToIndex works out which of the files on disk an incremental run must
+// (re-)index: the ones the index does not hold at all, plus the ones whose file
+// has been rewritten since it was indexed. It drops the stale rows for a
+// changed file as it goes, so the run that follows starts from a clean slate
+// rather than stacking a second set of pages on the first — which the
+// UNIQUE(doc_path, page_num) constraint would otherwise force into a replace,
+// silently keeping the page count of whichever set was larger.
+//
+// The second return is how many of the selected files were re-indexes rather
+// than first-time indexes, for logging. A cancelled context ends the walk early
+// with its error.
+func (idx *Indexer) filesToIndex(ctx context.Context, allFiles []string) ([]string, int, error) {
+	recorded, err := idx.docStore.ListDocModTimes(idx.dir)
+	if err != nil {
+		// The index could not be read: fall back to treating every file as new,
+		// which is what the old path-only filter did when it could not tell.
+		slog.Warn("could not read indexed mod times, indexing every file", "err", err)
+		recorded = nil
+	}
+
+	var toIndex []string
+	changed := 0
+	for _, filePath := range allFiles {
+		if ctx.Err() != nil {
+			return nil, 0, ctx.Err()
+		}
+		modTime, indexed := recorded[filePath]
+		if !indexed {
+			toIndex = append(toIndex, filePath) // new file
+			continue
+		}
+		if !fileChangedSince(filePath, modTime) {
+			slog.Debug("skipping unchanged document", "path", filePath)
+			continue
+		}
+		slog.Info("re-indexing modified document", "path", filePath, "indexedModTime", modTime)
+		if err := idx.docStore.DeleteByDoc(filePath); err != nil {
+			slog.Warn("could not drop stale entries for modified file, skipping", "path", filePath, "err", err)
+			continue
+		}
+		changed++
+		toIndex = append(toIndex, filePath)
+	}
+	return toIndex, changed, nil
 }
 
 // purgeDeletedDocs removes index entries for documents that were previously
@@ -480,6 +601,7 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 		Directory:   idx.dir,
 		Title:       title,
 		Model:       idx.model,
+		Provider:    idx.provider,
 		SessionType: "index",
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),
@@ -654,23 +776,22 @@ func (idx *Indexer) Preview() (*Plan, error) {
 		return plan, nil
 	}
 
-	indexed, err := idx.docStore.ListDocPaths(idx.dir)
+	indexed, err := idx.docStore.ListDocModTimes(idx.dir)
 	if err != nil {
-		return nil, fmt.Errorf("list indexed doc paths: %w", err)
+		return nil, fmt.Errorf("list indexed doc mod times: %w", err)
 	}
 
 	// One pass over what the index holds answers both questions: an indexed
-	// path still on disk is one the run skips, and one that is not is an entry
-	// the run purges.
-	inIndex := make(map[string]struct{}, len(indexed))
-	for _, path := range indexed {
-		inIndex[path] = struct{}{}
+	// path still on disk is one the run skips unless its file has changed, and
+	// one that is not on disk is an entry the run purges.
+	for path := range indexed {
 		if _, exists := onDisk[path]; !exists {
 			plan.Stale++
 		}
 	}
 	for path := range onDisk {
-		if _, exists := inIndex[path]; exists {
+		recorded, inIndex := indexed[path]
+		if inIndex && !fileChangedSince(path, recorded) {
 			plan.Indexed++
 			continue
 		}
@@ -683,7 +804,7 @@ func (idx *Indexer) Preview() (*Plan, error) {
 			plan.PendingText++
 		}
 	}
-	plan.Pending = plan.Total - plan.Indexed
+	plan.Pending = plan.PendingPDF + plan.PendingDocx + plan.PendingText
 	return plan, nil
 }
 

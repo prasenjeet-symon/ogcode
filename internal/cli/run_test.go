@@ -112,3 +112,50 @@ func TestCollectUsageSumsAssistantTurnsOnly(t *testing.T) {
 		t.Errorf("tokens = %+v, want %+v", tokens, want)
 	}
 }
+
+// Utility calls (title, risk check, compaction) record their tokens on the
+// session row, not on a message, so collectUsage must fold them in or a run
+// that compacted repeatedly under-reports what it spent.
+func TestCollectUsageIncludesUtilityTokens(t *testing.T) {
+	database, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	store := session.NewStore(database)
+
+	sess := &session.Session{
+		ID:        session.NewSessionID(),
+		CreatedAt: session.Now(),
+		UpdatedAt: session.Now(),
+	}
+	if err := store.Create(sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	msg := &session.MessageInfo{
+		ID:        session.NewMessageID(),
+		SessionID: sess.ID,
+		Role:      session.RoleAssistant,
+		Tokens:    &session.TokenCounts{Input: 10, Output: 5, Total: 15},
+		CreatedAt: session.Now(),
+	}
+	if err := store.CreateMessage(msg); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	if err := store.UpdateMessage(msg); err != nil {
+		t.Fatalf("update message: %v", err)
+	}
+
+	if err := store.AddUtilityUsage(sess.ID, session.TokenCounts{Input: 100, Output: 20, CacheRead: 5}); err != nil {
+		t.Fatalf("add utility: %v", err)
+	}
+
+	tokens, _, _ := collectUsage(store, sess.ID)
+	// Components are the sum of the message and the utility call; Utility reports
+	// just the utility subtotal (input + cache write + output, cache read
+	// excluded from the total the same way per-message counts are).
+	want := runTokens{Input: 110, Output: 25, CacheRead: 5, Utility: 120, Total: 135}
+	if tokens != want {
+		t.Errorf("tokens = %+v, want %+v", tokens, want)
+	}
+}

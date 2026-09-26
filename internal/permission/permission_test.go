@@ -25,7 +25,7 @@ func TestDefaultRulesetGatesMutatorsAllowsRest(t *testing.T) {
 }
 
 func TestAddRuleAlwaysGrantTakesPrecedence(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	const sess = "s1"
 
 	if got := m.Ruleset(sess).Evaluate("bash", "ls"); got != Ask {
@@ -42,7 +42,7 @@ func TestAddRuleAlwaysGrantTakesPrecedence(t *testing.T) {
 }
 
 func TestReplyDeliversAndRemoves(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	req := Request{ID: NewPermissionID(), SessionID: "s1", Tool: "write"}
 	pr := m.Create(req)
 
@@ -64,7 +64,7 @@ func TestReplyDeliversAndRemoves(t *testing.T) {
 }
 
 func TestRemoveDiscardsPending(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	req := Request{ID: NewPermissionID(), SessionID: "s1", Tool: "bash"}
 	m.Create(req)
 	m.Remove(req.ID)
@@ -77,7 +77,7 @@ func TestRemoveDiscardsPending(t *testing.T) {
 // idempotent — and it must never overwrite a grant the user gave earlier in the
 // session.
 func TestEnsureRules_SeedsOnceAndPreservesUserGrants(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	seed := Ruleset{{Permission: "skill", Pattern: "internal-docs", Action: Deny}}
 
 	m.EnsureRules("s1", seed)
@@ -106,7 +106,7 @@ func TestEnsureRules_SeedsOnceAndPreservesUserGrants(t *testing.T) {
 // the names it covers before seeding — which is what skillPermissionRules in
 // the agent package does.
 func TestEnsureRules_AskBeatsTheDefaultCatchAll(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	m.EnsureRules("s1", Ruleset{{Permission: "skill", Pattern: "deploy-prod", Action: Ask}})
 	if got := m.Ruleset("s1").Evaluate("skill", "deploy-prod"); got != Ask {
 		t.Errorf("Evaluate = %q, want ask", got)
@@ -114,7 +114,7 @@ func TestEnsureRules_AskBeatsTheDefaultCatchAll(t *testing.T) {
 }
 
 func TestEnsureRules_EmptyRulesLeaveTheSessionOnDefaults(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	m.EnsureRules("s1", nil)
 	if got := m.Ruleset("s1").Evaluate("bash", "rm -rf /"); got != Ask {
 		t.Errorf("bash = %q, want the default ask", got)

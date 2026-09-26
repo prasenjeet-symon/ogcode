@@ -165,3 +165,41 @@ func TestDeleteModelCapability_DropsLearnedWindow(t *testing.T) {
 		t.Fatal("record survived delete")
 	}
 }
+
+// TestSessionProviderRoundTrips pins the session `provider` column: it must
+// survive a write and a read, so a model id served by more than one provider can
+// be resolved to the one the user actually chose rather than whichever the
+// registry happens to walk first.
+func TestSessionProviderRoundTrips(t *testing.T) {
+	database := newCapabilityDB(t)
+	store := NewStore(database)
+
+	sess := &Session{
+		ID: NewSessionID(), ProjectID: "p", Directory: "d", Title: "t",
+		Model: "glm-5.3-flash", Provider: "ogx",
+		SessionType: "build", CreatedAt: Now(), UpdatedAt: Now(),
+	}
+	if err := store.Create(sess); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := store.Get(sess.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get: err=%v sess=%v", err, got)
+	}
+	if got.Model != "glm-5.3-flash" || got.Provider != "ogx" {
+		t.Fatalf("round trip = model %q provider %q, want glm-5.3-flash/ogx", got.Model, got.Provider)
+	}
+
+	// Update must carry the provider too — the session's own PATCH path uses it.
+	got.Provider = "openai"
+	if err := store.Update(got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	again, err := store.Get(sess.ID)
+	if err != nil || again == nil {
+		t.Fatalf("re-get: err=%v sess=%v", err, again)
+	}
+	if again.Provider != "openai" {
+		t.Fatalf("after update provider = %q, want openai", again.Provider)
+	}
+}

@@ -6,8 +6,6 @@ import {
   getSearchConfig,
   setSearchConfig,
   validateSearchKey,
-  getProjectSettings,
-  setProjectSettings,
   type SearchProvider,
 } from '../../api/client';
 import {
@@ -36,7 +34,6 @@ const ICONS = {
   globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3 7.5 7.03 7.5 12s2.015 9 4.5 9zm-8.716-5.25h17.432M3.284 8.25h17.432',
   keyboard: 'M6.75 3.75h.008v.008H6.75v-.008zM6.75 7.5h.008v.008H6.75V7.5zm0 3.75h.008v.008H6.75v-.008zM10.5 3.75h.008v.008H10.5v-.008zM10.5 7.5h.008v.008H10.5V7.5zm0 3.75h.008v.008H10.5v-.008zM14.25 3.75h.008v.008h-.008v-.008zM14.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM17.25 3.75h.008v.008h-.008v-.008zM17.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM4.5 18.75h15a.75.75 0 00.75-.75v-1.5a.75.75 0 00-.75-.75h-15a.75.75 0 00-.75.75v1.5a.75.75 0 00.75.75z',
   hotkey: 'M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zM12 15.75V18m3.75-3.75V18M4.5 4.5h15a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18V6a1.5 1.5 0 011.5-1.5z',
-  context: 'M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75',
 };
 
 // Defaults, matching session.SearchConfig in Go.
@@ -77,8 +74,6 @@ export default function GeneralSettings() {
       </Group>
 
       <ThemeGroup hide={hide} />
-
-      <ContextGroup hide={hide} />
 
       <SearchGroups hide={hide} />
 
@@ -257,99 +252,6 @@ function ThemeGroup(props: { hide: Hide }) {
           <p class="mt-2 text-meta" style={{ color: 'var(--danger)' }}>{error()}</p>
         </Show>
       </Row>
-    </Group>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Context — per-project agent context settings
-// ---------------------------------------------------------------------------
-
-/** Settings stored in this project's own database, so each workspace keeps its
- *  own answer. The switch applies to the next step of the next turn — the agent
- *  loop re-reads it every step — so there is no restart and no session to
- *  reopen. */
-function ContextGroup(props: { hide: Hide }) {
-  const [compactContext, setCompactContext] = createSignal(true);
-  const [loading, setLoading] = createSignal(true);
-  const [saving, setSaving] = createSignal(false);
-  const [error, setError] = createSignal('');
-
-  onMount(async () => {
-    try {
-      const settings = await getProjectSettings();
-      setCompactContext(settings.compactContext);
-    } catch {
-      // Defaults stay in place; the row still renders rather than vanishing.
-    } finally {
-      setLoading(false);
-    }
-  });
-
-  // Optimistic, then reverted on failure: the switch is the state, so leaving it
-  // showing a value the server rejected is the one outcome to avoid.
-  const toggle = async (next: boolean) => {
-    setCompactContext(next);
-    setError('');
-    setSaving(true);
-    try {
-      await setProjectSettings({ compactContext: next });
-    } catch {
-      setCompactContext(!next);
-      setError('Could not save. Is the ogcode server still running?');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Group
-      id="context"
-      title="Context"
-      icon={ICONS.context}
-      description="Saved per project directory, so each workspace decides for itself."
-    >
-      <Row
-        label="Compact context mid-turn"
-        helper={
-          <>
-            Lets the agent call <Mono>compact_context</Mono> to replace the finished part of a long
-            turn with a summary it writes — keeping its reasoning on what the task still needs, and
-            not re-sending work it is done with on every step. Turn it off if you would rather the
-            agent always keep the full turn in view. Applies to the next turn; no restart needed.
-          </>
-        }
-        hidden={props.hide(
-          'Compact context mid-turn',
-          'compact_context compaction summary reclaim tokens turn history context window',
-        )}
-      >
-        <Show when={!loading()} fallback={<Spinner class="w-4 h-4 text-[color:var(--text-muted)]" />}>
-          <Switch
-            checked={compactContext()}
-            disabled={saving()}
-            onChange={toggle}
-            label="Compact context mid-turn"
-          />
-        </Show>
-      </Row>
-
-      <Show when={!loading() && (error() || !compactContext())}>
-        <Row label="Status" stacked hidden={props.hide('Status', 'compact context disabled overflow compaction')}>
-          <Show
-            when={error()}
-            fallback={
-              <Banner tone="warn">
-                The agent will carry the whole turn in context. ogcode still compacts automatically
-                when a turn approaches the model's context limit — that is the safety net, not this
-                switch.
-              </Banner>
-            }
-          >
-            <Banner tone="danger">{error()}</Banner>
-          </Show>
-        </Row>
-      </Show>
     </Group>
   );
 }

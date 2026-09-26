@@ -56,9 +56,6 @@ func (s *Server) routes() http.Handler {
 		r.Post("/theme", s.handleSetTheme)
 		r.Delete("/theme/{directory}", s.handleDeleteTheme)
 
-		r.Get("/project/settings", s.handleGetProjectSettings)
-		r.Post("/project/settings", s.handleSetProjectSettings)
-
 		r.Get("/search/config", s.handleGetSearchConfig)
 		r.Post("/search/config", s.handleSetSearchConfig)
 		r.Post("/search/config/validate", s.handleValidateSearchKey)
@@ -81,6 +78,8 @@ func (s *Server) routes() http.Handler {
 		r.Get("/resources", s.handleResources)
 		r.Get("/scrcpy/status", s.handleScrcpyStatus)
 		r.Get("/scrcpy/devices", s.handleScrcpyDevices)
+		r.Get("/preview/status", s.handlePreviewStatus)
+		r.Get("/preview/services", s.handlePreviewServices)
 
 		r.Get("/skills", s.handleListSkills)
 		r.Post("/skills/{name}", s.handleSetSkillEnabled)
@@ -178,6 +177,12 @@ func (s *Server) routes() http.Handler {
 	// Forward /scrcpy/* to the separately-run ws-scrcpy device UI
 	// (http://127.0.0.1:8000). Also before the SPA fallback.
 	s.serveScrcpy(r)
+
+	// Forward /preview/<port>/* to a live local service on 127.0.0.1:<port> —
+	// a dev server, a player, a dashboard — so it is browsable at the ogcode
+	// origin. Also before the SPA fallback (bare /preview is left to the SPA,
+	// where the preview page lives).
+	s.servePreview(r)
 
 	// Serve embedded web UI (or placeholder for dev)
 	s.serveStatic(r)

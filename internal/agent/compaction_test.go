@@ -94,7 +94,7 @@ func TestLLMCompact_FoldsPriorSummaryAndScalesKeepRecent(t *testing.T) {
 	msgs := makeMessages(20)
 	const prior = "PRIOR-SUMMARY-BODY-XYZ"
 
-	addendum, recent := lr.llmCompact(context.Background(), mock, "mock-model", msgs, prior, 0)
+	addendum, recent := lr.llmCompact(context.Background(), "", mock, "mock-model", msgs, prior, 0)
 
 	// The returned addendum carries the canned summary.
 	if !strings.Contains(addendum, "MERGED SUMMARY TEXT") {
@@ -118,7 +118,7 @@ func TestLLMCompact_NoPriorSummary_LargeWindowKeepsMore(t *testing.T) {
 	mock := &captureSummarizerProvider{summary: "SUMMARY"}
 	msgs := makeMessages(60)
 
-	_, recent := lr.llmCompact(context.Background(), mock, "mock-model", msgs, "", 400000)
+	_, recent := lr.llmCompact(context.Background(), "", mock, "mock-model", msgs, "", 400000)
 
 	// No prior summary → the summarizer prompt uses the plain history framing.
 	mock.mu.Lock()

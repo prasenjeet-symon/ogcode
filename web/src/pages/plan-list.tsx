@@ -51,7 +51,7 @@ function PlanListContent() {
         plan.messages().filter((m: any) => m.info.role === 'user').length === 0;
 
       if (!isReusable) {
-        targetPlan = await plan.newPlan(undefined, plan.selectedModel());
+        targetPlan = await plan.newPlan(undefined, plan.selectedModel(), plan.selectedProvider());
       }
       navigate(`/plan/${targetPlan!.id}`);
       requestAnimationFrame(() => {

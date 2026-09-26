@@ -19,6 +19,82 @@ func askUserArgs(t *testing.T, qs ...question.Question) json.RawMessage {
 	return data
 }
 
+// The result reports the path taken: the screens shown with their answers, and
+// the screens skipped because their showWhen did not match. A branch the user
+// never reached must not read as a blank answer.
+func TestAskUserTool_ReportsThePathTaken(t *testing.T) {
+	questions := []question.Question{
+		{ID: "store", Header: "Storage", Question: "Which store?", Options: []question.Option{{Label: "Postgres"}, {Label: "MySQL"}}},
+		{ID: "pg", Header: "Postgres detail", Question: "Which version?", ShowWhen: &question.Condition{Question: "store", Options: []string{"Postgres"}}},
+		{ID: "mysql", Header: "MySQL detail", Question: "Which charset?", ShowWhen: &question.Condition{Question: "store", Options: []string{"MySQL"}}},
+	}
+	// The user picked MySQL; the Postgres screen was never shown, so the reply
+	// carries a blank for it and the dialog skips it.
+	tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+		return question.Reply{Answers: []question.Answer{
+			{Selected: []string{"MySQL"}}, {}, {Selected: []string{"utf8mb4"}},
+		}}, nil
+	}}
+
+	res, err := tool.Execute(context.Background(), askUserArgs(t, questions...), Context{})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	for _, want := range []string{"Which charset?", "utf8mb4"} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("the shown branch is missing %q:\n%s", want, res.Output)
+		}
+	}
+	if strings.Contains(res.Output, "Which version?") {
+		t.Errorf("a skipped screen must not be reported as answered:\n%s", res.Output)
+	}
+	if !strings.Contains(res.Output, "Skipped") || !strings.Contains(res.Output, "Postgres detail") {
+		t.Errorf("the skipped branch should be named as skipped:\n%s", res.Output)
+	}
+}
+
+// A branch pointing at a question that is not there — forward reference, a
+// missing id, a self-reference — is refused before the batch goes on screen,
+// because the dialog could never resolve it and would render no screen at all.
+func TestAskUserTool_RefusesUnresolvableBranching(t *testing.T) {
+	cases := []struct {
+		name string
+		qs   []question.Question
+	}{
+		{"forward reference", []question.Question{
+			{ID: "a", Question: "first?", ShowWhen: &question.Condition{Question: "b"}},
+			{ID: "b", Question: "second?"},
+		}},
+		{"unknown id", []question.Question{
+			{ID: "a", Question: "first?"},
+			{Question: "second?", ShowWhen: &question.Condition{Question: "nope"}},
+		}},
+		{"self reference", []question.Question{
+			{ID: "a", Question: "first?", ShowWhen: &question.Condition{Question: "a"}},
+		}},
+		{"no question named", []question.Question{
+			{ID: "a", Question: "first?", ShowWhen: &question.Condition{Options: []string{"x"}}},
+		}},
+	}
+	for _, tc := range cases {
+		called := false
+		tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+			called = true
+			return question.Reply{}, nil
+		}}
+		res, err := tool.Execute(context.Background(), askUserArgs(t, tc.qs...), Context{})
+		if err != nil {
+			t.Fatalf("%s: Execute returned error: %v", tc.name, err)
+		}
+		if called {
+			t.Errorf("%s: Ask was called with branching the dialog cannot resolve", tc.name)
+		}
+		if !strings.Contains(res.Output, "showWhen") {
+			t.Errorf("%s: the refusal should name showWhen, got: %q", tc.name, res.Output)
+		}
+	}
+}
+
 func TestAskUserTool_ReturnsTheAnswers(t *testing.T) {
 	var gotQuestions []question.Question
 	var gotSession string
@@ -77,7 +153,7 @@ func TestAskUserTool_EmptyAnswerIsReportedAsABlank(t *testing.T) {
 // business.
 func TestAskUserTool_DescriptionNamesTheChannelAndItsLimit(t *testing.T) {
 	desc := AskUserTool{}.Description()
-	for _, want := range []string{"quiz", "survey", "walk-through", "source code"} {
+	for _, want := range []string{"quiz", "survey", "walk-through", "source code", "showWhen"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("description does not mention %q — the channel it now is goes unstated", want)
 		}
@@ -207,12 +283,28 @@ func TestAskUserTool_SchemaDeclaresTheBatchShape(t *testing.T) {
 	}
 	item, _ := qs["items"].(map[string]any)
 	itemProps, _ := item["properties"].(map[string]any)
-	for _, want := range []string{"header", "question", "multiSelect", "options"} {
+	for _, want := range []string{"id", "header", "question", "multiSelect", "options", "showWhen"} {
 		if itemProps[want] == nil {
 			t.Errorf("question schema is missing %q", want)
 		}
 	}
 	if req, _ := item["required"].([]any); len(req) != 1 || req[0] != "question" {
 		t.Errorf("question required = %v, want [question]", item["required"])
+	}
+
+	// showWhen is what lets the model branch a screen on an earlier answer, so
+	// its shape must be declared too.
+	sw, _ := itemProps["showWhen"].(map[string]any)
+	if sw == nil {
+		t.Fatal("schema does not declare showWhen")
+	}
+	swProps, _ := sw["properties"].(map[string]any)
+	for _, want := range []string{"question", "options", "not"} {
+		if swProps[want] == nil {
+			t.Errorf("showWhen schema is missing %q", want)
+		}
+	}
+	if req, _ := sw["required"].([]any); len(req) != 1 || req[0] != "question" {
+		t.Errorf("showWhen required = %v, want [question]", sw["required"])
 	}
 }

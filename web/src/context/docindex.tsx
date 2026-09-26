@@ -59,6 +59,14 @@ export const DocIndexProvider: ParentComponent = (props) => {
     return def?.id || '';
   };
 
+  // The provider that serves the selected model. Two providers can serve the
+  // same model id, so naming the provider is what pins the index run to one
+  // endpoint rather than letting the server re-infer it.
+  const selectedProvider = (): string => {
+    const id = selectedModel();
+    return models().find((m) => m.id === id)?.providerId || '';
+  };
+
   const selectModel = (id: string) => setSelectedModelId(id);
 
   async function refresh() {
@@ -172,7 +180,7 @@ export const DocIndexProvider: ParentComponent = (props) => {
     setProgress({ total: 0, completed: 0, failed: 0, percent: 0 });
     startProgressPolling();
     try {
-      await buildDocIndex(server.directory() || undefined, rebuild, selectedModel() || undefined);
+      await buildDocIndex(server.directory() || undefined, rebuild, selectedModel() || undefined, selectedProvider() || undefined);
     } catch (e) {
       console.error('start docindex build failed:', e);
       setBuilding(false);

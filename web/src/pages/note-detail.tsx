@@ -57,6 +57,9 @@ export default function NoteDetailPage() {
   const [saving, setSaving] = createSignal(false);
   const [aiModels, setAiModels] = createSignal<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = createSignal('');
+  // The provider that serves selectedModel, chosen alongside it in the same
+  // picker; '' lets the server resolve by model id.
+  const [selectedProvider, setSelectedProvider] = createSignal('');
 
   onMount(async () => {
     const n = await noteCtx.refreshNote(params.id);
@@ -73,7 +76,10 @@ export default function NoteDetailPage() {
     getModels().then(ms => {
       const enabled = (ms || []).filter(m => m.enabled);
       setAiModels(enabled);
-      if (enabled.length > 0) setSelectedModel(enabled[0].id);
+      if (enabled.length > 0) {
+        setSelectedModel(enabled[0].id);
+        setSelectedProvider(enabled[0].providerId || '');
+      }
     }).catch(() => {});
   });
 
@@ -280,7 +286,7 @@ export default function NoteDetailPage() {
                 <ModelSelector
                   selectedModel={() => selectedModel()}
                   models={() => aiModels()}
-                  onSelect={setSelectedModel}
+                  onSelect={(id, providerId) => { setSelectedModel(id); setSelectedProvider(providerId); }}
                   placement="bottom"
                 />
                 <button
@@ -394,6 +400,7 @@ export default function NoteDetailPage() {
                     content={editContent()}
                     onChange={setEditContent}
                     model={selectedModel()}
+                    provider={selectedProvider()}
                     autofocus
                   />
                 </Show>

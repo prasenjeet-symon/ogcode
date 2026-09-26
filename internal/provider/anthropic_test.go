@@ -555,3 +555,71 @@ func TestAnthropicMultiSystemBlocksCaching(t *testing.T) {
 		t.Error("expected second block to contain the dynamic date reminder")
 	}
 }
+
+// TestAnthropicUsageIsTakenVerbatimFromMessageStart pins the exclusivity
+// contract: real Anthropic reports input_tokens EXCLUSIVE of
+// cache_read_input_tokens and cache_creation_input_tokens, so the parser must
+// carry all three through unchanged. Summing them is what callers do to get the
+// true request size; folding the cache fields into input here would
+// double-count every cached step.
+func TestAnthropicUsageIsTakenVerbatimFromMessageStart(t *testing.T) {
+	sse := "event: message_start\n" +
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":1000,"output_tokens":1,"cache_read_input_tokens":900,"cache_creation_input_tokens":50}}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","usage":{"output_tokens":42},"delta":{"stop_reason":"end_turn"}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+
+	p := NewAnthropicProvider()
+	ch := make(chan StreamEvent, 8)
+	p.streamEvents(io.NopCloser(strings.NewReader(sse)), ch, func() {})
+
+	var usage *TokenUsage
+	for evt := range ch {
+		if evt.Type == EventUsage {
+			usage = evt.Usage
+		}
+	}
+	if usage == nil {
+		t.Fatal("expected an EventUsage carrying the message_start usage")
+	}
+	if usage.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000 (exclusive of cache fields)", usage.InputTokens)
+	}
+	if usage.CacheReadTokens != 900 {
+		t.Errorf("CacheReadTokens = %d, want 900", usage.CacheReadTokens)
+	}
+	if usage.CacheWriteTokens != 50 {
+		t.Errorf("CacheWriteTokens = %d, want 50", usage.CacheWriteTokens)
+	}
+	if usage.OutputTokens != 42 {
+		t.Errorf("OutputTokens = %d, want 42 (superseded by message_delta)", usage.OutputTokens)
+	}
+}
+
+// TestAnthropicNegativeUsageIsClampedToZero guards the one thing a faithful
+// server never sends but a malformed or unknown proxy might: a negative token
+// count, which would subtract from the running total.
+func TestAnthropicNegativeUsageIsClampedToZero(t *testing.T) {
+	sse := "event: message_start\n" +
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":-5,"output_tokens":-2,"cache_read_input_tokens":-1,"cache_creation_input_tokens":-3}}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+
+	p := NewAnthropicProvider()
+	ch := make(chan StreamEvent, 8)
+	p.streamEvents(io.NopCloser(strings.NewReader(sse)), ch, func() {})
+
+	var usage *TokenUsage
+	for evt := range ch {
+		if evt.Type == EventUsage {
+			usage = evt.Usage
+		}
+	}
+	if usage == nil {
+		t.Fatal("expected an EventUsage")
+	}
+	if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CacheReadTokens != 0 || usage.CacheWriteTokens != 0 {
+		t.Errorf("negative usage must clamp to 0, got %+v", usage)
+	}
+}

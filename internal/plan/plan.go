@@ -18,20 +18,23 @@ const (
 // between the user and the PlanAgent. Once locked, no further messages
 // can be added. The plan serves as the reference point for all derived tasks.
 type Plan struct {
-	ID                string `json:"id"`
-	SessionID         string `json:"sessionId"`
-	ProjectID         string `json:"projectId"`
-	Directory         string `json:"directory"`
-	Title             string `json:"title"`
-	Status            string `json:"status"`            // "open" | "locked"
-	Model             string `json:"model,omitempty"`
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
+	ProjectID string `json:"projectId"`
+	Directory string `json:"directory"`
+	Title     string `json:"title"`
+	Status    string `json:"status"` // "open" | "locked"
+	Model     string `json:"model,omitempty"`
+	// Provider is the provider that serves Model. Empty means none was recorded
+	// (a legacy row) and the registry resolves it from the model id.
+	Provider          string `json:"provider,omitempty"`
 	BaseBranch        string `json:"baseBranch,omitempty"` // repo's active branch at lock time; PR base for derived tasks
 	CompactionSummary string `json:"compactionSummary,omitempty"`
-	BreakdownStatus    string `json:"breakdownStatus,omitempty"`    // "" | "in_progress" | "completed" | "failed"
-	BreakdownWarnings  string `json:"breakdownWarnings,omitempty"`  // non-empty when some tasks failed to create
-	AllTasksCompleted  bool   `json:"allTasksCompleted,omitempty"`  // true when locked and all tasks done
-	Archived           bool   `json:"archived,omitempty"`           // true when ArchivedAt > 0
-	CreatedAt          int64  `json:"createdAt"`
-	UpdatedAt          int64  `json:"updatedAt"`
-	ArchivedAt         int64  `json:"archivedAt,omitempty"`
+	BreakdownStatus   string `json:"breakdownStatus,omitempty"`   // "" | "in_progress" | "completed" | "failed"
+	BreakdownWarnings string `json:"breakdownWarnings,omitempty"` // non-empty when some tasks failed to create
+	AllTasksCompleted bool   `json:"allTasksCompleted,omitempty"` // true when locked and all tasks done
+	Archived          bool   `json:"archived,omitempty"`          // true when ArchivedAt > 0
+	CreatedAt         int64  `json:"createdAt"`
+	UpdatedAt         int64  `json:"updatedAt"`
+	ArchivedAt        int64  `json:"archivedAt,omitempty"`
 }

@@ -493,6 +493,24 @@ func TestReadOnlyAgent_SystemPrompt_OmitsPublicServing(t *testing.T) {
 	}
 }
 
+// TestBuildAgent_SystemPrompt_ContainsPreviewServing verifies the interactive
+// Build session is told how to hand the user a URL for a service it started on
+// a loopback port.
+func TestBuildAgent_SystemPrompt_ContainsPreviewServing(t *testing.T) {
+	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", "anthropic", true)
+	if !strings.Contains(p, "Live service preview") {
+		t.Error("BuildAgent prompt should include the live service preview section")
+	}
+	if !strings.Contains(p, "/preview/<port>/") {
+		t.Error("BuildAgent prompt should name the /preview/<port>/ URL pattern")
+	}
+	// The grid is what removes the need to hand back a URL per service; the
+	// agent can only rely on it if the prompt says it exists.
+	if !strings.Contains(p, "grid of tiles") {
+		t.Error("BuildAgent prompt should tell the agent the Preview page lists every service")
+	}
+}
+
 func TestBreakdownAgent_SystemPrompt_ContainsNotes(t *testing.T) {
 	// Verify BreakdownAgent mentions project notes and a per-task verification step.
 	if !strings.Contains(BreakdownAgent.System, "Read project notes") {
@@ -1031,6 +1049,7 @@ func TestAskUserPrompt_LeadsWithTheRuleAndKeepsTheBoundary(t *testing.T) {
 		"Ask each step through the tool",
 		"if you can find it out yourself, find it out", // the boundary, stated positively
 		"source code",
+		"showWhen", // the branching rule: a screen may depend on an earlier answer
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("askUserPrompt is missing %q", want)

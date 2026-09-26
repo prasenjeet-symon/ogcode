@@ -470,10 +470,15 @@ func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEve
 		switch evt.Type {
 		case "message_start":
 			if evt.Message != nil && evt.Message.Usage != nil {
-				usage.InputTokens = evt.Message.Usage.InputTokens
-				usage.OutputTokens = evt.Message.Usage.OutputTokens
-				usage.CacheReadTokens = evt.Message.Usage.CacheReadInputTokens
-				usage.CacheWriteTokens = evt.Message.Usage.CacheCreationInputTokens
+				// Anthropic reports input_tokens EXCLUSIVE of the two cache
+				// fields — a faithful server never double-counts — so they are
+				// taken verbatim. The clamp only guards a malformed proxy that
+				// returns a negative, which would otherwise subtract from the
+				// running total.
+				usage.InputTokens = max(0, evt.Message.Usage.InputTokens)
+				usage.OutputTokens = max(0, evt.Message.Usage.OutputTokens)
+				usage.CacheReadTokens = max(0, evt.Message.Usage.CacheReadInputTokens)
+				usage.CacheWriteTokens = max(0, evt.Message.Usage.CacheCreationInputTokens)
 				usageDirty = true
 			}
 		case "content_block_start":

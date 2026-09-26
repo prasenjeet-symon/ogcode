@@ -12,6 +12,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
+	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/question"
@@ -32,6 +33,7 @@ import (
 type env struct {
 	dir    string
 	db     *db.DB
+	global *db.DB
 	bus    *bus.Bus
 	store  *session.Store
 	runner *agent.LoopRunner
@@ -71,7 +73,9 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 		database.Close()
 		return nil, fmt.Errorf("open global config database: %w", err)
 	}
-	defer globalDatabase.Close() // only needed to resolve provider keys below
+	// The global DB now outlives provider resolution: the permission manager
+	// keeps a store on it for the env's whole lifetime, so it is released in
+	// Close rather than here.
 
 	registry, defaultProvider, err := buildProviderRegistry(globalDatabase)
 	if err != nil {
@@ -121,7 +125,7 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 	// One permission manager per env, shared across every session hosted in this
 	// directory — mirroring server.go:352. The loop only consults it for gated
 	// sessions, so headless task/index runs inside a hosted session are unaffected.
-	perm := permission.NewManager()
+	perm := permission.NewManager(permission.NewStore(globalDatabase))
 	// ask_user's manager, same lifetime and rationale as the permission one: the
 	// browser reaches this worktree server's HTTP through the master tunnel, so
 	// the question routes work here exactly as in an interactive local server.
@@ -137,24 +141,24 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 		Skills:          skillLoader,
 		Permissions:     perm,
 		Questions:       quest,
-		// Per-project setting, read from this workspace's own DB — a remote
-		// worker follows the same choice the project's settings screen records.
-		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
 	}
 	// The build agent advertises the task sub-agent tool, so it must resolve.
 	toolRegistry.Register(tool.TaskTool{Run: lr.RunTaskSession})
 	toolRegistry.Register(tool.AskUserTool{Ask: lr.AskUser})
 
-	return &env{dir: dir, db: database, bus: b, store: store, runner: lr, mcp: mcpMgr, permissions: perm}, nil
+	return &env{dir: dir, db: database, global: globalDatabase, bus: b, store: store, runner: lr, mcp: mcpMgr, permissions: perm}, nil
 }
 
-// Close tears down the env's MCP subprocesses and database.
+// Close tears down the env's MCP subprocesses and databases.
 func (e *env) Close() {
 	if e.mcp != nil {
 		e.mcp.Close()
 	}
 	if e.db != nil {
 		e.db.Close()
+	}
+	if e.global != nil {
+		e.global.Close()
 	}
 }
 
@@ -221,6 +225,13 @@ func buildProviderRegistry(globalDatabase *db.DB) (*provider.Registry, provider.
 		if p, e := provider.NewOGXProvider(acct.Token); e == nil {
 			registry.Register(p)
 		}
+	}
+
+	// Seed each provider's catalogue from the persisted copy so a session's
+	// first read (a title generation, a model pick) answers without a live
+	// fetch. A worker has no long-lived picker to refresh, so seeding is enough.
+	if e := modelcatalog.Seed(registry, globalDatabase); e != nil {
+		slog.Warn("seed model catalog failed", "err", e)
 	}
 
 	defaultProvider := registry.DefaultUsable()

@@ -37,6 +37,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		Query          string `json:"query"`
 		Directory      string `json:"directory"`
 		Model          string `json:"model,omitempty"`
+		Provider       string `json:"provider,omitempty"`
 		SessionID      string `json:"sessionId,omitempty"`
 		Source         string `json:"source,omitempty"`
 		ViewportWidth  int    `json:"viewportWidth,omitempty"`
@@ -87,7 +88,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	// If a source session ID is provided, rewrite the query using conversation context
 	query := input.Query
 	if input.SessionID != "" {
-		if rewritten, err := s.rewriteNoteQuery(input.SessionID, input.Query, input.Model); err != nil {
+		if rewritten, err := s.rewriteNoteQuery(input.SessionID, input.Query, input.Model, input.Provider); err != nil {
 			slog.Warn("note query rewrite failed, using original query", "session", input.SessionID, "err", err)
 		} else if rewritten != "" {
 			query = rewritten
@@ -102,6 +103,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		Directory:   dir,
 		Title:       "Note: " + truncate(input.Query, 60),
 		Model:       input.Model,
+		Provider:    input.Provider,
 		SessionType: "note",
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),
@@ -235,6 +237,7 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 		Text        string `json:"text"`
 		Instruction string `json:"instruction"`
 		Model       string `json:"model,omitempty"`
+		Provider    string `json:"provider,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -259,7 +262,7 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 
 	var p provider.Provider
 	if input.Model != "" {
-		p = s.registry.ResolveProvider(input.Model)
+		p = s.registry.ResolveProviderFor(input.Model, input.Provider)
 	}
 	if p == nil {
 		p = s.defaultProvider
@@ -309,7 +312,7 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 // rewriteNoteQuery uses conversation context from a source session to rewrite
 // a short user query into a detailed, self-contained description that the Note
 // Agent can understand without the full conversation history.
-func (s *Server) rewriteNoteQuery(sourceSessionID, originalQuery, model string) (string, error) {
+func (s *Server) rewriteNoteQuery(sourceSessionID, originalQuery, model, providerID string) (string, error) {
 	// Fetch the last 15 user messages from the source session
 	msgs, err := s.store.GetMessages(session.SessionID(sourceSessionID), "", 50)
 	if err != nil {
@@ -376,7 +379,7 @@ func (s *Server) rewriteNoteQuery(sourceSessionID, originalQuery, model string) 
 	// Resolve provider for the LLM call — use the same model as the Note Agent
 	var p provider.Provider
 	if model != "" {
-		p = s.registry.ResolveProvider(model)
+		p = s.registry.ResolveProviderFor(model, providerID)
 	}
 	if p == nil {
 		p = s.defaultProvider

@@ -76,7 +76,7 @@ func (t ProjectMemoryRecallTool) Execute(ctx context.Context, args json.RawMessa
 	title := "Project Memory Recall"
 	slog.Info("project_memory_recall delegating to recall agent",
 		"question", params.Question, "project", projectID, "scope", "project", "session", tctx.SessionID)
-	answer, err := t.Recall(ctx, params.Question, "project", "", tctx.SessionDir, tctx.Model)
+	answer, err := t.Recall(ctx, params.Question, "project", "", tctx.SessionDir, tctx.Model, tctx.Provider)
 	if err != nil {
 		return Result{Title: title, Output: "Memory recall failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
 	}

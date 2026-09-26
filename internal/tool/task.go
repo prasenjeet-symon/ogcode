@@ -10,7 +10,7 @@ import (
 // TaskFunc runs a read-only sub-agent session for a delegated investigation and
 // returns its final written answer. Implemented by agent.LoopRunner.RunTaskSession
 // and wired in from server.go/cli to avoid the tool→agent import cycle.
-type TaskFunc func(ctx context.Context, description, prompt, dir, model string) (string, error)
+type TaskFunc func(ctx context.Context, description, prompt, dir, model, provider string) (string, error)
 
 // taskTimeout bounds the total time a delegated sub-agent may run so a
 // misbehaving child can't burn tokens forever. 0 means no wall-clock bound —
@@ -88,7 +88,7 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 	}
 	defer cancel()
 
-	answer, err := t.Run(taskCtx, input.Description, input.Prompt, tctx.SessionDir, tctx.Model)
+	answer, err := t.Run(taskCtx, input.Description, input.Prompt, tctx.SessionDir, tctx.Model, tctx.Provider)
 	if err != nil {
 		return Result{Title: title, Output: fmt.Sprintf("Sub-agent error: %s", err)}, nil
 	}

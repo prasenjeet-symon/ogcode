@@ -69,7 +69,7 @@ func envInt(name string, def, lo, hi int) int {
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil {
-		slog.Warn("ignoring unparseable search tuning override", "env", name, "value", raw)
+		slog.Warn("ignoring unparseable int override", "env", name, "value", raw)
 		return def
 	}
 	if v < lo {
@@ -97,13 +97,13 @@ func envInt(name string, def, lo, hi int) int {
 // the result can never come back empty the way the old tool-calling loop did on
 // weaker models. The model is still inherited from the caller (dir is accepted
 // for signature compatibility but unused — the pipeline needs no working dir).
-func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model string) (string, error) {
+func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model, providerID string) (string, error) {
 	_ = dir
 	if lr.SearchBridge == nil {
 		return "", fmt.Errorf("search bridge is not available")
 	}
 
-	p, model := lr.resolveSearchProvider(model)
+	p, model := lr.resolveSearchProvider(model, providerID)
 	if p == nil {
 		return "", fmt.Errorf("no LLM provider available for deep search")
 	}
@@ -146,7 +146,7 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model st
 // resolveRunModel: prefer the model's provider, fall back to the registry
 // default and then the immutable startup default. When model is empty it adopts
 // the default provider's first model so the pipeline always has something to run.
-func (lr *LoopRunner) resolveSearchProvider(model string) (provider.Provider, string) {
+func (lr *LoopRunner) resolveSearchProvider(model, providerID string) (provider.Provider, string) {
 	if model == "" {
 		dp := lr.Registry.DefaultUsable()
 		if dp == nil {
@@ -160,7 +160,7 @@ func (lr *LoopRunner) resolveSearchProvider(model string) (provider.Provider, st
 	}
 	var p provider.Provider
 	if model != "" {
-		p = lr.Registry.ResolveProvider(model)
+		p = lr.Registry.ResolveProviderFor(model, providerID)
 	}
 	if p == nil {
 		if dp := lr.Registry.DefaultUsable(); dp != nil {

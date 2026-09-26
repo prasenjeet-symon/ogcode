@@ -34,16 +34,23 @@ func (noopGrepTool) Execute(ctx context.Context, args json.RawMessage, tctx tool
 // toolRoundsProvider emits a tool call on the first `rounds` StreamChat calls and
 // a final text answer afterward, recording the request messages of every call so
 // a test can inspect the working set the loop built for each turn.
+//
+// window and inputPerCall are optional: when set, Models() advertises the window
+// and each call reports a usage event of that many input tokens, which is what
+// drives the loop's cost trigger. Both default to zero — no window, no usage — so
+// tests that only care about the working set are unaffected.
 type toolRoundsProvider struct {
-	mu       sync.Mutex
-	rounds   int
-	calls    int
-	messages [][]provider.ModelMessage
+	mu           sync.Mutex
+	rounds       int
+	window       int
+	inputPerCall int
+	calls        int
+	messages     [][]provider.ModelMessage
 }
 
 func (m *toolRoundsProvider) ID() string { return "mock" }
 func (m *toolRoundsProvider) Models() []provider.ModelInfo {
-	return []provider.ModelInfo{{ID: "mock-model", ProviderID: "mock"}}
+	return []provider.ModelInfo{{ID: "mock-model", ProviderID: "mock", ContextWindow: m.window}}
 }
 
 func (m *toolRoundsProvider) StreamChat(ctx context.Context, req provider.StreamRequest) (<-chan provider.StreamEvent, error) {
@@ -63,12 +70,18 @@ func (m *toolRoundsProvider) StreamChat(ctx context.Context, req provider.Stream
 			ch <- provider.StreamEvent{Type: provider.EventToolCallStart, ToolCallID: callID, ToolName: "grep"}
 			ch <- provider.StreamEvent{Type: provider.EventToolCallDelta, ToolCallID: callID, ToolInput: []byte(`{}`)}
 			ch <- provider.StreamEvent{Type: provider.EventToolCallEnd, ToolCallID: callID}
-			fr := "tool_use"
-			ch <- provider.StreamEvent{Type: provider.EventFinish, FinishReason: &fr}
-			return
+		} else {
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "final answer"}
 		}
-		ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "final answer"}
-		fr := "stop"
+		if m.inputPerCall > 0 {
+			ch <- provider.StreamEvent{Type: provider.EventUsage, Usage: &provider.TokenUsage{
+				InputTokens: m.inputPerCall, OutputTokens: 10,
+			}}
+		}
+		fr := "tool_use"
+		if call > m.rounds {
+			fr = "stop"
+		}
 		ch <- provider.StreamEvent{Type: provider.EventFinish, FinishReason: &fr}
 	}()
 	return ch, nil

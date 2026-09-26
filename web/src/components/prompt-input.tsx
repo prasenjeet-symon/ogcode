@@ -1,4 +1,5 @@
-import { createSignal, createEffect, Show, For, onCleanup, onMount } from 'solid-js';
+import { createSignal, createEffect, Show, For, onCleanup, onMount, untrack } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { useSession } from '../context/session';
 import { type ImagePartData } from '../api/client';
 import ModelSelector from './model-selector';
@@ -15,6 +16,12 @@ interface PendingImage {
   data: string;       // base64 (without data: prefix)
   name: string;
   previewUrl: string; // object URL for thumbnail
+}
+
+// A composer draft, stashed per session id while the user is elsewhere.
+interface Draft {
+  text: string;
+  images: PendingImage[];
 }
 
 function isAcceptedType(type: string): boolean {
@@ -42,20 +49,48 @@ export default function PromptInput() {
   const [pendingImages, setPendingImages] = createSignal<PendingImage[]>([]);
   const [imageError, setImageError] = createSignal('');
   const [guidanceSent, setGuidanceSent] = createSignal(false); // brief confirmation after sending guidance
-  // Whether to cancel the in-flight tool when sending mid-loop guidance. The
-  // user can toggle this with a checkbox that appears while the agent is running.
-  // Defaults to true (cancel) so guidance is acted on immediately.
-  const [cancelTool, setCancelTool] = createSignal(true);
+  const [attachOpen, setAttachOpen] = createSignal(false);
+  const [attachPos, setAttachPos] = createSignal<{ left: number; top?: number; bottom?: number } | null>(null);
   let textareaRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
+  let cameraInputRef: HTMLInputElement | undefined;
+  let attachBtnRef: HTMLButtonElement | undefined;
   let guidanceSentTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Clear per-session transient state when the active session changes.
-  // PromptInput stays mounted across session switches (the route param changes
-  // but the component is reused), so local signals like guidanceSent would
-  // otherwise linger on the destination session's UI.
+  // Composer contents are per-session. PromptInput stays mounted across session
+  // switches (the route param changes but the component is reused), so a single
+  // set of signals would otherwise carry a half-typed message and its attached
+  // images from the session you left into the one you opened — the images are
+  // the visible symptom, since their previews render in the destination's
+  // composer. Stash the draft on the way out, restore it on the way back in.
+  //
+  // In-memory only: an image is held as base64 plus an object URL, too large
+  // (and too sensitive) to write to localStorage.
+  const drafts = new Map<string, Draft>();
+  let draftSessionId = '';
+
   createEffect(() => {
-    session.activeSession()?.id;
+    const id = session.activeSession()?.id ?? '';
+    if (!id || id === draftSessionId) return;
+
+    // Stash what the session we are leaving holds, verbatim. untrack keeps the
+    // effect subscribed to the session id alone — a keystroke must not wake it.
+    const leaving = draftSessionId;
+    untrack(() => {
+      if (leaving) drafts.set(leaving, { text: text(), images: pendingImages() });
+    });
+
+    // Restore — or start empty — for the session we are entering. Taking the
+    // draft out of the map keeps a live draft in exactly one place, so the
+    // unmount teardown revokes each preview URL once.
+    const draft = drafts.get(id);
+    drafts.delete(id);
+    draftSessionId = id;
+    setText(draft?.text ?? '');
+    setPendingImages(draft?.images ?? []);
+
+    // The badge is a transient confirmation for the session it was sent in,
+    // never something the destination session should inherit.
     setGuidanceSent(false);
     if (guidanceSentTimer) { clearTimeout(guidanceSentTimer); guidanceSentTimer = null; }
   });
@@ -87,6 +122,23 @@ export default function PromptInput() {
 
   // The agent loop is "running" if we're loading (LLM streaming) OR tools are executing
   const isRunning = () => session.loading() || session.hasRunningTools();
+
+  // Open the attach popover above the trigger. On phones (<640px) the
+  // .attach-menu CSS in index.css overrides this into a bottom sheet.
+  const toggleAttach = () => {
+    if (attachOpen()) { setAttachOpen(false); return; }
+    if (window.matchMedia('(max-width: 640px)').matches) { setAttachOpen(true); return; }
+    const r = attachBtnRef?.getBoundingClientRect();
+    if (r) {
+      const W = 224, GAP = 6, M = 8; // menu width (w-56), gap, viewport margin
+      const vw = window.innerWidth;
+      let left = r.left;
+      if (left + W > vw - M) left = vw - W - M;
+      if (left < M) left = M;
+      setAttachPos({ left, bottom: window.innerHeight - r.top + GAP });
+    }
+    setAttachOpen(true);
+  };
 
   // ── Image handling ──
 
@@ -165,7 +217,9 @@ export default function PromptInput() {
   };
 
   onCleanup(() => {
+    // Revoke every preview URL — the ones on screen and every stashed draft.
     pendingImages().forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    drafts.forEach((d) => d.images.forEach((img) => URL.revokeObjectURL(img.previewUrl)));
     if (guidanceSentTimer) clearTimeout(guidanceSentTimer);
   });
 
@@ -184,10 +238,10 @@ export default function PromptInput() {
 
     if (isRunning()) {
       // Mid-loop guidance: inject into the running loop. If no loop is running
-      // (409), fall back to a normal prompt. The user controls whether the
-      // currently-running tool is cancelled via the cancelTool checkbox.
+      // (409), fall back to a normal prompt. The in-flight stream and tool are
+      // always cancelled so the loop acts on the guidance immediately.
       const targetSessionId = session.activeSession()?.id;
-      const accepted = await session.guidance(content, cancelTool());
+      const accepted = await session.guidance(content, true);
       // Guard against session-switch race: if the user navigated to a different
       // session while the guidance request was in flight, don't show the
       // "Guidance sent" badge on the destination session.
@@ -309,6 +363,9 @@ export default function PromptInput() {
     // Publishes --kb-inset on <html> so this composer (and any other) can
     // pad above the on-screen keyboard. Idempotent across mounts.
     trackKeyboardInset();
+    // The capture attribute (opens the camera directly on phones) is not in
+    // Solid's JSX types, so set it on the element.
+    cameraInputRef?.setAttribute('capture', 'environment');
   });
   onCleanup(() => {
     document.removeEventListener('keydown', handleGlobalKeyDown);
@@ -325,6 +382,49 @@ export default function PromptInput() {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
+          {/* Attach dialogue — opened by the + button. Rendered through a
+              portal so it is not clipped by the composer's rounded box. */}
+          <Show when={attachOpen()}>
+            <Portal>
+              <div class="fixed inset-0 z-[210]" onClick={() => setAttachOpen(false)} />
+              <div
+                class="attach-menu fixed z-[211] w-56 py-1 overflow-hidden rounded-xl
+                       border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)]
+                       shadow-[0_16px_40px_rgba(0,0,0,0.5)] animate-fade-in"
+                style={{
+                  left: `${attachPos()?.left ?? 0}px`,
+                  ...(attachPos()?.top !== undefined ? { top: `${attachPos()!.top}px` } : { bottom: `${attachPos()?.bottom ?? 0}px` }),
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => { setAttachOpen(false); fileInputRef?.click(); }}
+                  class="w-full flex items-center gap-2.5 px-3 py-2 text-ui text-zinc-200
+                         hover:bg-[color:var(--bg-hover)] transition-colors text-left"
+                >
+                  <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                  </svg>
+                  <span>Choose image</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAttachOpen(false); cameraInputRef?.click(); }}
+                  class="w-full flex items-center gap-2.5 px-3 py-2 text-ui text-zinc-200
+                         hover:bg-[color:var(--bg-hover)] transition-colors text-left"
+                >
+                  <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
+                  </svg>
+                  <span>Take photo</span>
+                </button>
+                <div class="px-3 pt-1.5 pb-1 mt-0.5 border-t border-[color:var(--border-subtle)] text-micro text-[color:var(--text-muted)]">
+                  or paste / drop an image
+                </div>
+              </div>
+            </Portal>
+          </Show>
           {/* Drop target overlay — only while a file is actually over the box */}
           <Show when={dragging()}>
             <div class="absolute inset-0 z-10 rounded-[1.25rem] flex items-center justify-center gap-2
@@ -398,31 +498,44 @@ export default function PromptInput() {
           />
 
           {/* Toolbar. flex-wrap so a 320px viewport can stack the selector
-              row and the send controls rather than overflow. */}
+              row and the send controls rather than overflow. Approval mode and
+              attachments sit leftmost; the model selector shares the right
+              cluster with the round action button. */}
           <div class="flex flex-wrap items-center gap-1.5 px-2 pb-2 pt-0.5">
-            <ModelSelector />
-
-            {/* Approval mode: Ask (default) vs Auto (risk-gated) */}
-            <PermissionModeToggle />
-
-            {/* Image upload button */}
+            {/* Attach — a + that opens the choose-image / take-photo dialogue,
+                sitting just left of the approval-mode control */}
             <button
+              ref={attachBtnRef}
               type="button"
-              onClick={() => fileInputRef?.click()}
+              onClick={toggleAttach}
               disabled={isDisabled()}
-              title="Attach images — or drop them anywhere on the composer"
-              aria-label="Attach images"
+              aria-haspopup="menu"
+              aria-expanded={attachOpen()}
+              title="Attach an image — or paste / drop one anywhere on the composer"
+              aria-label="Attach image"
               class="icon-btn h-8 min-w-8 transition-colors"
+              classList={{ 'is-open': attachOpen() }}
             >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+              <svg class="w-4 h-4 transition-transform" classList={{ 'rotate-45': attachOpen() }} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </button>
+
+            {/* Approval mode: Ask (default), Auto (risk-gated), Yolo (unguarded) */}
+            <PermissionModeToggle />
+
             <input
               ref={fileInputRef}
               type="file"
               accept={ACCEPTED_IMAGE_TYPES.join(',')}
               multiple
+              onChange={handleFileSelect}
+              class="hidden"
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
               onChange={handleFileSelect}
               class="hidden"
             />
@@ -436,65 +549,54 @@ export default function PromptInput() {
               </span>
             </Show>
 
-            <Show when={isRunning()}>
-              {/* Cancel-in-flight checkbox: when checked (default), sending mid-loop
-                  guidance cancels the currently-running LLM stream AND any running
-                  tool so the loop acts on the guidance immediately. Uncheck to let
-                  the current generation/tool finish naturally — the guidance still
-                  applies on the next iteration. */}
-              <label
-                class="hide-below-md flex items-center gap-1.5 text-micro text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] cursor-pointer select-none transition-colors h-8 px-1.5 rounded-lg hover:bg-[color:var(--bg-hover)]"
-                title={cancelTool() ? 'The running LLM stream and tools will be cancelled when you send guidance' : 'The current generation/tool will be allowed to finish before guidance is applied'}
-              >
-                <input
-                  type="checkbox"
-                  checked={cancelTool()}
-                  onChange={(e) => setCancelTool((e.target as HTMLInputElement).checked)}
-                  class="w-3.5 h-3.5 accent-[color:var(--accent)] cursor-pointer"
-                />
-                <span>Cancel current work</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => session.abort()}
-                class="h-8 px-2.5 rounded-lg flex items-center gap-1.5 text-meta font-medium
-                       text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/25
-                       transition-colors"
-                title="Cancel agent (Esc)"
-              >
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                Stop
-              </button>
-              {/* Send-as-guidance button: visible while running so the user has
-                  an explicit affordance that submitting injects mid-loop guidance. */}
-              <button
-                type="submit"
-                disabled={!canSend()}
-                aria-label="Send guidance"
-                title={canSend() ? `Send mid-loop guidance (Enter)${cancelTool() ? ' — cancels current tool' : ''}` : 'Type guidance to send'}
-                class="send-btn"
-                classList={{ 'is-ready': canSend() }}
-              >
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6" />
-                </svg>
-              </button>
-            </Show>
+            <ModelSelector />
 
-            <Show when={!isRunning()}>
+            {/* Round action button. While the agent is running it is the
+                work-in-progress indicator: a pause glyph that stops the loop
+                and the session when clicked, and the send arrow once there is
+                guidance to send. Submitting while running injects mid-loop
+                guidance and always cancels the in-flight stream/tool so the
+                loop acts on it immediately. */}
+            <Show
+              when={isRunning()}
+              fallback={
+                <button
+                  type="submit"
+                  disabled={!canSend()}
+                  aria-label="Send message"
+                  title={canSend() ? 'Send (Enter)' : 'Type a message or attach an image'}
+                  class="send-btn"
+                  classList={{ 'is-ready': canSend() }}
+                >
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6" />
+                  </svg>
+                </button>
+              }
+            >
+              {/* A button, not a submit, while there is nothing to send: the
+                  pause glyph is the stop control. It becomes the submit form
+                  control the moment there is guidance to deliver. */}
               <button
-                type="submit"
-                disabled={!canSend()}
-                aria-label="Send message"
-                title={canSend() ? 'Send (Enter)' : 'Type a message or attach an image'}
+                type={canSend() ? 'submit' : 'button'}
+                onClick={() => { if (!canSend()) session.abort(); }}
+                aria-label={canSend() ? 'Send guidance' : 'Stop the agent'}
+                title={canSend() ? 'Send mid-loop guidance (Enter) — cancels the current tool' : 'Stop the agent (Esc)'}
                 class="send-btn"
-                classList={{ 'is-ready': canSend() }}
+                classList={{ 'is-ready': canSend(), 'is-stop': !canSend() }}
               >
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6" />
-                </svg>
+                <Show
+                  when={canSend()}
+                  fallback={
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
+                      <path stroke-linecap="round" d="M9.5 5.5v13M14.5 5.5v13" />
+                    </svg>
+                  }
+                >
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6" />
+                  </svg>
+                </Show>
               </button>
             </Show>
           </div>

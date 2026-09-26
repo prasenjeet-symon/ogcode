@@ -16,6 +16,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
+	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -163,6 +164,13 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Seed each provider's catalogue from the persisted copy so a headless run
+	// resolves a model without a live fetch. No background refresh here: the run
+	// resolves its model and exits.
+	if e := modelcatalog.Seed(registry, globalDatabase); e != nil {
+		slog.Warn("seed model catalog failed", "err", e)
+	}
+
 	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
 		return fmt.Errorf("no provider configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_BASE_URL")
@@ -295,9 +303,6 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		MaxSteps:        runMaxTurns,
 		Skills:          skillLoader,
 		SearchBridge:    searchBridge,
-		// A headless run honours the same per-project switch the UI writes, so
-		// `ogcode run` in a project behaves as that project is configured to.
-		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
 		// Same reporter the server wires. Without it indexedFiles stays -1, the
 		// index-status line is omitted, and a headless run in an unindexed
 		// project is left with a prompt that mandates codebase_map and no line
@@ -397,7 +402,12 @@ type runTokens struct {
 	Reasoning  int `json:"reasoning"`
 	CacheRead  int `json:"cache_read"`
 	CacheWrite int `json:"cache_write"`
-	Total      int `json:"total"`
+	// Utility is the token subtotal spent by utility calls (title generation,
+	// command risk assessment, context compaction). It is also folded into the
+	// component fields above, so Total and cost already include it; this reports
+	// how much of that was utility work.
+	Utility int `json:"utility"`
+	Total   int `json:"total"`
 }
 
 // runResult is the JSON document `--output-format json` prints.
@@ -459,6 +469,20 @@ func collectUsage(store *session.Store, sessionID session.SessionID) (tokens run
 		// count it inside input.
 		tokens.Total += t.Input + t.CacheWrite + t.Output
 	}
+	// Utility calls (title, risk check, compaction) spend tokens of their own
+	// that the loop accumulates on the session row rather than on a message. Fold
+	// them into the components so the cost and Total formulas include them, and
+	// record the utility subtotal so the caller can see how much that was.
+	if sess, err := store.Get(sessionID); err == nil && sess != nil && sess.UtilityTokens != nil {
+		u := sess.UtilityTokens
+		tokens.Input += u.Input
+		tokens.Output += u.Output
+		tokens.Reasoning += u.Reasoning
+		tokens.CacheRead += u.CacheRead
+		tokens.CacheWrite += u.CacheWrite
+		tokens.Total += u.Input + u.CacheWrite + u.Output
+		tokens.Utility = u.Input + u.CacheWrite + u.Output
+	}
 	return tokens, turns, finish
 }
 
@@ -509,8 +533,8 @@ func printResult(text *strings.Builder, store *session.Store, sessionID session.
 		if cost != nil {
 			costStr = fmt.Sprintf("$%.4f", *cost)
 		}
-		fmt.Fprintf(os.Stderr, "turns=%d finish=%s in=%d out=%d cache_read=%d cache_write=%d total=%d cost=%s\n",
-			turns, finish, tokens.Input, tokens.Output, tokens.CacheRead, tokens.CacheWrite, tokens.Total, costStr)
+		fmt.Fprintf(os.Stderr, "turns=%d finish=%s in=%d out=%d cache_read=%d cache_write=%d utility=%d total=%d cost=%s\n",
+			turns, finish, tokens.Input, tokens.Output, tokens.CacheRead, tokens.CacheWrite, tokens.Utility, tokens.Total, costStr)
 		return nil
 	}
 }

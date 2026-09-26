@@ -1,3 +1,81 @@
+# Release Notes — v0.39.0
+
+## Minor: Yolo — a permission mode that never asks
+
+Yolo is the third permission mode, beside Ask and Auto. Where Auto asks the model
+for a risk assessment before it runs a consequential call, Yolo skips the
+assessment entirely and runs everything without a prompt — the fully unguarded
+mode. The bash tool's own danger denylist still refuses the handful of commands
+that can wreck a machine, and a rule you have configured to **deny** is still
+denied: Yolo removes the *asking*, not the refusals.
+
+The mode is the third pill in the composer's permission toggle, and it persists
+as the machine-wide default for new sessions.
+
+## Minor: Live preview of local services
+
+A process you start on a loopback port is now reachable in the browser at
+`/preview/<port>/`, proxied to `127.0.0.1` with WebSockets and streaming
+responses included. Only the *port* comes from the request, and the host is
+always loopback, so the route cannot be turned into a way to reach anything else.
+
+A new Preview page lists every service it can find as a grid of tiles — found by
+scanning listening ports and keeping the ones that answer with HTML, labelled by
+their own page title — and any of them can be opened inline or in a new tab.
+Ports added by hand, and a deep link to a specific port, are kept even when
+nothing is listening yet. Starting several services at once is fine: each shows
+up as its own tile.
+
+## Minor: The model catalogue persists between restarts
+
+The list of models a provider offers is now stored, so the model picker is a
+plain read from the database instead of a live call to every provider on every
+page load. A background refresh keeps it current — on a timer, and on demand
+from **Refresh** — and a `models.updated` event tells an open tab when the
+catalogue changes, so a model that appears on the gateway shows up in the picker
+without a reload.
+
+## Minor: Token totals now include utility calls
+
+Title generation, the Auto-mode risk assessment, and compaction all spend
+tokens, and until now those calls were invisible to every total. Their usage is
+recorded per session and folded into the token pill and into `ogcode run`'s
+summary, which reports the utility subtotal on its own line. The per-message and
+session totals are otherwise unchanged.
+
+Two provider-side accounting fixes ride along: DeepSeek's top-level cache fields
+(`prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`) are now read, alongside
+the nested form, and the Anthropic parser clamps its `message_start` counts so a
+malformed proxy cannot report a negative.
+
+## Minor: A stricter compaction nudge
+
+When the context has grown past the read-pressure threshold, the reminder
+appended to the next tool result is now a directive that keeps arriving until
+the agent compacts — it is no longer quietly dismissible, and the escape hatch
+that let it be ignored is gone. The default threshold drops from 150000 to
+**40000** tokens (`OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`), and a second,
+independent trigger fires on how often the whole context has been re-sent to the
+model, headed **Re-send cost**, tuned with `OGCODE_RESEND_COST_WINDOW_MULTIPLE`.
+
+## Other changes
+
+- Mid-turn compaction is decided by the environment (`OGCODE_COMPACT_CONTEXT`),
+  not a per-project setting; migration `053` drops the old table.
+- The composer's image button becomes a **+** that opens a small dialogue to
+  choose an image or take a photo.
+- The pause glyph shown while a session runs is now the stop control — clicking
+  it stops the turn and the session, the same as `Esc`.
+- Composer drafts are kept per session, so switching away and back restores what
+  you had typed.
+- The document indexer skips far more generated directories — the default exclude
+  list grows from 14 names to 38 — and re-indexes a page when its file mtime has
+  changed. A quiet "skipping unchanged document" line moves to debug level.
+- The map tools carry a larger budget: the project and memory maps are capped at
+  100 KB each, a folder line lists up to 40 labels, and a page up to 30.
+
+---
+
 # Release Notes — v0.38.0
 
 ## Minor: OGX — the OG Lab plan as a provider
@@ -302,13 +380,13 @@ handing over instructions that cannot run. Values come from the environment
 ogcode was started from or from a `skills.env` block in `ogcode.json` — a real
 environment variable always wins.
 
-## Minor: Context settings, per project
+## Minor: Compact context is on by default, off via the environment
 
-A new **Context** group on the Settings page holds settings that belong to one
-project rather than the user as a whole, stored in that project's own database
-(one row; the DB is per project). The first is a switch for `compact_context`.
-It applies from the next step of the next turn — the loop re-reads it every
-step — so there is no restart and no session to reopen.
+`compact_context` — the tool that lets the agent replace the finished part of a
+long turn with a summary it writes — is offered to every read-capable agent by
+default. Set `OGCODE_COMPACT_CONTEXT=false` (also `0`, `no`, `off`) to withhold
+it; unset or empty leaves it on. The switch is process-wide, read fresh each
+turn, so it needs no restart and no per-project state.
 
 ## Other changes
 

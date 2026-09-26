@@ -74,6 +74,11 @@ func TestOGXProviderModelsComeFromTheGateway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
 	}
+	// The catalogue is fetched by an explicit RefreshCatalog; Models() is a pure
+	// read of whatever that installed (the freeze fix).
+	if got := p.RefreshCatalog(context.Background()); len(got) != 2 {
+		t.Fatalf("RefreshCatalog got %d models, want 2: %+v", len(got), got)
+	}
 	list := p.Models()
 	if len(list) != 2 {
 		t.Fatalf("got %d models, want 2: %+v", len(list), list)
@@ -108,6 +113,9 @@ func TestOGXProviderEmptyCatalogueHasNoFallback(t *testing.T) {
 	t.Setenv("OGX_GATEWAY_URL", srv.URL)
 
 	p, _ := NewOGXProvider("tok")
+	if got := p.RefreshCatalog(context.Background()); len(got) != 0 {
+		t.Fatalf("RefreshCatalog got %d models from an empty plan, want none: %+v", len(got), got)
+	}
 	if list := p.Models(); len(list) != 0 {
 		t.Fatalf("got %d models from an empty plan, want none: %+v", len(list), list)
 	}

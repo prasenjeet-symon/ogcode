@@ -45,10 +45,10 @@ func (s *Store) Upsert(entry *PageEntry) error {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO doc_page_index (id, doc_path, page_num, keywords, labels, indexed_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO doc_page_index (id, doc_path, page_num, keywords, labels, indexed_at, mod_time)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.DocPath, entry.PageNum,
-		string(keywordsJSON), string(labelsJSON), entry.IndexedAt,
+		string(keywordsJSON), string(labelsJSON), entry.IndexedAt, entry.ModTime,
 	)
 	return err
 }
@@ -56,7 +56,7 @@ func (s *Store) Upsert(entry *PageEntry) error {
 // GetByDoc returns all PageEntry rows for a given document path.
 func (s *Store) GetByDoc(docPath string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
-		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
+		`SELECT id, doc_path, page_num, keywords, labels, indexed_at, mod_time
 		 FROM doc_page_index WHERE doc_path = ? ORDER BY page_num ASC`, docPath,
 	)
 	if err != nil {
@@ -151,7 +151,7 @@ func (s *Store) ListDocsSummary(dirPrefix string) ([]*DocSummary, error) {
 // file has exactly one entry (page 1).
 func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
-		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
+		`SELECT id, doc_path, page_num, keywords, labels, indexed_at, mod_time
 		 FROM doc_page_index
 		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) NOT LIKE '%.pdf' AND LOWER(doc_path) NOT LIKE '%.docx'
 		 ORDER BY doc_path ASC`,
@@ -179,7 +179,7 @@ func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 // will have one entry per page; callers group them by DocPath.
 func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
-		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
+		`SELECT id, doc_path, page_num, keywords, labels, indexed_at, mod_time
 		 FROM doc_page_index
 		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) LIKE '%.pdf'
 		 ORDER BY doc_path ASC, page_num ASC`,
@@ -207,7 +207,7 @@ func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
 // will have one entry per pseudo-page; callers group them by DocPath.
 func (s *Store) ListDocxFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
-		`SELECT id, doc_path, page_num, keywords, labels, indexed_at
+		`SELECT id, doc_path, page_num, keywords, labels, indexed_at, mod_time
 		 FROM doc_page_index
 		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) LIKE '%.docx'
 		 ORDER BY doc_path ASC, page_num ASC`,
@@ -265,6 +265,34 @@ func (s *Store) ListDocPaths(dirPrefix string) ([]string, error) {
 	return paths, rows.Err()
 }
 
+// ListDocModTimes returns the newest recorded mod_time (Unix milliseconds) for
+// every indexed doc_path under dirPrefix (directory boundary semantics, see
+// dirPrefixFilter). A run compares these against the files' times on disk to
+// tell a rewritten file from an untouched one; a path absent from the map is
+// simply not indexed yet. A value of 0 means no time was recorded, which reads
+// as stale.
+func (s *Store) ListDocModTimes(dirPrefix string) (map[string]int64, error) {
+	rows, err := s.db.Query(
+		`SELECT doc_path, MAX(mod_time) FROM doc_page_index WHERE doc_path LIKE ? ESCAPE '\' GROUP BY doc_path`,
+		dirPrefixFilter(dirPrefix),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list doc mod times: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]int64)
+	for rows.Next() {
+		var path string
+		var modTime int64
+		if err := rows.Scan(&path, &modTime); err != nil {
+			return nil, fmt.Errorf("scan doc mod time: %w", err)
+		}
+		out[path] = modTime
+	}
+	return out, rows.Err()
+}
+
 // DeleteAllByPrefix deletes all entries for docs under dirPrefix (directory
 // boundary semantics, see dirPrefixFilter).
 func (s *Store) DeleteAllByPrefix(dirPrefix string) error {
@@ -275,7 +303,7 @@ func (s *Store) DeleteAllByPrefix(dirPrefix string) error {
 func scanEntry(rows *sql.Rows) (*PageEntry, error) {
 	var e PageEntry
 	var keywordsJSON, labelsJSON string
-	if err := rows.Scan(&e.ID, &e.DocPath, &e.PageNum, &keywordsJSON, &labelsJSON, &e.IndexedAt); err != nil {
+	if err := rows.Scan(&e.ID, &e.DocPath, &e.PageNum, &keywordsJSON, &labelsJSON, &e.IndexedAt, &e.ModTime); err != nil {
 		return nil, fmt.Errorf("scan entry: %w", err)
 	}
 	if err := json.Unmarshal([]byte(keywordsJSON), &e.Keywords); err != nil {

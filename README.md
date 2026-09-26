@@ -374,7 +374,7 @@ Agentic memory is enabled with:
 export OGCODE_AGENTIC_MEMORY_MODE=true
 ```
 
-Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. The deep-research pipeline reads four pages of 6000 characters by default; tune it with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and `OGCODE_SEARCH_PAGE_CHARS` (1000–20000). See the [documentation](docs/OUTLINE.md) for provider, skill, search, remote deployment, and control-plane configuration.
+Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. The deep-research pipeline reads four pages of 6000 characters by default; tune it with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and `OGCODE_SEARCH_PAGE_CHARS` (1000–20000). The agent is reminded to compact once about 40000 tokens of file, search, and page content have been read in one turn; tune that with `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`. Because every step re-sends the whole context, a second trigger reminds the agent once the accumulated re-send cost crosses the model's context window; tune that multiple with `OGCODE_RESEND_COST_WINDOW_MULTIPLE`. Mid-turn compaction is on by default; disable it with `OGCODE_COMPACT_CONTEXT=false`. See the [documentation](docs/OUTLINE.md) for provider, skill, search, remote deployment, and control-plane configuration.
 
 ---
 

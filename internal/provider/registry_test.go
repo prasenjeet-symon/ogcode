@@ -28,6 +28,111 @@ func newFake(id string, modelIDs ...string) *fakeProvider {
 	return &fakeProvider{id: id, models: ms}
 }
 
+// newFakeActive builds a provider whose models are all marked ActiveByDefault,
+// the way the OGX provider marks every model its plan grants.
+func newFakeActive(id string, modelIDs ...string) *fakeProvider {
+	f := newFake(id, modelIDs...)
+	for i := range f.models {
+		f.models[i].ActiveByDefault = true
+	}
+	return f
+}
+
+// TestRegistryResolveProviderIsDeterministic pins the fix for the bug where a
+// model id served by two providers resolved by whichever the map handed back
+// first — the same prompt landing on a metered plan one run and an out-of-credit
+// third-party endpoint the next. `glm-5.3-flash` is served by both OGX (active by
+// default) and an OpenAI-compatible Z.ai endpoint (not), so the active one must
+// win every time. The loop is what makes map randomness fail it.
+func TestRegistryResolveProviderIsDeterministic(t *testing.T) {
+	r := NewRegistry()
+	// openai outranks ogx in ProviderPriority, so a naive priority walk would
+	// pick Z.ai — ActiveByDefault is what has to decide.
+	r.Register(newFake("openai", "glm-5.3-flash"))
+	r.Register(newFakeActive("ogx", "glm-5.3-flash"))
+	for i := 0; i < 200; i++ {
+		got := r.ResolveProvider("glm-5.3-flash")
+		if got == nil || got.ID() != "ogx" {
+			t.Fatalf("iteration %d: ResolveProvider = %v, want the active-by-default ogx", i, got)
+		}
+	}
+}
+
+// TestRegistryResolveProviderFallsBackToPriority covers the ambiguous case with
+// no ActiveByDefault winner: two providers list the id, neither claims it by
+// default, and the tie must still resolve the same way every run — by the
+// ProviderPriority walk, not by map order.
+func TestRegistryResolveProviderFallsBackToPriority(t *testing.T) {
+	r := NewRegistry()
+	r.Register(newFake("ogx", "shared-model"))
+	r.Register(newFake("openai", "shared-model"))
+	for i := 0; i < 200; i++ {
+		got := r.ResolveProvider("shared-model")
+		if got == nil || got.ID() != "openai" {
+			t.Fatalf("iteration %d: ResolveProvider = %v, want openai (higher priority)", i, got)
+		}
+	}
+}
+
+// TestRegistryResolveProviderForHonoursTheExplicitProvider pins the primary
+// fix: a recorded provider is authoritative even when it does not outrank the
+// other provider serving the same id. A session that chose OGX must keep
+// running on OGX regardless of ProviderPriority.
+func TestRegistryResolveProviderForHonoursTheExplicitProvider(t *testing.T) {
+	r := NewRegistry()
+	r.Register(newFake("openai", "glm-5.3-flash"))
+	r.Register(newFake("ogx", "glm-5.3-flash"))
+	for i := 0; i < 200; i++ {
+		got := r.ResolveProviderFor("glm-5.3-flash", "ogx")
+		if got == nil || got.ID() != "ogx" {
+			t.Fatalf("iteration %d: ResolveProviderFor(ogx) = %v, want ogx", i, got)
+		}
+	}
+}
+
+// TestRegistryResolveProviderForFallsThroughAnUnregisteredProvider pins that a
+// provider id whose provider has since been removed does not make every stored
+// session unresolvable — resolution falls back to the model-id walk.
+func TestRegistryResolveProviderForFallsThroughAnUnregisteredProvider(t *testing.T) {
+	r := NewRegistry()
+	r.Register(newFakeActive("ogx", "glm-5.3-flash"))
+	got := r.ResolveProviderFor("glm-5.3-flash", "zai-gone")
+	if got == nil || got.ID() != "ogx" {
+		t.Fatalf("ResolveProviderFor(unregistered) = %v, want the ogx fallback", got)
+	}
+}
+
+// TestRegistryModelLookupAgreesAcrossCapabilityReaders pins that the three
+// capability readers return the SAME provider's values, so image support, the
+// context window and the output ceiling cannot disagree about which provider a
+// model came from — the deterministic walk is shared, not re-implemented.
+func TestRegistryModelLookupAgreesAcrossCapabilityReaders(t *testing.T) {
+	r := NewRegistry()
+	r.Register(newFake("openai", "glm-5.3-flash"))
+	r.Register(activeWithCapabilities("ogx", "glm-5.3-flash"))
+	for i := 0; i < 100; i++ {
+		if got := r.ContextWindow("glm-5.3-flash"); got != 128000 {
+			t.Fatalf("iteration %d: ContextWindow = %d, want the active provider's 128000", i, got)
+		}
+		if r.ModelSupportsImages("glm-5.3-flash") {
+			t.Fatalf("iteration %d: ModelSupportsImages must read the active provider's value", i)
+		}
+		if got := r.MaxOutputTokens("glm-5.3-flash"); got != 8192 {
+			t.Fatalf("iteration %d: MaxOutputTokens = %d, want the active provider's 8192", i, got)
+		}
+	}
+}
+
+// activeWithCapabilities is a provider whose one model is ActiveByDefault and
+// carries capability metadata, so the capability readers have an unambiguous
+// value to return when two providers serve the id.
+func activeWithCapabilities(id, modelID string) *fakeProvider {
+	return &fakeProvider{id: id, models: []ModelInfo{{
+		ID: modelID, ProviderID: id, ActiveByDefault: true,
+		ContextWindow: 128000, MaxOutputTokens: 8192,
+	}}}
+}
+
 func TestRegistryReplaceProviders(t *testing.T) {
 	r := NewRegistry()
 	r.Register(newFake("openai", "gpt-x"))
@@ -227,6 +332,7 @@ func TestRegistryConcurrentReplaceAndRead(t *testing.T) {
 				_ = r.ListModels()
 				_ = r.ResolveProvider("gpt-x")
 				_ = r.ResolveProvider("custom-x")
+				_ = r.ResolveProviderFor("claude-x", "anthropic")
 				_ = r.Default()
 				_ = r.ModelSupportsImages("claude-x")
 			}

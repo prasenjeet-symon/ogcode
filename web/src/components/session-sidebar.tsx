@@ -405,6 +405,20 @@ function SessionSidebarInner() {
         </button>
         <button
           type="button"
+          onClick={() => navigate('/preview')}
+          class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
+            ${location.pathname.startsWith('/preview')
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+            }`}
+        >
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+          </svg>
+          <span>Preview</span>
+        </button>
+        <button
+          type="button"
           onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
           class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
             ${location.pathname.startsWith('/settings/skills')

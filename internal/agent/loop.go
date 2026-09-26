@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"slices"
@@ -71,6 +72,22 @@ type LoopRunner struct {
 	// docindex. nil (CLI, tests) leaves the prompt silent and the agent probing,
 	// which is the behaviour that predates this field.
 	IndexedFileCount func(dir string) int
+	// AutoIndex, when set, refreshes the project index in the background after a
+	// completed turn, so files a session added or edited stop being missing from
+	// codebase_map until someone presses the manual button. It is a closure
+	// rather than the indexer itself because internal/indexer already imports
+	// this package (it drives the IndexAgent), so the dependency has to run this
+	// way round. nil (CLI, tests) leaves indexing manual, which is the behaviour
+	// that predates this field — the caller decides, so the env gate stays in the
+	// package that owns the index.
+	//
+	// model and provider are the endpoint the finished turn resolved to. They
+	// are passed rather than re-derived because an index session created with
+	// neither resolves through the registry default, which is frequently a
+	// different provider than the session it is catching up with — spending the
+	// tokens somewhere the user is not working. Inheriting them keeps the
+	// refresh on the same endpoint as the turn that triggered it.
+	AutoIndex func(dir, model, provider string)
 	// Permissions gates mutating tool calls (bash/write/edit) behind user
 	// approval. nil disables gating entirely (CLI, tests). Even when set, a loop
 	// only prompts when its context carries WithPermissionGating — so headless
@@ -86,26 +103,27 @@ type LoopRunner struct {
 	// tests) means no skill is ever listed and the skill tool has nothing to
 	// load, which is the behaviour that predates the feature.
 	Skills *skill.Loader
-	// CompactContextEnabled, when set, reports whether this project allows the
-	// agent to reclaim its own context mid-turn with compact_context. It is a
-	// closure rather than a bool so the value is read from the project's settings
-	// at the start of each turn rather than captured at startup: flipping the
-	// switch on the settings screen applies to the next turn, with no restart and
-	// no new session. Deliberately NOT re-read per step — it decides both a tool
-	// on the wire and a system-prompt entry, so a value that changed mid-turn
-	// would churn the cached prompt prefix, and the read fails open, which would
-	// let one transient DB error flip it for a single step. nil (CLI, tests) means
-	// enabled, which is the behaviour that predates the setting.
-	CompactContextEnabled func() bool
 }
 
-// compactContextAllowed reports the project's setting, defaulting to enabled
-// when no source for it was wired.
-func (lr *LoopRunner) compactContextAllowed() bool {
-	if lr.CompactContextEnabled == nil {
-		return true
+// compactContextEnv names the process-wide switch that withholds compact_context.
+// Compaction is on by default; a falsey value (0/false/no/off) turns it off for
+// every agent in the process.
+const compactContextEnv = "OGCODE_COMPACT_CONTEXT"
+
+// compactContextEnabled reports whether the agent may reclaim its own context
+// mid-turn with compact_context. On unless OGCODE_COMPACT_CONTEXT names a falsey
+// value.
+//
+// It is an environment switch rather than a per-project setting: it decides both
+// a tool on the wire and a ~2.5KB system entry, so it belongs to the deployment
+// rather than to one workspace. A turn resolves it once and stays consistent
+// with itself, which is what keeps the cached prompt prefix stable across steps.
+func compactContextEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(compactContextEnv))) {
+	case "0", "false", "no", "off":
+		return false
 	}
-	return lr.CompactContextEnabled()
+	return true
 }
 
 // RunLoop executes the core agent loop: prompt -> stream -> tools -> loop back.
@@ -262,13 +280,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// Resolved once per turn, for the same reason as the two above — and for one
 	// more: it decides both a tool on the wire and a ~2.5KB system entry, and on
 	// OpenAI/Ollama every system entry is joined into messages[0], where those
-	// endpoints' longest-common-prefix cache lives. Re-reading it per step let a
-	// single transient DB error flip it for one step (the read fails OPEN, to
-	// the default), which would silently hand the model a different tool list and
-	// a different system prompt mid-turn and cost the cache for the rest of it.
-	// A turn now decides once and stays consistent with itself; a settings change
-	// takes effect on the next turn, which is as promptly as anyone can observe.
-	compactContextAllowed := lr.compactContextAllowed()
+	// endpoints' longest-common-prefix cache lives. Reading it once keeps the tool
+	// list and the system prompt byte-identical across every step of a turn.
+	compactContextAllowed := compactContextEnabled()
 
 	// For note sessions: save the final assistant message as note content when the loop exits.
 	// This defer runs before the loop.done publish (LIFO) so the note is persisted before
@@ -313,6 +327,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 	// Resolve the provider/model and the two fixed per-run model attributes.
 	p, modelID, modelSupportsImages, modelContextWindow := lr.resolveRunModel(ctx, sess, sessionID)
+	// The resolved provider's id is threaded to every consumer that must resolve
+	// the same provider again (tool contexts, the risk classifier): a model id
+	// alone can match more than one provider, so naming the provider is what
+	// keeps the whole turn on one endpoint.
+	providerID := ""
+	if p != nil {
+		providerID = p.ID()
+	}
 
 	compactionThreshold := compactionThresholdTokens(modelContextWindow)
 	// The model's output ceiling (0 = unknown). Sent as the per-request output
@@ -342,9 +364,18 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 	// How much file, search, and page content the agent has pulled into this turn,
 	// and whether that has reached the point of reminding it that compact_context
-	// exists. Sized against the same threshold the loop's own compaction uses, so
-	// the reminder means the same thing on a small local model and a large hosted one.
-	pressure := newReadPressure(compactionThreshold)
+	// exists. Sized at a fixed read volume (OGCODE_READ_PRESSURE_THRESHOLD_TOKENS,
+	// default 40k) rather than as a share of the loop's own compaction threshold:
+	// the reminder means the same thing on a small local model and a large hosted
+	// one, and its threshold is not tied to where the loop would compact.
+	//
+	// A second, independent trigger watches the accumulated re-send cost — the
+	// sum of every step's context size, since the whole context goes back to the
+	// model each step and that is what a turn pays when a repeated prefix is not
+	// cached. It is window-relative (OGCODE_RESEND_COST_WINDOW_MULTIPLE, default
+	// 1×) because the cost scales with the context. Either trigger arms the same
+	// reminder.
+	pressure := newReadPressure(sessionID, modelContextWindow)
 	if sess != nil {
 		compactionSummary = sess.CompactionSummary
 	}
@@ -582,6 +613,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				if turnMemoryActive {
 					lr.writeTurnMemory(ctx, sessionID, p, modelID)
 				}
+				lr.autoIndexTurn(agent.ID, sessionID, modelID, providerID)
 				return nil
 			}
 			slog.Info("agent loop continuing for pending guidance", "session", sessionID, "step", step, "len", len(pendingGuidance))
@@ -622,10 +654,6 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 		// Build system prompt, tuned to the model's family (Claude / GPT / Gemini /
 		// local). The family is fixed for the session, so this stays cache-stable.
-		providerID := ""
-		if p != nil {
-			providerID = p.ID()
-		}
 		// Entry [0] is static within a session so it stays byte-for-byte identical
 		// across turns; per-turn content (viewport, date) follows as separate
 		// entries. This separation is critical for Anthropic prompt caching: the
@@ -825,6 +853,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				if b := proactiveCompactionBoundary(messages, turnStartIdx, keep); b >= 0 {
 					if watermark.set(messages[b].Info.ID, compactionSummary, messages) {
 						slog.Info("proactive compaction watermark advanced", "session", sessionID, "step", step, "boundaryIdx", b, "keptTail", len(messages)-b)
+						// The loop reclaimed the same space the read-pressure reminder asks
+						// the agent to reclaim, and the watermark it just set is what makes
+						// that durable — so the counted reads are no longer being sent.
+						// Without this the reminder, now uncapped, would keep firing about
+						// content already compacted away.
+						pressure.reset()
 					}
 				}
 			}
@@ -1560,6 +1594,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// proactive-compaction check can use the exact size the model saw
 			// instead of the byte estimate.
 			lastInputTokens = streamUsage.InputTokens + streamUsage.CacheReadTokens + streamUsage.CacheWriteTokens
+			// The same count is one step's re-send cost: the whole context went back
+			// to the model just now. Summing it is what the cost trigger watches.
+			pressure.observeContext(lastInputTokens)
 		}
 		if err := lr.Store.UpdateMessage(assistantMsg); err != nil {
 			slog.Error("update message finish", "err", err)
@@ -1629,7 +1666,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// model calling something it was never given, and compact_context is
 			// added per step for agents that accumulate read context. Passing the
 			// static agent here would reject every compaction as a disallowed tool.
-			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, workDir, modelSupportsImages, modelID, pressure)
+			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, workDir, modelSupportsImages, modelID, providerID, pressure)
 			if aborted {
 				exitReason = "aborted"
 				return ctx.Err()
@@ -1696,6 +1733,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if turnMemoryActive {
 				lr.writeTurnMemory(ctx, sessionID, p, modelID)
 			}
+			lr.autoIndexTurn(agent.ID, sessionID, modelID, providerID)
 			return nil
 		}
 
@@ -1714,6 +1752,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	if turnMemoryActive {
 		lr.writeTurnMemory(ctx, sessionID, p, modelID)
 	}
+	lr.autoIndexTurn(agent.ID, sessionID, modelID, providerID)
 	return nil
 }
 
@@ -2007,6 +2046,76 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 	}()
 }
 
+// autoIndexTurn refreshes the project index for a just-finished turn, on a
+// detached goroutine so the turn returns at once. It is the indexing twin of
+// writeTurnMemory: the same trigger (a completed turn), the same background
+// shape, and the same detached context, because a turn that ends is exactly
+// when its files should stop being missing from codebase_map.
+//
+// It runs only for the interactive build agent, working directly in the project
+// directory. Indexing is not cheap the way memory is — one small file per turn
+// for memory, every changed file in the tree for the index — so the set of
+// sessions that may trigger it is deliberately the narrow one:
+//
+//   - agentID must be "build". Every other agent is a utility turn (plan, note,
+//     breakdown, search, subagent, recall) whose work does not belong in the
+//     project index, and the index agent in particular would recurse: the
+//     indexer drives its own turns through this loop, so indexing on them would
+//     spawn an index of the index, without bound. The session TYPE is not the
+//     discriminator — a task session is stored as "build" — so the resolved
+//     agent is what is checked.
+//   - the session's directory must be its project directory. A task session
+//     works in a git worktree under .ogcode/, which is a second full checkout:
+//     every file in it is new to the index, so one task turn would index a
+//     whole duplicate tree, write it into the shared index, and have it purged
+//     again when the worktree is deleted. The worktree is not the project, so
+//     it does not refresh the project's index.
+//
+// The work itself is incremental, so within those sessions the cost is bounded
+// by what the turn actually changed: unchanged files are skipped, new and
+// edited ones are indexed, deleted ones are purged.
+func (lr *LoopRunner) autoIndexTurn(agentID string, sessionID session.SessionID, model, provider string) {
+	if lr.AutoIndex == nil {
+		return
+	}
+	if agentID != "build" {
+		return
+	}
+
+	sess, err := lr.Store.Get(sessionID)
+	if err != nil || sess == nil {
+		slog.Warn("autoIndex: could not load session", "session", sessionID, "err", err)
+		return
+	}
+
+	dir := lr.Dir
+	if sess.Directory != "" {
+		dir = sess.Directory
+	} else if sess.ProjectID != "" {
+		dir = sess.ProjectID
+	}
+	if dir == "" {
+		return
+	}
+	// A session whose directory is not its project is working in a worktree (or
+	// some other checkout); refreshing the project index from it would import
+	// that whole tree. Compared as they are stored: both are written from the
+	// same resolved path for an ordinary session.
+	if sess.Directory != "" && sess.ProjectID != "" && sess.Directory != sess.ProjectID {
+		slog.Info("autoIndex: skipping a session working outside the project directory", "session", sessionID, "dir", dir)
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("autoIndex: panic in background index", "err", r, "stack", string(debug.Stack()))
+			}
+		}()
+		lr.AutoIndex(dir, model, provider)
+	}()
+}
+
 // buildTurnDigest renders a compact digest of one turn for summary synthesis:
 // the user's request, every tool call's name and input (NOT its output — that is
 // the token saving this feature exists for), and the agent's final text
@@ -2096,7 +2205,10 @@ const probeImageTimeout = 15 * time.Second
 func (lr *LoopRunner) resolveRunModel(ctx context.Context, sess *session.Session, sessionID session.SessionID) (p provider.Provider, modelID string, supportsImages bool, contextWindow int) {
 	if sess != nil && sess.Model != "" {
 		slog.Info("resolving model for session", "session", sessionID, "requestedModel", sess.Model)
-		p = lr.Registry.ResolveProvider(sess.Model)
+		// The session's recorded provider, when it has one, is authoritative: two
+		// providers can serve the same model id, and the stored one is the
+		// endpoint the user's work has been running on.
+		p = lr.Registry.ResolveProviderFor(sess.Model, sess.Provider)
 		modelID = sess.Model
 		if p != nil {
 			slog.Info("resolved provider for model", "session", sessionID, "model", sess.Model, "provider", p.ID())
@@ -2182,7 +2294,7 @@ func (lr *LoopRunner) resolveImageSupport(ctx context.Context, p provider.Provid
 	return supports
 }
 
-func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.SessionID, messageID session.MessageID, tc pendingToolCall, a Agent, workDir string, modelSupportsImages bool, model string) (tool.Result, error) {
+func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.SessionID, messageID session.MessageID, tc pendingToolCall, a Agent, workDir string, modelSupportsImages bool, model, providerID string) (tool.Result, error) {
 	// Reject tools not in the agent's allowed list — guards against prompt injection
 	// or a misbehaving model calling tools it was never offered.
 	if !a.HasTool(tc.Name) {
@@ -2194,7 +2306,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 	// (bash/write/edit) require user approval. Non-gated runs (headless task,
 	// breakdown, note, search, CLI) and a nil manager skip this entirely.
 	if lr.Permissions != nil && PermissionGatingEnabled(ctx) {
-		action, err := lr.requestPermission(ctx, sessionID, tc, model)
+		action, err := lr.requestPermission(ctx, sessionID, tc, model, providerID)
 		if err != nil {
 			return tool.Result{}, err // context cancelled while awaiting approval
 		}
@@ -2221,6 +2333,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 			SessionDir:          workDir,
 			ModelSupportsImages: modelSupportsImages,
 			Model:               model,
+			Provider:            providerID,
 		}
 		// Honor cancellation at the dispatch boundary. Several built-in tools do
 		// bounded local work and don't check ctx themselves, so a mid-loop abort
@@ -2260,7 +2373,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 // executeReadyToolCalls runs every ready call and returns each one's result
 // keyed by call ID, so the caller can act on what a tool actually did rather
 // than on the fact that it was invoked.
-func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID string, pressure *readPressure) (results map[string]tool.Result, loopAborted bool) {
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID, providerID string, pressure *readPressure) (results map[string]tool.Result, loopAborted bool) {
 	if len(readyCalls) > 1 {
 		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
 	}
@@ -2340,7 +2453,7 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 					execInfos[idx].err = fmt.Errorf("tool %s panicked: %v", tc.Name, r)
 				}
 			}()
-			result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID)
+			result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID, providerID)
 			execInfos[idx].result = result
 			execInfos[idx].err = err
 		}(i)
@@ -2484,22 +2597,31 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 // requestPermission evaluates the session ruleset for a tool call and, when the
 // decision is "ask", publishes a permission.requested event and blocks until the
 // user replies (or the tool/loop context is cancelled). It returns the resolved
-// action (Allow or Deny). An "always" reply is recorded so subsequent matching
-// calls in this session auto-allow.
-func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.SessionID, tc pendingToolCall, model string) (permission.Action, error) {
+// action (Allow or Deny). An "always" reply is recorded against the exact target
+// (the command, the path, the skill) and persisted, so that target auto-allows
+// from then on — in this session and in every other.
+func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.SessionID, tc pendingToolCall, model, providerID string) (permission.Action, error) {
 	pattern := permissionPattern(tc)
 	action := lr.Permissions.Ruleset(string(sessionID)).Evaluate(tc.Name, pattern)
 	if action == permission.Allow || action == permission.Deny {
 		return action, nil
 	}
 
-	// action == Ask. In Auto mode, let the risk classifier auto-approve calls it
-	// judges safe (rules first, an LLM check for the unclear middle); genuinely
-	// risky calls still fall through to the prompt. Ask mode always prompts.
-	if sess, _ := lr.Store.Get(sessionID); sess != nil && sess.Permission == "auto" {
-		if lr.assessAutoRisk(ctx, sess, tc, pattern, model) == permission.RiskSafe {
-			slog.Info("auto-approved low-risk tool call", "session", sessionID, "tool", tc.Name)
+	// action == Ask. Yolo runs it without asking at all — the user's explicit
+	// "no guardrails" choice, which skips even the risk classifier. In Auto, let
+	// the risk classifier auto-approve calls it judges safe (rules first, an LLM
+	// check for the unclear middle); genuinely risky calls still fall through to
+	// the prompt. Ask mode always prompts.
+	if sess, _ := lr.Store.Get(sessionID); sess != nil {
+		switch sess.Permission {
+		case permission.ModeYolo:
+			slog.Info("yolo mode: running tool call without asking", "session", sessionID, "tool", tc.Name)
 			return permission.Allow, nil
+		case permission.ModeAuto:
+			if lr.assessAutoRisk(ctx, sess, tc, pattern, model, providerID) == permission.RiskSafe {
+				slog.Info("auto-approved low-risk tool call", "session", sessionID, "tool", tc.Name)
+				return permission.Allow, nil
+			}
 		}
 	}
 
@@ -2536,10 +2658,13 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 	case reply := <-pr.ReplyCh:
 		switch reply {
 		case "always":
-			// Grant this tool for the rest of the session.
+			// Grant this exact target (the command, the path, the skill) rather
+			// than the whole tool, so approving one command never silently
+			// approves every other command that tool could run. The grant is
+			// machine-wide and durable — see Manager.AddRule.
 			lr.Permissions.AddRule(string(sessionID), permission.Rule{
 				Permission: tc.Name,
-				Pattern:    "*",
+				Pattern:    pattern,
 				Action:     permission.Allow,
 			})
 			return permission.Allow, nil
@@ -2594,21 +2719,34 @@ func (lr *LoopRunner) AskUser(ctx context.Context, sessionID string, questions [
 // call for long. On timeout/error the verdict is RiskAsk (fail safe).
 const riskLLMTimeout = 12 * time.Second
 
+// riskLLMMaxTokens is the output budget for the Auto-mode risk verdict. It has
+// to cover the model's thinking, not just its one-word answer: a reasoning model
+// emits its reasoning into the same budget before the answer, so a budget sized
+// for the answer alone is spent entirely on thinking and the response comes back
+// with empty content and finish=length. That was 8 here, and it meant every
+// unclear command came back with nothing to read, resolved to RiskAsk, and went
+// to the user — the "Auto mode keeps asking" bug. Measured on the models the
+// Auto sessions actually run (deepseek-v4.1-flash, glm-5.3-flash, over ollama):
+// at 8 tokens 3 of 16 unclear commands reached a verdict, at 1024 all 16 did.
+// The number is a cap, not a cost — the model stops when it is done — so a
+// per-command median of 1.5-3.3s (max ~7s) still sits inside riskLLMTimeout.
+const riskLLMMaxTokens = 1024
+
 // assessAutoRisk decides, in Auto mode, whether a tool call is safe to run
 // without asking. write/edit are judged purely by the path rules; bash uses the
 // command rules and escalates the unclear middle to a quick LLM check. The
 // model argument is the loop's resolved model ID (may differ from sess.Model
 // when the session has no model pinned); it is forwarded to the LLM risk check
-// so it resolves the same provider the loop is using, not an arbitrary first
-// provider from a ResolveProvider("") fallback.
-func (lr *LoopRunner) assessAutoRisk(ctx context.Context, sess *session.Session, tc pendingToolCall, pattern, model string) permission.Risk {
+// together with the resolved provider id, so that check resolves the same
+// provider the loop is using rather than an arbitrary first provider.
+func (lr *LoopRunner) assessAutoRisk(ctx context.Context, sess *session.Session, tc pendingToolCall, pattern, model, providerID string) permission.Risk {
 	switch tc.Name {
 	case "write", "edit":
 		return permission.ClassifyWrite(pattern, sess.Directory)
 	case "bash":
 		r := permission.ClassifyBash(pattern)
 		if r == permission.RiskUnclear {
-			r = lr.assessCommandRiskLLM(ctx, model, pattern)
+			r = lr.assessCommandRiskLLM(ctx, sess.ID, model, providerID, pattern)
 		}
 		return r
 	default:
@@ -2650,16 +2788,47 @@ func riskGateUserContent(command string) string {
 	return "<command>\n" + command + "\n</command>"
 }
 
+// recordUtilityUsage adds the tokens a utility call spent to the session's
+// running utility totals. Utility calls — title generation, command risk
+// assessment, context compaction — stream usage on a call the main-turn
+// accounting never sees, so without this it is silently dropped from every
+// total. It is a no-op when there is no store (CLI-less tests) or nothing was
+// reported.
+func (lr *LoopRunner) recordUtilityUsage(sessionID session.SessionID, usage *provider.TokenUsage) {
+	if lr.Store == nil || usage == nil {
+		return
+	}
+	tc := session.TokenCounts{
+		Input:      usage.InputTokens,
+		Output:     usage.OutputTokens,
+		Reasoning:  usage.ReasoningTokens,
+		CacheRead:  usage.CacheReadTokens,
+		CacheWrite: usage.CacheWriteTokens,
+	}
+	if err := lr.Store.AddUtilityUsage(sessionID, tc); err != nil {
+		slog.Warn("record utility usage", "err", err)
+		return
+	}
+	// Announce it so an open token view picks up the new figure: utility usage
+	// lands on the session row, not on a message, so no message.updated will
+	// carry it. Re-read the row so the event carries the accumulated totals.
+	if lr.Bus != nil {
+		if sess, gerr := lr.Store.Get(sessionID); gerr == nil && sess != nil {
+			lr.Bus.Publish("session.updated", sess)
+		}
+	}
+}
+
 // assessCommandRiskLLM asks the model whether a shell command the rules couldn't
 // classify is safe to auto-run. Verdicts are cached (command risk is context-
 // independent). Any failure — no provider, error, timeout, or an ambiguous
 // answer — resolves to RiskAsk so Auto mode never auto-runs something it isn't
 // confident about.
-func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, model, command string) permission.Risk {
+func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, sessionID session.SessionID, model, providerID, command string) permission.Risk {
 	if v, ok := lr.Permissions.CachedRisk(command); ok {
 		return v
 	}
-	p := lr.Registry.ResolveProvider(model)
+	p := lr.Registry.ResolveProviderFor(model, providerID)
 	if p == nil {
 		if dp := lr.Registry.DefaultUsable(); dp != nil {
 			p = dp
@@ -2679,30 +2848,60 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, model, command s
 		Model:     model,
 		System:    []string{riskGateSystem},
 		Messages:  []provider.ModelMessage{{Role: "user", Content: userContent}},
-		MaxTokens: 8,
+		MaxTokens: riskLLMMaxTokens,
 	})
 	if err != nil {
 		slog.Warn("auto-mode risk check failed; asking", "err", err)
 		return permission.RiskAsk
 	}
 	var out strings.Builder
+	var finish string
+	var usage *provider.TokenUsage
+	reasoningChars := 0
 	for evt := range ch {
-		if evt.Type == provider.EventTextDelta {
+		switch evt.Type {
+		case provider.EventTextDelta:
 			out.WriteString(evt.Text)
+		case provider.EventReasoning:
+			// Counted, never parsed: a chain of thought can contain both "I'd
+			// say SAFE" and a later "but strictly… ASK", and substring-matching
+			// a security verdict out of that could auto-approve a deliberation
+			// that concluded ASK.
+			reasoningChars += len(evt.Text)
+		case provider.EventUsage:
+			usage = evt.Usage
+		case provider.EventFinish:
+			if evt.FinishReason != nil {
+				finish = *evt.FinishReason
+			}
 		}
 	}
-	up := strings.ToUpper(out.String())
+	lr.recordUtilityUsage(sessionID, usage)
+	text := strings.TrimSpace(out.String())
 	verdict := permission.RiskAsk
 	// The model is asked for exactly one word: SAFE or ASK. Require the trimmed
 	// output to BE "SAFE" (allowing trailing punctuation), not merely contain it
 	// — "NOT SAFE", "not safe", "UNSAFE", and "It is safe" all contain "SAFE" as
 	// a substring, and the old Contains check auto-approved all of them. A strict
 	// equals match is fail-safe: anything ambiguous defaults to RiskAsk.
-	if isSafeVerdict(up) {
+	if isSafeVerdict(strings.ToUpper(text)) {
 		verdict = permission.RiskSafe
 	}
-	lr.Permissions.CacheRisk(command, verdict)
+	// A model that answered is a judgement, and judgements are cached (command
+	// risk is context-independent). A model that returned nothing did not judge:
+	// this is the shape a reasoning model produces when the budget ran out before
+	// it reached an answer, and it is worth a warning rather than a verdict line,
+	// because the user is about to be asked and nothing here judged the command.
+	if text == "" {
+		slog.Warn("auto-mode risk check got no verdict; asking",
+			"command", truncateText(command, 80), "finish", finish, "reasoningChars", reasoningChars)
+		return permission.RiskAsk
+	}
 	slog.Info("auto-mode risk verdict", "command", truncateText(command, 80), "verdict", verdict)
+	// Caching is skipped for the unanswered case above: RiskAsk there is the
+	// absence of a verdict, not one, and caching it would keep re-asking the
+	// user without ever consulting the model again.
+	lr.Permissions.CacheRisk(command, verdict)
 	return verdict
 }
 
@@ -3397,6 +3596,12 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 			if pp := publicServingPrompt(dir); pp != "" {
 				prompt += "\n\n" + strings.TrimSpace(pp)
 			}
+
+			// Live service preview: a loopback service the agent starts is
+			// proxied under /preview/<port>/. Gated with public hosting — the
+			// same interactive Build session in the server's own directory is
+			// the one where a locally-started process is the user's to open.
+			prompt += "\n\n" + strings.TrimSpace(previewServingPrompt())
 		}
 	}
 
@@ -3709,7 +3914,7 @@ func replaceOrAppendSummary(system []string, prevSummary, newSummary string) []s
 // (unchanged when the summarizer produced nothing). Shared by the proactive
 // (pre-send, size-based) and reactive (on context-length error) compaction paths.
 func (lr *LoopRunner) compactRequest(ctx context.Context, p provider.Provider, modelID string, sessionID session.SessionID, streamReq *provider.StreamRequest, prevSummary string, contextWindow int) string {
-	summaryAddendum, compactedMsgs := lr.llmCompact(ctx, p, modelID, streamReq.Messages, prevSummary, contextWindow)
+	summaryAddendum, compactedMsgs := lr.llmCompact(ctx, sessionID, p, modelID, streamReq.Messages, prevSummary, contextWindow)
 	streamReq.Messages = compactedMsgs
 	newSummary := prevSummary
 	if summaryAddendum != "" {
@@ -3732,7 +3937,7 @@ func (lr *LoopRunner) compactRequest(ctx context.Context, p provider.Provider, m
 // into the new summary so re-compaction never drops earlier context; keepRecent
 // scales with the model's context window. Falls back to mechanical truncation if
 // the LLM call fails.
-func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, modelID string, messages []provider.ModelMessage, prevSummary string, contextWindow int) (systemAddendum string, compacted []provider.ModelMessage) {
+func (lr *LoopRunner) llmCompact(ctx context.Context, sessionID session.SessionID, p provider.Provider, modelID string, messages []provider.ModelMessage, prevSummary string, contextWindow int) (systemAddendum string, compacted []provider.ModelMessage) {
 	keepRecent := compactionKeepRecent(contextWindow)
 	if len(messages) <= keepRecent {
 		return "", messages
@@ -3860,11 +4065,16 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, p provider.Provider, model
 	}
 
 	var summary strings.Builder
+	var usage *provider.TokenUsage
 	for evt := range ch {
-		if evt.Type == provider.EventTextDelta {
+		switch evt.Type {
+		case provider.EventTextDelta:
 			summary.WriteString(evt.Text)
+		case provider.EventUsage:
+			usage = evt.Usage
 		}
 	}
+	lr.recordUtilityUsage(sessionID, usage)
 
 	if summary.Len() == 0 {
 		slog.Warn("llm compact: empty summary received, falling back to truncation")
@@ -3921,7 +4131,7 @@ const subagentMaxSteps = 0
 // answer. The session is deleted on completion. Called by tool.TaskTool via the
 // tool.TaskFunc contract. The sub-agent (SubagentAgent) is depth-1 — its toolset
 // omits `task`, so it cannot spawn further sub-agents.
-func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, dir, model string) (string, error) {
+func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, dir, model, providerID string) (string, error) {
 	if dir == "" {
 		dir = lr.Dir
 	}
@@ -3948,6 +4158,7 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 		Directory:   dir,
 		Title:       "Task: " + truncateText(label, 60),
 		Model:       model,
+		Provider:    providerID,
 		SessionType: "subagent",
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),
@@ -4035,7 +4246,7 @@ func truncateText(s string, max int) string {
 // session's Model. The scope (project vs one session) is placed on the child
 // context for the memory_map tool, so the model cannot widen it. Wired to the
 // recall tools via the tool.RecallFunc contract.
-func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scope, targetSessionID, dir, model string) (string, error) {
+func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scope, targetSessionID, dir, model, providerID string) (string, error) {
 	if dir == "" {
 		dir = lr.Dir
 	}
@@ -4060,6 +4271,7 @@ func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scop
 		Directory:   dir,
 		Title:       "Memory recall: " + truncateText(question, 60),
 		Model:       model,
+		Provider:    providerID,
 		SessionType: "memory-recall",
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),

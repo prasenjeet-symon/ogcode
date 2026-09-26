@@ -10,7 +10,7 @@ import (
 // DeepSearchFunc is a function that runs a child search-agent session and returns
 // the synthesised answer. Implemented by agent.LoopRunner.RunSearchSession and
 // wired in from server.go to avoid the tool→agent import cycle.
-type DeepSearchFunc func(ctx context.Context, query, dir, model string) (string, error)
+type DeepSearchFunc func(ctx context.Context, query, dir, model, provider string) (string, error)
 
 // deepSearchTimeout bounds the total time a deep search can run. This prevents
 // a misbehaving search agent from burning tokens forever. The search agent is
@@ -73,7 +73,7 @@ func (t DeepSearchTool) Execute(ctx context.Context, args json.RawMessage, tctx 
 	searchCtx, cancel := context.WithTimeout(ctx, deepSearchTimeout)
 	defer cancel()
 
-	answer, err := t.Run(searchCtx, fullQuery, tctx.SessionDir, tctx.Model)
+	answer, err := t.Run(searchCtx, fullQuery, tctx.SessionDir, tctx.Model, tctx.Provider)
 	if err != nil {
 		return Result{Output: fmt.Sprintf("Search agent error: %s", err)}, nil
 	}

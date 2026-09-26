@@ -16,7 +16,7 @@ type recordingRecall struct {
 	targetSessionID string
 }
 
-func (r *recordingRecall) Recall(ctx context.Context, question, scope, targetSessionID, dir, model string) (string, error) {
+func (r *recordingRecall) Recall(ctx context.Context, question, scope, targetSessionID, dir, model, provider string) (string, error) {
 	r.calls++
 	r.question = question
 	r.scope = scope

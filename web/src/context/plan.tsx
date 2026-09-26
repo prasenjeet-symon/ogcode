@@ -40,11 +40,13 @@ interface PlanContextValue {
   loading: () => boolean;
   models: () => any[];
   selectedModel: () => string;
+  /** The provider chosen with the model; '' means resolve it from the model id. */
+  selectedProvider: () => string;
   archivePath: () => string;
   dismissArchiveNotification: () => void;
-  selectModel: (modelId: string) => void;
+  selectModel: (modelId: string, providerId?: string) => void;
   selectPlan: (id: string) => Promise<void>;
-  newPlan: (title?: string, model?: string) => Promise<Plan>;
+  newPlan: (title?: string, model?: string, provider?: string) => Promise<Plan>;
   sendPrompt: (content: string) => Promise<void>;
   abort: () => Promise<void>;
   lockPlan: () => Promise<void>;
@@ -61,7 +63,7 @@ interface PlanContextValue {
   completeTaskById: (id: string) => Promise<void>;
   failTaskById: (id: string) => Promise<void>;
   retryTaskById: (id: string) => Promise<void>;
-  setTaskModel: (id: string, model: string) => Promise<void>;
+  setTaskModel: (id: string, model: string, provider?: string) => Promise<void>;
   startAllTasks: () => Promise<void>;
   deletePlan: (id: string) => Promise<void>;
 }
@@ -99,6 +101,12 @@ export const PlanProvider: ParentComponent = (props) => {
   const [pendingModel, setPendingModel] = createSignal<string>(
     typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) || '' : ''
   );
+  // The provider chosen alongside pendingModel: a model id can be served by more
+  // than one provider, so the id alone does not pin an endpoint.
+  const PROVIDER_STORAGE_KEY = 'ogcode-selected-provider';
+  const [pendingProvider, setPendingProvider] = createSignal<string>(
+    typeof localStorage !== 'undefined' ? localStorage.getItem(PROVIDER_STORAGE_KEY) || '' : ''
+  );
 
   const selectedModel = (): string => {
     if (pendingModel()) return pendingModel();
@@ -111,14 +119,30 @@ export const PlanProvider: ParentComponent = (props) => {
     return '';
   };
 
-  async function selectModel(modelId: string) {
+  // The provider paired with the selected model, in the same precedence order:
+  // an explicit pending pick, then the plan's stored provider, then the
+  // catalog's own providerId for the resolved model. '' lets the server resolve
+  // by model id.
+  const selectedProvider = (): string => {
+    if (pendingProvider()) return pendingProvider();
+    const plan = activePlan();
+    if (plan?.provider) return plan.provider;
+    const id = selectedModel();
+    return models().find((m: any) => m.id === id)?.providerId || '';
+  };
+
+  async function selectModel(modelId: string, providerId?: string) {
     setPendingModel(modelId);
+    if (providerId) setPendingProvider(providerId);
     // Persist so the selection survives app restarts.
-    try { localStorage.setItem(STORAGE_KEY, modelId); } catch (_e) { /* ignore */ }
+    try {
+      localStorage.setItem(STORAGE_KEY, modelId);
+      if (providerId) localStorage.setItem(PROVIDER_STORAGE_KEY, providerId);
+    } catch (_e) { /* ignore */ }
     const plan = activePlan();
     if (!plan) return;
     try {
-      const updated = await updatePlan(plan.id, { model: modelId });
+      const updated = await updatePlan(plan.id, providerId ? { model: modelId, provider: providerId } : { model: modelId });
       setActivePlan(updated);
     } catch (e) {
       console.error('update plan model failed:', e);
@@ -328,8 +352,8 @@ export const PlanProvider: ParentComponent = (props) => {
     }
   }
 
-  async function newPlan(title?: string, model?: string): Promise<Plan> {
-    const plan = await createPlan(server.directory(), title, model || selectedModel());
+  async function newPlan(title?: string, model?: string, provider?: string): Promise<Plan> {
+    const plan = await createPlan(server.directory(), title, model || selectedModel(), provider || selectedProvider());
     setPlans((prev) => prev.find((p) => p.id === plan.id) ? prev : [plan, ...prev]);
     setActivePlan(plan);
     setMessages([]);
@@ -449,11 +473,13 @@ export const PlanProvider: ParentComponent = (props) => {
   }
 
   // setTaskModel sets a per-task model override ('' clears it back to the plan
-  // default). Updates optimistically, then reconciles with the server response.
-  async function setTaskModel(id: string, model: string) {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, model } : t)));
+  // default), together with the provider that serves it — a model id alone can
+  // match more than one provider. Updates optimistically, then reconciles with
+  // the server response.
+  async function setTaskModel(id: string, model: string, provider?: string) {
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, model, ...(provider !== undefined ? { provider } : {}) } : t)));
     try {
-      const updated = await updateTask(id, { model });
+      const updated = await updateTask(id, provider !== undefined ? { model, provider } : { model });
       setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (e) {
       console.error('set task model failed:', e);
@@ -771,11 +797,11 @@ export const PlanProvider: ParentComponent = (props) => {
     const modelId = session.modelSlots()[slot];
     if (!modelId) return;
     // Only switch if the model is currently enabled in this context.
-    const enabled = models().some((m: any) => m.id === modelId && m.enabled);
-    if (!enabled) return;
+    const target = models().find((m: any) => m.id === modelId);
+    if (!target?.enabled) return;
     e.preventDefault();
     e.stopPropagation();
-    selectModel(modelId);
+    selectModel(modelId, target.providerId);
     session.showModelSwitchPopup(modelId, slot + 1);
   };
   onMount(() => document.addEventListener('keydown', handlePlanHotkey));
@@ -791,6 +817,7 @@ export const PlanProvider: ParentComponent = (props) => {
     loading,
     models,
     selectedModel,
+    selectedProvider,
     archivePath,
     dismissArchiveNotification,
     selectModel,
@@ -823,7 +850,7 @@ export const PlanProvider: ParentComponent = (props) => {
       setMessages((prev) => [...prev, tempUserMsg]);
 
       try {
-        await sendPlanPrompt(plan.id, content, selectedModel(), window.innerWidth, window.innerHeight);
+        await sendPlanPrompt(plan.id, content, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider());
         const msgs = await getPlanMessages(plan.id);
         setMessages(msgs);
         startBgPoll(plan.id);

@@ -60,7 +60,7 @@ func (t MemoryRecallTool) Execute(ctx context.Context, args json.RawMessage, tct
 		t.Barrier.Wait(project.Resolve(tctx.SessionDir))
 	}
 	slog.Info("memory_recall delegating to recall agent", "question", params.Question, "session", tctx.SessionID)
-	answer, err := t.Recall(ctx, params.Question, "session", string(tctx.SessionID), tctx.SessionDir, tctx.Model)
+	answer, err := t.Recall(ctx, params.Question, "session", string(tctx.SessionID), tctx.SessionDir, tctx.Model, tctx.Provider)
 	if err != nil {
 		return Result{Title: "Memory Recall", Output: "Memory recall failed: " + err.Error() + "\nThis is not the same as memory being empty — retry, or proceed without it."}, nil
 	}

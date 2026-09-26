@@ -15,6 +15,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
+	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
 	"github.com/prasenjeet-symon/ogcode/internal/portmap"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/server"
@@ -150,6 +151,13 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Seed each provider's catalogue from the persisted copy so Models() has an
+	// answer without a live fetch on this one-shot path. There is no background
+	// refresh here: `ogcode index` resolves its model and exits.
+	if err := modelcatalog.Seed(registry, globalDatabase); err != nil {
+		slog.Warn("seed model catalog failed", "err", err)
+	}
+
 	defaultProvider := registry.DefaultUsable()
 	if defaultProvider == nil {
 		return fmt.Errorf("no LLM provider configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or OLLAMA_API_KEY")
@@ -163,17 +171,32 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(docindexStore))
 
 	lr := &agent.LoopRunner{
-		Store:                 sessionStore,
-		Bus:                   b,
-		Registry:              registry,
-		DefaultProvider:       defaultProvider,
-		Tools:                 toolRegistry,
-		Dir:                   dir,
-		MaxSteps:              50,
-		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
+		Store:           sessionStore,
+		Bus:             b,
+		Registry:        registry,
+		DefaultProvider: defaultProvider,
+		Tools:           toolRegistry,
+		Dir:             dir,
+		MaxSteps:        50,
 	}
 
-	idx := indexer.New(dir, docindexStore, lr)
+	// Seed and apply the shipped default excludes, exactly as the server's
+	// index paths do. Without this the same project would index different files
+	// from the terminal than from the app, and the defaults would be a claim
+	// about the UI rather than about the index.
+	if err := docindexStore.SeedDefaultExcludes(dir); err != nil {
+		slog.Warn("seed default excludes failed", "dir", dir, "err", err)
+	}
+	var excludePatterns []string
+	if excludes, err := docindexStore.ListExcludes(dir); err != nil {
+		slog.Warn("fetch excludes failed, indexing without them", "dir", dir, "err", err)
+	} else {
+		for _, e := range excludes {
+			excludePatterns = append(excludePatterns, e.Pattern)
+		}
+	}
+
+	idx := indexer.New(dir, docindexStore, lr).WithExcludes(excludePatterns)
 	if indexModel != "" {
 		idx = idx.WithModel(indexModel)
 	}

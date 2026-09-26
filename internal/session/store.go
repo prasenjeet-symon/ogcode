@@ -22,32 +22,39 @@ func (s *Store) DB() *db.DB { return s.db }
 
 func (s *Store) Create(session *Session) error {
 	_, err := s.db.Exec(
-		`INSERT INTO session (id, project_id, directory, title, model, session_type, permission, compaction_summary, time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.ID, session.ProjectID, session.Directory, session.Title, session.Model, session.SessionType, session.Permission, session.CompactionSummary, session.CreatedAt, session.UpdatedAt,
+		`INSERT INTO session (id, project_id, directory, title, model, provider, session_type, permission, compaction_summary, time_created, time_updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		session.ID, session.ProjectID, session.Directory, session.Title, session.Model, session.Provider, session.SessionType, session.Permission, session.CompactionSummary, session.CreatedAt, session.UpdatedAt,
 	)
 	return err
 }
 
 func (s *Store) Get(id SessionID) (*Session, error) {
 	row := s.db.QueryRow(
-		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, time_created, time_updated
+		`SELECT id, project_id, directory, title, model, provider, session_type, permission, compaction_summary,
+		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
+		        time_created, time_updated
 		 FROM session WHERE id = ?`, id,
 	)
 	var sess Session
-	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.CreatedAt, &sess.UpdatedAt)
+	var uIn, uOut, uReason, uCacheRead, uCacheWrite int
+	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
+		&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
+	sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
 	return &sess, nil
 }
 
 func (s *Store) List(directory string) ([]*Session, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, time_created, time_updated
+		`SELECT id, project_id, directory, title, model, provider, session_type, permission, compaction_summary,
+		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
+		        time_created, time_updated
 		 FROM session WHERE directory = ? AND session_type NOT IN ('note', 'index', 'search') ORDER BY time_updated DESC`, directory,
 	)
 	if err != nil {
@@ -58,9 +65,12 @@ func (s *Store) List(directory string) ([]*Session, error) {
 	var sessions []*Session
 	for rows.Next() {
 		var sess Session
-		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
+		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
+			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
 			return nil, err
 		}
+		sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
 		sessions = append(sessions, &sess)
 	}
 	return sessions, nil
@@ -71,7 +81,9 @@ func (s *Store) List(directory string) ([]*Session, error) {
 // project identity onto nodes written before that column existed.
 func (s *Store) ListAll() ([]*Session, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, directory, title, model, session_type, permission, compaction_summary, time_created, time_updated
+		`SELECT id, project_id, directory, title, model, provider, session_type, permission, compaction_summary,
+		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
+		        time_created, time_updated
 		 FROM session ORDER BY time_updated DESC`,
 	)
 	if err != nil {
@@ -82,20 +94,69 @@ func (s *Store) ListAll() ([]*Session, error) {
 	var sessions []*Session
 	for rows.Next() {
 		var sess Session
-		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.SessionType, &sess.Permission, &sess.CompactionSummary, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
+		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
+			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
 			return nil, err
 		}
+		sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
 		sessions = append(sessions, &sess)
 	}
 	return sessions, rows.Err()
 }
 
+// Update rewrites the mutable, user-visible columns of a session. It
+// deliberately leaves the utility_* columns alone: those are written only by
+// AddUtilityUsage, which increments them, so a read-modify-write here would
+// clobber an increment that landed between the caller's Get and this Update.
 func (s *Store) Update(session *Session) error {
 	_, err := s.db.Exec(
-		`UPDATE session SET title = ?, model = ?, session_type = ?, permission = ?, compaction_summary = ?, time_updated = ? WHERE id = ?`,
-		session.Title, session.Model, session.SessionType, session.Permission, session.CompactionSummary, session.UpdatedAt, session.ID,
+		`UPDATE session SET title = ?, model = ?, provider = ?, session_type = ?, permission = ?, compaction_summary = ?, time_updated = ? WHERE id = ?`,
+		session.Title, session.Model, session.Provider, session.SessionType, session.Permission, session.CompactionSummary, session.UpdatedAt, session.ID,
 	)
 	return err
+}
+
+// AddUtilityUsage adds the tokens a utility call spent to the session's running
+// totals. Utility calls — title generation, command risk assessment, context
+// compaction — stream their usage on a call the main-turn accounting never
+// sees, so it accumulates here instead of on a message. The UPDATE increments
+// rather than assigns, so concurrent calls cannot lose one another's tokens, and
+// it leaves time_updated untouched: this is not a user-visible session change.
+func (s *Store) AddUtilityUsage(id SessionID, u TokenCounts) error {
+	if u.Input == 0 && u.Output == 0 && u.Reasoning == 0 && u.CacheRead == 0 && u.CacheWrite == 0 {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE session SET
+		        utility_input = utility_input + ?,
+		        utility_output = utility_output + ?,
+		        utility_reasoning = utility_reasoning + ?,
+		        utility_cache_read = utility_cache_read + ?,
+		        utility_cache_write = utility_cache_write + ?
+		 WHERE id = ?`,
+		u.Input, u.Output, u.Reasoning, u.CacheRead, u.CacheWrite, id,
+	)
+	return err
+}
+
+// utilityTokens rebuilds the utility TokenCounts from the five stored columns,
+// returning nil while every count is zero so an untouched session marshals
+// without the field.
+func utilityTokens(input, output, reasoning, cacheRead, cacheWrite int) *TokenCounts {
+	if input == 0 && output == 0 && reasoning == 0 && cacheRead == 0 && cacheWrite == 0 {
+		return nil
+	}
+	return &TokenCounts{
+		Input:      input,
+		Output:     output,
+		Reasoning:  reasoning,
+		CacheRead:  cacheRead,
+		CacheWrite: cacheWrite,
+		// Cache read is excluded from Total for the same reason as per-message
+		// counts: cached tokens were already counted as input when first sent.
+		Total: input + cacheWrite + output,
+	}
 }
 
 // UpdateCompactionSummary updates only the compaction_summary column for a session,

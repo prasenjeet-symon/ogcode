@@ -130,6 +130,12 @@ type Server struct {
 	// opts carries the runtime toggles set at construction (see Options).
 	opts Options
 
+	// catalogRefresh serializes provider-catalogue refreshes and exposes the
+	// in-flight one, so the startup refresh, a credential-change refresh, and a
+	// manual /models/refresh can never stack a second fetch per provider. See
+	// beginCatalogRefresh in model_catalog.go.
+	catalogRefresh catalogRefreshState
+
 	// stopCh is closed by Stop() to end the Serve wait loop without a signal.
 	// Allocated in serve; Stop before Serve is a no-op by design (Serve is what
 	// wires the shutdown path). stopOnce guards a double Stop. stopMu guards the
@@ -404,6 +410,10 @@ func (s *Server) serve(ctx context.Context) error {
 	s.registry = registry
 	s.defaultProvider = defaultProvider
 
+	// Seed every provider's in-memory catalogue from the persisted copy so the
+	// picker answers immediately, before the first background refresh lands.
+	s.seedModelCatalog()
+
 	// Custom model definitions and model enable/disable preferences live in the
 	// global config DB so they persist across every project/workspace (like
 	// provider credentials). Older builds stored them in the per-project DB, so
@@ -423,7 +433,7 @@ func (s *Server) serve(ctx context.Context) error {
 		}
 	}
 
-	s.permissions = permission.NewManager()
+	s.permissions = permission.NewManager(permission.NewStore(s.globalDB))
 	s.questions = question.NewManager()
 	s.loopRunner = &agent.LoopRunner{
 		Store:           s.store,
@@ -445,11 +455,8 @@ func (s *Server) serve(ctx context.Context) error {
 		TurnMemory:     memfile.TurnMemoryEnabled(),
 		NoteStore:      s.noteStore,
 		SearchBridge:   searchBackend,
-		// Whether the agent may compact its own context mid-turn is a per-project
-		// choice, so it is read from the project DB (not the global one), once at
-		// the start of each turn — flipping it in the settings screen applies to
-		// the next turn without a restart.
-		CompactContextEnabled: func() bool { return session.CompactContextEnabled(database) },
+		// Whether the agent may compact its own context mid-turn is a process-wide
+		// switch (OGCODE_COMPACT_CONTEXT); the loop resolves it once per turn.
 		// Lets the system prompt say up front whether codebase_map has anything
 		// to return, so a session in an unindexed project does not spend a call
 		// finding out. Queried per turn, so building the index mid-session is
@@ -464,6 +471,18 @@ func (s *Server) serve(ctx context.Context) error {
 				return -1
 			}
 			return len(paths)
+		},
+		// Refresh the project index after a completed turn, so codebase_map does
+		// not fall behind the files the session just added or edited. Gated on the
+		// same env switch that turns it off, read here so the decision is the
+		// indexer package's rather than the loop's. nil when off leaves indexing
+		// exactly as manual as it was.
+		AutoIndex: func(dir, model, provider string) {
+			if !indexer.AutoIndexEnabled() {
+				return
+			}
+			slog.Info("autoIndex: refreshing project index after turn", "dir", dir, "model", model, "provider", provider)
+			s.autoIndexDir(dir, model, provider)
 		},
 		Permissions: s.permissions,
 		Questions:   s.questions,
@@ -578,6 +597,11 @@ func (s *Server) serve(ctx context.Context) error {
 	if s.mcpConnect != nil {
 		go s.mcpConnect()
 	}
+
+	// Refresh every provider's model catalogue in the background now that the
+	// listeners are live: the picker already answers from the seeded catalogue,
+	// and this only fills it in with whatever the endpoints report today.
+	s.refreshModelCatalogsInBackground()
 
 	// signalCh owns process signals; stopCh is the programmatic Stop() path, so
 	// a ctx-driven caller (the worker hosting N servers) is never torn down by a
@@ -789,6 +813,12 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 func (s *Server) reloadProviders() {
 	s.registry.ReplaceProviders(s.loadProviderMap())
 	slog.Info("reloaded provider registry", "providers", s.registry.List())
+	// Seed the freshly-built providers from the persisted catalogue so a
+	// credential change shows the last known list immediately, then refresh
+	// live in the background — the same shape as startup, and the same reason:
+	// the credential POST must not wait on a network fetch.
+	s.seedModelCatalog()
+	s.refreshModelCatalogsInBackground()
 }
 
 // migrateModelPreferencesToGlobal backfills the global config DB with any model

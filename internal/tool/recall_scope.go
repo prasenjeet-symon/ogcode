@@ -34,7 +34,7 @@ func RecallScopeFromContext(ctx context.Context) (RecallScope, bool) {
 // given scope and returns its concise written answer. Implemented by
 // agent.LoopRunner.RunMemoryRecallSession and wired in from server.go to avoid
 // the tool→agent import cycle, exactly like TaskFunc.
-type RecallFunc func(ctx context.Context, question, scope, targetSessionID, dir, model string) (string, error)
+type RecallFunc func(ctx context.Context, question, scope, targetSessionID, dir, model, provider string) (string, error)
 
 // RecallBarrier lets a recall wait for in-flight background turn-summary work to
 // settle before it runs, so it never reads a stale or partial index.

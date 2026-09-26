@@ -22,23 +22,23 @@ func (s *Store) Create(task *Task) error {
 		return fmt.Errorf("marshal dependencies: %w", err)
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO task (id, plan_id, session_id, parent_task_id, title, description, effort, complexity, status, dependencies, branch_name, chain_branch, worktree_path, pr_url, pr_number, pr_error, model, order_index, time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.PlanID, task.SessionID, task.ParentTaskID, task.Title, task.Description, task.Effort, task.Complexity, task.Status, string(depsJSON), task.BranchName, task.ChainBranch, task.WorktreePath, task.PRURL, task.PRNumber, task.PRError, task.Model, task.OrderIndex, task.CreatedAt, task.UpdatedAt,
+		`INSERT INTO task (id, plan_id, session_id, parent_task_id, title, description, effort, complexity, status, dependencies, branch_name, chain_branch, worktree_path, pr_url, pr_number, pr_error, model, provider, order_index, time_created, time_updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.PlanID, task.SessionID, task.ParentTaskID, task.Title, task.Description, task.Effort, task.Complexity, task.Status, string(depsJSON), task.BranchName, task.ChainBranch, task.WorktreePath, task.PRURL, task.PRNumber, task.PRError, task.Model, task.Provider, task.OrderIndex, task.CreatedAt, task.UpdatedAt,
 	)
 	return err
 }
 
 func (s *Store) Get(id string) (*Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, plan_id, session_id, parent_task_id, title, description, effort, complexity, status, dependencies, branch_name, chain_branch, worktree_path, pr_url, pr_number, pr_error, model, order_index, time_created, time_updated
+		`SELECT id, plan_id, session_id, parent_task_id, title, description, effort, complexity, status, dependencies, branch_name, chain_branch, worktree_path, pr_url, pr_number, pr_error, model, provider, order_index, time_created, time_updated
 		 FROM task WHERE id = ?`, id,
 	)
 	var t Task
 	var sessionID, parentTaskID sql.NullString
 	var prNumber sql.NullInt64
 	var depsJSON string
-	err := row.Scan(&t.ID, &t.PlanID, &sessionID, &parentTaskID, &t.Title, &t.Description, &t.Effort, &t.Complexity, &t.Status, &depsJSON, &t.BranchName, &t.ChainBranch, &t.WorktreePath, &t.PRURL, &prNumber, &t.PRError, &t.Model, &t.OrderIndex, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.PlanID, &sessionID, &parentTaskID, &t.Title, &t.Description, &t.Effort, &t.Complexity, &t.Status, &depsJSON, &t.BranchName, &t.ChainBranch, &t.WorktreePath, &t.PRURL, &prNumber, &t.PRError, &t.Model, &t.Provider, &t.OrderIndex, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -66,7 +66,7 @@ func (s *Store) Get(id string) (*Task, error) {
 
 func (s *Store) ListByPlan(planID string) ([]*Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, plan_id, session_id, parent_task_id, title, description, effort, complexity, status, dependencies, branch_name, chain_branch, worktree_path, pr_url, pr_number, pr_error, model, order_index, time_created, time_updated
+		`SELECT id, plan_id, session_id, parent_task_id, title, description, effort, complexity, status, dependencies, branch_name, chain_branch, worktree_path, pr_url, pr_number, pr_error, model, provider, order_index, time_created, time_updated
 		 FROM task WHERE plan_id = ? ORDER BY order_index ASC`, planID,
 	)
 	if err != nil {
@@ -80,7 +80,7 @@ func (s *Store) ListByPlan(planID string) ([]*Task, error) {
 		var sessionID, parentTaskID sql.NullString
 		var prNumber sql.NullInt64
 		var depsJSON string
-		if err := rows.Scan(&t.ID, &t.PlanID, &sessionID, &parentTaskID, &t.Title, &t.Description, &t.Effort, &t.Complexity, &t.Status, &depsJSON, &t.BranchName, &t.ChainBranch, &t.WorktreePath, &t.PRURL, &prNumber, &t.PRError, &t.Model, &t.OrderIndex, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.PlanID, &sessionID, &parentTaskID, &t.Title, &t.Description, &t.Effort, &t.Complexity, &t.Status, &depsJSON, &t.BranchName, &t.ChainBranch, &t.WorktreePath, &t.PRURL, &prNumber, &t.PRError, &t.Model, &t.Provider, &t.OrderIndex, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if sessionID.Valid {
@@ -107,8 +107,8 @@ func (s *Store) Update(task *Task) error {
 		return fmt.Errorf("marshal dependencies: %w", err)
 	}
 	_, err = s.db.Exec(
-		`UPDATE task SET session_id = ?, parent_task_id = ?, title = ?, description = ?, effort = ?, complexity = ?, status = ?, dependencies = ?, branch_name = ?, chain_branch = ?, worktree_path = ?, pr_url = ?, pr_number = ?, pr_error = ?, model = ?, order_index = ?, time_updated = ? WHERE id = ?`,
-		task.SessionID, task.ParentTaskID, task.Title, task.Description, task.Effort, task.Complexity, task.Status, string(depsJSON), task.BranchName, task.ChainBranch, task.WorktreePath, task.PRURL, task.PRNumber, task.PRError, task.Model, task.OrderIndex, task.UpdatedAt, task.ID,
+		`UPDATE task SET session_id = ?, parent_task_id = ?, title = ?, description = ?, effort = ?, complexity = ?, status = ?, dependencies = ?, branch_name = ?, chain_branch = ?, worktree_path = ?, pr_url = ?, pr_number = ?, pr_error = ?, model = ?, provider = ?, order_index = ?, time_updated = ? WHERE id = ?`,
+		task.SessionID, task.ParentTaskID, task.Title, task.Description, task.Effort, task.Complexity, task.Status, string(depsJSON), task.BranchName, task.ChainBranch, task.WorktreePath, task.PRURL, task.PRNumber, task.PRError, task.Model, task.Provider, task.OrderIndex, task.UpdatedAt, task.ID,
 	)
 	return err
 }

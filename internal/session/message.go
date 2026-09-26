@@ -6,16 +6,18 @@ import (
 )
 
 type Session struct {
-	ID                SessionID `json:"id"`
-	ProjectID         string    `json:"projectId"`
-	Directory         string    `json:"directory"`
-	Title             string    `json:"title"`
-	Model             string    `json:"model,omitempty"`
-	SessionType       string    `json:"sessionType,omitempty"`
-	Permission        string    `json:"permission,omitempty"`
-	CompactionSummary string    `json:"compactionSummary,omitempty"`
-	CreatedAt         int64     `json:"createdAt"`
-	UpdatedAt         int64     `json:"updatedAt"`
+	ID                SessionID    `json:"id"`
+	ProjectID         string       `json:"projectId"`
+	Directory         string       `json:"directory"`
+	Title             string       `json:"title"`
+	Model             string       `json:"model,omitempty"`
+	Provider          string       `json:"provider,omitempty"`
+	SessionType       string       `json:"sessionType,omitempty"`
+	Permission        string       `json:"permission,omitempty"`
+	CompactionSummary string       `json:"compactionSummary,omitempty"`
+	UtilityTokens     *TokenCounts `json:"utilityTokens,omitempty"`
+	CreatedAt         int64        `json:"createdAt"`
+	UpdatedAt         int64        `json:"updatedAt"`
 }
 
 type MessageRole string

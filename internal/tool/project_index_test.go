@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -103,10 +104,79 @@ func TestProjectIndex_FolderLabelsRankedByFrequency(t *testing.T) {
 	if !strings.Contains(line, "zebra") || !strings.Contains(line, "yak") {
 		t.Errorf("collapsed line lost a label:\n%s", line)
 	}
-	// Both labels are within folderLabelCap (6) so both appear, in frequency
+	// Both labels are within folderLabelCap so both appear, in frequency
 	// order: zebra (12) before yak (11).
 	if strings.Index(line, "yak") < strings.Index(line, "zebra") {
 		t.Errorf("frequency ranking ignored — yak (11) before zebra (12):\n%s", line)
+	}
+}
+
+// A folder line summarizes the whole branch, so a label carried by several
+// subfolders outranks one merely dense in a single large subtree. Spread
+// (directories carrying the label) ranks ahead of frequency (files carrying it),
+// which is what keeps a small but distinctive child from being crowded out.
+func TestProjectIndex_FolderLineSpreadsLabelsAcrossSubfolders(t *testing.T) {
+	entries := make([]*docindex.PageEntry, 0, 22)
+	// One big subfolder carrying only "bulk topic" — 20 files, so it wins on
+	// frequency by a wide margin.
+	for i := 0; i < 20; i++ {
+		entries = append(entries, textEntry(fmt.Sprintf("/proj/pkg/a/f%02d.go", i), "bulk topic"))
+	}
+	// Two small subfolders that happen to share a label — 2 files in total, but
+	// spread across two directories.
+	entries = append(entries, textEntry("/proj/pkg/b/one.go", "shared topic"))
+	entries = append(entries, textEntry("/proj/pkg/c/two.go", "shared topic"))
+
+	tree := buildProjectTree("/proj", entries, nil, nil)
+	out := renderProjectMap(tree, "")
+
+	line := ""
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "pkg/") && strings.Contains(l, "files)") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("no collapsed line for pkg/:\n%s", out)
+	}
+	// "shared topic" is in 2 directories, "bulk topic" in 1, so despite being
+	// 2 files against 20 the spread ranks it first.
+	if strings.Index(line, "bulk") < strings.Index(line, "shared") {
+		t.Errorf("spread ranking ignored — bulk (20 files, 1 folder) before shared (2 files, 2 folders):\n%s", line)
+	}
+}
+
+// A folder line is capped at folderLabelCap labels however many distinct labels
+// its branch holds: one folder line stands for a whole branch, and the per-file
+// detail arrives on drill-down.
+func TestProjectIndex_FolderLineCappedAtTheFolderCeiling(t *testing.T) {
+	// One distinct label per file, so the folder sees one more distinct label
+	// than the cap allows.
+	entries := make([]*docindex.PageEntry, 0, folderLabelCap+1)
+	for i := 0; i < folderLabelCap+1; i++ {
+		entries = append(entries, textEntry(fmt.Sprintf("/proj/pkg/f%03d.go", i), fmt.Sprintf("topic%02d", i)))
+	}
+	tree := buildProjectTree("/proj", entries, nil, nil)
+	out := renderProjectMap(tree, "")
+
+	line := ""
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "pkg/") && strings.Contains(l, "files)") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("no collapsed line for pkg/:\n%s", out)
+	}
+	// Alphabetical ties mean the first folderLabelCap labels survive and the
+	// one past the cap is dropped.
+	if !strings.Contains(line, "topic00") || !strings.Contains(line, fmt.Sprintf("topic%02d", folderLabelCap-1)) {
+		t.Errorf("labels within the cap were dropped:\n%s", line)
+	}
+	if strings.Contains(line, fmt.Sprintf("topic%02d", folderLabelCap)) {
+		t.Errorf("a label past the cap of %d was kept:\n%s", folderLabelCap, line)
 	}
 }
 
@@ -203,18 +273,40 @@ func TestProjectIndex_MixedDocumentTypesAggregateIntoFolderStats(t *testing.T) {
 	}
 }
 
-// Labels are the bulk of this output, so text/code files are capped.
-func TestProjectIndex_CapsTextFileLabels(t *testing.T) {
-	many := []string{"one", "two", "three", "four", "five", "six", "seven", "eight"}
+// Labels are the bulk of this output, so a file is capped at the index's own
+// per-page ceiling — but no lower. A stored label the model paid a step to
+// produce must not be hidden by the render, so textLabelCap equals
+// MaxLabelsPerPage.
+func TestProjectIndex_TextFileLabelsCappedAtTheIndexCeiling(t *testing.T) {
+	// One more label than the ceiling: the last must be dropped.
+	many := make([]string, MaxLabelsPerPage+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("topic%02d", i)
+	}
 	tree := buildProjectTree("/proj", []*docindex.PageEntry{textEntry("/proj/a.go", many...)}, nil, nil)
-
 	out := renderProjectMap(tree, "")
 
-	if !strings.Contains(out, "a.go  one, two, three, four, five") {
-		t.Errorf("expected exactly %d label(s):\n%s", textLabelCap, out)
+	// The first MaxLabelsPerPage labels appear, in order; the extra one does not.
+	for i := 0; i < MaxLabelsPerPage; i++ {
+		if !strings.Contains(out, fmt.Sprintf("topic%02d", i)) {
+			t.Errorf("label topic%02d within the cap was dropped:\n%s", i, out)
+		}
 	}
-	if strings.Contains(out, "six") {
-		t.Errorf("label cap not applied:\n%s", out)
+	if strings.Contains(out, fmt.Sprintf("topic%02d", MaxLabelsPerPage)) {
+		t.Errorf("label past the cap of %d was kept:\n%s", MaxLabelsPerPage, out)
+	}
+
+	// A file at exactly the ceiling shows every label — the cap hides nothing
+	// the indexer produced.
+	exact := make([]string, MaxLabelsPerPage)
+	for i := range exact {
+		exact[i] = fmt.Sprintf("kept%02d", i)
+	}
+	full := renderProjectMap(buildProjectTree("/proj", []*docindex.PageEntry{textEntry("/proj/b.go", exact...)}, nil, nil), "")
+	for i := 0; i < MaxLabelsPerPage; i++ {
+		if !strings.Contains(full, fmt.Sprintf("kept%02d", i)) {
+			t.Errorf("a file at the ceiling lost label kept%02d:\n%s", i, full)
+		}
 	}
 }
 
@@ -235,7 +327,7 @@ func bigIndex(n int) []*docindex.PageEntry {
 	return entries
 }
 
-// With collapsing, the map must stay inside MaxToolOutputBytes at every size —
+// With collapsing, the map must stay inside its own byte budget at every size —
 // the 2000-file render now costs a few KB, not tens of KB — and folders
 // summarize rather than leak loose file names.
 func TestProjectIndex_StaysUnderOutputCap(t *testing.T) {
@@ -244,9 +336,9 @@ func TestProjectIndex_StaysUnderOutputCap(t *testing.T) {
 			tree := buildProjectTree("/proj", bigIndex(files), nil, nil)
 			out := renderProjectMap(tree, "")
 
-			if len(out) > MaxToolOutputBytes {
-				t.Errorf("map is %d bytes, over the %d cap — it will be truncated by the backstop",
-					len(out), MaxToolOutputBytes)
+			if len(out) > projectMapBudget {
+				t.Errorf("map is %d bytes, over the %d budget — it would degrade",
+					len(out), projectMapBudget)
 			}
 			// With one call = one expanded level, the root's large child
 			// (internal/, many packages) is itself summarized — expanding
@@ -259,13 +351,58 @@ func TestProjectIndex_StaysUnderOutputCap(t *testing.T) {
 	}
 }
 
-// Past the budget the labels go, not the structure — and the agent is told how
-// to get them back rather than being left with a silently shorter tree. With
-// collapsing this path needs a pathological tree, so the fabricated index is
-// one flat directory of 2000 loose files: no structural cut exists there.
+// A level too wide for every file's full label set must degrade by showing
+// fewer labels per file, not by dropping labels wholesale. This is the case the
+// raised caps make reachable: a real directory of ~60 files at the store's
+// ceiling would otherwise cross the budget and lose all its labels, which is
+// exactly the depth the map exists to carry.
+func TestProjectIndex_WideLevelShowsFewerLabelsRatherThanNone(t *testing.T) {
+	// Many loose files, each at the store ceiling, with realistically long
+	// labels — wide enough that full depth overflows the budget but a shallower
+	// rung fits. 140 files renders ~125 KB at full depth, past the 100 KB budget.
+	labels := make([]string, MaxLabelsPerPage)
+	for i := range labels {
+		labels[i] = fmt.Sprintf("subsystem behaviour topic %d", i)
+	}
+	const files = 140
+	entries := make([]*docindex.PageEntry, 0, files)
+	for i := 0; i < files; i++ {
+		entries = append(entries, textEntry(fmt.Sprintf("/proj/pkg/f%03d.go", i), labels...))
+	}
+
+	// Sanity: at full depth this level must overflow, or the test proves nothing.
+	var probe strings.Builder
+	renderProjectLevel(buildProjectTree("/proj/pkg", entries, nil, nil), &probe, true, textLabelCap, folderLabelCap)
+	if probe.Len() <= projectMapBudget {
+		t.Skipf("fixture is only %d bytes at full depth — widen it to exercise degradation", probe.Len())
+	}
+
+	out := renderProjectMap(buildProjectTree("/proj/pkg", entries, nil, nil), "pkg")
+
+	if len(out) > projectMapBudget {
+		t.Errorf("map is %d bytes, over the %d budget", len(out), projectMapBudget)
+	}
+	// Labels survive — the whole point. If degradation dropped them, the line
+	// would carry the file name alone.
+	if !strings.Contains(out, "subsystem behaviour topic") {
+		t.Errorf("a wide level lost every label instead of showing fewer:\n%s", out[:400])
+	}
+	// And they survive at reduced depth: rung 2 caps every entry at 10 labels,
+	// so a level that overflows at full depth must show no more than that.
+	atFolderRung := "subsystem behaviour topic 0, subsystem behaviour topic 1, subsystem behaviour topic 2, subsystem behaviour topic 3, subsystem behaviour topic 4, subsystem behaviour topic 5, subsystem behaviour topic 6, subsystem behaviour topic 7, subsystem behaviour topic 8, subsystem behaviour topic 9, subsystem behaviour topic 10"
+	if strings.Contains(out, atFolderRung) {
+		t.Error("expected a cap below 10 labels per file for a level this wide")
+	}
+}
+
+// Past every rung the labels go, not the structure — and the agent is told how
+// to get them back rather than being left with a silently shorter tree. This is
+// the last resort: a level where even one label per file will not fit, so the
+// fabricated index is one flat directory of 3000 loose files — past the 100 KB
+// budget even once the render is down to a single label each.
 func TestProjectIndex_LargeProjectDropsLabelsWithGuidance(t *testing.T) {
-	flat := make([]*docindex.PageEntry, 0, 2000)
-	for i := 0; i < 2000; i++ {
+	flat := make([]*docindex.PageEntry, 0, 3000)
+	for i := 0; i < 3000; i++ {
 		flat = append(flat, textEntry(fmt.Sprintf("/proj/f%04d.go", i), "subsystem behaviour topic 0-0"))
 	}
 
@@ -293,11 +430,53 @@ func TestProjectIndex_RepoSizedProjectKeepsLabels(t *testing.T) {
 	out := renderProjectMap(buildProjectTree("/proj", bigIndex(280), nil, nil), "")
 
 	if strings.Contains(out, "too large to show topic labels") {
-		t.Errorf("a 280-file project dropped its labels at %d bytes, well inside the %d cap",
-			len(out), MaxToolOutputBytes)
+		t.Errorf("a 280-file project dropped its labels at %d bytes, well inside the %d budget",
+			len(out), projectMapBudget)
 	}
 	if !strings.Contains(out, "subsystem behaviour topic 0-0") {
 		t.Error("labels missing from a repo-sized map")
+	}
+}
+
+// The map's byte budget sits above MaxToolOutputBytes, the generic cap on any
+// tool result. That is only safe because Execute opts the result out of the
+// loop's backstop (Result.Truncated): without the flag the backstop would
+// head-truncate a large map mid-branch — the very thing the budget exists to
+// prevent. Pinned at the Execute boundary, since a direct renderProjectMap call
+// never touches the flag.
+func TestProjectIndex_ResultOptsOutOfTheGenericOutputCap(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	store := docindex.NewStore(database)
+
+	// Enough loose files at one level to render past the generic 50 KB cap on
+	// their own, so the flag — not the size — is what keeps the tree intact.
+	const dir = "/proj"
+	for i := 0; i < 700; i++ {
+		labels := make([]string, 8)
+		for j := range labels {
+			labels[j] = fmt.Sprintf("subsystem behaviour topic %d-%d", i, j)
+		}
+		if err := store.Upsert(&docindex.PageEntry{
+			DocPath: fmt.Sprintf("%s/f%04d.go", dir, i), PageNum: 1, Labels: labels,
+		}); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	res, err := NewProjectIndexTool(store).Execute(context.Background(), nil, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(res.Output) <= MaxToolOutputBytes {
+		t.Fatalf("fixture renders only %d bytes, under the %d generic cap — widen it to exercise the opt-out",
+			len(res.Output), MaxToolOutputBytes)
+	}
+	if !res.Truncated {
+		t.Errorf("map is %d bytes but the result is not marked Truncated — the loop's backstop would cut the tree mid-branch",
+			len(res.Output))
 	}
 }
 

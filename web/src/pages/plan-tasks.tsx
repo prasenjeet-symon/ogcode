@@ -194,7 +194,7 @@ function TaskDrawer(props: { task: Task | null; onClose: () => void }) {
                   <div class="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)]">
                     <ModelSelector
                       selectedModel={() => effectiveModelId()}
-                      onSelect={(id) => plan.setTaskModel(t()!.id, id)}
+                      onSelect={(id, providerId) => plan.setTaskModel(t()!.id, id, providerId)}
                       placement="top"
                     />
                   </div>
@@ -204,7 +204,7 @@ function TaskDrawer(props: { task: Task | null; onClose: () => void }) {
                   >
                     <button
                       type="button"
-                      onClick={() => plan.setTaskModel(t()!.id, '')}
+                      onClick={() => plan.setTaskModel(t()!.id, '', '')}
                       class="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
                     >
                       Reset to plan default

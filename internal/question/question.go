@@ -12,6 +12,7 @@
 package question
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/prasenjeet-symon/ogcode/internal/id"
@@ -29,14 +30,86 @@ type Option struct {
 	Description string `json:"description,omitempty"`
 }
 
+// Condition gates a question on an answer already given — the branching that
+// lets one screen decide what the next screen asks. It names an earlier
+// question by id and the option labels that reveal this one.
+type Condition struct {
+	// Question is the id of an earlier question in the same batch.
+	Question string `json:"question"`
+	// Options are option labels of that question. The gated screen is shown
+	// when the answer selected any of them; an empty list matches any answer at
+	// all (a selection or typed text).
+	Options []string `json:"options,omitempty"`
+	// Not inverts the match: shown when none of Options was selected.
+	Not bool `json:"not,omitempty"`
+}
+
 // Question is one prompt within a batch. Header is the short title shown on the
 // question's own screen; MultiSelect says whether several options may be
 // selected at once (single-select is the default).
+//
+// ID is a short slug another question can branch on; ShowWhen makes this
+// screen conditional on an earlier answer. A question with no ShowWhen is
+// always shown, so a batch that does not branch is unchanged.
 type Question struct {
-	Header      string   `json:"header,omitempty"`
-	Question    string   `json:"question"`
-	Options     []Option `json:"options,omitempty"`
-	MultiSelect bool     `json:"multiSelect,omitempty"`
+	ID          string     `json:"id,omitempty"`
+	Header      string     `json:"header,omitempty"`
+	Question    string     `json:"question"`
+	Options     []Option   `json:"options,omitempty"`
+	MultiSelect bool       `json:"multiSelect,omitempty"`
+	ShowWhen    *Condition `json:"showWhen,omitempty"`
+}
+
+// Match reports whether the condition holds for answers keyed by question id. A
+// nil condition (a screen with no ShowWhen) always matches.
+func (c *Condition) Match(answers map[string]Answer) bool {
+	if c == nil {
+		return true
+	}
+	a := answers[c.Question]
+	hit := false
+	if len(c.Options) == 0 {
+		hit = len(a.Selected) > 0 || strings.TrimSpace(a.Text) != ""
+	} else {
+		for _, sel := range a.Selected {
+			for _, want := range c.Options {
+				if sel == want {
+					hit = true
+				}
+			}
+		}
+	}
+	if c.Not {
+		return !hit
+	}
+	return hit
+}
+
+// AnswersByID pairs a positional reply with the batch, keyed by question id. A
+// question without an id is left out: nothing can branch on it.
+func AnswersByID(questions []Question, reply Reply) map[string]Answer {
+	m := make(map[string]Answer, len(questions))
+	for i, q := range questions {
+		if q.ID == "" {
+			continue
+		}
+		if i < len(reply.Answers) {
+			m[q.ID] = reply.Answers[i]
+		}
+	}
+	return m
+}
+
+// Visibility reports, for each question in order, whether the user is shown it
+// given the answers to the questions before it. Because a condition only ever
+// names an earlier question, the walk is a single pass — a screen behind a
+// skipped branch is skipped too, since its condition then reads a blank answer.
+func Visibility(questions []Question, answers map[string]Answer) []bool {
+	vis := make([]bool, len(questions))
+	for i, q := range questions {
+		vis[i] = q.ShowWhen.Match(answers)
+	}
+	return vis
 }
 
 // Request is a whole batch, as handed to the UI.

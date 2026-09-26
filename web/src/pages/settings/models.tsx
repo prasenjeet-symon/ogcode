@@ -270,7 +270,7 @@ export default function ModelsSettings() {
             onToggle={(m) => session.toggleModel(m, !m.enabled)}
             onRemove={async (m) => {
               if (!confirm(`Remove "${m.name}"? This deletes the custom model.`)) return;
-              await session.removeCustomModel(m.id);
+              await session.removeCustomModel(m.id, m.providerId);
             }}
             onAdd={(id, name, collection) =>
               session.addCustomModel(id, slot().id, name, collection || undefined)

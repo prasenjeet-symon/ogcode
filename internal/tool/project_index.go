@@ -23,11 +23,11 @@ import (
 // map one directory deeper. Output size therefore tracks how wide a level is,
 // never how large the project is beneath it.
 //
-// Text, code, PDF, and DOCX leaves all carry a flat topic-label array. For
-// PDFs and DOCX files a concise subset of labels (capped at 15) is aggregated
-// and de-duplicated across all pages; the dedicated pdf_index and docx_index
-// tools provide the full per-page detail when the agent needs to decide which
-// page to read.
+// Text, code, PDF, and DOCX leaves all carry a flat topic-label array. A text or
+// code file shows every label the index holds for it (the store caps that at
+// MaxLabelsPerPage). For PDFs and DOCX files a subset is aggregated across
+// pages; the dedicated pdf_index and docx_index tools provide the full per-page
+// detail when the agent needs to decide which page to read.
 type ProjectIndexTool struct {
 	Store *docindex.Store
 }
@@ -39,7 +39,7 @@ func NewProjectIndexTool(store *docindex.Store) ProjectIndexTool {
 func (ProjectIndexTool) ID() string { return "codebase_map" }
 
 func (ProjectIndexTool) Description() string {
-	return "Return one level of a labeled map of indexed files — text, code, PDF, and DOCX documents. Every folder is shown as a SINGLE line with its most common topic labels and the number of files inside it; files sitting directly at that level are listed individually with their own labels. To look inside a folder, call again with subdir set to its path (e.g. \"internal/tool\") — each call descends one level. For PDFs and DOCX files a concise subset of labels (up to 15) is aggregated across pages (no per-page breakdown). Use this to find which area is relevant to a topic before reading anything; use pdf_index for per-page labels of a specific PDF, or docx_index for a DOCX."
+	return fmt.Sprintf("Return one level of a labeled map of indexed files — text, code, PDF, and DOCX documents. Every folder is shown as a SINGLE line with its most representative topic labels and the number of files inside it; files sitting directly at that level are listed individually with their own labels. To look inside a folder, call again with subdir set to its path (e.g. \"internal/tool\") — each call descends one level. For PDFs and DOCX files a subset of labels (up to %d) is aggregated across pages (no per-page breakdown). Use this to find which area is relevant to a topic before reading anything; use pdf_index for per-page labels of a specific PDF, or docx_index for a DOCX.", docLabelCap)
 }
 
 func (ProjectIndexTool) Parameters() json.RawMessage {
@@ -181,6 +181,10 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 	return Result{
 		Title:  fmt.Sprintf("%s — %s", title, levelSummary(tree, dirStatsOf(tree).files)),
 		Output: renderProjectMap(tree, params.Subdir),
+		// Rendered to projectMapBudget, which sits above the generic 50 KB cap,
+		// so opt out of the loop's backstop: it would otherwise head-truncate the
+		// tree mid-branch. The budget is what bounds this result.
+		Truncated: true,
 	}, nil
 }
 
@@ -195,53 +199,71 @@ func countDistinctDocs(entries []*docindex.PageEntry) int {
 }
 
 // docLabelCap is the maximum number of topic labels returned for a multi-page
-// document (PDF or DOCX) in the project tree. Labels are collected across pages
-// (de-duplicated, first-seen order) and truncated at this limit so the map
-// stays concise. The full per-page breakdown is available through the
-// dedicated pdf_index / docx_index tools.
-const docLabelCap = 15
+// document (PDF or DOCX) in the project tree. A multi-page document's labels are
+// collected across every page (de-duplicated, first-seen order), so unlike a
+// text file there is no natural bound and a cap is required. Set to
+// MaxLabelsPerPage: deep enough that the merged list reads as a real summary of
+// the document rather than a teaser. The full per-page breakdown is available
+// through the dedicated pdf_index / docx_index tools.
+const docLabelCap = MaxLabelsPerPage
 
 // textLabelCap is the maximum number of topic labels shown per text/code file.
 //
-// Labels dominate this output: on a 277-file index of this repo they account
-// for 55 KB of the 64 KB of real content, against 8 KB of file paths. Uncapped,
-// the rendered map came to 86 KB — past the 50 KB MaxToolOutputBytes ceiling,
-// so the tail was being silently truncated before the agent ever saw it. Five
-// labels is enough to tell what a file covers; the file itself is one file_map
-// call away.
-const textLabelCap = 5
+// Equal to MaxLabelsPerPage — the ceiling on what the index can store for a
+// page — so a file's line shows every label it holds; nothing the indexer
+// produced is hidden by the render. Labels still dominate the output, so the
+// byte budget below (projectMapBudget) is the real limit: on a pathologically
+// wide level the map sheds labels rung by rung, and the result opts out of the
+// loop's generic cap (Result.Truncated) so that budget, not MaxToolOutputBytes,
+// bounds it.
+const textLabelCap = MaxLabelsPerPage
 
 // projectMapBudget is the byte budget for a rendered project map.
 //
-// Held just under MaxToolOutputBytes (50 KB) so the map degrades on its own
-// terms rather than being cut mid-tree by the generic backstop, which would
-// leave the agent with a truncated branch and no idea what it was missing.
+// Independent of MaxToolOutputBytes, the generic 50 KB cap on any tool result:
+// the map opts out of the loop's backstop (Execute marks its result Truncated),
+// so this budget is the only thing that bounds a map and may sit above that
+// generic cap without a large map being head-truncated mid-branch — a tree that
+// simply stops, with nothing telling the model what was lost. The map degrades
+// on its own terms instead: labels shed rung by rung until the level fits, and
+// only a level that will not fit at one label per file falls back to the
+// label-less outline.
 //
-// The margin is deliberately thin. Dropping labels is a heavy loss — they are
-// what makes this tool more than `find` — so it must happen only when the
-// alternative is genuinely not fitting. An earlier 40 KB budget pushed this
-// repo, which renders to 44 KB, onto the degraded path for nothing.
-const projectMapBudget = 49 * 1024
+// Set well above what a repo-sized map costs (a few KB with folders collapsed),
+// so ordinary use never degrades. It exists for the pathological level — many
+// loose files, each near the label ceiling — which would otherwise run to
+// hundreds of KB.
+const projectMapBudget = 100 * 1024
 
 // folderLabelCap is the maximum number of topic labels shown on a collapsed
 // folder's summary line.
 //
-// One more than textLabelCap: a folder summarizes many files and needs
-// slightly more topical spread than a single file. Labels are ranked by how
-// many of the folder's files carry them, so what survives is what is most
-// common there, not what came first.
-const folderLabelCap = 6
+// Ranked by how many of the folder's subdirectories carry each label, then by
+// how many of its files do (see dirStatsOf and topLabels), so what survives is
+// the label spread across the branch rather than one confined to a single large
+// subtree — a small but distinctive child folder is not crowded out by a big
+// one. Above textLabelCap on purpose: one folder line stands for a whole branch,
+// so it carries the widest spread the render can afford, while a loose file's
+// own line is read on its own and needs less. The budget still bounds the level:
+// on a wide one, renderProjectMap lowers this rung by rung.
+const folderLabelCap = 40
 
 // dirStats holds what folder summarization needs to know about one directory:
 // how many files it contains (all descendants, not just immediate children)
 // and how many of those files carry each topic label.
 type dirStats struct {
-	files  int
+	files int
+	// labels counts, for each topic label, how many files in the subtree
+	// carry it (once per file, not once per occurrence).
 	labels map[string]int
+	// spread counts, for each topic label, how many directories in the subtree
+	// contain at least one file carrying it — how widely a label is distributed
+	// across the branch, independent of how many files carry it in any one place.
+	spread map[string]int
 }
 
-// dirStatsOf computes the descendant-file count and label frequencies of a
-// directory node by walking its leaves. A []string node value is a file (its
+// dirStatsOf computes the descendant-file count, label frequencies, and label
+// spread of a directory node by walking its leaves. A []string node value is a file (its
 // elements are labels); a map[string]any is a subdirectory. Rendered counts
 // must be identical everywhere they are needed — the collapse decision and the
 // summary line both read this — so nothing downstream can disagree about how
@@ -250,11 +272,17 @@ type dirStats struct {
 // Labels are counted once per file, not once per occurrence: a file's label
 // array is expected to hold distinct labels, but if a stored index ever
 // repeats one, the folder line must still report how many files carry the
-// label, not how many times it happened to appear.
+// label, not how many times it happened to appear. Spread is counted once per
+// directory, for the same reason one layer up: a directory carrying a label in
+// fifty files contributes one, so a label that recurs across many child folders
+// outweighs one that is merely dense in a single subtree.
 func dirStatsOf(node map[string]any) dirStats {
-	st := dirStats{labels: make(map[string]int)}
+	st := dirStats{labels: make(map[string]int), spread: make(map[string]int)}
 	var walk func(map[string]any)
 	walk = func(n map[string]any) {
+		// Labels this directory's own files carry, so the directory counts once
+		// per label however many of its files carry it.
+		here := make(map[string]struct{})
 		for _, v := range n {
 			switch t := v.(type) {
 			case []string:
@@ -266,22 +294,30 @@ func dirStatsOf(node map[string]any) dirStats {
 					}
 					seen[l] = struct{}{}
 					st.labels[l]++
+					here[l] = struct{}{}
 				}
 			case map[string]any:
 				walk(t)
 			}
+		}
+		for l := range here {
+			st.spread[l]++
 		}
 	}
 	walk(node)
 	return st
 }
 
-// topLabels picks the n most frequent labels from a frequency map, breaking
-// ties alphabetically. Frequency ranked, rather than the first-seen order a
-// file leaf keeps, because a folder line summarizes many files and "what is
-// common here" is the useful signal; alphabetical ties keep the output
-// deterministic against map iteration order.
-func topLabels(labels map[string]int, n int) []string {
+// topLabels picks the n most representative labels, in rank order.
+//
+// spread, when non-nil, ranks ahead of frequency: it is how many directories
+// carry the label (see dirStatsOf), so a label spread across many child folders
+// outranks one confined to a single large subtree. That is what keeps a folder's
+// line a summary of the whole branch rather than of whichever child happens to
+// hold the most files. Frequency breaks spread ties and the label itself breaks
+// frequency ties, so the output is deterministic against map iteration order. A
+// nil spread (memory_map's use) skips straight to frequency.
+func topLabels(labels map[string]int, spread map[string]int, n int) []string {
 	type kv struct {
 		label string
 		count int
@@ -291,6 +327,9 @@ func topLabels(labels map[string]int, n int) []string {
 		entries = append(entries, kv{l, c})
 	}
 	sort.Slice(entries, func(i, j int) bool {
+		if si, sj := spread[entries[i].label], spread[entries[j].label]; si != sj {
+			return si > sj
+		}
 		if entries[i].count != entries[j].count {
 			return entries[i].count > entries[j].count
 		}
@@ -306,35 +345,48 @@ func topLabels(labels map[string]int, n int) []string {
 	return out
 }
 
-// renderProjectMap renders the tree, degrading to a label-less outline if the
-// result would not fit the budget.
+// renderProjectMap renders the tree, degrading gracefully if the result would
+// not fit the budget.
 //
-// Collapsing every folder bounds the output by how wide one level is, so the
-// budget tripping means something pathological — most plausibly thousands of
-// loose files in a single flat directory, where there is no folder to hide them
-// behind. When it does trip, labels go wholesale and the agent is told how to
-// get them back for the part of the tree it actually cares about.
+// Collapsing every folder bounds the output by how wide one level is, so a
+// tripped budget means a level with many entries — enough loose files, or
+// enough folder lines, that even a handful of labels each overflows. The
+// response is to render again at a progressively shallower cap, on both files
+// and folder lines, so a wide level shows fewer labels rather than losing them
+// wholesale: the model still learns what each file and folder covers, and opens
+// the branches it cares about. Dropping labels entirely is the last resort, for
+// a level where even one label per entry will not fit.
 func renderProjectMap(tree map[string]any, subdir string) string {
 	// Derived from the tree rather than passed in, so the total can never
 	// disagree with the folder counts printed underneath it — they are computed
 	// by the same walk over the same leaves.
 	total := dirStatsOf(tree).files
 
-	var b strings.Builder
-	// The total goes first because it is the one number the model cannot work
-	// out for itself: the level below shows a handful of folder counts, and
-	// summing them to find out how big the project is costs a step and gets it
-	// wrong whenever loose files sit at this level too.
-	if subdir == "" {
-		fmt.Fprintf(&b, "%s indexed in this project.\n", fileCount(total))
-	} else {
-		fmt.Fprintf(&b, "%s indexed under %q.\n", fileCount(total), subdir)
-	}
-	b.WriteString("Folders end in \"/\" and are shown as ONE line each: the folder's most common topic labels and the number of files inside it. Files at this level are listed individually with their own labels. To see inside a folder, call again with subdir set to its path.\n\n")
-	renderProjectLevel(tree, &b, true)
-
-	if b.Len() <= projectMapBudget {
-		return b.String()
+	// Full depth first, then progressively shallower — both a loose file's
+	// labels and a folder line's, since either can be the bulk of a wide level.
+	// The floor rung is 1 label each; past it the label-less outline below takes
+	// over.
+	for _, rung := range []struct{ fileCap, folderCap int }{
+		{textLabelCap, folderLabelCap},
+		{10, 10},
+		{3, 3},
+		{1, 1},
+	} {
+		var b strings.Builder
+		// The total goes first because it is the one number the model cannot
+		// work out for itself: the level below shows a handful of folder counts,
+		// and summing them to find out how big the project is costs a step and
+		// gets it wrong whenever loose files sit at this level too.
+		if subdir == "" {
+			fmt.Fprintf(&b, "%s indexed in this project.\n", fileCount(total))
+		} else {
+			fmt.Fprintf(&b, "%s indexed under %q.\n", fileCount(total), subdir)
+		}
+		b.WriteString("Folders end in \"/\" and are shown as ONE line each: the folder's most representative topic labels and the number of files inside it. Files at this level are listed individually with their own labels. To see inside a folder, call again with subdir set to its path.\n\n")
+		renderProjectLevel(tree, &b, true, rung.fileCap, rung.folderCap)
+		if b.Len() <= projectMapBudget {
+			return b.String()
+		}
 	}
 
 	scope := "a subdirectory"
@@ -342,17 +394,18 @@ func renderProjectMap(tree map[string]any, subdir string) string {
 		scope = "a subdirectory (e.g. subdir=\"internal/auth\")"
 	}
 
-	b.Reset()
+	var b strings.Builder
 	fmt.Fprintf(&b, "%s indexed here.\n", fileCount(total))
 	b.WriteString("Folders end in \"/\". This level is too wide to show topic labels, so only the names are listed.\n")
 	fmt.Fprintf(&b, "Call codebase_map again scoped to %s to get labels for the files there.\n\n", scope)
-	renderProjectLevel(tree, &b, false)
+	renderProjectLevel(tree, &b, false, 0, 0)
 	return b.String()
 }
 
 // renderProjectLevel writes exactly one level of the tree: every subdirectory
-// as a single summary line carrying its most common topic labels and the number
-// of files beneath it, and every loose file at this level with its own labels.
+// as a single summary line carrying its most representative topic labels and the
+// number of files beneath it, and every loose file at this level with its own
+// labels.
 //
 // One level, never recursive, and no size threshold: a folder is a folder
 // whether it holds three files or three thousand. That makes the map's cost a
@@ -376,7 +429,13 @@ func renderProjectMap(tree map[string]any, subdir string) string {
 //
 // Nothing downstream unmarshals this: it is read by a model, not parsed. The
 // same reasoning gave file_map its plain-text output.
-func renderProjectLevel(node map[string]any, b *strings.Builder, withLabels bool) {
+//
+// fileCap and folderCap bound how many labels a loose file and a folder line
+// show. renderProjectMap lowers both rung by rung when a level will not fit the
+// budget: a folder line is one line whatever the branch holds, but on a level
+// with many folders those lines are the bulk, so they shed depth alongside the
+// files. The last resort (withLabels false) passes 0 for both.
+func renderProjectLevel(node map[string]any, b *strings.Builder, withLabels bool, fileCap, folderCap int) {
 	// Folders first, then files, each group alphabetical. The two are different
 	// kinds of thing: a folder line is somewhere to go next, a file line is
 	// something to read. Interleaving them alphabetically made the reader scan
@@ -404,14 +463,18 @@ func renderProjectLevel(node map[string]any, b *strings.Builder, withLabels bool
 			st := dirStatsOf(v)
 			summary := "(" + fileCount(st.files) + ")"
 			if withLabels && len(st.labels) > 0 {
-				if top := topLabels(st.labels, folderLabelCap); len(top) > 0 {
+				if top := topLabels(st.labels, st.spread, folderCap); len(top) > 0 {
 					summary = strings.Join(top, ", ") + "  " + summary
 				}
 			}
 			fmt.Fprintf(b, "%s/  %s\n", k, summary)
 		case []string:
-			if withLabels && len(v) > 0 {
-				fmt.Fprintf(b, "%s  %s\n", k, strings.Join(v, ", "))
+			labels := v
+			if len(labels) > fileCap {
+				labels = labels[:fileCap]
+			}
+			if withLabels && len(labels) > 0 {
+				fmt.Fprintf(b, "%s  %s\n", k, strings.Join(labels, ", "))
 				continue
 			}
 			fmt.Fprintf(b, "%s\n", k)

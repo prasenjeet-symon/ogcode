@@ -87,9 +87,14 @@ func TestFindNestedGitignores(t *testing.T) {
 	// Inside an ignored directory: not reported, because the walk never opens a
 	// tree the root file already excludes.
 	write("node_modules/pkg/.gitignore", "*.map\n")
+	// Inside ogcode's own state directory: also not reported. A run never opens
+	// it either, so a rule the panel listed from there is one the index can
+	// never apply — the panel would be describing a different index than the one
+	// that runs.
+	write(".ogcode/worktrees/task/.gitignore", "tmp/\n")
 
 	got := findNestedGitignores(root)
 	if len(got) != 1 || got[0] != "web/.gitignore" {
-		t.Errorf("got %v, want just [web/.gitignore] — the root file is not nested and ignored trees are pruned", got)
+		t.Errorf("got %v, want just [web/.gitignore] — the root file is not nested, and ignored and ogcode state trees are pruned", got)
 	}
 }

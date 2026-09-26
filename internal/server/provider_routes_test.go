@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
 // newTestServer builds a Server backed by temp DBs and an empty registry,
@@ -235,5 +237,103 @@ func TestModelsSingleGlobalDefault(t *testing.T) {
 	}
 	if !sonnetEnabled {
 		t.Fatal("the default model must be enabled for a new user")
+	}
+}
+
+// TestModelPreferenceIsScopedToProvider pins the read side of the (id,
+// provider_id) preference key: the same model id served by two providers —
+// glm-5.3-flash exists under both the OGX plan and a custom OpenAI-compatible
+// endpoint — carries two independent enabled states. A toggle on one must
+// leave the other exactly as its own default has it, or a disable somewhere
+// else would darken a plan model the user never touched.
+func TestModelPreferenceIsScopedToProvider(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.routes()
+	srv.registry.ReplaceProviders(map[string]provider.Provider{
+		"ogx": stubProvider{id: "ogx", models: []provider.ModelInfo{
+			{ID: "glm-5.3-flash", ProviderID: "ogx", ActiveByDefault: true},
+		}},
+		"openai": stubProvider{id: "openai", models: []provider.ModelInfo{
+			{ID: "glm-5.3-flash", ProviderID: "openai", ActiveByDefault: true},
+		}},
+	})
+
+	// Disable the custom endpoint's copy; the plan's copy must not follow.
+	body := strings.NewReader(`{"id":"glm-5.3-flash","providerId":"openai","displayName":"GLM","enabled":false}`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/models/preference", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST preference = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	var models []struct {
+		ID         string `json:"id"`
+		ProviderID string `json:"providerId"`
+		Enabled    bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
+		t.Fatalf("decode models: %v (body: %s)", err, rec.Body.String())
+	}
+	seen := make(map[string]bool)
+	for _, m := range models {
+		if m.ID != "glm-5.3-flash" {
+			continue
+		}
+		seen[m.ProviderID] = m.Enabled
+	}
+	if !seen["ogx"] {
+		t.Fatal("the OGX plan's model must stay enabled when the same id is disabled elsewhere")
+	}
+	if seen["openai"] {
+		t.Fatal("the disabled provider's copy must read back disabled")
+	}
+}
+
+// TestSessionCarriesTheChosenProvider pins the session-side fix at the HTTP
+// boundary: the provider chosen in the picker rides the create POST and comes
+// back on the session, and a later PATCH can change it. Without this, a model id
+// served by two providers (glm-5.3-flash) resolves by whichever the registry
+// walks first rather than by what the user picked.
+func TestSessionCarriesTheChosenProvider(t *testing.T) {
+	srv := newTestServer(t)
+	srv.store = session.NewStore(srv.db)
+	srv.bus = bus.New(64)
+	h := srv.routes()
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"directory":"` + srv.dir + `","model":"glm-5.3-flash","provider":"ogx"}`)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/session", body))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /api/session = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID       string `json:"id"`
+		Model    string `json:"model"`
+		Provider string `json:"provider"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode session: %v (body: %s)", err, rec.Body.String())
+	}
+	if created.Model != "glm-5.3-flash" || created.Provider != "ogx" {
+		t.Fatalf("created session = model %q provider %q, want glm-5.3-flash/ogx", created.Model, created.Provider)
+	}
+
+	// A PATCH must be able to move the session to the other provider.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/session/"+created.ID,
+		strings.NewReader(`{"provider":"openai"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/session = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var updated struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated session: %v", err)
+	}
+	if updated.Provider != "openai" {
+		t.Fatalf("after PATCH provider = %q, want openai", updated.Provider)
 	}
 }

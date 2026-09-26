@@ -28,6 +28,11 @@ const maxAskUserQuestions = 5
 // the turn continues. It is a blocking round trip — the turn pauses until the
 // user answers (or the run is cancelled).
 //
+// A screen can depend on an earlier answer: give a question an id and gate the
+// next one on it with showWhen, so the user only ever sees the branch that
+// applies to them. The result reports both the answers given and which screens
+// were skipped, so the model can see the path the user took.
+//
 // It is only offered to an interactive session: the tool is registered where a
 // question manager exists and the loop only offers it under permission gating
 // (see LoopRunner.RunLoop). Headless runs and sub-agents never see it.
@@ -46,6 +51,8 @@ func (AskUserTool) Description() string {
 		"do not ask it here, and do not use it to confirm an obvious next step. " +
 		"Ask everything you need in ONE call: each question has a short header, the question text, and 2-4 concrete options you propose " +
 		"(the user can always type their own answer instead), marked multi-select only when several options may apply at once. " +
+		"When one screen should depend on an earlier answer, give the earlier question an id and set showWhen on the later one, " +
+		"so the user only sees the branch that applies to them; the result tells you which screens were shown and which were skipped for not matching. " +
 		"The turn pauses until the user answers."
 }
 
@@ -61,6 +68,10 @@ func (AskUserTool) Parameters() json.RawMessage {
 				"items": {
 					"type": "object",
 					"properties": {
+						"id": {
+							"type": "string",
+							"description": "A short slug (e.g. \"store\") so a later question can branch on this one's answer via showWhen. Optional."
+						},
 						"header": {
 							"type": "string",
 							"description": "A short (2-5 word) title for the question, shown as the screen's heading, e.g. \"Storage choice\"."
@@ -72,6 +83,26 @@ func (AskUserTool) Parameters() json.RawMessage {
 						"multiSelect": {
 							"type": "boolean",
 							"description": "Allow several options to be selected at once. Default false (pick one). Use it only when options are not mutually exclusive."
+						},
+						"showWhen": {
+							"type": "object",
+							"description": "Show this screen only when an earlier question's answer matches. Omit to always show it. Branching is evaluated as the user answers, so the user only sees the branch that applies.",
+							"properties": {
+								"question": {
+									"type": "string",
+									"description": "The id of an earlier question in this batch."
+								},
+								"options": {
+									"type": "array",
+									"items": {"type": "string"},
+									"description": "Option labels of that question. The screen shows when any was selected. Omit to match any answer at all."
+								},
+								"not": {
+									"type": "boolean",
+									"description": "Invert the match: show when none of the options was selected."
+								}
+							},
+							"required": ["question"]
 						},
 						"options": {
 							"type": "array",
@@ -115,6 +146,9 @@ func (t AskUserTool) Execute(ctx context.Context, args json.RawMessage, tctx Con
 	if len(input.Questions) > maxAskUserQuestions {
 		return Result{Output: fmt.Sprintf("too many questions (%d) — ask at most %d in one call", len(input.Questions), maxAskUserQuestions)}, nil
 	}
+	if msg := validateBranching(input.Questions); msg != "" {
+		return Result{Output: msg}, nil
+	}
 	if t.Ask == nil {
 		return Result{Output: "ask_user is not available in this environment — proceed on your own judgement and say what you assumed"}, nil
 	}
@@ -134,13 +168,51 @@ func (t AskUserTool) Execute(ctx context.Context, args json.RawMessage, tctx Con
 	return Result{Title: title, Output: formatAnswers(input.Questions, reply)}, nil
 }
 
-// formatAnswers renders the answered batch back to the model. Every question is
-// echoed with whatever the user gave it, so the model can tell an answer from a
-// deliberate blank and does not have to hold the batch in its head.
+// validateBranching checks the showWhen graph before the batch goes on screen,
+// so a branch that can never resolve — a forward reference, a missing id, an
+// unknown option — is reported to the model as a call to fix rather than
+// silently rendering no screen at all.
+func validateBranching(qs []question.Question) string {
+	seen := map[string]bool{}
+	for i, q := range qs {
+		if q.ShowWhen == nil {
+			if q.ID != "" {
+				seen[q.ID] = true
+			}
+			continue
+		}
+		c := q.ShowWhen
+		if c.Question == "" {
+			return fmt.Sprintf("question %d has showWhen but names no question to branch on", i+1)
+		}
+		if c.Question == q.ID && q.ID != "" {
+			return fmt.Sprintf("question %d's showWhen refers to itself", i+1)
+		}
+		if !seen[c.Question] {
+			return fmt.Sprintf("question %d's showWhen refers to %q, which is not an earlier question with that id", i+1, c.Question)
+		}
+		if q.ID != "" {
+			seen[q.ID] = true
+		}
+	}
+	return ""
+}
+
+// formatAnswers renders the answered batch back to the model, reporting the path
+// the user took: every screen that was shown and what was given for it, then the
+// screens skipped because their branch did not apply. The model sees both, so a
+// branch it declared but the user never reached is not mistaken for a blank
+// answer, and it knows which decision path the user actually followed.
 func formatAnswers(questions []question.Question, reply question.Reply) string {
+	answers := question.AnswersByID(questions, reply)
+	visible := question.Visibility(questions, answers)
+
 	var b strings.Builder
 	b.WriteString("The user answered:\n")
 	for i, q := range questions {
+		if !visible[i] {
+			continue
+		}
 		label := q.Header
 		if label == "" {
 			label = q.Question
@@ -163,6 +235,23 @@ func formatAnswers(questions []question.Question, reply question.Reply) string {
 		if len(a.Selected) == 0 && a.Text == "" {
 			b.WriteString("   (no answer)\n")
 		}
+	}
+
+	var skipped []string
+	for i, q := range questions {
+		if visible[i] {
+			continue
+		}
+		name := q.Header
+		if name == "" {
+			name = q.Question
+		}
+		skipped = append(skipped, name)
+	}
+	if len(skipped) > 0 {
+		b.WriteString("\nSkipped, because the earlier answers did not select their showWhen options: ")
+		b.WriteString(strings.Join(skipped, "; "))
+		b.WriteString("\n")
 	}
 	return b.String()
 }

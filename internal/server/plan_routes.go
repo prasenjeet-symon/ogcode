@@ -84,6 +84,7 @@ func (s *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		Directory string `json:"directory"`
 		Title     string `json:"title,omitempty"`
 		Model     string `json:"model,omitempty"`
+		Provider  string `json:"provider,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -101,6 +102,7 @@ func (s *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		Directory:   dir,
 		Title:       "Plan: " + input.Title,
 		Model:       input.Model,
+		Provider:    input.Provider,
 		SessionType: "plan",
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),
@@ -120,6 +122,7 @@ func (s *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		Title:     input.Title,
 		Status:    plan.StatusOpen,
 		Model:     input.Model,
+		Provider:  input.Provider,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -160,8 +163,9 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var update struct {
-		Title *string `json:"title"`
-		Model *string `json:"model"`
+		Title    *string `json:"title"`
+		Model    *string `json:"model"`
+		Provider *string `json:"provider"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -173,6 +177,9 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if update.Model != nil {
 		p.Model = *update.Model
+	}
+	if update.Provider != nil {
+		p.Provider = *update.Provider
 	}
 	p.UpdatedAt = plan.Now()
 
@@ -629,6 +636,7 @@ func (s *Server) runBreakdown(p *plan.Plan) {
 			Complexity:   complexity,
 			Status:       task.StatusPending,
 			Dependencies: deps,
+			Provider:     p.Provider,
 			OrderIndex:   td.OrderIndex,
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -795,6 +803,7 @@ func (s *Server) handlePlanPrompt(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Content        string `json:"content"`
 		Model          string `json:"model,omitempty"`
+		Provider       string `json:"provider,omitempty"`
 		ViewportWidth  int    `json:"viewportWidth,omitempty"`
 		ViewportHeight int    `json:"viewportHeight,omitempty"`
 	}
@@ -809,18 +818,20 @@ func (s *Server) handlePlanPrompt(w http.ResponseWriter, r *http.Request) {
 	if input.Model != "" {
 		slog.Info("updating plan model", "plan", p.ID, "newModel", input.Model)
 		sess, err := s.store.Get(sessionID)
-		if err == nil && sess != nil && sess.Model != input.Model {
+		if err == nil && sess != nil && (sess.Model != input.Model || sess.Provider != input.Provider) {
 			slog.Info("updating session model", "session", sessionID, "oldModel", sess.Model, "newModel", input.Model)
 			sess.Model = input.Model
+			sess.Provider = input.Provider
 			sess.UpdatedAt = session.Now()
 			if err := s.store.Update(sess); err != nil {
 				slog.Error("update plan session model", "err", err)
 			}
 		}
 		// Also update the plan's model to keep them in sync
-		if p.Model != input.Model {
+		if p.Model != input.Model || p.Provider != input.Provider {
 			slog.Info("updating plan object model", "plan", p.ID, "oldModel", p.Model, "newModel", input.Model)
 			p.Model = input.Model
+			p.Provider = input.Provider
 			p.UpdatedAt = plan.Now()
 			if err := s.planStore.Update(p); err != nil {
 				slog.Error("update plan model", "err", err)
@@ -1151,7 +1162,7 @@ func (s *Server) autoNamePlan(p *plan.Plan, userMessage string) {
 	var pr provider.Provider
 	modelID := p.Model
 	if modelID != "" {
-		pr = s.registry.ResolveProvider(modelID)
+		pr = s.registry.ResolveProviderFor(modelID, p.Provider)
 	}
 	if pr == nil {
 		pr = s.defaultProvider

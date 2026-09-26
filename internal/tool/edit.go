@@ -93,6 +93,23 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		LegacyReplaceAll *bool   `json:"replace_all"`
 		LegacyExpected   *int    `json:"expected_count"`
 	}
+	if stringifiedEdits(args) {
+		// A stringified array is a shape some models emit for an array param:
+		// the hunk list arrives as a JSON string HOLDING the array rather than
+		// the array itself. The plain decode below then fails with "cannot
+		// unmarshal string into Go struct field .edits", which names neither
+		// the fix nor the field as the caller wrote it, and the model retries
+		// the same call. Intercept it and say what to send.
+		//
+		// The string is deliberately not unwrapped: the escaping that made the
+		// inner text a string also collapses its \n and \t escapes into raw
+		// control characters, so an unwrap would repair some payloads and
+		// silently mangle others. See edit.go's Parameters for the one form.
+		return Result{}, fmt.Errorf(
+			"edits arrived as a string containing a JSON array, not as an array — the hunks " +
+				"could not be read. Resend them as array entries: " +
+				"\"edits\": [{\"old_string\": \"…\", \"new_string\": \"…\"}], one entry per change")
+	}
 	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
@@ -162,6 +179,21 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		Title:  filepath.Base(path),
 		Output: summarize(path, len(hunks), replaced),
 	}, note, check), nil
+}
+
+// stringifiedEdits reports whether the call's "edits" value is a JSON string
+// rather than the array the schema asks for. Some models quote an array param
+// they cannot express directly; this recognises the shape so the caller can be
+// told what to send. Unreadable args are left for the decoder to report.
+func stringifiedEdits(args json.RawMessage) bool {
+	var probe struct {
+		Edits json.RawMessage `json:"edits"`
+	}
+	if json.Unmarshal(args, &probe) != nil {
+		return false
+	}
+	trimmed := strings.TrimSpace(string(probe.Edits))
+	return strings.HasPrefix(trimmed, `"`)
 }
 
 // collectHunks reduces the two request shapes to one list. The single-edit form

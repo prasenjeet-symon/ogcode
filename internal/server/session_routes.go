@@ -35,6 +35,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Directory string `json:"directory"`
 		Model     string `json:"model,omitempty"`
+		Provider  string `json:"provider,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -51,9 +52,15 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Directory:   dir,
 		Title:       "New session",
 		Model:       input.Model,
+		Provider:    input.Provider,
 		SessionType: "build",
-		CreatedAt:   session.Now(),
-		UpdatedAt:   session.Now(),
+		// New sessions start in the stored default mode (Ask unless the user has
+		// chosen Auto somewhere). Setting it here rather than resolving it on read
+		// means the session row states its own mode from the start, so a later
+		// change to the default cannot move a session already in progress.
+		Permission: s.permissions.DefaultMode(),
+		CreatedAt:  session.Now(),
+		UpdatedAt:  session.Now(),
 	}
 
 	if err := s.store.Create(sess); err != nil {
@@ -94,6 +101,7 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	var update struct {
 		Title      *string `json:"title"`
 		Model      *string `json:"model"`
+		Provider   *string `json:"provider"`
 		Permission *string `json:"permission"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
@@ -107,8 +115,17 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	if update.Model != nil {
 		sess.Model = *update.Model
 	}
+	if update.Provider != nil {
+		sess.Provider = *update.Provider
+	}
 	if update.Permission != nil {
 		sess.Permission = *update.Permission
+		// Remember the choice as the mode new sessions start in: a user who
+		// prefers Auto should not reselect it for every session. Last toggle
+		// wins, and this session keeps its own mode on its row regardless.
+		if err := s.permissions.SetDefaultMode(*update.Permission); err != nil {
+			slog.Warn("failed to persist default permission mode", "err", err)
+		}
 	}
 	sess.UpdatedAt = session.Now()
 
@@ -385,6 +402,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		Images         []session.ImagePartData `json:"images,omitempty"`
 		Agent          string                  `json:"agent,omitempty"`
 		Model          string                  `json:"model,omitempty"`
+		Provider       string                  `json:"provider,omitempty"`
 		ViewportWidth  int                     `json:"viewportWidth,omitempty"`
 		ViewportHeight int                     `json:"viewportHeight,omitempty"`
 	}
@@ -407,11 +425,21 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 			slog.Error("update session model", "err", err)
 		}
 	}
+	// Record the provider alongside the model. A model id can be served by more
+	// than one provider, so the id alone does not pin the endpoint this
+	// conversation runs on.
+	if input.Provider != "" && sess.Provider != input.Provider {
+		sess.Provider = input.Provider
+		sess.UpdatedAt = session.Now()
+		if err := s.store.Update(sess); err != nil {
+			slog.Error("update session provider", "err", err)
+		}
+	}
 
 	// Auto-generate session title from first message content
 	// Only generate if the title is still the default "New session"
 	if sess.Title == "New session" && strings.TrimSpace(input.Content) != "" {
-		go s.generateTitle(sessionID, input.Content, input.Model)
+		go s.generateTitle(sessionID, input.Content, sess.Model, sess.Provider)
 	}
 
 	// Create user message
@@ -493,7 +521,37 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 // generateTitle uses the LLM to generate a short title from the first message
 // content and updates the session. Runs in a goroutine — failures are logged
 // but never block the user's prompt.
-func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string, model string) {
+// recordUtilityUsage adds the tokens a utility call spent to the session's
+// running utility totals. Utility calls — title generation here, the risk check
+// and compaction in the agent loop — stream usage on a call the main-turn
+// accounting never sees, so without this it is dropped from every total. A
+// no-op when there is no store or nothing was reported.
+func (s *Server) recordUtilityUsage(sessionID session.SessionID, usage *provider.TokenUsage) {
+	if s.store == nil || usage == nil {
+		return
+	}
+	tc := session.TokenCounts{
+		Input:      usage.InputTokens,
+		Output:     usage.OutputTokens,
+		Reasoning:  usage.ReasoningTokens,
+		CacheRead:  usage.CacheReadTokens,
+		CacheWrite: usage.CacheWriteTokens,
+	}
+	if err := s.store.AddUtilityUsage(sessionID, tc); err != nil {
+		slog.Warn("record utility usage", "err", err)
+		return
+	}
+	// Announce it so an open token view picks up the new figure: utility usage
+	// lands on the session row, not on a message, so no message.updated carries
+	// it. Re-read the row so the event carries the accumulated totals.
+	if s.bus != nil {
+		if sess, gerr := s.store.Get(sessionID); gerr == nil && sess != nil {
+			s.bus.Publish("session.updated", sess)
+		}
+	}
+}
+
+func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string, model, providerID string) {
 	// Truncate very long messages to avoid wasting tokens
 	content := firstMessage
 	if len(content) > 500 {
@@ -503,7 +561,7 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 	// Resolve the provider for the session's model
 	var p provider.Provider
 	if model != "" {
-		p = s.registry.ResolveProvider(model)
+		p = s.registry.ResolveProviderFor(model, providerID)
 	}
 	if p == nil {
 		p = s.defaultProvider
@@ -548,15 +606,23 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 	}
 
 	var title strings.Builder
+	var usage *provider.TokenUsage
 	for evt := range ch {
 		if evt.Type == provider.EventTextDelta {
 			title.WriteString(evt.Text)
+		}
+		if evt.Type == provider.EventUsage {
+			usage = evt.Usage
 		}
 		if evt.Type == provider.EventError {
 			slog.Warn("generateTitle: stream error", "err", evt.Error)
 			return
 		}
 	}
+	// Record what the title call spent: like the risk check and compaction, it
+	// streams usage the main-turn accounting never sees. Recorded even when the
+	// generated title is discarded below — the tokens were spent regardless.
+	s.recordUtilityUsage(sessionID, usage)
 
 	generated := strings.TrimSpace(title.String())
 	// Strip surrounding quotes if the model adds them

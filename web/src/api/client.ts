@@ -37,9 +37,11 @@ export interface Session {
   directory: string;
   title: string;
   model?: string;
+  provider?: string;
   sessionType?: string;
   permission?: string;
   compactionSummary?: string;
+  utilityTokens?: TokenCounts;
   createdAt: number;
   updatedAt: number;
 }
@@ -49,14 +51,14 @@ export function listSessions(directory?: string): Promise<Session[]> {
   return fetchAPI(`/session${dir}`);
 }
 
-export function createSession(directory?: string, model?: string): Promise<Session> {
+export function createSession(directory?: string, model?: string, provider?: string): Promise<Session> {
   return fetchAPI('/session', {
     method: 'POST',
-    body: JSON.stringify({ directory, model }),
+    body: JSON.stringify({ directory, model, provider }),
   });
 }
 
-export function updateSession(id: string, updates: { title?: string; model?: string; permission?: string }): Promise<Session> {
+export function updateSession(id: string, updates: { title?: string; model?: string; provider?: string; permission?: string }): Promise<Session> {
   return fetchAPI(`/session/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),
@@ -206,10 +208,11 @@ export function getMessages(sessionId: string): Promise<MessageWithParts[]> {
   return fetchAPI(`/session/${sessionId}/message`);
 }
 
-export function sendPrompt(sessionId: string, content: string, images?: ImagePartData[], model?: string, viewportWidth?: number, viewportHeight?: number): Promise<void> {
+export function sendPrompt(sessionId: string, content: string, images?: ImagePartData[], model?: string, viewportWidth?: number, viewportHeight?: number, provider?: string): Promise<void> {
   const body: Record<string, unknown> = { content };
   if (images && images.length > 0) body.images = images;
   if (model) body.model = model;
+  if (provider) body.provider = provider;
   if (viewportWidth) body.viewportWidth = viewportWidth;
   if (viewportHeight) body.viewportHeight = viewportHeight;
   return fetchAPI(`/session/${sessionId}/prompt`, {
@@ -252,11 +255,28 @@ export interface QuestionOptionAPI {
   description?: string;
 }
 
+// A showWhen condition gates a screen on an answer to an earlier question in
+// the same batch. The dialog evaluates it live, so the user only sees the
+// branch that applies.
+export interface QuestionConditionAPI {
+  // The id of an earlier question in this batch.
+  question: string;
+  // Option labels of that question. The screen shows when any was selected;
+  // omitted matches any answer at all (a selection or typed text).
+  options?: string[];
+  // Invert the match: show when none of the options was selected.
+  not?: boolean;
+}
+
 export interface QuestionAPI {
+  // A short slug a later question can branch on via showWhen.
+  id?: string;
   header?: string;
   question: string;
   options?: QuestionOptionAPI[];
   multiSelect?: boolean;
+  // Show this screen only when an earlier answer matches. Absent = always show.
+  showWhen?: QuestionConditionAPI;
 }
 
 // A whole ask_user batch as sent to the UI. It is rendered as one dialog with a
@@ -502,8 +522,10 @@ export function setModelPreference(pref: ModelPreference): Promise<ModelInfo[]> 
   });
 }
 
-export function deleteModelPreference(id: string): Promise<void> {
-  return fetchAPI(`/models/preference/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export function deleteModelPreference(id: string, providerId: string): Promise<void> {
+  return fetchAPI(`/models/preference/${encodeURIComponent(id)}?providerId=${encodeURIComponent(providerId)}`, {
+    method: 'DELETE',
+  });
 }
 
 // Theme API
@@ -634,6 +656,7 @@ export interface Plan {
   title: string;
   status: 'open' | 'locked';
   model?: string;
+  provider?: string;
   compactionSummary?: string;
   breakdownStatus?: '' | 'in_progress' | 'completed' | 'failed';
   breakdownWarnings?: string;
@@ -659,6 +682,7 @@ export interface Task {
   prNumber?: number;
   prError?: string;
   model?: string;
+  provider?: string;
   orderIndex: number;
   createdAt: number;
   updatedAt: number;
@@ -669,10 +693,10 @@ export function listPlans(directory?: string): Promise<Plan[]> {
   return fetchAPI(`/plans${dir}`);
 }
 
-export function createPlan(directory?: string, title?: string, model?: string): Promise<Plan> {
+export function createPlan(directory?: string, title?: string, model?: string, provider?: string): Promise<Plan> {
   return fetchAPI('/plans', {
     method: 'POST',
-    body: JSON.stringify({ directory, title, model }),
+    body: JSON.stringify({ directory, title, model, provider }),
   });
 }
 
@@ -680,7 +704,7 @@ export function getPlan(id: string): Promise<Plan> {
   return fetchAPI(`/plans/${id}`);
 }
 
-export function updatePlan(id: string, updates: { title?: string; model?: string }): Promise<Plan> {
+export function updatePlan(id: string, updates: { title?: string; model?: string; provider?: string }): Promise<Plan> {
   return fetchAPI(`/plans/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),
@@ -695,9 +719,10 @@ export function lockPlan(id: string): Promise<Plan> {
   return fetchAPI(`/plans/${id}/lock`, { method: 'POST' });
 }
 
-export function sendPlanPrompt(id: string, content: string, model?: string, viewportWidth?: number, viewportHeight?: number): Promise<void> {
+export function sendPlanPrompt(id: string, content: string, model?: string, viewportWidth?: number, viewportHeight?: number, provider?: string): Promise<void> {
   const body: Record<string, unknown> = { content };
   if (model) body.model = model;
+  if (provider) body.provider = provider;
   if (viewportWidth) body.viewportWidth = viewportWidth;
   if (viewportHeight) body.viewportHeight = viewportHeight;
   return fetchAPI(`/plans/${id}/prompt`, {
@@ -760,6 +785,7 @@ export function updateTask(id: string, updates: {
   status?: string;
   branchName?: string;
   model?: string;
+  provider?: string;
 }): Promise<Task> {
   return fetchAPI(`/tasks/${id}`, {
     method: 'PATCH',
@@ -811,8 +837,9 @@ export function listNotes(directory?: string): Promise<Note[]> {
   return fetchAPI(`/notes${dir}`);
 }
 
-export function createNote(query: string, directory?: string, model?: string, sessionId?: string, viewportWidth?: number, viewportHeight?: number, source?: string): Promise<Note> {
+export function createNote(query: string, directory?: string, model?: string, sessionId?: string, viewportWidth?: number, viewportHeight?: number, source?: string, provider?: string): Promise<Note> {
   const body: Record<string, unknown> = { query, directory, model };
+  if (provider) body.provider = provider;
   if (sessionId) body.sessionId = sessionId;
   if (viewportWidth) body.viewportWidth = viewportWidth;
   if (viewportHeight) body.viewportHeight = viewportHeight;
@@ -838,10 +865,10 @@ export function deleteNote(id: string): Promise<void> {
   return fetchAPI(`/notes/${id}`, { method: 'DELETE' });
 }
 
-export function transformText(text: string, instruction: string, model?: string): Promise<{ result: string }> {
+export function transformText(text: string, instruction: string, model?: string, provider?: string): Promise<{ result: string }> {
   return fetchAPI('/notes/transform', {
     method: 'POST',
-    body: JSON.stringify({ text, instruction, model }),
+    body: JSON.stringify({ text, instruction, model, provider }),
   });
 }
 
@@ -899,35 +926,6 @@ export function getVersion(): Promise<VersionResponse> {
 
 export function checkForUpdate(): Promise<UpdateInfo> {
   return fetchAPI('/version/check', { method: 'POST' });
-}
-
-// ─── Project Settings API ───
-// General settings scoped to the workspace the server was started in, stored in
-// that project's own database. Unlike provider keys or model preferences (which
-// are the user's and follow them everywhere), these differ from project to
-// project.
-
-export interface ProjectSettings {
-  // Whether the agent is offered compact_context, the tool that drops the
-  // finished part of a turn in exchange for a summary it writes. Turning it off
-  // also withholds the guidance and the read-pressure reminder that name it. It
-  // does not affect the loop's own size-triggered compaction, which is the
-  // safety net against overflowing the context window.
-  compactContext: boolean;
-  updatedAt?: number;
-}
-
-export function getProjectSettings(): Promise<ProjectSettings> {
-  return fetchAPI('/project/settings');
-}
-
-export function setProjectSettings(
-  settings: Omit<ProjectSettings, 'updatedAt'>,
-): Promise<ProjectSettings> {
-  return fetchAPI('/project/settings', {
-    method: 'POST',
-    body: JSON.stringify(settings),
-  });
 }
 
 // Search Config API
@@ -1000,10 +998,10 @@ export function getDocIndexBuildStatus(): Promise<DocIndexBuildStatus> {
   return fetchAPI('/docindex/build');
 }
 
-export function buildDocIndex(directory?: string, rebuild = false, model?: string): Promise<{ running: boolean }> {
+export function buildDocIndex(directory?: string, rebuild = false, model?: string, provider?: string): Promise<{ running: boolean }> {
   return fetchAPI('/docindex/build', {
     method: 'POST',
-    body: JSON.stringify({ directory, rebuild, model }),
+    body: JSON.stringify({ directory, rebuild, model, provider }),
   });
 }
 
@@ -1079,6 +1077,9 @@ export interface ExcludeEntry {
   directory: string;
   pattern: string;
   createdAt: number;
+  // True for a pattern ogcode ships rather than one the user wrote. Derived
+  // from the shipped list server-side, so it cannot drift from that list.
+  default?: boolean;
 }
 
 export function getExcludes(directory?: string): Promise<ExcludeEntry[]> {
@@ -1188,4 +1189,45 @@ export interface ScrcpyDevice {
 
 export function getScrcpyDevices(): Promise<{ devices: ScrcpyDevice[] }> {
   return fetchAPI('/scrcpy/devices');
+}
+
+// Preview API
+// State of a live local service (a dev server, a player, a dashboard) that the
+// server proxies onto /preview/<port>/ from 127.0.0.1:<port>.
+export interface PreviewStatus {
+  // True when something answers HTTP on the loopback port, so the panel can
+  // embed it rather than showing the nothing-there hint.
+  up: boolean;
+  // Where the reverse proxy dials (always http://127.0.0.1:<port>).
+  target: string;
+}
+
+export function getPreviewStatus(port: number): Promise<PreviewStatus> {
+  return fetchAPI(`/preview/status?port=${port}`);
+}
+
+// One loopback service the preview grid offers.
+export interface PreviewService {
+  // The loopback port the service listens on.
+  port: number;
+  // The service's own <title>, or '' when it served none (the grid falls back
+  // to the port).
+  title: string;
+  // Where the reverse proxy dials (always http://127.0.0.1:<port>).
+  target: string;
+  // True when the service answered, so the grid can embed it rather than
+  // greying the tile.
+  up: boolean;
+  // 'auto' for a listener the server discovered, 'manual' for a port the page
+  // asked for. A manual port is listed whether or not it answers.
+  source: 'auto' | 'manual';
+}
+
+// getPreviewServices lists the services for the preview grid: the apps the
+// server discovers on this machine, plus the ports given here — the user's
+// added ports and any /preview/<port>/ deep link — so the grid can show a port
+// that is down instead of it silently vanishing.
+export function getPreviewServices(ports: number[]): Promise<{ services: PreviewService[] }> {
+  const q = ports.length ? `?ports=${ports.join(',')}` : '';
+  return fetchAPI(`/preview/services${q}`);
 }

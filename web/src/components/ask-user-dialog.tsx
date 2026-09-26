@@ -13,6 +13,11 @@ import type { QuestionAPI, QuestionAnswerAPI } from '../api/client';
  * button for the same reason; a question the user wants left open is answered by
  * submitting it blank, which the tool reports to the model as a non-answer rather
  * than as silence.
+ *
+ * A question may carry a showWhen condition on an earlier question's answer, so
+ * the screens on offer depend on what the user has picked so far. Visibility is
+ * evaluated live against the draft answers and mirrors the server's rule, so the
+ * two agree on which screens were actually shown.
  */
 
 export default function AskUserDialog() {
@@ -25,22 +30,64 @@ export default function AskUserDialog() {
     return qs.length ? qs[qs.length - 1] : undefined;
   });
 
-  const [index, setIndex] = createSignal(0);
+  const [pos, setPos] = createSignal(0);
   // Per-question draft answers, keyed by question index — the batch is stable
   // while it is on screen, so index is a sound key.
   const [selected, setSelected] = createSignal<Record<number, string[]>>({});
   const [text, setText] = createSignal<Record<number, string>>({});
 
   const questions = () => batch()?.questions ?? [];
-  const current = (): QuestionAPI | undefined => questions()[index()];
-  const isLast = () => index() >= questions().length - 1;
+
+  // Draft answers keyed by question id, for evaluating showWhen. Mirrors the
+  // server's Condition.Match: an option list matches any of its labels selected,
+  // no list matches any answer at all, and `not` inverts either.
+  const answersById = () => {
+    const sel = selected();
+    const txt = text();
+    const byId: Record<string, { selected: string[]; text: string }> = {};
+    questions().forEach((q, i) => {
+      if (!q.id) return;
+      byId[q.id] = { selected: sel[i] || [], text: (txt[i] || '').trim() };
+    });
+    return byId;
+  };
+
+  const matches = (q: QuestionAPI): boolean => {
+    const c = q.showWhen;
+    if (!c || !c.question) return true;
+    const a = answersById()[c.question];
+    const sel = a?.selected ?? [];
+    let hit: boolean;
+    if (!c.options || c.options.length === 0) {
+      hit = sel.length > 0 || !!a?.text;
+    } else {
+      hit = sel.some((s) => c.options!.includes(s));
+    }
+    return c.not ? !hit : hit;
+  };
+
+  // The real question indices the user is shown, in order. A condition only
+  // names an earlier question, so a screen behind a skipped branch is skipped
+  // too — its condition reads a blank answer.
+  const visibleIdx = () => questions().map((_, i) => i).filter((i) => matches(questions()[i]));
+  const total = () => visibleIdx().length;
+  const curIdx = () => visibleIdx()[pos()] ?? -1;
+  const current = (): QuestionAPI | undefined => questions()[curIdx()];
+  const isLast = () => pos() >= total() - 1;
 
   // Reset the draft whenever a different batch arrives, and start on screen one.
   createEffect(on(() => batch()?.questionId, () => {
-    setIndex(0);
+    setPos(0);
     setSelected({});
     setText({});
   }));
+
+  // A user can change an earlier answer and shrink the visible set out from under
+  // the current position; keep it on the last screen rather than off the end.
+  createEffect(() => {
+    const n = total();
+    if (n > 0 && pos() > n - 1) setPos(n - 1);
+  });
 
   const toggle = (qIdx: number, label: string, multi: boolean) => {
     setSelected((all) => {
@@ -116,29 +163,29 @@ export default function AskUserDialog() {
                     The agent has a question
                   </h2>
                   <p class="text-[11.5px] text-[color:var(--text-tertiary)] mt-1 leading-relaxed">
-                    {questions().length === 1
+                    {total() === 1
                       ? 'Your turn pauses until it is answered.'
-                      : `${questions().length} questions — your turn pauses until they are answered.`}
+                      : `${total()} questions — your turn pauses until they are answered.`}
                   </p>
                 </div>
               </div>
             </div>
 
             {/* ---- Progress ---- */}
-            <Show when={questions().length > 1}>
+            <Show when={total() > 1}>
               <div class="shrink-0 px-5 pt-3 flex items-center gap-2">
                 <span class="text-[11px] text-[color:var(--text-tertiary)] font-medium tabular-nums">
-                  {index() + 1} of {questions().length}
+                  {pos() + 1} of {total()}
                 </span>
                 <div class="flex items-center gap-1.5">
-                  <For each={questions()}>
+                  <For each={visibleIdx()}>
                     {(_, i) => (
                       <button
                         type="button"
-                        onClick={() => setIndex(i())}
+                        onClick={() => setPos(i())}
                         aria-label={`Question ${i() + 1}`}
                         class={`h-1.5 rounded-full transition-all ${
-                          i() === index()
+                          i() === pos()
                             ? 'w-5 bg-[color:var(--accent)]'
                             : 'w-1.5 bg-[color:var(--border-default)] hover:bg-[color:var(--text-tertiary)]'
                         }`}
@@ -173,11 +220,11 @@ export default function AskUserDialog() {
                       <div class="flex flex-col gap-1.5 mt-0.5">
                         <For each={q().options}>
                           {(opt) => {
-                            const on = () => (selected()[index()] || []).includes(opt.label);
+                            const on = () => (selected()[curIdx()] || []).includes(opt.label);
                             return (
                               <button
                                 type="button"
-                                onClick={() => toggle(index(), opt.label, !!q().multiSelect)}
+                                onClick={() => toggle(curIdx(), opt.label, !!q().multiSelect)}
                                 aria-pressed={on()}
                                 class={`w-full text-left px-3 py-2 rounded-lg border transition flex items-start gap-2.5 ${
                                   on()
@@ -219,8 +266,8 @@ export default function AskUserDialog() {
                         {q().options?.length ? 'Or answer in your own words' : 'Your answer'}
                       </label>
                       <textarea
-                        value={text()[index()] || ''}
-                        onInput={(e) => setAnswerText(index(), e.currentTarget.value)}
+                        value={text()[curIdx()] || ''}
+                        onInput={(e) => setAnswerText(curIdx(), e.currentTarget.value)}
                         rows={q().options?.length ? 2 : 4}
                         placeholder="Type your answer, or leave blank…"
                         class="w-full resize-y bg-[color:var(--bg-base)] border border-[color:var(--border-default)] rounded-lg px-3 py-2 text-[12.5px] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-tertiary)] focus:outline-none focus:border-[color:var(--accent)] transition"
@@ -235,8 +282,8 @@ export default function AskUserDialog() {
             <div class="shrink-0 px-5 py-3 border-t border-[color:var(--border-subtle)] flex items-center justify-between gap-3">
               <button
                 type="button"
-                onClick={() => setIndex((i) => Math.max(0, i - 1))}
-                disabled={index() === 0}
+                onClick={() => setPos((i) => Math.max(0, i - 1))}
+                disabled={pos() === 0}
                 class="h-8 px-3 rounded-lg text-[12px] font-medium text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)] transition disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[color:var(--text-secondary)]"
               >
                 Back
@@ -245,7 +292,7 @@ export default function AskUserDialog() {
                 <Show when={!isLast()}>
                   <button
                     type="button"
-                    onClick={() => setIndex((i) => Math.min(questions().length - 1, i + 1))}
+                    onClick={() => setPos((i) => Math.min(total() - 1, i + 1))}
                     class="h-8 px-4 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-white hover:opacity-90 transition"
                   >
                     Next
@@ -257,7 +304,7 @@ export default function AskUserDialog() {
                     onClick={submit}
                     class="h-8 px-4 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-white hover:opacity-90 transition"
                   >
-                    {questions().length > 1 ? 'Submit answers' : 'Submit'}
+                    {total() > 1 ? 'Submit answers' : 'Submit'}
                   </button>
                 </Show>
               </div>

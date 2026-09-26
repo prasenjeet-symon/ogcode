@@ -46,6 +46,7 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 		Directory string `json:"directory"`
 		Rebuild   bool   `json:"rebuild"`
 		Model     string `json:"model,omitempty"`
+		Provider  string `json:"provider,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -75,15 +76,56 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	excludes, err := s.docindexStore.ListExcludes(dir)
-	if err != nil {
-		slog.Warn("fetch excludes failed, indexing without them", "err", err)
-	}
-	var excludePatterns []string
-	for _, e := range excludes {
-		excludePatterns = append(excludePatterns, e.Pattern)
+	patterns := s.excludePatternsFor(dir)
+
+	s.runIndexerInBackground(dir, patterns, input.Model, input.Provider)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{"running": true})
+}
+
+// autoIndexDir is the LoopRunner.AutoIndex closure: it refreshes a directory's
+// project index in the background after a turn, so files the session added or
+// edited stop being missing from codebase_map without anyone pressing the
+// button. It is the per-turn twin of handleBuildDocIndex and shares its running
+// guard, so the automatic refresh and a manual build can never overlap.
+//
+// model and provider are the endpoint the finished turn resolved to, inherited
+// by the index sessions this starts. Passing them is what keeps the refresh on
+// the same provider as the turn that triggered it: an index session with no
+// model of its own falls back to the registry default, which can be a different
+// provider entirely.
+//
+// Skipping when a run is already in flight is deliberate. The running pass is
+// reading the same files and writing the same rows; a second one would only
+// duplicate the model calls and race the first for the rows it is about to
+// write.
+func (s *Server) autoIndexDir(dir, model, provider string) {
+	if dir == "" {
+		return
 	}
 
+	s.docindexMu.Lock()
+	if s.docindexRunning {
+		s.docindexMu.Unlock()
+		slog.Info("autoIndex: a project index run is already in flight, skipping", "dir", dir)
+		return
+	}
+	s.docindexRunning = true
+	s.docindexMu.Unlock()
+
+	patterns := s.excludePatternsFor(dir)
+
+	s.runIndexerInBackground(dir, patterns, model, provider)
+}
+
+// runIndexerInBackground runs the indexer over dir on a detached goroutine and
+// clears the running flag when it finishes. The caller must have set
+// docindexRunning first. Both entry points — the manual build and the per-turn
+// auto-index — end here, so they report progress to the same tracker and
+// publish the same docindex.built event the UI listens for. model and provider
+// are the endpoint the index sessions run on; empty leaves the indexer on the
+// runner's default, which is the manual path when the caller names no model.
+func (s *Server) runIndexerInBackground(dir string, excludePatterns []string, model, provider string) {
 	go func() {
 		defer func() {
 			s.docindexMu.Lock()
@@ -94,8 +136,11 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		idx := indexer.New(dir, s.docindexStore, s.loopRunner).WithExcludes(excludePatterns)
-		if input.Model != "" {
-			idx = idx.WithModel(input.Model)
+		if model != "" {
+			idx = idx.WithModel(model)
+		}
+		if provider != "" {
+			idx = idx.WithProvider(provider)
 		}
 
 		// Store progress tracker so the status endpoint can report progress.
@@ -107,8 +152,6 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 			slog.Error("docindex build failed", "dir", dir, "err", err)
 		}
 	}()
-
-	writeJSON(w, http.StatusAccepted, map[string]any{"running": true})
 }
 
 // handleDocIndexPreview reports what an index run would do before one starts.
@@ -123,14 +166,7 @@ func (s *Server) handleDocIndexPreview(w http.ResponseWriter, r *http.Request) {
 		dir = s.dir
 	}
 
-	excludes, err := s.docindexStore.ListExcludes(dir)
-	if err != nil {
-		slog.Warn("fetch excludes failed, previewing without them", "err", err)
-	}
-	var patterns []string
-	for _, e := range excludes {
-		patterns = append(patterns, e.Pattern)
-	}
+	patterns := s.excludePatternsFor(dir)
 
 	plan, err := indexer.New(dir, s.docindexStore, s.loopRunner).WithExcludes(patterns).Preview()
 	if err != nil {
@@ -166,14 +202,7 @@ func (s *Server) handleListIndexFiles(w http.ResponseWriter, r *http.Request) {
 		dir = s.dir
 	}
 
-	excludes, err := s.docindexStore.ListExcludes(dir)
-	if err != nil {
-		slog.Warn("fetch excludes failed, listing without them", "err", err)
-	}
-	var patterns []string
-	for _, e := range excludes {
-		patterns = append(patterns, e.Pattern)
-	}
+	patterns := s.excludePatternsFor(dir)
 
 	files, err := indexer.New(dir, s.docindexStore, s.loopRunner).WithExcludes(patterns).FileList()
 	if err != nil {
@@ -263,6 +292,31 @@ func (s *Server) handleReadDocContent(w http.ResponseWriter, r *http.Request) {
 		result["content"] = string(data)
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// excludePatternsFor seeds the shipped defaults for dir if this directory has
+// not been seeded yet, then returns the patterns in force.
+//
+// Seeding lives on the run path rather than only where the panel reads, because
+// the defaults have to hold for a project that never opens the panel: a headless
+// run, a per-turn auto-index or `ogcode index` would otherwise apply none of
+// them, and the list would be a claim about the UI rather than about the index.
+// Seeding only adds — a pattern the user wrote is left as it is — and a default
+// they deleted is not restored, which SeedDefaultExcludes records separately.
+func (s *Server) excludePatternsFor(dir string) []string {
+	if err := s.docindexStore.SeedDefaultExcludes(dir); err != nil {
+		slog.Warn("seed default excludes failed", "dir", dir, "err", err)
+	}
+	excludes, err := s.docindexStore.ListExcludes(dir)
+	if err != nil {
+		slog.Warn("fetch excludes failed, indexing without them", "dir", dir, "err", err)
+		return nil
+	}
+	var patterns []string
+	for _, e := range excludes {
+		patterns = append(patterns, e.Pattern)
+	}
+	return patterns
 }
 
 func (s *Server) handleListExcludes(w http.ResponseWriter, r *http.Request) {
@@ -408,7 +462,9 @@ func readGitignoreRules(path string) ([]gitignoreRule, bool, error) {
 // and finds nothing matching still has no explanation for a missing directory.
 // The walk prunes ignored directories with the same matcher the indexer uses,
 // which keeps it out of vendor and node_modules trees rather than descending
-// into the very things the file excludes.
+// into the very things the file excludes — and it prunes ogcode's own state
+// directory too, since a run never opens that either and a .gitignore reported
+// from inside one would be a rule the panel lists but the index can never apply.
 func findNestedGitignores(root string) []string {
 	m := gitignore.New(root)
 	var found []string
@@ -417,8 +473,13 @@ func findNestedGitignores(root string) []string {
 			return nil // unreadable entries are skipped, not fatal
 		}
 		if d.IsDir() {
-			if path != root && m.Match(path, true) {
-				return filepath.SkipDir
+			if path != root {
+				if d.Name() == indexer.StateDirName {
+					return filepath.SkipDir
+				}
+				if m.Match(path, true) {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}

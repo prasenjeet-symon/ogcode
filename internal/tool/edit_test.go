@@ -716,6 +716,36 @@ func TestEditTool_OnlyTakesTheEditsArray(t *testing.T) {
 	})
 }
 
+// TestEditTool_StringifiedEditsArrayIsExplained covers the shape weak models
+// emit for an array param: the hunk list arrives as a JSON string holding the
+// array rather than the array itself. The decoder's own message
+// ("cannot unmarshal string into Go struct field .edits") names neither the fix
+// nor the field as written, so the caller has to be told what to send instead.
+func TestEditTool_StringifiedEditsArrayIsExplained(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "hello world\n"
+	mustWriteFile(t, path, original)
+
+	// The hunk list as a string, escaped the way a caller double-encoding it
+	// would: the inner array is JSON text, not a second array.
+	inner := `[{"old_string":"world","new_string":"there"}]`
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"edits":` + strconv.Quote(inner) + `}`)
+
+	_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
+	if err == nil {
+		t.Fatal("a stringified edits array must be refused")
+	}
+	for _, want := range []string{"string containing a JSON array", `"edits"`, "old_string", "one entry per change"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("file must be untouched, got %q", got)
+	}
+}
+
 // TestEditTool_NoOpEditIsRejected covers an edit that finds its anchor and
 // changes nothing.
 //

@@ -12,16 +12,33 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/project"
 )
 
-// memoryMapBudget caps the rendered map so a project with a long history can't
-// flood the recall agent's context. Past the cap, the render degrades the same
-// way codebase_map does: labels dropped, names only, plus the drilldown hint.
-const memoryMapBudget = 40 * 1024
+// memoryMapBudget is the byte budget for a rendered memory map.
+//
+// Independent of MaxToolOutputBytes, the generic 50 KB cap on any tool result:
+// the map opts out of the loop's backstop (Execute marks its result Truncated),
+// so this budget is the only thing that bounds a map and may sit above that
+// generic cap without a large map being head-truncated mid-conversation — a
+// level that simply stops, with nothing telling the model what was lost. The
+// map degrades on its own terms instead: on a level too wide for every entry's
+// full label set, labels are shed rung by rung (see renderMemoryMap) until the
+// level fits, and only a level that will not fit at one label per entry falls
+// back to the label-less outline with the drilldown hint.
+//
+// Set well above what a project-sized history costs (a few KB with conversations
+// collapsed), so ordinary use never degrades. It exists for the pathological
+// level — many conversations, each near the label ceiling — which would
+// otherwise run to hundreds of KB.
+const memoryMapBudget = 100 * 1024
 
 // sessionLabelCap is the maximum number of topic labels shown on a collapsed
-// conversation's summary line. One more than the codebase_map folder cap: a
-// conversation's turns are more topically varied than one folder's files, so
-// its "what is common here" line needs slightly more spread.
-const sessionLabelCap = 7
+// conversation's summary line.
+//
+// Equal to codebase_map's folderLabelCap: a conversation line stands for a
+// whole branch of turns exactly as a folder line stands for a branch of
+// directories, so the two carry the same label budget. Referenced rather than
+// restated so the two cannot drift apart. The byte budget still bounds the
+// level: on a wide one, renderMemoryMap lowers this rung by rung.
+const sessionLabelCap = folderLabelCap
 
 // MemoryMapTool is the index over a project's per-turn markdown memory — the
 // memory analogue of codebase_map. At project scope every conversation is
@@ -52,10 +69,6 @@ func (t MemoryMapTool) Parameters() json.RawMessage {
 			"subdir": {
 				"type": "string",
 				"description": "Optional conversation tag (e.g. \"ses01M26\") to descend into. The map then lists that conversation's turns individually instead of collapsing it to one line. Omit to start at the project level."
-			},
-			"topic": {
-				"type": "string",
-				"description": "Optional topic filter: keeps only summaries whose topics match this substring, case-insensitively (e.g. \"migration\")."
 			}
 		}
 	}`)
@@ -64,7 +77,6 @@ func (t MemoryMapTool) Parameters() json.RawMessage {
 func (t MemoryMapTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var params struct {
 		Subdir string `json:"subdir"`
-		Topic  string `json:"topic"`
 	}
 	if args != nil {
 		_ = DecodeArgs(args, &params)
@@ -96,14 +108,7 @@ func (t MemoryMapTool) Execute(ctx context.Context, args json.RawMessage, tctx C
 		return Result{Title: "Memory Map", Output: "Memory index lookup failed: " + err.Error()}, nil
 	}
 
-	total := len(entries)
-	if params.Topic != "" {
-		entries = filterByTopic(entries, params.Topic)
-	}
 	if len(entries) == 0 {
-		if total > 0 {
-			return Result{Title: "Memory Map", Output: fmt.Sprintf("No summaries in %s match topic %q (all %d filtered out).", label, params.Topic, total)}, nil
-		}
 		return Result{Title: "Memory Map", Output: "No past turns are recorded in " + label + "'s memory yet."}, nil
 	}
 
@@ -135,19 +140,34 @@ func (t MemoryMapTool) Execute(ctx context.Context, args json.RawMessage, tctx C
 	}
 	flat = flat || params.Subdir != ""
 
-	return Result{Title: "Memory Map", Output: renderMemoryMap(entries, label, flat, params.Subdir)}, nil
+	return Result{
+		Title:  "Memory Map",
+		Output: renderMemoryMap(entries, label, flat, params.Subdir),
+		// Rendered to memoryMapBudget, which sits above the generic 50 KB cap,
+		// so opt out of the loop's backstop: it would otherwise head-truncate
+		// the map mid-conversation. The budget is what bounds this result.
+		Truncated: true,
+	}, nil
 }
 
 // renderSummaryLine renders one summary the way codebase_map renders a file:
 // name and topic labels on one line. The filename already carries the rest —
 // the UTC timestamp leads it and the session tag and title slug follow — and
 // the heading outline is file_map's job, not the map's.
-func renderSummaryLine(e *memfile.Entry) string {
+//
+// labelCap bounds the labels shown, exactly as renderProjectLevel does for a
+// loose file; renderMemoryMap lowers it rung by rung when a level will not fit
+// the budget, and 0 lists the name alone.
+func renderSummaryLine(e *memfile.Entry, labelCap int) string {
 	name := filepath.Base(e.Path)
-	if len(e.Labels) == 0 {
+	labels := e.Labels
+	if len(labels) > labelCap {
+		labels = labels[:labelCap]
+	}
+	if len(labels) == 0 {
 		return name + "\n"
 	}
-	return name + "  " + strings.Join(e.Labels, ", ") + "\n"
+	return name + "  " + strings.Join(labels, ", ") + "\n"
 }
 
 // turnSummary is one collapsed conversation: the grouping tag, its entries, and
@@ -196,43 +216,68 @@ func summarizeSessions(entries []*memfile.Entry) []turnSummary {
 // as one file line — name plus labels (a conversation's turns, after a subdir
 // drilldown or under session scope); otherwise every conversation is one line:
 // tag/  top topics  (N turns) — the codebase_map folder-line shape.
+//
+// Like codebase_map's renderProjectMap, it degrades gracefully if the result
+// would not fit the budget: collapsing every conversation bounds the output by
+// how wide one level is, so a tripped budget means a level with many entries —
+// many summaries, or many conversations. The response is to render again at a
+// progressively shallower label cap, on both the flat file lines and the
+// conversation lines, so a wide level shows fewer labels rather than losing
+// them wholesale. Dropping labels entirely is the last resort, for a level
+// where even one label per entry will not fit.
 func renderMemoryMap(entries []*memfile.Entry, label string, flat bool, subdir string) string {
-	var b strings.Builder
 	turnNoun := func(n int) string {
 		if n == 1 {
 			return "1 turn"
 		}
 		return fmt.Sprintf("%d turns", n)
 	}
-
-	if flat {
-		fmt.Fprintf(&b, "%s in %s, newest first.\n", turnNoun(len(entries)), scopeName(subdir))
-		fmt.Fprintf(&b, "Summaries live in %s. Each line below is one summary file and its topics. Call file_map on a summary for its heading outline with line ranges, then read(path, start_line=N, end_line=M) for just that section.\n\n", memoryDirOf(entries))
-		renderFlat(entries, &b)
-	} else {
-		fmt.Fprintf(&b, "%s in %s.\n", turnNoun(len(entries)), label)
-		b.WriteString("Conversations end in \"/\" and are shown as ONE line each: the conversation's most common topics and the number of turns inside it. To see a conversation's turns, call again with subdir set to its tag (e.g. subdir=\"ses01M26\").\n\n")
-		renderSessions(summarizeSessions(entries), &b, true, turnNoun)
+	// Grouped once, and only on the collapsed path: a flat render lists the
+	// entries themselves and never collapses a conversation.
+	var summaries []turnSummary
+	if !flat {
+		summaries = summarizeSessions(entries)
 	}
 
-	if b.Len() <= memoryMapBudget {
-		return strings.TrimRight(b.String(), "\n") + "\n"
+	// Full depth first, then progressively shallower — both a flat file line's
+	// labels and a conversation line's, since either can be the bulk of a wide
+	// level. The floor rung is 1 label each; past it the label-less outline
+	// below takes over.
+	for _, rung := range []struct{ fileCap, sessionCap int }{
+		{textLabelCap, sessionLabelCap},
+		{10, 10},
+		{3, 3},
+		{1, 1},
+	} {
+		var b strings.Builder
+		if flat {
+			fmt.Fprintf(&b, "%s in %s, newest first.\n", turnNoun(len(entries)), scopeName(subdir))
+			fmt.Fprintf(&b, "Summaries live in %s. Each line below is one summary file and its topics. Call file_map on a summary for its heading outline with line ranges, then read(path, start_line=N, end_line=M) for just that section.\n\n", memoryDirOf(entries))
+			renderFlat(entries, &b, rung.fileCap)
+		} else {
+			fmt.Fprintf(&b, "%s in %s.\n", turnNoun(len(entries)), label)
+			b.WriteString("Conversations end in \"/\" and are shown as ONE line each: the conversation's most common topics and the number of turns inside it. To see a conversation's turns, call again with subdir set to its tag (e.g. subdir=\"ses01M26\").\n\n")
+			renderSessions(summaries, &b, rung.sessionCap, turnNoun)
+		}
+		if b.Len() <= memoryMapBudget {
+			return strings.TrimRight(b.String(), "\n") + "\n"
+		}
 	}
 
-	// Over budget: drop the labels wholesale and keep the structure — the same
-	// degraded render codebase_map falls back to. The drilldown hint goes on the
-	// flat path too, where the entries themselves were what overflowed.
-	b.Reset()
+	// Past every rung the labels go, not the structure — the last resort
+	// codebase_map falls back to. The drilldown hint goes on the flat path too,
+	// where the entries themselves were what overflowed.
+	var b strings.Builder
 	if flat {
 		fmt.Fprintf(&b, "%s in %s, newest first.\n", turnNoun(len(entries)), scopeName(subdir))
 		b.WriteString("This level is too large to show topics, so only file names are listed.\n")
-		fmt.Fprintf(&b, "Call memory_map again with topic set to a keyword to narrow it.\n\n")
-		renderFlat(entries, &b)
+		b.WriteString("Call file_map on a summary for its heading outline, then read just the section you need.\n\n")
+		renderFlat(entries, &b, 0)
 	} else {
 		fmt.Fprintf(&b, "%s in %s.\n", turnNoun(len(entries)), label)
 		b.WriteString("Conversations end in \"/\". This level is too wide to show topics, so only the names are listed.\n")
-		fmt.Fprintf(&b, "Call memory_map again with topic set to a keyword, or subdir set to a conversation tag to get topics for its turns.\n\n")
-		renderSessions(summarizeSessions(entries), &b, false, turnNoun)
+		fmt.Fprintf(&b, "Call memory_map again with subdir set to a conversation tag to get topics for its turns.\n\n")
+		renderSessions(summaries, &b, 0, turnNoun)
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
@@ -256,41 +301,27 @@ func memoryDirOf(entries []*memfile.Entry) string {
 }
 
 // renderFlat writes one line per summary — file name plus topic labels,
-// oldest-last (entries arrive newest first).
-func renderFlat(entries []*memfile.Entry, b *strings.Builder) {
+// oldest-last (entries arrive newest first). labelCap bounds the labels on each
+// line; renderMemoryMap lowers it rung by rung when the level will not fit the
+// budget.
+func renderFlat(entries []*memfile.Entry, b *strings.Builder, labelCap int) {
 	for _, e := range entries {
-		b.WriteString(renderSummaryLine(e))
+		b.WriteString(renderSummaryLine(e, labelCap))
 	}
 }
 
 // renderSessions writes one line per conversation: its tag, its most common
-// topics, and its turn count — the codebase_map folder line. withLabels false
-// degrades to names and counts only.
-func renderSessions(summaries []turnSummary, b *strings.Builder, withLabels bool, turnNoun func(int) string) {
+// topics, and its turn count — the codebase_map folder line. labelCap bounds
+// the topics shown; renderMemoryMap lowers it rung by rung when the level will
+// not fit the budget, and 0 degrades to names and counts only.
+func renderSessions(summaries []turnSummary, b *strings.Builder, labelCap int, turnNoun func(int) string) {
 	for _, s := range summaries {
 		summary := "(" + turnNoun(len(s.entries)) + ")"
-		if withLabels && len(s.labels) > 0 {
-			if top := topLabels(s.labels, sessionLabelCap); len(top) > 0 {
+		if labelCap > 0 && len(s.labels) > 0 {
+			if top := topLabels(s.labels, nil, labelCap); len(top) > 0 {
 				summary = strings.Join(top, ", ") + "  " + summary
 			}
 		}
 		fmt.Fprintf(b, "%s/  %s\n", s.tag, summary)
 	}
-}
-
-// filterByTopic keeps entries carrying a label that contains topic
-// case-insensitively. Go-side, not SQL: the labels live in one JSON column and
-// the recall sets are small.
-func filterByTopic(entries []*memfile.Entry, topic string) []*memfile.Entry {
-	needle := strings.ToLower(topic)
-	kept := make([]*memfile.Entry, 0, len(entries))
-	for _, e := range entries {
-		for _, l := range e.Labels {
-			if strings.Contains(strings.ToLower(l), needle) {
-				kept = append(kept, e)
-				break
-			}
-		}
-	}
-	return kept
 }

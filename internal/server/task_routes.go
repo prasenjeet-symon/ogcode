@@ -77,6 +77,7 @@ func (s *Server) handleCreateTasks(w http.ResponseWriter, r *http.Request) {
 			Complexity:   complexity,
 			Status:       task.StatusPending,
 			Dependencies: t.Dependencies,
+			Provider:     p.Provider,
 			OrderIndex:   t.OrderIndex,
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -126,6 +127,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		Status      *string `json:"status"`
 		BranchName  *string `json:"branchName"`
 		Model       *string `json:"model"`
+		Provider    *string `json:"provider"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -187,6 +189,9 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if update.Model != nil {
 		t.Model = *update.Model
+	}
+	if update.Provider != nil {
+		t.Provider = *update.Provider
 	}
 	t.UpdatedAt = task.Now()
 
@@ -296,6 +301,14 @@ func (s *Server) executeTask(t *task.Task, p *plan.Plan) error {
 		sess.Model = t.Model
 	} else if p.Model != "" {
 		sess.Model = p.Model
+	}
+	// Same inheritance for the provider: a model id can be served by more than
+	// one provider, so it must travel with the model or the task's session could
+	// resolve a different endpoint than the plan's.
+	if t.Provider != "" {
+		sess.Provider = t.Provider
+	} else if p.Provider != "" {
+		sess.Provider = p.Provider
 	}
 	if err := s.store.Create(sess); err != nil {
 		s.gitMu.Lock()

@@ -24,6 +24,7 @@ import NotesPage from './pages/notes';
 import NoteDetailPage from './pages/note-detail';
 import DocIndexPage from './pages/docindex';
 import DevicePage from './pages/device';
+import PreviewPage from './pages/preview';
 import SettingsLayout from './pages/settings/layout';
 import GeneralSettings from './pages/settings/general';
 import ModelsSettings from './pages/settings/models';
@@ -47,6 +48,11 @@ export default function App() {
       <Route path="/notes/:id" component={NoteDetailPage} />
       <Route path="/docindex" component={DocIndexPage} />
       <Route path="/device" component={DevicePage} />
+      <Route path="/preview" component={PreviewPage} />
+      {/* The agent hands back /preview/<port>/ URLs; a click on one is a
+          client-side navigation that lands here with the port in the path. The
+          page normalizes it to /preview?port=<port>. */}
+      <Route path="/preview/:port" component={PreviewPage} />
       {/* Skills moved under Settings, where the rest of "what this agent can
           reach for" lives. The old path still resolves so bookmarks and links
           from earlier sessions do not dead-end on the 404 page. */}

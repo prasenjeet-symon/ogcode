@@ -1040,6 +1040,10 @@ textarea.auto-resize {
   color: var(--text-tertiary);
   background: transparent;
 }
+.icon-btn.is-open {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
 
 /* Reasoning ("Thought") disclosure — tinted with the --reasoning token so a
    custom accent never desyncs it. Written in CSS rather than as Tailwind
@@ -1103,6 +1107,16 @@ textarea.auto-resize {
 .send-btn.is-ready:hover {
   background: var(--accent-hover);
   box-shadow: var(--shadow-glow);
+}
+/* Stop state: while the agent is running the same button is the stop control
+   (the pause glyph), so it has to read as clickable even though nothing is
+   queued to send. Warn on hover rather than at rest. */
+.send-btn.is-stop {
+  cursor: pointer;
+}
+.send-btn.is-stop:hover {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-elevated));
+  color: var(--danger);
 }
 
 /* Keycap used in the composer hint row. */
@@ -1336,6 +1350,20 @@ body.drawer-open {
     padding-top: 0.625rem;
     padding-bottom: 0.625rem;
   }
+  /* The attach dialogue becomes a bottom sheet too — the 224px popover would
+     sit under the thumb otherwise. Anchored by the same JS coordinates, which
+     the inline styles apply but these override. */
+  .attach-menu {
+    left: 0.5rem !important;
+    right: 0.5rem !important;
+    top: auto !important;
+    bottom: max(0.5rem, env(safe-area-inset-bottom, 0px)) !important;
+    width: auto !important;
+  }
+  .attach-menu button {
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
 }
 
 /* Task drawer on phones: min-width beats max-width in CSS, so the old
@@ -1371,11 +1399,6 @@ body.drawer-open {
    what the markup keeps. Hidden at <lg where the header is tightest. */
 @media (max-width: 1023px) {
   .hide-below-lg {
-    display: none !important;
-  }
-}
-@media (max-width: 767px) {
-  .hide-below-md {
     display: none !important;
   }
 }

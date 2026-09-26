@@ -47,8 +47,11 @@ func (s *Server) HostSession(id session.SessionID, dir, prompt, agentName string
 		Title:       truncateTitle(prompt, 60),
 		Model:       "",
 		SessionType: agentName,
-		CreatedAt:   session.Now(),
-		UpdatedAt:   session.Now(),
+		// Hosted sessions are gated exactly like browser-driven ones, so they
+		// start in the stored default mode too rather than silently on Ask.
+		Permission: s.permissions.DefaultMode(),
+		CreatedAt:  session.Now(),
+		UpdatedAt:  session.Now(),
 	}
 	if err := s.store.Create(sess); err != nil {
 		return nil, false, err

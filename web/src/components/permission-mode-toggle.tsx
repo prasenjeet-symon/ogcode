@@ -4,7 +4,9 @@ import { useSession } from '../context/session';
 // calls are gated for the active session:
 //   Ask  — prompt before every bash / write / edit (default, safest)
 //   Auto — auto-run low-risk commands; still ask for risky ones (the backend
-//          classifies risk with rules + an LLM check for the unclear middle).
+//          classifies risk with rules + an LLM check for the unclear middle)
+//   Yolo — run everything without asking and without a risk classification;
+//          an explicit Deny rule still denies.
 export default function PermissionModeToggle() {
   const session = useSession();
   const mode = () => session.permissionMode();
@@ -45,6 +47,18 @@ export default function PermissionModeToggle() {
           <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
         </svg>
         Auto
+      </button>
+      <button
+        type="button"
+        onClick={() => session.setPermissionMode('yolo')}
+        aria-pressed={mode() === 'yolo'}
+        class={pill(mode() === 'yolo')}
+        title="Yolo — run every command, file write, and edit without asking (no guardrails)"
+      >
+        <svg class="w-[13px] h-[13px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 21.75h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+        </svg>
+        Yolo
       </button>
     </div>
   );

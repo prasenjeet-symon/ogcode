@@ -66,7 +66,7 @@ function groupText(group: string): string {
 interface ModelSelectorProps {
   selectedModel?: () => string;
   models?: () => ModelInfo[];
-  onSelect?: (modelId: string) => void;
+  onSelect?: (modelId: string, providerId: string) => void;
   placement?: 'top' | 'bottom';
 }
 
@@ -131,11 +131,11 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
     return enabledModels().find((m) => m.id === id) ?? allModels().find((m) => m.id === id);
   };
 
-  const handleSelect = (modelId: string) => {
+  const handleSelect = (modelId: string, providerId: string) => {
     if (props.onSelect) {
-      props.onSelect(modelId);
+      props.onSelect(modelId, providerId);
     } else {
-      session.selectModel(modelId);
+      session.selectModel(modelId, providerId);
     }
     setOpen(false);
   };
@@ -184,7 +184,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
                     return (
                       <button
                         type="button"
-                        onClick={() => handleSelect(model.id)}
+                        onClick={() => handleSelect(model.id, model.providerId)}
                         class={`w-full text-left px-3 py-1.5 text-ui transition-colors
                                 flex items-center justify-between gap-2
                                 ${isSelected()
