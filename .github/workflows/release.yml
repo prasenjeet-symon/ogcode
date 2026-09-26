@@ -80,12 +80,19 @@ jobs:
           echo "/opt/zig" >> "$GITHUB_PATH"
       - name: Build binaries
         shell: bash
+        env:
+          # The first-party client secret, baked into the binary at link time
+          # (internal/provider.OGXAppSecret) so the release signs its gateway
+          # calls as app `ogcode`. Unset in a fork, so the binary simply
+          # signs nothing rather than failing the build.
+          OGX_APP_SECRET: ${{ secrets.OGX_APP_SECRET }}
         run: |
           set -euo pipefail
           LD="-s -w \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Version=${RELEASE_REF} \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Commit=$(git rev-parse HEAD) \
-            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            -X github.com/prasenjeet-symon/ogcode/internal/provider.OGXAppSecret=${OGX_APP_SECRET}"
           # Link fully statically against musl rather than dynamically against
           # the runner's glibc. Building natively on ubuntu-latest made the
           # binaries require the runner's glibc symbol versions (GLIBC_2.38 as
@@ -141,12 +148,19 @@ jobs:
           path: web/dist
       - name: Build binaries
         shell: bash
+        env:
+          # The first-party client secret, baked into the binary at link time
+          # (internal/provider.OGXAppSecret) so the release signs its gateway
+          # calls as app `ogcode`. Unset in a fork, so the binary simply
+          # signs nothing rather than failing the build.
+          OGX_APP_SECRET: ${{ secrets.OGX_APP_SECRET }}
         run: |
           set -euo pipefail
           LD="-s -w \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Version=${RELEASE_REF} \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Commit=$(git rev-parse HEAD) \
-            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            -X github.com/prasenjeet-symon/ogcode/internal/provider.OGXAppSecret=${OGX_APP_SECRET}"
           # arm64 native; amd64 via clang's built-in cross arch (Apple universal toolchain).
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
             go build -trimpath -ldflags "$LD" -o prebuilt/ogcode_darwin_arm64/ogcode .
@@ -206,12 +220,19 @@ jobs:
           done
       - name: Build binaries
         shell: bash
+        env:
+          # The first-party client secret, baked into the binary at link time
+          # (internal/provider.OGXAppSecret) so the release signs its gateway
+          # calls as app `ogcode`. Unset in a fork, so the binary simply
+          # signs nothing rather than failing the build.
+          OGX_APP_SECRET: ${{ secrets.OGX_APP_SECRET }}
         run: |
           set -euo pipefail
           LD="-s -w \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Version=${RELEASE_REF} \
             -X github.com/prasenjeet-symon/ogcode/internal/version.Commit=$(git rev-parse HEAD) \
-            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            -X github.com/prasenjeet-symon/ogcode/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            -X github.com/prasenjeet-symon/ogcode/internal/provider.OGXAppSecret=${OGX_APP_SECRET}"
           CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-clang CXX=x86_64-w64-mingw32-clang++ \
             go build -trimpath -ldflags "$LD" -o prebuilt/ogcode_windows_amd64/ogcode.exe .
           CGO_ENABLED=1 GOOS=windows GOARCH=arm64 CC=aarch64-w64-mingw32-clang CXX=aarch64-w64-mingw32-clang++ \

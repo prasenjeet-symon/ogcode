@@ -344,6 +344,8 @@ You can also use `~/.config/ogcode/config.json` for global settings and `ogcode.
 
 OGX is the subscription plan sold by OG Lab, connected from the settings screen rather than an environment variable: signing in on the OG Lab side links this install, and the plan's models then run through OG Lab's gateway. `OGX_GATEWAY_URL` overrides the gateway base URL (default `https://ogx.ogcode.xyz/v1`) and `OGX_CONNECT_URL` overrides the connect page.
 
+A release build also bakes in the first-party secret with `make build-server OGX_APP_SECRET=...` (an ldflags value, not a runtime variable). ogcode then stamps every gateway call with `X-Client-App`, `X-Client-Timestamp` and `X-Client-Signature` — the base64url HMAC-SHA256 of the app name, timestamp, method and path under that secret — so the gateway admits this install rather than a bearer token copied out of it. A build with no secret signs nothing and talks to a gateway that has not been told any secrets.
+
 ```json
 {
   "providers": {

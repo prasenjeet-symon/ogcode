@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
@@ -112,7 +113,7 @@ func (s *Server) handleOGXConnect(w http.ResponseWriter, r *http.Request) {
 	q := url.Values{}
 	q.Set("state", state)
 	q.Set("redirect_uri", fmt.Sprintf("http://127.0.0.1:%d/api/ogx/callback", s.Port()))
-	q.Set("app", "ogcode")
+	q.Set("app", provider.OGXAppID)
 	sep := "?"
 	if strings.Contains(base, "?") {
 		sep = "&"

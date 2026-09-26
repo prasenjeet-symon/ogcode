@@ -1,7 +1,7 @@
 # Ogcode — Documentation Outline
 
 > Architecture and configuration reference for the ogcode codebase.
-> Regenerated from codebase analysis at **v0.39.0**.
+> Regenerated from codebase analysis at **v0.39.1**.
 
 ---
 
@@ -100,6 +100,7 @@ Persistent flags on the root command: `--ollama-url` (overrides `OLLAMA_BASE_URL
 | `OLLAMA_SHOW_URL` / `OLLAMA_CLOUD_CATALOG` | Ollama `/api/show` endpoint and cloud-catalogue toggle |
 | `OGX_GATEWAY_URL` | OGX gateway base URL (default `https://ogx.ogcode.xyz/v1`) |
 | `OGX_CONNECT_URL` | OGX account-connect URL used by the OAuth flow |
+| `OGX_APP_SECRET` | Shared secret ogcode signs its gateway calls with. Read at **build time** via ldflags (`make build-server`), not at runtime — a release binary carries it, a local build leaves it unset and unasserted. The matching `app` name is `ogcode`. |
 | `OGCODE_STREAM_IDLE_TIMEOUT` | Stream idle budget before a turn is called stalled: a duration (`30m`), bare seconds (`1800`), or `off`. Overrides the per-endpoint defaults (10m local / 2m cloud) |
 | `OGCODE_FORCE_IPV4` | `1`/`true`/`yes`/`on` pins IPv4, `0`/`off`/`never` keeps IPv6. Unset = automatic fallback to IPv4 after two IPv6-path failures |
 
@@ -371,7 +372,7 @@ type Provider interface {
 | OpenAI | `openai` | ✅ | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
 | OpenRouter | `openrouter` | ✅ | `OPENROUTER_API_KEY` |
 | Ollama | `ollama` | ✅ | `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, `OLLAMA_FALLBACK_URLS` |
-| OGX | `ogx` | ✅ | Account token from the OGX connect flow; `OGX_GATEWAY_URL` |
+| OGX | `ogx` | ✅ | Account token from the OGX connect flow; `OGX_GATEWAY_URL`; signs with `OGX_APP_SECRET` (build-time) as app `ogcode` |
 
 ### 6.3 Provider Resolution (`Registry.ResolveProvider`)
 
@@ -863,7 +864,7 @@ Port selection runs through `internal/portmap`, which remembers the port each pr
 
 ## 15. Version & Update Checking (`internal/version/`)
 
-- Current version: **v0.39.0** (set via ldflags)
+- Current version: **v0.39.1** (set via ldflags)
 - `CheckUpdate()`: fetches the latest release from the GitHub API (`prasenjeet-symon/ogcode`), cached for 1 hour
 - Detects the install method: Homebrew, winget, scoop, cargo, or the curl script
 - Compares semantic versions and returns update info with the install command

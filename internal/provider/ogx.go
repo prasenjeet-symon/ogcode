@@ -31,10 +31,23 @@ import (
 // as an empty, explained list rather than a failure.
 const OGXProviderID = "ogx"
 
+// OGXAppID is the first-party identity ogcode presents to the gateway when it
+// asserts its requests. It matches the `app` the connect flow registers with,
+// and it is the key the gateway's app-secret table looks the shared secret up
+// under.
+const OGXAppID = "ogcode"
+
 // DefaultOGXGatewayURL is OG Lab's gateway, the endpoint the OGX token is valid
 // against. OGX_GATEWAY_URL overrides it — development and staging point this at
 // a local gateway.
 const DefaultOGXGatewayURL = "https://ogx.ogcode.xyz/v1"
+
+// OGXAppSecret is the shared secret ogcode signs its gateway requests with, so
+// the gateway admits this first-party client and not a bearer token copied out
+// of it. It is baked in at build time via ldflags (see the Makefile) and reads
+// from the OGX_APP_SECRET environment variable there, so a release binary
+// carries the identity while a local build leaves it empty and unasserted.
+var OGXAppSecret = ""
 
 // OGXGatewayURL returns the gateway base URL to use, honouring OGX_GATEWAY_URL.
 func OGXGatewayURL() string {
@@ -56,8 +69,10 @@ func NewOGXProvider(token string) (*OpenAIProvider, error) {
 		return nil, fmt.Errorf("ogx: empty token")
 	}
 	return &OpenAIProvider{
-		id:      OGXProviderID,
-		apiKey:  token,
-		baseURL: OGXGatewayURL(),
+		id:        OGXProviderID,
+		apiKey:    token,
+		baseURL:   OGXGatewayURL(),
+		appID:     OGXAppID,
+		appSecret: strings.TrimSpace(OGXAppSecret),
 	}, nil
 }

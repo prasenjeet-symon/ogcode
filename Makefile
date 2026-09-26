@@ -21,7 +21,7 @@ build-blog:
 build-server:
 	$(eval VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || node -p "require('./web/package.json').version" 2>/dev/null || echo "dev"))
 	CGO_ENABLED=1 go build \
-		-ldflags "-X github.com/prasenjeet-symon/ogcode/internal/version.Version=$(VERSION)" \
+		-ldflags "-X github.com/prasenjeet-symon/ogcode/internal/version.Version=$(VERSION) -X github.com/prasenjeet-symon/ogcode/internal/provider.OGXAppSecret=$(OGX_APP_SECRET)" \
 		-o ogcode .
 
 build: build-web build-server

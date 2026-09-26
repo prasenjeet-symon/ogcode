@@ -1119,6 +1119,24 @@ textarea.auto-resize {
   color: var(--danger);
 }
 
+/* Update toast — the bottom-right release notification. A flat elevated
+   surface using the layered depth shadow (no gradient); it slides up on entry
+   and its release-notes scroll box gets a thin scoped scrollbar. */
+.update-toast {
+  box-shadow: var(--shadow-lg);
+  animation: fadeInSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.update-notes::-webkit-scrollbar {
+  width: 6px;
+}
+.update-notes::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--border-strong);
+}
+.update-notes::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* Keycap used in the composer hint row. */
 .kbd {
   display: inline-flex;

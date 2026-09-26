@@ -1,3 +1,34 @@
+# Release Notes — v0.39.1
+
+## Minor: First-party identity for the OGX gateway
+
+ogcode now signs every call it makes to the OGX gateway, so the gateway can
+admit this install as a first-party client rather than any process that holds a
+bearer token copied out of it. Each request to the plan API and to chat
+completions carries `X-Client-App`, `X-Client-Timestamp` and
+`X-Client-Signature` — the base64url HMAC-SHA256 of the app name, the timestamp,
+and the method and path, so a signature for one endpoint authorises no other and
+cannot be replayed.
+
+The shared secret is baked in at build time (`make build-server
+OGX_APP_SECRET=...`, an ldflags value rather than a runtime variable), so a
+release binary carries the identity while a local build leaves it empty and
+signs nothing. The gate on the gateway side is conditional: with no secret
+configured it stays open, so an older client keeps working against a gateway
+that has not yet been told any secrets. Every other provider leaves the identity
+empty and its requests unasserted.
+
+## Patch: A calmer update notification
+
+The "update available" toast is rebuilt on the app's design tokens: a flat,
+elevated card with a hairline border and an accent icon, in place of the old
+gradient header and emoji. Release notes render as markdown, collapsed to a
+two-line preview that expands into a scrollable box, with a **Copy** command and
+a **View release** link. It dismisses for 24 hours from the close button, or for
+a week with **Don't show again**.
+
+---
+
 # Release Notes — v0.39.0
 
 ## Minor: Yolo — a permission mode that never asks

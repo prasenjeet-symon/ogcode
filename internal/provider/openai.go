@@ -29,6 +29,12 @@ type OpenAIProvider struct {
 	baseURL    string
 	collection string // grouping label for dynamically-fetched models ("" = none)
 
+	// appID and appSecret, when both set, make this provider assert its
+	// first-party identity to the router it calls (the OGX gateway). They are
+	// empty for every other endpoint, which leaves its requests unasserted.
+	appID     string
+	appSecret string
+
 	// cachedModels is the provider's model catalogue: the list last fetched from
 	// the endpoint (or seeded from the persisted copy at startup). Models() is a
 	// pure read of it and never touches the network. Nil means nothing has been
@@ -325,14 +331,8 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 		slog.Warn("failed to create models request", "provider", p.id, "err", err)
 		return nil
 	}
+	p.setChatHeaders(req)
 	req.Header.Set("Accept", "application/json")
-	if p.apiKey != "" {
-		token := p.apiKey
-		if !strings.Contains(token, " ") {
-			token = "Bearer " + token
-		}
-		req.Header.Set("Authorization", token)
-	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -923,6 +923,9 @@ func (p *OpenAIProvider) setChatHeaders(req *http.Request) {
 		req.Header.Set("HTTP-Referer", "https://ogcode.xyz")
 		req.Header.Set("X-Title", "ogcode")
 	}
+	// The gateway refuses an unasserted request once it has been given any
+	// app secret, so a provider carrying an identity signs every call.
+	signRequestAssertion(req, p.appID, p.appSecret)
 }
 
 // idleTimeout is how long this endpoint may go silent before its stream is
