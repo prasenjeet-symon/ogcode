@@ -1,26 +1,39 @@
 ---
-// Follow-the-author card shown at the end of every post.
+// Follow-the-author card shown at the end of every post by the default
+// author: a blueprint box (corner squares) with the follow links as pills.
+// Styles live in post.css; importing it here keeps the card self-contained
+// (Astro dedupes the stylesheet when the page imports it too).
 import { AUTHOR } from '../lib/author';
+import '../styles/post.css';
 ---
-<aside class="author-card" aria-label="About the author">
+<aside class="box bp-author" aria-label="About the author">
+  <span class="cn tl" aria-hidden="true"></span>
+  <span class="cn tr" aria-hidden="true"></span>
+  <span class="cn bl" aria-hidden="true"></span>
+  <span class="cn br" aria-hidden="true"></span>
+
   <img
-    class="author-avatar"
+    class="bp-author-avatar"
     src={AUTHOR.avatar}
-    alt={AUTHOR.name}
-    width="52"
-    height="52"
+    alt=""
+    width="56"
+    height="56"
     loading="lazy"
+    decoding="async"
   />
-  <div class="author-body">
-    <div class="author-name">{AUTHOR.name}</div>
-    <p class="author-role">{AUTHOR.role}, in the open. If this post was useful, following is the best way to catch the next one.</p>
-    <div class="author-links">
+  <div class="bp-author-body">
+    <p class="bp-author-kicker">Written by</p>
+    <p class="bp-author-name">{AUTHOR.name}</p>
+    <p class="bp-author-role">{AUTHOR.role}, in the open. If this post was useful, following is the best way to catch the next one.</p>
+    <ul class="bp-author-links" aria-label={`Follow ${AUTHOR.name}`}>
       {AUTHOR.links.map((link) => (
-        <a class="btn btn-sm btn-ghost" href={link.url} target="_blank" rel="noopener">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={link.icon} /></svg>
-          {link.label}
-        </a>
+        <li>
+          <a class="btn btn-line btn-sm" href={link.url} target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={link.icon} /></svg>
+            {link.label}
+          </a>
+        </li>
       ))}
-    </div>
+    </ul>
   </div>
 </aside>

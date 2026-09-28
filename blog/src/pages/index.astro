@@ -1,62 +1,160 @@
 ---
+// Blog index: a compact brand slab (the homepage hero recipe) over one
+// blueprint box of posts. The newest post is featured full width, the rest
+// sit in a grid of card links. Pure pre-rendered HTML, zero client JS.
+import { render } from 'astro:content';
 import Base from '../layouts/Base.astro';
-import { publishedPosts, postUrl, formatDate } from '../lib/posts';
+import CtaSlab from '../components/CtaSlab.astro';
+import { publishedPosts, postUrl, formatDate, type Post } from '../lib/posts';
+import '../styles/index.css';
 
 const posts = await publishedPosts();
+
+// Reading time comes from the remark plugin, so each post needs a render pass.
+const entries = await Promise.all(
+  posts.map(async (post) => {
+    const { remarkPluginFrontmatter } = await render(post);
+    return { post, minutes: remarkPluginFrontmatter.readingTime as number };
+  }),
+);
+const [featured, ...rest] = entries;
+
+// The grid draws its 1px lines through the gaps, so a short last row would
+// leave a lit hole. Filler cells close the row: .f3 ones show at three
+// columns, .f2 ones at two (one column never needs them).
+const fill3 = (3 - (rest.length % 3)) % 3;
+const fill2 = rest.length % 2;
+const fillers = Array.from({ length: Math.max(fill3, fill2) }, (_, i) =>
+  [i < fill3 && 'f3', i < fill2 && 'f2'].filter(Boolean).join(' '),
+);
+
+const count = posts.length;
+const firstTag = (post: Post) => post.data.tags[0] ?? 'field notes';
+const titleId = (post: Post) => `bi-t-${post.id}`;
 ---
 <Base
   title="Blog — Ogcode"
   description="Notes from building Ogcode: context engineering, agent memory, and running coding agents on your own machine."
   canonical="https://ogcode.xyz/blog/"
 >
-  <header class="blog-head">
-    <div class="wrap">
-      <span class="eyebrow">Field notes</span>
-      <h1 class="display">Notes from the <em>workshop</em></h1>
-      <p class="lede">
-        How Ogcode is built: context engineering, agent memory, and what it takes
-        to run a coding agent entirely on your own machine.
-        Subscribe via <a href="/blog/rss.xml">RSS</a>.
-      </p>
-    </div>
-  </header>
-
-  <section class="post-list">
-    <div class="wrap">
-      {posts.length === 0 && (
-        <div class="blog-empty">
-          <p>The first post is being written.</p>
-          <p class="sub">Grab the <a href="/blog/rss.xml" style="color: var(--text-secondary); border-bottom: 1px solid var(--border-strong);">RSS feed</a> and it will find you when it lands.</p>
-        </div>
-      )}
-      {posts.map((post) => (
-        <a class="post-row" href={postUrl(post)}>
-          <div class="post-rail">
-            <time class="post-date" datetime={post.data.pubDate.toISOString()}>
-              {formatDate(post.data.pubDate)}
-            </time>
-            {post.data.tags[0] && <span class="post-meta">{post.data.tags[0]}</span>}
-          </div>
-          <div>
-            <h2 class="post-title">
-              {post.data.title}
-              {post.data.draft && <span class="draft-flag">DRAFT</span>}
-            </h2>
-            <p class="post-desc">{post.data.description}</p>
-          </div>
-          {post.data.hero && (
-            <img
-              class="post-thumb"
-              src={post.data.hero}
-              alt=""
-              width="1344"
-              height="768"
-              loading="lazy"
-              decoding="async"
-            />
-          )}
+  <section class="bi-head-wrap" aria-labelledby="bi-title">
+    <div class="bi-head slab">
+      <div class="bi-head-in">
+        <a class="announce rise r1" href="/blog/rss.xml" type="application/rss+xml">
+          <span class="bi-ann-k">Field notes</span>
+          <span class="dot" aria-hidden="true">·</span>
+          <span class="announce-text">Subscribe via RSS</span>
+          <span class="announce-go" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+          </span>
         </a>
-      ))}
+
+        <h1 class="bi-title rise r2" id="bi-title">Notes from the workshop</h1>
+
+        <p class="bi-lede rise r3">
+          How Ogcode is built: context engineering, agent memory, and what it
+          takes to run a coding agent on your own machine.
+        </p>
+      </div>
     </div>
   </section>
+
+  <section class="sec bi-list" aria-labelledby="bi-list-title">
+    <div class="frame">
+      <div class="box bi-box">
+        <i class="cn tl"></i><i class="cn tr"></i><i class="cn bl"></i><i class="cn br"></i>
+
+        <div class="bi-bar">
+          <h2 class="bi-bar-h" id="bi-list-title">all posts</h2>
+          {count > 0 && <span class="bi-bar-n">{count} {count === 1 ? 'post' : 'posts'}</span>}
+          <i class="bi-bar-rule" aria-hidden="true"></i>
+          <a class="bi-bar-rss" href="/blog/rss.xml" type="application/rss+xml">rss feed</a>
+        </div>
+
+        {!featured && (
+          <div class="bi-empty">
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </span>
+            <h3 class="h3">The first post is being written.</h3>
+            <p class="p">
+              Grab the <a class="link" href="/blog/rss.xml" type="application/rss+xml">RSS feed</a>
+              and it will find you when it lands.
+            </p>
+          </div>
+        )}
+
+        {featured && (
+          <a class="bi-card bi-feat" href={postUrl(featured.post)} aria-labelledby={titleId(featured.post)}>
+            <div class="bi-media">
+              {featured.post.data.hero ? (
+                <img
+                  src={featured.post.data.hero}
+                  alt=""
+                  width="1344"
+                  height="768"
+                  loading="eager"
+                  decoding="async"
+                  fetchpriority="high"
+                />
+              ) : (
+                <span class="bi-ph" aria-hidden="true"><span class="bi-ph-tag">{firstTag(featured.post)}</span></span>
+              )}
+            </div>
+
+            <div class="bi-feat-body">
+              <p class="meta-row bi-meta">
+                <time datetime={featured.post.data.pubDate.toISOString()}>{formatDate(featured.post.data.pubDate)}</time>
+                <span class="sep" aria-hidden="true">·</span>
+                <span>{featured.minutes} min read</span>
+                {featured.post.data.draft && <span class="chip chip-draft">DRAFT</span>}
+              </p>
+              <h3 class="bi-feat-title" id={titleId(featured.post)}>{featured.post.data.title}</h3>
+              <p class="bi-feat-desc">{featured.post.data.description}</p>
+              {featured.post.data.tags.length > 0 && (
+                <ul class="bi-tags">
+                  {featured.post.data.tags.map((tag) => <li class="chip">{tag}</li>)}
+                </ul>
+              )}
+              <span class="link bi-more">Read the post<span aria-hidden="true">→</span></span>
+            </div>
+          </a>
+        )}
+
+        {rest.length > 0 && (
+          <div class="cells cells-3 bi-grid">
+            {rest.map(({ post, minutes }) => (
+              <a class="bi-card bi-cell" href={postUrl(post)} aria-labelledby={titleId(post)}>
+                <div class="bi-media">
+                  {post.data.hero ? (
+                    <img
+                      src={post.data.hero}
+                      alt=""
+                      width="1344"
+                      height="768"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  ) : (
+                    <span class="bi-ph" aria-hidden="true"><span class="bi-ph-tag">{firstTag(post)}</span></span>
+                  )}
+                </div>
+                <p class="meta-row bi-meta">
+                  <time datetime={post.data.pubDate.toISOString()}>{formatDate(post.data.pubDate)}</time>
+                  <span class="sep" aria-hidden="true">·</span>
+                  <span>{minutes} min read</span>
+                  {post.data.draft && <span class="chip chip-draft">DRAFT</span>}
+                </p>
+                <h3 class="bi-cell-title" id={titleId(post)}>{post.data.title}</h3>
+                <p class="bi-cell-desc">{post.data.description}</p>
+              </a>
+            ))}
+            {fillers.map((cls) => <div class={`bi-fill ${cls}`} aria-hidden="true"></div>)}
+          </div>
+        )}
+      </div>
+    </div>
+  </section>
+
+  <CtaSlab />
 </Base>

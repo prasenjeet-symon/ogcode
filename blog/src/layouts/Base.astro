@@ -1,6 +1,9 @@
 ---
 // Shared shell for every blog page: head metadata, fonts, nav, footer.
-// Zero client-side JavaScript — pages are pure pre-rendered HTML.
+// Zero client-side JavaScript: pages are pure pre-rendered HTML (the
+// only <script> a page may carry is JSON-LD, via the "head" slot).
+// The chrome mirrors the homepage (docs/index.html): skip link, fixed
+// nav, <main id="main"> with the dashed page guides, footer.
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import '../styles/blog.css';
@@ -30,7 +33,7 @@ const {
   <title>{title}</title>
   <meta name="description" content={description} />
   <link rel="canonical" href={canonical} />
-  <meta name="theme-color" content="#09090b" />
+  <meta name="theme-color" content="#151414" />
   <meta name="color-scheme" content="dark" />
   <meta name="generator" content={Astro.generator} />
 
@@ -45,22 +48,22 @@ const {
   <meta name="twitter:description" content={description} />
   <meta name="twitter:image" content={ogImage} />
 
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%235E6AD2'/><path d='M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33' transform='translate(9 9) scale(0.72)' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round'/></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23FF5E1F'/><path d='M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33' transform='translate(9 9) scale(0.72)' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round'/></svg>" />
   <link rel="apple-touch-icon" href="/media/logo.png" />
   <link rel="alternate" type="application/rss+xml" title="Ogcode Blog" href="/blog/rss.xml" />
 
   <link rel="preload" href="/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="preload" href="/fonts/eb-garamond-var.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/jetbrains-mono-var.woff2" as="font" type="font/woff2" crossorigin />
 
   <slot name="head" />
 </head>
 <body>
-  <div class="ambient" aria-hidden="true"></div>
-  <div class="grid-bg" aria-hidden="true"></div>
+  <a class="skip" href="#main">Skip to content</a>
 
   <Nav />
 
-  <main>
+  <main id="main">
+    <div class="guides" aria-hidden="true"></div>
     <slot />
   </main>
 

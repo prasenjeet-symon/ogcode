@@ -1,0 +1,33 @@
+---
+// Closing call to action for the blog index and every post: the
+// homepage's final CTA slab in a compact cut (no floating tiles, no
+// ticker). Install lands on /#install, which the homepage opens as
+// its install panel; the chip underneath carries the one-liner for
+// anyone who would rather copy it straight from here.
+// Styles: .cta-wrap(-sm) / .cta / .cta-sm / .cta-cmd in blog.css.
+const REPO = 'https://github.com/prasenjeet-symon/ogcode';
+const INSTALL = 'curl -fsSL https://ogcode.xyz/install.sh | sh';
+---
+<section class="cta-wrap cta-wrap-sm" aria-labelledby="ctaTitle">
+  <div class="cta cta-sm slab">
+    <div class="cta-in">
+      <h2 class="cta-title" id="ctaTitle">From side project to enterprise codebase.</h2>
+      <p class="cta-sub">One Go binary, any model, your keys. Ogcode builds the context each task needs, so you get the job done without burning through your wallet.</p>
+      <div class="cta-actions">
+        <a class="btn btn-light btn-lg" href="/#install">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+          Install Ogcode
+        </a>
+        <a class="btn btn-glass btn-lg" href={REPO} target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l2.66 5.39 5.95.87-4.3 4.19 1.01 5.92L12 16.77l-5.32 2.8 1.01-5.92-4.3-4.19 5.95-.87z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+      <p class="cta-cmd">
+        <span class="sr">Or install from a terminal:</span>
+        <span class="cta-cmd-p" aria-hidden="true">$</span>
+        <code tabindex="0">{INSTALL}</code>
+      </p>
+    </div>
+  </div>
+</section>

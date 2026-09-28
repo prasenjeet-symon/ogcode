@@ -1,0 +1,445 @@
+/* ═══════════════════════════════════════════════════════════════
+   Ogcode blog · post page (bp-).
+   Page-specific only: tokens, .frame .box .cn .btn .chip .link and the
+   base reset all come from blog.css, ported 1:1 from docs/index.html.
+   Layout: a centred 860px header, the hero in a frame-wide blueprint
+   box that sits on the page guides, then a 720px reading column.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ══ Header ══════════════════════════════════════════════════════ */
+.bp-head {
+  padding: calc(72px + clamp(40px, 6.4vw, 92px)) 0 clamp(44px, 5.4vw, 72px);
+  text-align: center;
+}
+.bp-head-in {
+  max-width: 860px;
+  margin-inline: auto;
+  display: flex; flex-direction: column; align-items: center;
+  /* Entrance: the shared one-shot .rise (blog.css), no delay. */
+}
+
+.bp-back svg { width: 15px; height: 15px; transition: transform .25s var(--ease); }
+.bp-back:hover svg { transform: translateX(-2px); }
+
+/* The shared .meta-row (blog.css), centred and a touch larger. */
+.bp-meta { justify-content: center; margin-top: 30px; font-size: 12.5px; }
+.bp-title {
+  margin-top: 18px;
+  font-size: clamp(34px, 4.8vw, 58px);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+  color: var(--bright);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+.bp-lede {
+  margin-top: 22px;
+  max-width: 680px;
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+/* Byline + tags share one strip under a dashed rule, like the
+   homepage's FAQ stats line. */
+.bp-credits {
+  width: min(720px, 100%);
+  margin-top: 36px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--line-2);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 16px 24px;
+  text-align: left;
+}
+.bp-byline { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.bp-avatar {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  object-fit: cover;
+}
+.bp-avatar-initial {
+  display: grid; place-items: center;
+  background: var(--bg-3);
+  font: 500 13px/1 var(--mono);
+  color: var(--brand-ink);
+}
+.bp-byline-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bp-byline-name { font-size: 14.5px; font-weight: 500; line-height: 1.2; color: var(--bright); }
+.bp-byline-role { font-size: 13px; line-height: 1.2; color: var(--dim); }
+.bp-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ══ Hero ════════════════════════════════════════════════════════
+   Flush inside a frame-wide blueprint box, so its edges land exactly
+   on the dashed page guides. */
+.bp-hero { margin: 0; }
+.bp-hero img {
+  display: block;
+  width: 100%; height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 0;
+}
+
+/* No hero: a bare frame-wide hairline with its two registration marks
+   still separates the header from the text. */
+.bp-rule { height: 0; border-top: 1px solid var(--line); }
+.bp-rule .cn.tl, .bp-rule .cn.tr { top: -5px; }
+.bp-rule + .bp-body { padding-top: clamp(44px, 5vw, 64px); }
+
+/* ══ Body ════════════════════════════════════════════════════════ */
+.bp-body { padding-top: clamp(48px, 6vw, 80px); }
+
+/* While the page guides show (>760px), keep type off the dashed lines
+   when the frame is barely wider than the reading column. */
+@media (min-width: 761px) {
+  .bp-head, .bp-body { padding-inline: 28px; }
+}
+
+.bp-prose {
+  /* Shiki `css-variables` theme, mapped to the homepage diff palette. */
+  --astro-code-foreground: var(--text);
+  --astro-code-background: var(--bg-2);
+  --astro-code-token-keyword: #ff7038;
+  --astro-code-token-string: #e9c285;
+  --astro-code-token-string-expression: #e9c285;
+  --astro-code-token-function: #ffc2a1;
+  --astro-code-token-constant: #7cc7e8;
+  --astro-code-token-comment: var(--dim);
+  --astro-code-token-punctuation: var(--muted);
+  --astro-code-token-parameter: var(--text);
+  --astro-code-token-link: #ff7038;
+  --astro-code-token-inserted: var(--ok);
+  --astro-code-token-deleted: var(--bad);
+  --astro-code-token-changed: var(--warn);
+
+  max-width: 720px;
+  margin-inline: auto;
+  font-size: 17.5px;
+  line-height: 1.75;
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+/* Rhythm: one flow gap between blocks, larger breaks before headings. */
+.bp-prose :where(p, ul, ol, blockquote, pre, table, figure, hr, img, video, h2, h3, h4, h5, h6, details, section) { margin: 0; }
+.bp-prose > * + * { margin-top: 1.15em; }
+
+.bp-prose :where(h2, h3, h4, h5, h6) {
+  color: var(--bright);
+  font-weight: 500;
+  text-wrap: balance;
+}
+/* h2: a dashed rule (the page-guide dash, 5 on / 6 off) with a
+   registration square at its start. */
+.bp-prose h2 {
+  position: relative;
+  margin-top: 64px;
+  padding-top: 34px;
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.bp-prose h2::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: repeating-linear-gradient(to right, var(--line-2) 0 5px, transparent 5px 11px);
+}
+.bp-prose h2::after {
+  content: ""; position: absolute; top: -4px; left: 0;
+  width: 9px; height: 9px;
+  border: 1px solid var(--line-3);
+  background: var(--bg);
+}
+.bp-prose h3 {
+  margin-top: 44px;
+  font-size: 21px;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+.bp-prose :where(h4, h5, h6) {
+  margin-top: 36px;
+  font-size: 17.5px;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.bp-prose h2 + * { margin-top: 16px; }
+.bp-prose :where(h3, h4, h5, h6) + * { margin-top: 10px; }
+.bp-prose > :first-child { margin-top: 0; }
+.bp-prose > :last-child { margin-bottom: 0; }
+/* A post that opens on a heading: the hero box edge is rule enough. */
+.bp-prose > h2:first-child { padding-top: 0; }
+.bp-prose > h2:first-child::before, .bp-prose > h2:first-child::after { content: none; }
+
+.bp-prose strong { color: var(--bright); font-weight: 600; }
+
+.bp-prose a {
+  color: var(--brand-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(255,112,56,.5);
+  overflow-wrap: anywhere;
+  transition: text-decoration-color .2s;
+}
+.bp-prose a:hover { text-decoration-color: currentColor; }
+.bp-prose a:focus-visible { border-radius: 3px; }
+
+/* Lists: square markers echo the corner squares; ordered numbers in mono. */
+.bp-prose :where(ul, ol) { padding-left: 1.4em; }
+.bp-prose ol { padding-left: 1.6em; }
+.bp-prose ul { list-style: square; }
+.bp-prose li { padding-left: .3em; }
+.bp-prose li + li { margin-top: .55em; }
+.bp-prose li > :where(ul, ol, p) { margin-top: .55em; }
+.bp-prose li::marker { color: var(--brand-ink); }
+.bp-prose ol > li::marker { font-family: var(--mono); font-size: .86em; font-weight: 500; }
+
+.bp-prose blockquote {
+  margin-block: 30px;
+  padding: 16px 22px;
+  border-left: 2px solid var(--brand);
+  border-radius: 0 8px 8px 0;
+  background: var(--bg-2);
+  color: var(--text);
+}
+.bp-prose blockquote > * + * { margin-top: .8em; }
+
+/* Inline code: the homepage chip, sized to the reading text. */
+.bp-prose :not(pre) > code {
+  font-size: .86em;
+  padding: .12em .4em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.bp-prose a > code { color: inherit; }
+
+/* ── Code blocks ─────────────────────────────────────────────────
+   Window-like panels that scroll inside themselves (the author's
+   `wrap: true` Shiki setting is overridden so trees and tables keep
+   their columns). The language rides as a small tab hanging from the
+   top edge. The panel is a one-column grid as wide as the longest
+   line, so the tab (a sticky grid item) stays pinned to the visible
+   right edge while the code scrolls under it. */
+.bp-prose pre {
+  position: relative;
+  margin-block: 30px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+  font: 400 13.5px/1.7 var(--mono);
+  font-feature-settings: "calt" 0, "liga" 0;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  overflow-x: auto;
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-wrap: normal !important;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-4) transparent;
+}
+.bp-prose pre::-webkit-scrollbar { height: 6px; }
+.bp-prose pre::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 6px; }
+.bp-prose pre > code {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+.bp-prose pre span[style*="token-comment"] { font-style: italic; }
+/* The css-variables theme gives markdown headings weight but no colour;
+   tint them like the homepage diff's keywords so a note reads as a note. */
+.bp-prose pre:is([data-language="markdown"], [data-language="md"]) span[style*="font-weight:bold"] { color: var(--brand-ink) !important; }
+
+.bp-prose pre[data-language] {
+  display: grid;
+  /* At least the panel's width, at most the longest line: the track
+     grows past the panel only when the code does. */
+  grid-template-columns: minmax(max-content, 1fr);
+}
+.bp-prose pre[data-language] > code { grid-area: 1 / 1; }
+.bp-prose pre[data-language]::before {
+  content: attr(data-language);
+  grid-area: 1 / 1;
+  justify-self: end; align-self: start;
+  position: sticky; right: 0;
+  z-index: 1;
+  margin: -19px -7px 0 0;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
+  background: var(--bg-3);
+  font: 500 10.5px/1.2 var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.bp-prose pre:is([data-language="plaintext"], [data-language="text"], [data-language="txt"], [data-language="plain"])::before { content: none; }
+
+/* ── Tables: blueprint hairlines, mono cells, scroll inside ─────── */
+.bp-prose table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin-block: 30px;
+  border-collapse: collapse;
+  font: 400 13px/1.55 var(--mono);
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-4) transparent;
+}
+.bp-prose :where(th, td) {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.bp-prose th {
+  background: var(--bg-2);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bp-prose td {
+  /* Once a table is wider than the column it scrolls; a floor on the
+     cell width keeps it from first crushing prose cells to one word
+     per line. */
+  min-width: 8em;
+  color: var(--text);
+}
+.bp-prose td:last-child:not(:first-child) { min-width: 14em; } /* usually the prose column */
+
+/* ── Media ───────────────────────────────────────────────────── */
+.bp-prose :where(img, video) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.bp-prose figcaption,
+.bp-prose p > img + em {
+  display: block;
+  margin-top: 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--dim);
+  text-align: center;
+}
+
+.bp-prose hr {
+  height: 1px;
+  margin-block: 2.6em;
+  border: 0;
+  background: repeating-linear-gradient(to right, var(--line-2) 0 5px, transparent 5px 11px);
+}
+
+.bp-prose kbd {
+  padding: .1em .4em;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font: 500 .8em/1 var(--mono);
+  color: var(--bright);
+}
+
+/* GFM footnotes (remark's .sr-only label is hidden by blog.css). */
+.bp-prose .footnotes {
+  margin-top: 3em;
+  padding-top: 24px;
+  border-top: 1px dashed var(--line-2);
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* ══ Author card ═════════════════════════════════════════════════ */
+.bp-author {
+  display: flex; align-items: flex-start; gap: 20px;
+  max-width: 720px;
+  margin: var(--sec-gap) auto 0;
+  padding: clamp(22px, 3vw, 30px);
+}
+.bp-author-avatar {
+  width: 56px; height: 56px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  object-fit: cover;
+}
+.bp-author-body { min-width: 0; }
+.bp-author-kicker {
+  font: 500 10.5px/1.2 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--brand-ink);
+}
+.bp-author-name {
+  margin-top: 7px;
+  font-size: 18px; font-weight: 500; line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--bright);
+}
+.bp-author-role {
+  margin-top: 6px;
+  max-width: 54ch;
+  font-size: 15px; line-height: 1.55;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+/* Two classes: must outrank the base `ul[class]` margin reset. */
+.bp-author .bp-author-links {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 20px 0 0; padding: 0; list-style: none;
+}
+.bp-author-links .btn svg { width: 14px; height: 14px; }
+
+/* ══ Foot of the article ═════════════════════════════════════════ */
+.bp-foot {
+  max-width: 720px;
+  margin: 28px auto 0;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px 20px;
+}
+.bp-rss {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 34px;
+  font: 500 14px/1 var(--font);
+  color: var(--muted);
+  border-radius: 999px;
+  transition: color .2s;
+}
+.bp-rss:hover { color: var(--bright); }
+.bp-rss svg { width: 15px; height: 15px; }
+
+/* ══ Responsive ══════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .bp-lede { font-size: 17.5px; }
+  .bp-credits { margin-top: 30px; }
+  .bp-prose { font-size: 17px; line-height: 1.72; }
+  .bp-prose h2 { margin-top: 52px; padding-top: 28px; font-size: 24px; }
+  .bp-prose h3 { margin-top: 36px; font-size: 19.5px; }
+  .bp-prose pre { padding: 16px; font-size: 13px; border-radius: 10px; }
+  .bp-prose pre[data-language]::before { margin-top: -17px; margin-right: -3px; }
+  .bp-prose blockquote { padding: 14px 18px; }
+}
+@media (max-width: 520px) {
+  .bp-author { flex-direction: column; gap: 16px; }
+}
+
+/* ══ Reduced motion ══════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .bp-back svg, .bp-prose a, .bp-rss { transition: none; }
+  .bp-back:hover svg { transform: none; }
+}

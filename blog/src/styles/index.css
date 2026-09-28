@@ -1,0 +1,220 @@
+/* ═══════════════════════════════════════════════════════════════
+   Blog index (src/pages/index.astro).
+   A compact brand slab, then one blueprint box of posts: the newest
+   featured full width, the rest in a grid of card links. Only bi-
+   classes live here. The shared ones (.slab .announce .rise .sec
+   .frame .box .cn .cells .chip .chip-draft .meta-row .link .h3 .p .ico) come
+   from blog.css and are used as-is, never redefined.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ══ Header slab ═════════════════════════════════════════════════
+   The homepage hero recipe, compact: inset 8px under the 72px nav,
+   content centred. A lower, wider sun than the hero keeps the lede
+   off the brightest part of the glow. */
+.bi-head-wrap { padding: 72px 8px 0; }
+.bi-head {
+  --glow: 66% 44%;
+  min-height: clamp(340px, 46vh, 460px);
+  /* Tall portrait tablets would otherwise get a sea of empty slab. */
+  min-height: clamp(340px, min(46svh, 24vw + 220px), 460px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+  padding: clamp(56px, 8vh, 76px) 20px clamp(84px, 12vh, 112px);
+}
+.bi-head-in {
+  width: 100%; max-width: 820px;
+  display: flex; flex-direction: column; align-items: center;
+}
+
+/* The pill is the shared .announce; its first label never shrinks
+   (the homepage's version tag does the same). */
+.bi-ann-k { flex-shrink: 0; }
+
+.bi-title {
+  font-size: clamp(36px, 4.6vw, 60px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  color: #fffbf5;
+  max-width: 22ch;
+  margin: 28px auto 0;
+}
+.bi-lede {
+  font-size: 18px; line-height: 1.55;
+  color: rgba(255,255,255,.86);
+  max-width: 600px;
+  margin: 20px auto 0;
+  text-wrap: pretty;
+}
+
+/* ══ Post box ════════════════════════════════════════════════════ */
+.sec.bi-list { padding-top: var(--sec-gap); }
+.bi-box { --bi-pad: clamp(22px, 2.6vw, 34px); }
+
+/* Header row: mono label, dotted leader, the feed as a lit tag
+   (the homepage's cost-chart header). */
+.bi-bar {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 52px; padding: 12px var(--bi-pad);
+  border-bottom: 1px solid var(--line);
+  font: 400 12px/1.2 var(--mono);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.bi-bar-h { font: 500 12px/1.2 var(--mono); letter-spacing: .02em; color: var(--text); }
+.bi-bar-rule { flex: 1; min-width: 16px; border-top: 1px dotted var(--line-2); }
+.bi-bar-rss {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 0; margin: -6px 0;
+  color: var(--brand-ink);
+  border-radius: 4px;
+  text-underline-offset: 3px; text-decoration-thickness: 1px;
+}
+.bi-bar-rss::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--brand-ink);
+  box-shadow: 0 0 0 3px rgba(255,112,56,.16);
+}
+.bi-bar-rss:hover { text-decoration: underline; }
+
+/* ── Card links (featured + grid) ──────────────────────────────── */
+.bi-card {
+  display: flex; flex-direction: column;
+  padding: var(--bi-pad);
+  background: var(--bg);
+  transition: background .25s var(--ease);
+}
+.bi-card:hover { background: var(--bg-2); }
+/* Inset ring: an outside one would slide under the neighbouring cell. */
+.bi-card:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: -2px; }
+
+.bi-media {
+  position: relative; isolation: isolate;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-2);
+  transition: border-color .25s var(--ease);
+}
+.bi-media img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transition: transform .7s var(--ease);
+}
+.bi-card:hover .bi-media { border-color: var(--line-2); }
+.bi-card:hover .bi-media img { transform: scale(1.03); }
+
+/* No hero image: a quiet dot-grid panel with the post's first tag,
+   so the grid keeps its rhythm. */
+.bi-ph {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  background:
+    radial-gradient(70% 70% at 50% 50%, transparent 30%, var(--bg-2) 100%),
+    radial-gradient(rgba(255,255,255,.075) 1px, transparent 1.3px) 0 0 / 14px 14px,
+    var(--bg-2);
+}
+.bi-ph-tag {
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 6px 10px 6px 9px;
+  border: 1px solid var(--line-2); border-radius: 6px;
+  background: var(--bg);
+  font: 500 11px/1.2 var(--mono);
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bi-ph-tag::before {
+  content: ""; width: 6px; height: 6px; flex-shrink: 0;
+  border-radius: 1px; background: var(--brand);
+}
+
+/* .bi-meta rides on the shared .meta-row (blog.css); only its
+   position in each card is set here. */
+
+/* ── Featured (newest post) ───────────────────────────────────── */
+.bi-feat { display: grid; gap: 26px; }
+.bi-feat-body { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.bi-feat-title {
+  margin-top: 14px;
+  font-size: clamp(26px, 2.6vw, 34px);
+  font-weight: 500; line-height: 1.12; letter-spacing: -0.025em;
+  color: var(--bright);
+  max-width: 20ch;
+}
+.bi-feat-desc {
+  margin-top: 14px;
+  font-size: 16px; line-height: 1.6;
+  color: var(--muted);
+  max-width: 50ch;
+  text-wrap: pretty;
+}
+/* Two classes: outranks the base ul[class] reset's margin: 0. */
+.bi-feat-body .bi-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 22px 0 0; padding: 0; list-style: none; }
+.bi-more { margin-top: 26px; font-size: 15px; line-height: 1.3; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+/* The arrow is spaced by margin, not a space, so the hover underline
+   stops at the words. */
+.bi-more span { display: inline-block; margin-left: .3em; transition: transform .25s var(--ease); }
+.bi-feat:hover .bi-more { text-decoration: underline; }
+.bi-feat:hover .bi-more span { transform: translateX(3px); }
+
+/* ── The rest: a .cells grid ──────────────────────────────────── */
+.bi-grid { border-top: 1px solid var(--line); }
+.bi-cell .bi-meta { margin-top: 20px; }
+.bi-cell-title {
+  margin-top: 10px;
+  font-size: 19px; font-weight: 500; line-height: 1.3; letter-spacing: -0.012em;
+  color: var(--bright);
+}
+.bi-cell-desc {
+  margin-top: 8px;
+  font-size: 15px; line-height: 1.55;
+  color: var(--muted);
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden;
+}
+.cells > .bi-fill {
+  display: none;
+  background:
+    radial-gradient(rgba(255,255,255,.035) 1px, transparent 1.3px) 0 0 / 22px 22px,
+    var(--bg);
+}
+
+/* ── Empty state ──────────────────────────────────────────────── */
+.bi-empty { padding: clamp(48px, 7vw, 88px) var(--bi-pad); text-align: center; }
+.bi-empty .ico { margin: 0 auto 18px; }
+.bi-empty .p { max-width: 44ch; margin: 10px auto 0; }
+
+/* ══ Responsive ══════════════════════════════════════════════════ */
+@media (min-width: 900px) {
+  .bi-feat {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: clamp(32px, 4vw, 56px);
+    align-items: center;
+  }
+}
+@media (min-width: 960px) {
+  .cells > .bi-fill.f3 { display: block; }
+}
+/* Three cards under 960px get cramped: two columns until the shared
+   .cells-3 rule drops to one at 760px. */
+@media (min-width: 761px) and (max-width: 959px) {
+  .cells.bi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cells > .bi-fill.f2 { display: block; }
+}
+@media (max-width: 640px) {
+  .bi-head { --glow: 100% 36%; padding: 56px 20px 88px; }
+  .bi-bar { gap: 10px; }
+}
+@media (max-width: 400px) {
+  .bi-head { padding-left: 16px; padding-right: 16px; }
+}
+
+/* ══ Reduced motion ══════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .bi-card:hover .bi-media img,
+  .bi-feat:hover .bi-more span { transform: none; }
+}
