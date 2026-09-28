@@ -53,10 +53,10 @@ const COLLECTION_TEXT: Record<string, string> = {
   Mistral: 'text-rose-400',
 };
 
-function groupLabel(group: string): string {
+export function groupLabel(group: string): string {
   return PROVIDER_LABELS[group] || group;
 }
-function groupDot(group: string): string {
+export function groupDot(group: string): string {
   return COLLECTION_DOT[group] || PROVIDER_DOT[group] || 'bg-zinc-500';
 }
 function groupText(group: string): string {

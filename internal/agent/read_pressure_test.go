@@ -32,6 +32,15 @@ const resendCostMarker = "Re-send cost:"
 // window cannot influence them.
 const costWindow = 0
 
+// The terse reminder is the one place an ask_user exchange would otherwise go
+// unnamed — the directive lists what the summary must carry, and the user's
+// answers steer every step after them, so they belong in that list.
+func TestCompactDirectiveCarriesTheUserAnswers(t *testing.T) {
+	if !strings.Contains(compactDirective, "each question with the answer it got") {
+		t.Errorf("compactDirective does not require the user's answers: %q", compactDirective)
+	}
+}
+
 func TestReadPressureThresholdTokens(t *testing.T) {
 	t.Setenv(readPressureThresholdEnv, "") // pin the built-in default
 	if got := readPressureThresholdTokens(); got != readPressureThresholdDefault {

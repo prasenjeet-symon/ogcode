@@ -28,6 +28,7 @@ import PreviewPage from './pages/preview';
 import SettingsLayout from './pages/settings/layout';
 import GeneralSettings from './pages/settings/general';
 import ModelsSettings from './pages/settings/models';
+import UsageSettings from './pages/settings/usage';
 import SkillsSettings from './pages/settings/skills';
 import MCPSettings from './pages/settings/mcp';
 import AboutSettings from './pages/settings/about';
@@ -49,9 +50,9 @@ export default function App() {
       <Route path="/docindex" component={DocIndexPage} />
       <Route path="/device" component={DevicePage} />
       <Route path="/preview" component={PreviewPage} />
-      {/* The agent hands back /preview/<port>/ URLs; a click on one is a
-          client-side navigation that lands here with the port in the path. The
-          page normalizes it to /preview?port=<port>. */}
+      {/* A legacy /preview/<port>/ link is a client-side navigation that lands
+          here with the port in the path. The page normalizes it to
+          /preview?port=<port>. */}
       <Route path="/preview/:port" component={PreviewPage} />
       {/* Skills moved under Settings, where the rest of "what this agent can
           reach for" lives. The old path still resolves so bookmarks and links
@@ -60,6 +61,7 @@ export default function App() {
       <Route path="/settings" component={SettingsLayout}>
         <Route path="/" component={GeneralSettings} />
         <Route path="/models" component={ModelsSettings} />
+        <Route path="/usage" component={UsageSettings} />
         <Route path="/skills" component={SkillsSettings} />
         <Route path="/mcp" component={MCPSettings} />
         <Route path="/about" component={AboutSettings} />

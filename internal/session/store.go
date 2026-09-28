@@ -147,16 +147,15 @@ func utilityTokens(input, output, reasoning, cacheRead, cacheWrite int) *TokenCo
 	if input == 0 && output == 0 && reasoning == 0 && cacheRead == 0 && cacheWrite == 0 {
 		return nil
 	}
-	return &TokenCounts{
+	tc := &TokenCounts{
 		Input:      input,
 		Output:     output,
 		Reasoning:  reasoning,
 		CacheRead:  cacheRead,
 		CacheWrite: cacheWrite,
-		// Cache read is excluded from Total for the same reason as per-message
-		// counts: cached tokens were already counted as input when first sent.
-		Total: input + cacheWrite + output,
 	}
+	tc.Total = tc.Consumed()
+	return tc
 }
 
 // UpdateCompactionSummary updates only the compaction_summary column for a session,
@@ -199,6 +198,61 @@ func (s *Store) UpdateMessage(msg *MessageInfo) error {
 		string(data), msg.ID,
 	)
 	return err
+}
+
+// StepUsage is what one assistant step spent and on which endpoint: the part of
+// a message a cost view needs, read without the message's parts.
+type StepUsage struct {
+	MessageID MessageID
+	SessionID SessionID
+	Model     string
+	Provider  string
+	Tokens    TokenCounts
+	CreatedAt int64
+}
+
+// ListStepUsage returns every assistant step that reported usage, oldest first —
+// one session's when sessionID is set, the whole project's when it is empty. It
+// decodes only the message rows, never their parts, so pricing a long session
+// does not load its transcript.
+func (s *Store) ListStepUsage(sessionID SessionID) ([]StepUsage, error) {
+	query := `SELECT data FROM message`
+	var args []any
+	if sessionID != "" {
+		query += ` WHERE session_id = ?`
+		args = append(args, sessionID)
+	}
+	query += ` ORDER BY time_created, id`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list step usage: %w", err)
+	}
+	defer rows.Close()
+
+	var out []StepUsage
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var msg MessageInfo
+		// One unreadable row must not hide the rest of a project's spend.
+		if json.Unmarshal([]byte(data), &msg) != nil {
+			continue
+		}
+		if msg.Role != RoleAssistant || msg.Tokens == nil || msg.Tokens.Consumed() == 0 {
+			continue
+		}
+		out = append(out, StepUsage{
+			MessageID: msg.ID,
+			SessionID: msg.SessionID,
+			Model:     msg.Model,
+			Provider:  msg.Provider,
+			Tokens:    *msg.Tokens,
+			CreatedAt: msg.CreatedAt,
+		})
+	}
+	return out, rows.Err()
 }
 
 // DeleteMessage removes a message and all of its parts. Foreign-key cascade

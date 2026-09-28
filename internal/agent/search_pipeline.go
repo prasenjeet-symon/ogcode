@@ -295,7 +295,8 @@ Candidate sources:
 %s
 Pick the %d best sources to read in full to answer the question. Prefer official documentation, primary sources, and authoritative sites over SEO aggregators. Output only their numbers, one per line, most relevant first — just the numbers, nothing else.`, query, sb.String(), tune.fetchTopK)
 
-	out, err := oneShotLLM(ctx, p, model, system, user, 0)
+	out, usage, err := oneShotLLM(ctx, p, model, system, user, 0)
+	lr.chargeUsage(ctx, providerIDOf(p), model, usage)
 	if err != nil {
 		slog.Warn("deep search: rank failed, using top results", "err", err)
 		return topResults(candidates, tune.fetchTopK)
@@ -433,7 +434,9 @@ Source material:
 %s
 Write the final answer now as plain markdown.`, today, query, sb)
 
-	return oneShotLLM(ctx, p, model, searchSynthesizeSystem, user, searchSynthMaxTokens)
+	out, usage, err := oneShotLLM(ctx, p, model, searchSynthesizeSystem, user, searchSynthMaxTokens)
+	lr.chargeUsage(ctx, providerIDOf(p), model, usage)
+	return out, err
 }
 
 // buildSourceMaterial renders the fetched pages (or, when every fetch failed,
@@ -459,14 +462,16 @@ func buildSourceMaterial(candidates []search.SearchResult, pages []search.PageCo
 	return sb.String()
 }
 
-// oneShotLLM makes a single tool-free LLM call and returns the collected text.
-// It falls back to the reasoning stream when the text stream is empty (some
-// thinking models emit their whole answer as reasoning). maxTokens of 0 leaves
-// the provider default in place.
-func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user string, maxTokens int) (string, error) {
+// oneShotLLM makes a single tool-free LLM call and returns the collected text
+// and the usage the provider reported (nil when it reported none — the caller
+// charges it to the session either way, since a failed call can still have been
+// billed). It falls back to the reasoning stream when the text stream is empty
+// (some thinking models emit their whole answer as reasoning). maxTokens of 0
+// leaves the provider default in place.
+func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user string, maxTokens int) (string, *provider.TokenUsage, error) {
 	userJSON, err := json.Marshal(user)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	req := provider.StreamRequest{
 		Model:     model,
@@ -476,16 +481,21 @@ func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user st
 	}
 	ch, err := p.StreamChat(ctx, req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var text, reasoning strings.Builder
 	var streamErr string
+	var usage *provider.TokenUsage
 	for evt := range ch {
 		switch evt.Type {
 		case provider.EventTextDelta:
 			text.WriteString(evt.Text)
 		case provider.EventReasoning:
 			reasoning.WriteString(evt.Text)
+		case provider.EventUsage:
+			// Providers may repeat cumulative usage; the last report wins,
+			// exactly as in the step loop.
+			usage = evt.Usage
 		case provider.EventError:
 			streamErr = evt.Error
 		}
@@ -495,13 +505,13 @@ func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user st
 	// truncated answer as a successful research result; the caller can then use
 	// its fallback or report the failure clearly.
 	if streamErr != "" {
-		return "", fmt.Errorf("%s", streamErr)
+		return "", usage, fmt.Errorf("%s", streamErr)
 	}
 	out := strings.TrimSpace(text.String())
 	if out == "" {
 		out = strings.TrimSpace(reasoning.String())
 	}
-	return out, nil
+	return out, usage, nil
 }
 
 // extractFirstURL returns the first http(s) token in s, trimmed of surrounding

@@ -732,22 +732,73 @@ func (r *Registry) ListModels() []ModelInfo {
 	return models
 }
 
-// ModelSupportsImages reports whether the given model accepts image input.
-// Unknown models default to false.
+// localRunner is implemented by a provider that can run a model on this
+// machine (a local Ollama instance), where the window a request gets is the
+// instance's num_ctx — set by free memory or OLLAMA_CONTEXT_LENGTH — and image
+// input depends on the build that was pulled, not on the model's published
+// facts.
+type localRunner interface {
+	RunsLocally(modelID string) bool
+}
+
+// runsLocally reports whether modelID runs on this machine: its custom routing
+// or, failing that, the provider that lists it says so.
+func (r *Registry) runsLocally(modelID string) bool {
+	r.customMu.RLock()
+	pid, custom := r.customModels[modelID]
+	r.customMu.RUnlock()
+	var p Provider
+	if custom {
+		p = r.Get(pid)
+	} else {
+		p, _, _ = r.lookupModel(modelID)
+	}
+	lr, ok := p.(localRunner)
+	return ok && lr.RunsLocally(modelID)
+}
+
+// CatalogModel returns the built-in catalogue's entry for modelID where the
+// catalogue speaks for it — everywhere but a model running on this machine,
+// whose window and image support are the runtime's, found by asking it (a
+// listing, a probe, an overflow) rather than by reading the model's datasheet.
+func (r *Registry) CatalogModel(modelID string) (CatalogModel, bool) {
+	if r.runsLocally(modelID) {
+		return CatalogModel{}, false
+	}
+	return LookupCatalogModel(modelID)
+}
+
+// ModelSupportsImages reports whether the given model accepts image input. The
+// built-in catalogue answers for any model it knows, whichever provider serves
+// it (see CatalogModel); otherwise the provider's own listing does. Unknown
+// models default to false.
 func (r *Registry) ModelSupportsImages(modelID string) bool {
+	if cm, ok := r.CatalogModel(modelID); ok {
+		return cm.SupportsImages
+	}
 	_, m, ok := r.lookupModel(modelID)
 	return ok && m.SupportsImages
 }
 
-// ContextWindow returns the model's total context length in tokens, or 0 when
-// unknown (dynamically-fetched models without catalog metadata). Callers treat
-// 0 as "fall back to a size heuristic".
+// ContextWindow returns the most a request to the model can hold, in tokens,
+// or 0 when unknown. Two sources know it: the built-in catalogue, under any id
+// a host gives the model — including one a user added by hand that no provider
+// lists — and the serving host's own listing (OpenRouter's context_length,
+// Ollama Cloud's /api/show). When both do, the smaller wins: a host may serve
+// less than the vendor's window (MiniMax-M3 is 1M first-party, 512K elsewhere)
+// and a request must fit the host it is sent to, while a host that claims more
+// than the vendor (OpenRouter's 1M for a 200K model) is not to be trusted with
+// it. A model running on this machine gets only its listing's figure (see
+// CatalogModel). Callers treat 0 as "fall back to a size heuristic".
 func (r *Registry) ContextWindow(modelID string) int {
-	_, m, ok := r.lookupModel(modelID)
-	if !ok {
-		return 0
+	window := 0
+	if cm, ok := r.CatalogModel(modelID); ok {
+		window = cm.ContextWindow
 	}
-	return m.ContextWindow
+	if _, m, ok := r.lookupModel(modelID); ok && m.ContextWindow > 0 && (window <= 0 || m.ContextWindow < window) {
+		window = m.ContextWindow
+	}
+	return window
 }
 
 // MaxOutputTokens returns the model's output ceiling in tokens, or 0 when
@@ -783,6 +834,26 @@ func (r *Registry) IsCustomModel(modelID string) bool {
 	defer r.customMu.RUnlock()
 	_, ok := r.customModels[modelID]
 	return ok
+}
+
+// ServingProvider is the provider that serves modelID by the registry's own
+// routing — a custom-model registration, or a provider that lists the model —
+// and nil when none does. Unlike ResolveProviderFor it never falls back to the
+// highest-priority provider: it answers "where did this model run", for work
+// whose provider was never recorded, and a guess there would misstate a bill.
+func (r *Registry) ServingProvider(modelID string) Provider {
+	r.customMu.RLock()
+	customProvider, customOk := r.customModels[modelID]
+	r.customMu.RUnlock()
+	if customOk {
+		if p := r.Get(customProvider); p != nil {
+			return p
+		}
+	}
+	if p, _, ok := r.lookupModel(modelID); ok {
+		return p
+	}
+	return nil
 }
 
 // ResolveProvider resolves a model id with no stored provider preference, the

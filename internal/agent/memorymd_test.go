@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,25 +82,46 @@ func TestLoadMemoryMD_Hierarchy(t *testing.T) {
 	}
 }
 
-func TestLoadMemoryMD_SizeLimit(t *testing.T) {
+// With no budget configured — the default — a large MEMORY.md reaches the
+// model whole. Long-term memory is the file the agent is told to append to
+// every turn, so a silent cut is the one failure that compounds.
+func TestLoadMemoryMD_NoBudgetByDefault(t *testing.T) {
 	dir := t.TempDir()
-	// Create a file larger than the max size
-	bigContent := make([]byte, maxMemoryMDSize+1000)
+	bigContent := strings.Repeat("a", 128*1024)
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(bigContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadMemoryMD(dir)
+	if !strings.Contains(got, bigContent) {
+		t.Errorf("expected the whole file with no budget set, got %d bytes", len(got))
+	}
+	if strings.Contains(got, mdTruncationMarker) {
+		t.Error("an uncapped load must not carry the truncation marker")
+	}
+}
+
+// A budget set through the environment caps the total across all files.
+func TestLoadMemoryMD_BudgetFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file larger than the budget
+	bigContent := make([]byte, 24*1024)
 	for i := range bigContent {
 		bigContent[i] = 'a'
 	}
 	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), bigContent, 0644); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv(memoryMDBudgetEnv, "8192")
 
 	got := LoadMemoryMD(dir)
 	if got == "" {
 		t.Fatal("expected non-empty result")
 	}
-	// Should be truncated to maxMemoryMDSize
+	// Should be truncated to the configured budget.
 	tagOverhead := len("\n\n<memory-md path=\"MEMORY.md\">\n\n</memory-md>")
-	if len(got) > maxMemoryMDSize+tagOverhead {
-		t.Errorf("result too long: got %d bytes, expected at most %d", len(got), maxMemoryMDSize+tagOverhead)
+	if len(got) > 8192+tagOverhead {
+		t.Errorf("result too long: got %d bytes, expected at most %d", len(got), 8192+tagOverhead)
 	}
 }
 

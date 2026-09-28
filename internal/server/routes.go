@@ -11,6 +11,14 @@ func (s *Server) routes() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
+	// Preview hostnames (<port>.<preview-domain>) are dispatched before any
+	// route, so a service at its own origin root answers for every path —
+	// including /api/... — exactly as it would if it were reachable directly.
+	// And before the middleware below, which is ogcode's own: a preview
+	// response must not carry ogcode's CORS policy, and the proxy must see the
+	// real peer rather than one RealIP took from a client header. See
+	// previewHostDispatch.
+	r.Use(s.previewHostDispatch)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -74,12 +82,15 @@ func (s *Server) routes() http.Handler {
 		r.Delete("/ogx", s.handleOGXDisconnect)
 
 		r.Get("/pricing", s.handleGetPricing)
+		// Spend across every project and model, from the global ledger.
+		r.Get("/usage", s.handleUsageSummary)
 
 		r.Get("/resources", s.handleResources)
 		r.Get("/scrcpy/status", s.handleScrcpyStatus)
 		r.Get("/scrcpy/devices", s.handleScrcpyDevices)
-		r.Get("/preview/status", s.handlePreviewStatus)
 		r.Get("/preview/services", s.handlePreviewServices)
+		r.Post("/preview/ports", s.handlePublishPreviewPort)
+		r.Delete("/preview/ports/{port}", s.handleUnpublishPreviewPort)
 
 		r.Get("/skills", s.handleListSkills)
 		r.Post("/skills/{name}", s.handleSetSkillEnabled)
@@ -100,6 +111,7 @@ func (s *Server) routes() http.Handler {
 				r.Post("/prompt", s.handlePrompt)
 				r.Post("/guidance", s.handleGuidance)
 				r.Get("/message", s.handleGetMessages)
+				r.Get("/usage", s.handleSessionUsage)
 				r.Get("/permission", s.handleListPermissions)
 				r.Post("/permission/{permissionID}", s.handlePermissionReply)
 				r.Get("/question", s.handleListQuestions)
@@ -159,6 +171,8 @@ func (s *Server) routes() http.Handler {
 			r.Get("/preview", s.handleDocIndexPreview)
 			r.Get("/docs", s.handleListIndexedDocs)
 			r.Get("/docs/content", s.handleReadDocContent)
+			r.Get("/docs/raw", s.handleReadDocAsset)
+			r.Get("/docs/entry", s.handleGetIndexedDoc)
 			r.Get("/files", s.handleListIndexFiles)
 			r.Get("/gitignore", s.handleGitignoreInfo)
 			r.Get("/excludes", s.handleListExcludes)
@@ -178,10 +192,9 @@ func (s *Server) routes() http.Handler {
 	// (http://127.0.0.1:8000). Also before the SPA fallback.
 	s.serveScrcpy(r)
 
-	// Forward /preview/<port>/* to a live local service on 127.0.0.1:<port> —
-	// a dev server, a player, a dashboard — so it is browsable at the ogcode
-	// origin. Also before the SPA fallback (bare /preview is left to the SPA,
-	// where the preview page lives).
+	// Redirect the legacy /preview/<port>/* form onto the service's own preview
+	// hostname, where previewHostDispatch proxies it. Also before the SPA
+	// fallback (bare /preview is left to the SPA, where the preview page lives).
 	s.servePreview(r)
 
 	// Serve embedded web UI (or placeholder for dev)

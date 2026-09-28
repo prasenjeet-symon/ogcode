@@ -104,6 +104,10 @@ export interface MessageInfo {
   cost?: number;
   tokens?: TokenCounts;
   createdAt: number;
+  /** The model that answered (assistant messages; absent on older ones). */
+  model?: string;
+  /** The provider that served it. */
+  provider?: string;
 }
 
 /**
@@ -456,6 +460,120 @@ export function getProviderPricing(provider: string): Promise<Record<string, num
   return fetchAPI(`/pricing?provider=${encodeURIComponent(provider)}`);
 }
 
+// Usage API — what models cost, priced on the server (internal/usage).
+//
+// billing says how a model's tokens are paid for: 'metered' is billed per token
+// at a known price, 'included' is a flat plan (OGX, Ollama Cloud) or a local
+// model that bills nothing per token, 'unpriced' is billed per token at a price
+// nothing publishes, and 'unknown' is work whose provider was never recorded
+// on a model nothing configured serves today — never counted as billed.
+export type Billing = 'metered' | 'included' | 'unpriced' | 'unknown';
+
+export interface UsageTokens {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Everything but cache reads, as the token pill counts. */
+  effective: number;
+  /** Everything, cache reads included. */
+  total: number;
+}
+
+export interface ModelUsage extends UsageTokens {
+  provider: string;
+  model: string;
+  /** The catalogue's display name, when it knows the model. */
+  name?: string;
+  billing: Billing;
+  /**
+   * Set when `provider` is empty (work from before providers were recorded)
+   * and a configured provider serves the model: the row is billed as that one.
+   */
+  inferredProvider?: string;
+  /**
+   * The endpoint host when the provider slot points somewhere other than its
+   * own default (the OpenAI slot at api.z.ai); absent on default endpoints.
+   */
+  host?: string;
+  /** Agent steps plus utility calls. */
+  calls: number;
+  sessions: number;
+  /** Billed per token: 0 for included usage, null when the price is unknown. */
+  costUsd: number | null;
+  /** Included usage at the model's list price; null otherwise. */
+  listUsd: number | null;
+}
+
+export interface UsageTotals extends UsageTokens {
+  calls: number;
+  sessions: number;
+  /** Everything billed per token at a known price. */
+  costUsd: number;
+  /** Plan and local usage at list price. */
+  includedListUsd: number;
+  includedEffective: number;
+  /** Effective tokens billed at a price nothing publishes, left out of costUsd. */
+  unpricedEffective: number;
+  /** Effective tokens whose provider is unknown, also left out of costUsd. */
+  unknownEffective: number;
+}
+
+export interface SessionUsage {
+  models: ModelUsage[];
+  totals: UsageTotals;
+}
+
+export interface ProjectUsage extends UsageTokens {
+  /** The workspace directory. */
+  project: string;
+  name: string;
+  costUsd: number;
+  includedListUsd: number;
+}
+
+export interface UsageDay {
+  /** YYYY-MM-DD in the server's local time. */
+  day: string;
+  input: number;
+  output: number;
+  effective: number;
+  costUsd: number;
+  includedListUsd: number;
+}
+
+export interface UsageSummary {
+  from: number;
+  to: number;
+  /** The project the summary is narrowed to; absent for all projects. */
+  project?: string;
+  /** When the ledger's oldest row was spent; 0 when it is empty. */
+  first: number;
+  models: ModelUsage[];
+  projects: ProjectUsage[];
+  days: UsageDay[];
+  totals: UsageTotals;
+}
+
+/** One session's spend, each step priced at the model that answered it. */
+export function getSessionUsage(sessionId: string): Promise<SessionUsage> {
+  return fetchAPI(`/session/${sessionId}/usage`);
+}
+
+/**
+ * Spend since `from` (unix ms; 0 = all of it) in one project — the workspace
+ * directory, its task worktrees included — or, with no project, across every
+ * project on this machine.
+ */
+export function getUsageSummary(from = 0, project = ''): Promise<UsageSummary> {
+  const q = new URLSearchParams();
+  if (from > 0) q.set('from', String(from));
+  if (project) q.set('project', project);
+  const qs = q.toString();
+  return fetchAPI(`/usage${qs ? `?${qs}` : ''}`);
+}
+
 // Path API
 export interface PathInfo {
   home: string;
@@ -493,6 +611,11 @@ export interface ModelInfo {
   collection: string;
   inputPricePerM: number;
   outputPricePerM: number;
+  // The context window the agent loop sizes compaction against (catalogue, else
+  // learned from an overflow error; absent = unknown), and the request size at
+  // which the loop compacts. Read by the context meter.
+  contextWindow?: number;
+  compactAtTokens?: number;
 }
 
 export function getModels(): Promise<ModelInfo[]> {
@@ -1035,6 +1158,20 @@ export function getDocContent(docPath: string, directory?: string): Promise<DocC
   return fetchAPI(`/docindex/docs/content?path=${encodeURIComponent(docPath)}${dir}`);
 }
 
+// What the index recorded for one file: its pages with the labels and keywords
+// each was filed under. Rejects with a 404 ApiError for a file not in the index.
+export function getIndexedDoc(docPath: string, directory?: string): Promise<DocSummary> {
+  const dir = directory ? `&directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/docindex/docs/entry?path=${encodeURIComponent(docPath)}${dir}`);
+}
+
+// URL an <img> loads a workspace image from — the Markdown preview rewrites a
+// document's relative image paths to it. Images only; the server refuses the rest.
+export function docAssetURL(docPath: string, directory?: string): string {
+  const dir = directory ? `&directory=${encodeURIComponent(directory)}` : '';
+  return `${API}/docindex/docs/raw?path=${encodeURIComponent(docPath)}${dir}`;
+}
+
 export interface IndexPlan {
   total: number;
   pending: number;
@@ -1192,20 +1329,6 @@ export function getScrcpyDevices(): Promise<{ devices: ScrcpyDevice[] }> {
 }
 
 // Preview API
-// State of a live local service (a dev server, a player, a dashboard) that the
-// server proxies onto /preview/<port>/ from 127.0.0.1:<port>.
-export interface PreviewStatus {
-  // True when something answers HTTP on the loopback port, so the panel can
-  // embed it rather than showing the nothing-there hint.
-  up: boolean;
-  // Where the reverse proxy dials (always http://127.0.0.1:<port>).
-  target: string;
-}
-
-export function getPreviewStatus(port: number): Promise<PreviewStatus> {
-  return fetchAPI(`/preview/status?port=${port}`);
-}
-
 // One loopback service the preview grid offers.
 export interface PreviewService {
   // The loopback port the service listens on.
@@ -1216,18 +1339,50 @@ export interface PreviewService {
   // Where the reverse proxy dials (always http://127.0.0.1:<port>).
   target: string;
   // True when the service answered, so the grid can embed it rather than
-  // greying the tile.
+  // greying the tile. Always false for an unpublished port, which the server
+  // never probes.
   up: boolean;
-  // 'auto' for a listener the server discovered, 'manual' for a port the page
-  // asked for. A manual port is listed whether or not it answers.
-  source: 'auto' | 'manual';
+  // True when the service answered with a text/html page. A service that is
+  // up but served JSON or plain text (a raw API, a non-HTML listener), or that
+  // redirects off its own origin, is not embeddable, so the grid shows it as
+  // up-but-not-embeddable instead of loading a white box.
+  html: boolean;
+  // True when the port is served at its preview hostname: the agent handed
+  // back its live-preview URL, or the user added it. A port the page only
+  // named (a ?port= deep link) is listed unpublished, so the user can add it —
+  // its hostname answers 403 until they do.
+  published: boolean;
+  // The URL the browser opens to reach the service at its own origin —
+  // http://<port>.<preview-domain>/ prefixed with this server's scheme and
+  // port. Each service answers at the root of that origin so an app that reads
+  // its own location (Next.js and friends) boots normally.
+  url: string;
 }
 
-// getPreviewServices lists the services for the preview grid: the apps the
-// server discovers on this machine, plus the ports given here — the user's
-// added ports and any /preview/<port>/ deep link — so the grid can show a port
-// that is down instead of it silently vanishing.
-export function getPreviewServices(ports: number[]): Promise<{ services: PreviewService[] }> {
-  const q = ports.length ? `?ports=${ports.join(',')}` : '';
-  return fetchAPI(`/preview/services${q}`);
+// getPreviewServices lists the services for the preview grid: the ports
+// published for this directory — announced by the agent or added by the user —
+// plus the ports given here (a ?port= deep link), so the grid can offer to
+// publish a port it was pointed at. Scoping to a directory keeps the grid to
+// the project in view rather than every service on the machine.
+export function getPreviewServices(ports: number[], directory?: string): Promise<{ services: PreviewService[] }> {
+  const params = new URLSearchParams();
+  if (ports.length) params.set('ports', ports.join(','));
+  if (directory) params.set('directory', directory);
+  const q = params.toString();
+  return fetchAPI(`/preview/services${q ? `?${q}` : ''}`);
+}
+
+// publishPreviewPort adds a port to this project's previews: its tile is
+// listed and its preview hostname starts being served.
+export function publishPreviewPort(port: number, directory?: string): Promise<{ port: number; url: string }> {
+  return fetchAPI('/preview/ports', {
+    method: 'POST',
+    body: JSON.stringify({ port, directory }),
+  });
+}
+
+// unpublishPreviewPort takes a port off the previews: its tile goes and its
+// preview hostname stops being served (until the agent announces it again).
+export function unpublishPreviewPort(port: number): Promise<void> {
+  return fetchAPI(`/preview/ports/${port}`, { method: 'DELETE' });
 }

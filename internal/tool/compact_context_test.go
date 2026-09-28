@@ -91,6 +91,38 @@ func TestCompactContextParametersAreValidJSONSchema(t *testing.T) {
 	}
 }
 
+// An ask_user exchange steers every step after it, so a summary that flattens
+// it loses the steering. Both surfaces the agent reads — the tool description and
+// the schema property it fills — have to name the requirement; a rule stated in
+// only one of them is a rule the agent can miss.
+func TestCompactContextRequiresTheUserAnswersVerbatim(t *testing.T) {
+	desc := NewCompactContextTool().Description()
+	if !strings.Contains(desc, "ask_user") {
+		t.Errorf("description does not name ask_user: %q", desc)
+	}
+	if !strings.Contains(desc, "verbatim") {
+		t.Errorf("description does not require the answers verbatim: %q", desc)
+	}
+
+	var schema struct {
+		Properties struct {
+			Summary struct {
+				Description string `json:"description"`
+			} `json:"summary"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(NewCompactContextTool().Parameters(), &schema); err != nil {
+		t.Fatalf("parameters are not valid JSON: %v", err)
+	}
+	summaryDesc := schema.Properties.Summary.Description
+	if !strings.Contains(summaryDesc, "ask_user") {
+		t.Errorf("summary property does not name ask_user: %q", summaryDesc)
+	}
+	if !strings.Contains(summaryDesc, "verbatim") {
+		t.Errorf("summary property does not require the answers verbatim: %q", summaryDesc)
+	}
+}
+
 func TestCompactContextIDIsStable(t *testing.T) {
 	// The agent loop matches this name to decide whether to record a watermark.
 	// Renaming the tool without updating the loop would silently disable the

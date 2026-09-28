@@ -9,13 +9,21 @@ import (
 
 const (
 	memoryMDFilename = "MEMORY.md"
-	maxMemoryMDSize  = 64 * 1024 // 64KB max total across all files
+	// memoryMDBudgetEnv optionally caps the total bytes of MEMORY.md content
+	// interpolated into the system prompt across all discovered files. Unset —
+	// the default — means no cap at all: every file is loaded whole.
+	memoryMDBudgetEnv = "OGCODE_MEMORY_MD_MAX_BYTES"
 )
 
 // LoadMemoryMD discovers and loads MEMORY.md files by walking from dir up to
 // the filesystem root. Files are returned in root-to-leaf order (outermost
 // first), so that closer/leaf files appear later in the concatenated result
 // and naturally take precedence for the LLM.
+//
+// There is no size limit by default — the whole of every discovered file
+// reaches the model. Set OGCODE_MEMORY_MD_MAX_BYTES to a positive number of
+// bytes to cap the total, in which case the first file that would overrun it is
+// cut (on a rune boundary, with a marker) and the remainder are skipped.
 //
 // Missing files are silently skipped. Permission or read errors are logged
 // as warnings and the file is skipped.
@@ -27,6 +35,9 @@ func LoadMemoryMD(dir string) string {
 
 	var b strings.Builder
 	var totalSize int
+	// 0 means no budget: include every file whole. A positive value is the total
+	// across all discovered files.
+	limit := mdSizeLimit(memoryMDBudgetEnv)
 
 	for _, p := range paths {
 		content, err := os.ReadFile(p)
@@ -42,10 +53,15 @@ func LoadMemoryMD(dir string) string {
 			continue
 		}
 
-		remaining := maxMemoryMDSize - totalSize
-		if remaining <= 0 {
-			slog.Warn("MEMORY.md total size exceeds limit, skipping remaining files", "limit", maxMemoryMDSize)
-			break
+		// remaining is 0 (uncapped) unless an operator set a budget, in which
+		// case it is what is left of that budget for this file.
+		remaining := 0
+		if limit > 0 {
+			remaining = limit - totalSize
+			if remaining <= 0 {
+				slog.Warn("MEMORY.md total size exceeds budget, skipping remaining files", "limit", limit)
+				break
+			}
 		}
 
 		relPath, err := filepath.Rel(dir, p)
@@ -64,7 +80,7 @@ func LoadMemoryMD(dir string) string {
 		// renderMDBlock.
 		block, used, truncated := renderMDBlock("memory-md", relPath, trimmed, remaining)
 		if truncated {
-			slog.Warn("MEMORY.md truncated due to size limit", "path", p, "limit", maxMemoryMDSize)
+			slog.Warn("MEMORY.md truncated due to size budget", "path", p, "limit", limit)
 		}
 		b.WriteString(block)
 		totalSize += used

@@ -144,3 +144,75 @@ func TestUsageFromOAITopLevelHitCannotGoNegative(t *testing.T) {
 		t.Errorf("CacheReadTokens = %d, want 900", got.CacheReadTokens)
 	}
 }
+
+// Gemini's OpenAI-compatible endpoint leaves thinking out of completion_tokens
+// and reports it only in total_tokens, with no reasoning breakdown. These are
+// the figures a live gemini-2.5-flash call returned: 3430 + 24 = 3454, but the
+// provider billed 3693. The 239-token gap is thinking, spent as output.
+func TestUsageFromOAIRecoversThinkingHiddenInTotal(t *testing.T) {
+	got := usageFromOAI(&oaiUsage{PromptTokens: 3430, CompletionTokens: 24, TotalTokens: 3693})
+	if got.OutputTokens != 263 {
+		t.Errorf("OutputTokens = %d, want 263 (24 visible + 239 thinking)", got.OutputTokens)
+	}
+	if got.ReasoningTokens != 239 {
+		t.Errorf("ReasoningTokens = %d, want 239", got.ReasoningTokens)
+	}
+	if got.InputTokens != 3430 {
+		t.Errorf("InputTokens = %d, want 3430 (prompt untouched)", got.InputTokens)
+	}
+	if sum := got.InputTokens + got.CacheReadTokens + got.CacheWriteTokens + got.OutputTokens; sum != 3693 {
+		t.Errorf("all tokens = %d, want 3693 (the provider's total_tokens)", sum)
+	}
+}
+
+// A provider that itemises reasoning but leaves it out of completion_tokens
+// still has the gap added to output, and its own reasoning figure is kept rather
+// than doubled.
+func TestUsageFromOAIReasoningOutsideCompletionIsNotDoubled(t *testing.T) {
+	got := usageFromOAI(&oaiUsage{
+		PromptTokens:            100,
+		CompletionTokens:        20,
+		TotalTokens:             420,
+		CompletionTokensDetails: &oaiCompletionTokenDetails{ReasoningTokens: 300},
+	})
+	if got.OutputTokens != 320 {
+		t.Errorf("OutputTokens = %d, want 320", got.OutputTokens)
+	}
+	if got.ReasoningTokens != 300 {
+		t.Errorf("ReasoningTokens = %d, want 300 (not 600)", got.ReasoningTokens)
+	}
+}
+
+// When total_tokens shows the cached count sits OUTSIDE prompt_tokens (the gap
+// equals it exactly), prompt_tokens is already the uncached input: it must be
+// kept, not clamped to zero, and the gap must not be mistaken for output.
+func TestUsageFromOAIExclusiveCachedCountKeepsInput(t *testing.T) {
+	got := usageFromOAI(&oaiUsage{
+		PromptTokens:        100,
+		CompletionTokens:    20,
+		TotalTokens:         1020,
+		PromptTokensDetails: &oaiPromptTokensDetails{CachedTokens: 900},
+	})
+	if got.InputTokens != 100 || got.CacheReadTokens != 900 {
+		t.Errorf("input/cacheRead = %d/%d, want 100/900", got.InputTokens, got.CacheReadTokens)
+	}
+	if got.OutputTokens != 20 || got.ReasoningTokens != 0 {
+		t.Errorf("output/reasoning = %d/%d, want 20/0", got.OutputTokens, got.ReasoningTokens)
+	}
+}
+
+// The ordinary shapes are untouched: an OpenAI total that equals prompt +
+// completion adds nothing, and a missing total_tokens is never read as a gap.
+func TestUsageFromOAIConsistentTotalAddsNothing(t *testing.T) {
+	for name, u := range map[string]*oaiUsage{
+		"total matches": {PromptTokens: 1000, CompletionTokens: 50, TotalTokens: 1050,
+			PromptTokensDetails: &oaiPromptTokensDetails{CachedTokens: 900}},
+		"total absent": {PromptTokens: 1000, CompletionTokens: 50,
+			PromptTokensDetails: &oaiPromptTokensDetails{CachedTokens: 900}},
+	} {
+		got := usageFromOAI(u)
+		if got.InputTokens != 100 || got.CacheReadTokens != 900 || got.OutputTokens != 50 || got.ReasoningTokens != 0 {
+			t.Errorf("%s: got %+v, want input 100, cacheRead 900, output 50, reasoning 0", name, got)
+		}
+	}
+}

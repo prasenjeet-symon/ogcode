@@ -280,6 +280,24 @@ func PermissionGatingEnabled(ctx context.Context) bool {
 	return enabled
 }
 
+// --- server origin ---
+
+type serverURLKey struct{}
+
+// WithServerURL carries the origin (scheme://host[:port]) the client used to
+// reach this server, so the agent can hand back absolute URLs to /preview/ or
+// /public/ paths.
+func WithServerURL(ctx context.Context, url string) context.Context {
+	return context.WithValue(ctx, serverURLKey{}, url)
+}
+
+// ServerURLFromContext returns the client origin, or "" when unset (CLI,
+// indexer, sub-agents, tests).
+func ServerURLFromContext(ctx context.Context) string {
+	u, _ := ctx.Value(serverURLKey{}).(string)
+	return u
+}
+
 // guidanceLabel is the heading prepended to accumulated guidance text when it
 // is appended to the user's turn message. It labels the injected content so the
 // model understands this is mid-loop guidance from the user, not a new turn.

@@ -25,12 +25,14 @@ func newSynthClient(p provider.Provider, model string) *synthClient {
 	return &synthClient{provider: p, model: model}
 }
 
-func (c *synthClient) Chat(ctx context.Context, system, prompt string) (string, error) {
+// Chat returns the concatenated text and the usage the provider reported (nil
+// when none), so the caller can charge the summary to the session it describes.
+func (c *synthClient) Chat(ctx context.Context, system, prompt string) (string, *provider.TokenUsage, error) {
 	model := c.model
 	if model == "" {
 		models := c.provider.Models()
 		if len(models) == 0 {
-			return "", fmt.Errorf("synth: provider %q has no models to synthesize with", c.provider.ID())
+			return "", nil, fmt.Errorf("synth: provider %q has no models to synthesize with", c.provider.ID())
 		}
 		model = models[0].ID
 	}
@@ -41,16 +43,19 @@ func (c *synthClient) Chat(ctx context.Context, system, prompt string) (string, 
 	}
 	ch, err := c.provider.StreamChat(ctx, req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var parts []string
+	var usage *provider.TokenUsage
 	for ev := range ch {
 		switch ev.Type {
 		case provider.EventTextDelta:
 			parts = append(parts, ev.Text)
+		case provider.EventUsage:
+			usage = ev.Usage
 		case provider.EventError:
-			return "", fmt.Errorf("chat error: %s", ev.Error)
+			return "", usage, fmt.Errorf("chat error: %s", ev.Error)
 		}
 	}
-	return strings.Join(parts, ""), nil
+	return strings.Join(parts, ""), usage, nil
 }

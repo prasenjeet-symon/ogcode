@@ -1189,7 +1189,12 @@ func (s *Server) autoNamePlan(p *plan.Plan, userMessage string) {
 	slog.Info("auto-name plan: using provider/model", "plan", p.ID, "provider", pr.ID(), "model", modelID)
 
 	systemPrompt := "Generate a short, concise title (maximum 7 words) that captures the goal of the request below. Return ONLY the title, no quotes, no extra text, no markdown."
-	text, err := collectStreamText(ctx, pr, modelID, systemPrompt, userMessage)
+	text, usage, err := collectStreamText(ctx, pr, modelID, systemPrompt, userMessage)
+	// Naming is spent on the plan's session; charge it there like the chat
+	// session's own title call.
+	if p.SessionID != "" {
+		s.recordUtilityUsage(session.SessionID(p.SessionID), pr.ID(), modelID, usage)
+	}
 	if err != nil {
 		slog.Warn("auto-name plan: stream failed", "plan", p.ID, "err", err)
 		return
@@ -1260,7 +1265,7 @@ func excerptTitle(s string, maxWords int) string {
 // producing visible content. If the model produces no content text but does
 // produce reasoning text, we fall back to the reasoning so the title is never
 // empty just because the model is a thinker.
-func collectStreamText(ctx context.Context, pr provider.Provider, modelID, systemPrompt, userMessage string) (string, error) {
+func collectStreamText(ctx context.Context, pr provider.Provider, modelID, systemPrompt, userMessage string) (string, *provider.TokenUsage, error) {
 	userParts, _ := json.Marshal([]provider.ContentPart{{Type: "text", Text: userMessage}})
 
 	req := provider.StreamRequest{
@@ -1275,11 +1280,12 @@ func collectStreamText(ctx context.Context, pr provider.Provider, modelID, syste
 
 	ch, err := pr.StreamChat(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("stream chat: %w", err)
+		return "", nil, fmt.Errorf("stream chat: %w", err)
 	}
 
 	var text strings.Builder
 	var reasoning strings.Builder
+	var usage *provider.TokenUsage
 	for ev := range ch {
 		if ev.Type == provider.EventTextDelta {
 			text.WriteString(ev.Text)
@@ -1287,14 +1293,17 @@ func collectStreamText(ctx context.Context, pr provider.Provider, modelID, syste
 		if ev.Type == provider.EventReasoning {
 			reasoning.WriteString(ev.Text)
 		}
+		if ev.Type == provider.EventUsage {
+			usage = ev.Usage
+		}
 		if ev.Type == provider.EventError {
-			return text.String(), fmt.Errorf("stream error: %s", ev.Error)
+			return text.String(), usage, fmt.Errorf("stream error: %s", ev.Error)
 		}
 	}
 	// Thinking models emit reasoning but sometimes produce empty content.
 	// Use the reasoning text as a fallback so we always have something to work with.
 	if text.Len() == 0 && reasoning.Len() > 0 {
-		return reasoning.String(), nil
+		return reasoning.String(), usage, nil
 	}
-	return text.String(), nil
+	return text.String(), usage, nil
 }

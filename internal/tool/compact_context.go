@@ -33,7 +33,7 @@ func NewCompactContextTool() CompactContextTool { return CompactContextTool{} }
 func (CompactContextTool) ID() string { return "compact_context" }
 
 func (CompactContextTool) Description() string {
-	return "Replace everything you have done so far in this turn with a summary you write, freeing the context it occupies. Use it when earlier steps have served their purpose — large files you have already extracted what you need from, searches whose answer you have recorded — and re-sending them on every remaining step is pure cost. Your summary becomes the only record of that work for the rest of the turn, so it must carry every conclusion, file path, and decision you still need. Anything you leave out is gone and must be rediscovered from scratch."
+	return "Replace everything you have done so far in this turn with a summary you write, freeing the context it occupies. Use it when earlier steps have served their purpose — large files you have already extracted what you need from, searches whose answer you have recorded — and re-sending them on every remaining step is pure cost. Your summary becomes the only record of that work for the rest of the turn, so it must carry every conclusion, file path, and decision you still need, and — if you asked the user anything with ask_user — each question with the answer it got, verbatim. Anything you leave out is gone and must be rediscovered from scratch."
 }
 
 func (CompactContextTool) Parameters() json.RawMessage {
@@ -43,7 +43,7 @@ func (CompactContextTool) Parameters() json.RawMessage {
 		"properties": {
 			"summary": {
 				"type": "string",
-				"description": "A complete account of the turn so far, written for a reader who cannot see any of it. Include: what the task is and what remains, what you established and where (exact file paths and line ranges), decisions made and approaches already ruled out, and any exact values — names, flags, config, commands — you would otherwise have to look up again. Omit raw file contents you have already drawn your conclusions from."
+				"description": "A complete account of the turn so far, written for a reader who cannot see any of it. Include: what the task is and what remains, what you established and where (exact file paths and line ranges), decisions made and approaches already ruled out, and any exact values — names, flags, config, commands — you would otherwise have to look up again. If you asked the user anything with ask_user, include each question with the answer it got, verbatim: the option the user chose or the text they typed. Omit raw file contents you have already drawn your conclusions from."
 			}
 		}
 	}`)

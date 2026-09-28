@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
+	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/id"
 	"github.com/prasenjeet-symon/ogcode/internal/keepawake"
 	"github.com/prasenjeet-symon/ogcode/internal/memfile"
@@ -31,6 +32,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
+	"github.com/prasenjeet-symon/ogcode/internal/usage"
 )
 
 // LoopRunner orchestrates the agent loop for a session.
@@ -103,6 +105,10 @@ type LoopRunner struct {
 	// tests) means no skill is ever listed and the skill tool has nothing to
 	// load, which is the behaviour that predates the feature.
 	Skills *skill.Loader
+	// Usage is the global spend ledger: every step and utility call is recorded
+	// there with the model it ran on, so one view can total spend across
+	// projects and models. nil (tests) records nothing.
+	Usage *usage.Ledger
 }
 
 // compactContextEnv names the process-wide switch that withholds compact_context.
@@ -136,6 +142,9 @@ const maxReasoningLen = 50_000
 // in inner scopes, which is why the publish can stay a single defer up here
 // rather than being threaded through a dozen exit paths.
 func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, agentName string, viewportWidth int, viewportHeight int) (runErr error) {
+	// Everything this turn spawns (sub-agents, deep search) inherits ctx, so
+	// stamping the session here lets that work charge its tokens back to it.
+	ctx = withUsageSession(ctx, sessionID)
 	agent := GetAgent(agentName)
 	// Read MaxSteps into a local; never mutate the shared LoopRunner field. A
 	// deep_search call runs a nested RunLoop concurrently with the parent loop,
@@ -633,6 +642,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			Agent:     agent.ID,
 			ParentID:  parentID,
 			CreatedAt: session.Now(),
+			// Which endpoint answered, so the step is priced at its own model
+			// even after the session moves to another.
+			Model:    modelID,
+			Provider: providerID,
 		}
 		if err := lr.Store.CreateMessage(assistantMsg); err != nil {
 			return fmt.Errorf("create assistant message: %w", err)
@@ -705,6 +718,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// must stay byte-identical across the whole session.
 		if guidance := skillGuidancePrompt(visibleSkills); guidance != "" {
 			systemPrompts = appendSystemEntry(systemPrompts, agent, guidance)
+		}
+		// The server's own origin is fixed for the session, but it is appended
+		// here rather than folded into entry [0] so the cached prefix never
+		// depends on the host the client happened to use. Build-only, matching
+		// the preview and public sections it explains.
+		if agent.canHostPublicFiles() {
+			if u := ServerURLFromContext(ctx); u != "" {
+				systemPrompts = appendSystemEntry(systemPrompts, agent, strings.TrimSpace(serverURLPrompt(u)))
+			}
 		}
 		// Last of the system entries, because it is the only one that can change
 		// DURING a turn: compaction fires mid-loop and rewrites this summary,
@@ -1515,6 +1537,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 		}
 
+		// A live-preview URL in this step's prose publishes its port now, before
+		// any tool runs, so the link works the moment the user can read it.
+		lr.recordAnnouncedPorts(agent.ID, sessionID, currentText.String())
+
 		// Finalize reasoning part: flush any remaining buffered reasoning to DB.
 		if currentReasoning.Len() > 0 {
 			if streamReasoningPart != nil {
@@ -1584,12 +1610,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				Reasoning:  streamUsage.ReasoningTokens,
 				CacheRead:  streamUsage.CacheReadTokens,
 				CacheWrite: streamUsage.CacheWriteTokens,
-				// CacheRead and CacheWrite are input variants with different pricing;
-				// include them so Total reflects all tokens actually consumed.
-				Total: streamUsage.InputTokens + streamUsage.CacheReadTokens +
-					streamUsage.CacheWriteTokens + streamUsage.OutputTokens,
 			}
+			tc.Total = tc.Consumed()
 			assistantMsg.Tokens = &tc
+			// Into the global ledger too, which keeps it even if this message is
+			// later deleted: the tokens were spent either way.
+			lr.Usage.RecordStep(string(sessionID), string(assistantMsg.ID), providerID, modelID, tc, assistantMsg.CreatedAt)
 			// Carry the reported input-side token count forward so the next step's
 			// proactive-compaction check can use the exact size the model saw
 			// instead of the byte estimate.
@@ -2018,7 +2044,10 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 		bgCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
-		summary, err := newSynthClient(chatProvider, chatModel).Chat(bgCtx, memfile.SummarySystemPrompt, digest)
+		summary, usage, err := newSynthClient(chatProvider, chatModel).Chat(bgCtx, memfile.SummarySystemPrompt, digest)
+		// The summary is spent on this session's behalf after every turn, so it
+		// belongs in its totals whether or not the write that follows succeeds.
+		lr.recordUtilityUsage(sessionID, providerIDOf(chatProvider), chatModel, usage)
 		if err != nil {
 			slog.Warn("writeTurnMemory: summary synthesis failed", "session", sessionID, "err", err)
 			return
@@ -2114,6 +2143,57 @@ func (lr *LoopRunner) autoIndexTurn(agentID string, sessionID session.SessionID,
 		}()
 		lr.AutoIndex(dir, model, provider)
 	}()
+}
+
+// recordAnnouncedPorts records the ports of the live-preview URLs in one step's
+// prose — the text the agent wrote as that step ended — so the Preview page can
+// list the service and the preview proxy, which serves only recorded ports, will
+// forward to it. It runs as each step ends rather than once when the turn does:
+// a URL the agent writes and then works on past ("the dev server is up at …,
+// now the tests") is a link the user clicks while the turn is still running.
+//
+// Only the agent's prose is read. A tool call's output is full of ports that
+// are not this project's services, and the reasoning trace echoes the prompt's
+// own example URL. Earlier turns are never re-read either, so a preview URL
+// merely quoted in an old reply — discussion, not an announcement — is not
+// recorded again; rescanning history kept dead services on the grid forever.
+//
+// It runs for the interactive build agent only, matching autoIndexTurn: a
+// utility turn does not announce the project's services, and a task session in a
+// worktree announces services for a directory that is not the project.
+func (lr *LoopRunner) recordAnnouncedPorts(agentID string, sessionID session.SessionID, text string) {
+	if lr.Store == nil || agentID != "build" {
+		return
+	}
+	// Parse first: almost every step names no preview URL, and those must not
+	// cost a session lookup.
+	ports := AnnouncedPreviewPorts(text)
+	if len(ports) == 0 {
+		return
+	}
+	sess, err := lr.Store.Get(sessionID)
+	if err != nil || sess == nil {
+		return
+	}
+	dir := lr.Dir
+	if sess.Directory != "" {
+		dir = sess.Directory
+	} else if sess.ProjectID != "" {
+		dir = sess.ProjectID
+	}
+	if dir == "" {
+		return
+	}
+	if sess.Directory != "" && sess.ProjectID != "" && sess.Directory != sess.ProjectID {
+		return
+	}
+	for _, port := range ports {
+		if err := lr.Store.RecordAnnouncedPort(dir, port); err != nil {
+			slog.Warn("recordAnnouncedPorts: failed to record", "session", sessionID, "port", port, "err", err)
+			continue
+		}
+		slog.Info("recordAnnouncedPorts: preview service announced", "session", sessionID, "dir", dir, "port", port)
+	}
 }
 
 // buildTurnDigest renders a compact digest of one turn for summary synthesis:
@@ -2231,17 +2311,15 @@ func (lr *LoopRunner) resolveRunModel(ctx context.Context, sess *session.Session
 	// decide to return an image (e.g. a rendered PDF page) instead of text.
 	supportsImages = lr.resolveImageSupport(ctx, p, modelID)
 	// The active model's context window (0 = unknown), used to size the
-	// proactive-compaction trigger. The catalog is authoritative when it knows
-	// the model; when it is silent (Ollama locals, dynamic OpenAI-compatible
-	// endpoints), a window learned from a previous overflow error fills the gap.
-	if lr.Registry != nil {
-		contextWindow = lr.Registry.ContextWindow(modelID)
+	// proactive-compaction trigger: the smallest of the catalogue's figure, the
+	// serving host's, and one learned from a previous overflow error.
+	var database *db.DB
+	if lr.Store != nil {
+		database = lr.Store.DB()
 	}
-	if contextWindow <= 0 {
-		if cap, ok, err := session.GetModelCapability(lr.Store.DB(), modelID); err == nil && ok && cap.ContextWindow > 0 {
-			contextWindow = cap.ContextWindow
-			slog.Info("using learned context window", "model", modelID, "contextWindow", contextWindow)
-		}
+	contextWindow, learned := EffectiveContextWindow(lr.Registry, database, modelID)
+	if learned {
+		slog.Info("using learned context window", "model", modelID, "contextWindow", contextWindow)
 	}
 	return p, modelID, supportsImages, contextWindow
 }
@@ -2261,12 +2339,17 @@ func (lr *LoopRunner) resolveImageSupport(ctx context.Context, p provider.Provid
 		return cap.SupportsImages
 	}
 
-	// Anthropic and OpenAI ship a curated catalog with known capabilities — trust
-	// it directly rather than spending a probe call. Dynamic providers fall through.
-	// A *custom* model added under the anthropic/openai slot is NOT in that catalog,
-	// so it must be probed like any dynamic model; only short-circuit for genuine
-	// catalog models. Without this, custom OpenAI models never probe and always
-	// resolve to false (not found in the catalog), disabling image tools for them.
+	// A catalogued model's image support is known, whichever provider serves it
+	// and whether or not the user added it by hand — trust it rather than
+	// spending a probe call. (Not for a model running on this machine: what it
+	// accepts depends on the build that was pulled, so it is probed.)
+	if cm, ok := lr.Registry.CatalogModel(modelID); ok {
+		return cm.SupportsImages
+	}
+	// Anthropic and OpenAI list only catalogued models, so this is a fallback for
+	// anything they serve beyond it. A *custom* model added under the
+	// anthropic/openai slot must be probed like any dynamic model; only
+	// short-circuit for the providers' own listings.
 	if !lr.Registry.IsCustomModel(modelID) {
 		switch p.ID() {
 		case "anthropic", "openai":
@@ -2792,10 +2875,11 @@ func riskGateUserContent(command string) string {
 // running utility totals. Utility calls — title generation, command risk
 // assessment, context compaction — stream usage on a call the main-turn
 // accounting never sees, so without this it is silently dropped from every
-// total. It is a no-op when there is no store (CLI-less tests) or nothing was
-// reported.
-func (lr *LoopRunner) recordUtilityUsage(sessionID session.SessionID, usage *provider.TokenUsage) {
-	if lr.Store == nil || usage == nil {
+// total. providerID and modelID name the endpoint the call ran on, which the
+// global ledger prices it at. It is a no-op when there is no store (CLI-less
+// tests) or nothing was reported.
+func (lr *LoopRunner) recordUtilityUsage(sessionID session.SessionID, providerID, modelID string, usage *provider.TokenUsage) {
+	if usage == nil {
 		return
 	}
 	tc := session.TokenCounts{
@@ -2804,6 +2888,27 @@ func (lr *LoopRunner) recordUtilityUsage(sessionID session.SessionID, usage *pro
 		Reasoning:  usage.ReasoningTokens,
 		CacheRead:  usage.CacheReadTokens,
 		CacheWrite: usage.CacheWriteTokens,
+	}
+	// The ledger is written here, where the tokens were actually spent, and
+	// not in recordUtilityCounts: that also folds in a finished sub-agent's
+	// usage, whose every step the ledger already recorded as it ran.
+	lr.Usage.RecordUtility(string(sessionID), providerID, modelID, tc, session.Now())
+	lr.recordUtilityCounts(sessionID, tc)
+}
+
+// providerIDOf names a provider for the ledger, "" when there is none.
+func providerIDOf(p provider.Provider) string {
+	if p == nil {
+		return ""
+	}
+	return p.ID()
+}
+
+// recordUtilityCounts adds already-converted counts to the session's utility
+// totals and announces the change. AddUtilityUsage ignores an all-zero delta.
+func (lr *LoopRunner) recordUtilityCounts(sessionID session.SessionID, tc session.TokenCounts) {
+	if lr.Store == nil {
+		return
 	}
 	if err := lr.Store.AddUtilityUsage(sessionID, tc); err != nil {
 		slog.Warn("record utility usage", "err", err)
@@ -2876,7 +2981,7 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, sessionID sessio
 			}
 		}
 	}
-	lr.recordUtilityUsage(sessionID, usage)
+	lr.recordUtilityUsage(sessionID, p.ID(), model, usage)
 	text := strings.TrimSpace(out.String())
 	verdict := permission.RiskAsk
 	// The model is asked for exactly one word: SAFE or ASK. Require the trimmed
@@ -3598,10 +3703,11 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 			}
 
 			// Live service preview: a loopback service the agent starts is
-			// proxied under /preview/<port>/. Gated with public hosting — the
-			// same interactive Build session in the server's own directory is
-			// the one where a locally-started process is the user's to open.
-			prompt += "\n\n" + strings.TrimSpace(previewServingPrompt())
+			// reachable at its own hostname (<port>.<preview-domain>). Gated with
+			// public hosting — the same interactive Build session in the server's
+			// own directory is the one where a locally-started process is the
+			// user's to open.
+			prompt += "\n\n" + strings.TrimSpace(previewServingPrompt(PreviewDomain()))
 		}
 	}
 
@@ -4074,7 +4180,7 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, sessionID session.SessionI
 			usage = evt.Usage
 		}
 	}
-	lr.recordUtilityUsage(sessionID, usage)
+	lr.recordUtilityUsage(sessionID, providerIDOf(p), modelID, usage)
 
 	if summary.Len() == 0 {
 		slog.Warn("llm compact: empty summary received, falling back to truncation")
@@ -4167,8 +4273,11 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 		return "", fmt.Errorf("create subagent session: %w", err)
 	}
 
-	// Always clean up the ephemeral session when done.
+	// Always clean up the ephemeral session when done — after charging what it
+	// spent to the session that delegated the task, since its counts are deleted
+	// with it. This runs on the error paths too: a failed run still spent tokens.
 	defer func() {
+		lr.foldChildUsage(ctx, sess.ID)
 		if err := lr.Store.Delete(sess.ID); err != nil {
 			slog.Warn("delete ephemeral subagent session", "session", sess.ID, "err", err)
 		}
@@ -4280,6 +4389,9 @@ func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scop
 		return "", fmt.Errorf("create memory-recall session: %w", err)
 	}
 	defer func() {
+		// Charge the recall's run to the session that asked, before its counts
+		// are deleted with it (see foldChildUsage).
+		lr.foldChildUsage(ctx, sess.ID)
 		if err := lr.Store.Delete(sess.ID); err != nil {
 			slog.Warn("delete ephemeral memory-recall session", "session", sess.ID, "err", err)
 		}

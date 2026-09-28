@@ -2,7 +2,10 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -35,6 +38,26 @@ var mdWrapperTag = regexp.MustCompile(`(?i)<(/?)(agent-md|memory-md)`)
 // the model as the whole of what the project had to say.
 const mdTruncationMarker = "\n\n[truncated — the rest of this file did not fit the prompt budget]"
 
+// mdSizeLimit reads a prompt-budget override from name. Unset, empty, or a
+// non-positive value means no budget: the document reaches the model whole,
+// which is the default so a project's own instructions and long-term memory are
+// never silently cut. A positive value is the byte budget across all discovered
+// files of that kind, with no upper bound — an operator asking for a large
+// budget is not second-guessed — and no floor, so a deliberately tiny budget is
+// honoured too.
+func mdSizeLimit(name string) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		slog.Warn("ignoring unparseable prompt-budget override", "env", name, "value", raw)
+		return 0
+	}
+	return v
+}
+
 // renderMDBlock renders one discovered file as a tagged block, neutralized and
 // fitted to limit bytes of content. It returns the block, the number of content
 // bytes it consumed from the budget, and whether anything was dropped.
@@ -42,6 +65,7 @@ const mdTruncationMarker = "\n\n[truncated — the rest of this file did not fit
 // limit bounds the CONTENT, not the block: the tag overhead is a constant the
 // caller's budget never had to cover, and folding it in would make the limit
 // mean something different for a deeply nested path than for a top-level one.
+// A limit of 0 or less means no cap: nothing is cut and truncated is false.
 //
 // truncated is reported rather than left for the caller to infer by comparing
 // lengths, because neutralizing can lengthen the text: a file that fits by two
@@ -72,7 +96,8 @@ func escapeMDAttr(s string) string {
 }
 
 // truncateForPrompt cuts s to at most limit bytes, on a rune boundary, and says
-// so in the text when anything was dropped.
+// so in the text when anything was dropped. A limit of 0 or less means no cap:
+// the whole string comes back unmarked.
 //
 // The rune boundary matters because the result goes straight into a JSON request
 // body: a byte slice through a multi-byte character leaves invalid UTF-8, which
@@ -83,7 +108,7 @@ func escapeMDAttr(s string) string {
 // budget a caller sets is the budget it gets.
 func truncateForPrompt(s string, limit int) (string, bool) {
 	if limit <= 0 {
-		return "", s != ""
+		return s, false
 	}
 	if len(s) <= limit {
 		return s, false

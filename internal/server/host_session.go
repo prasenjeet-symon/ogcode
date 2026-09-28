@@ -83,7 +83,7 @@ func (s *Server) HostSession(id session.SessionID, dir, prompt, agentName string
 	}
 	s.bus.Publish("message.updated", userMsg)
 
-	s.startSessionLoop(id, agentName, viewportWidth, viewportHeight)
+	s.startSessionLoop(id, agentName, viewportWidth, viewportHeight, "")
 	return func() { s.cancelLoop(id) }, false, nil
 }
 

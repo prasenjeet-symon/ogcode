@@ -85,6 +85,21 @@ func TestTruncateForPrompt_CutsOnRuneBoundary(t *testing.T) {
 	}
 }
 
+// A non-positive limit means "no cap": the whole string comes back unmarked.
+// This is what makes the default (no budget configured) load documents whole.
+func TestTruncateForPrompt_NonPositiveLimitIsUncapped(t *testing.T) {
+	s := strings.Repeat("a", 5000)
+	for _, limit := range []int{0, -1} {
+		got, truncated := truncateForPrompt(s, limit)
+		if truncated {
+			t.Errorf("limit %d reported truncated = true", limit)
+		}
+		if got != s {
+			t.Errorf("limit %d cut the string: got %d bytes, want %d", limit, len(got), len(s))
+		}
+	}
+}
+
 // The marker has to come out of the budget, not be added on top of it, or every
 // caller's size limit quietly becomes limit+len(marker).
 func TestTruncateForPrompt_MarkerCountsAgainstTheLimit(t *testing.T) {

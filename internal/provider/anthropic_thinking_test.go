@@ -102,7 +102,7 @@ func TestAnthropicThinkingParameter(t *testing.T) {
 	})
 
 	t.Run("thinking displaces temperature", func(t *testing.T) {
-		req := baseThinkingRequest("claude-opus-4-7")
+		req := baseThinkingRequest("claude-opus-4-6")
 		req.Thinking = true
 		req.Temperature = 0.3
 		body := captureAnthropicBody(t, req)
@@ -111,10 +111,20 @@ func TestAnthropicThinkingParameter(t *testing.T) {
 		}
 
 		// Without thinking it still goes out as the caller set it.
-		plain := baseThinkingRequest("claude-opus-4-7")
+		plain := baseThinkingRequest("claude-opus-4-6")
 		plain.Temperature = 0.3
 		if got := captureAnthropicBody(t, plain)["temperature"]; got != 0.3 {
 			t.Errorf("expected temperature preserved without thinking, got %v", got)
+		}
+	})
+
+	t.Run("models that reject sampling never get a temperature", func(t *testing.T) {
+		// Opus 4.7 and later answer a non-default temperature with a 400,
+		// thinking or not, so it is dropped even from a plain utility call.
+		plain := baseThinkingRequest("claude-opus-4-7")
+		plain.Temperature = 0.3
+		if got, ok := captureAnthropicBody(t, plain)["temperature"]; ok {
+			t.Errorf("expected no temperature for a model that rejects sampling, got %v", got)
 		}
 	})
 }

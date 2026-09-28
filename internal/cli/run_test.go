@@ -1,44 +1,71 @@
 package cli
 
 import (
+	"context"
 	"math"
 	"testing"
 
 	"github.com/prasenjeet-symon/ogcode/internal/db"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
+// priced returns what a catalogued model costs on the Claude API, so these
+// tests follow the catalogue's prices instead of pinning numbers that change
+// with it.
+func priced(t *testing.T, id string) *provider.ModelPrice {
+	t.Helper()
+	price, ok := provider.NewRegistry().PriceOn("anthropic", id)
+	if !ok || price.Input == 0 || price.Output == 0 {
+		t.Fatalf("%s: want a priced catalogue entry", id)
+	}
+	return &price
+}
+
 func TestEstimateCost(t *testing.T) {
-	// claude-opus-4-7 is $15/M in, $75/M out.
+	price := priced(t, "claude-opus-4-7")
 	tokens := runTokens{Input: 1_000_000, Output: 1_000_000}
-	got := estimateCost(tokens, "claude-opus-4-7")
+	got := estimateCost(tokens, price)
 	if got == nil {
 		t.Fatal("want a price for a catalogued model, got nil")
 	}
-	if want := 90.0; math.Abs(*got-want) > 1e-9 {
+	if want := price.Input + price.Output; math.Abs(*got-want) > 1e-9 {
 		t.Errorf("cost = %v, want %v", *got, want)
 	}
 }
 
-func TestEstimateCostAppliesCacheMultipliers(t *testing.T) {
-	// Cache traffic only: 1M written at 1.25x and 1M read at 0.1x the $15
-	// input price = 18.75 + 1.50.
+// Cache traffic is priced at the published cache prices, or at the standard
+// multiples of the input price when a model publishes none.
+func TestEstimateCostPricesCacheTraffic(t *testing.T) {
 	tokens := runTokens{CacheWrite: 1_000_000, CacheRead: 1_000_000}
-	got := estimateCost(tokens, "claude-opus-4-7")
-	if got == nil {
-		t.Fatal("want a price, got nil")
-	}
-	if want := 20.25; math.Abs(*got-want) > 1e-9 {
-		t.Errorf("cost = %v, want %v", *got, want)
+	for name, price := range map[string]*provider.ModelPrice{
+		"published": priced(t, "claude-opus-4-7"),
+		"derived":   {Input: 2, Output: 8},
+	} {
+		read, write := price.CacheRead, price.CacheWrite
+		if read == 0 {
+			read = price.Input * cacheReadMultiplier
+		}
+		if write == 0 {
+			write = price.Input * cacheWriteMultiplier
+		}
+		got := estimateCost(tokens, price)
+		if got == nil {
+			t.Fatalf("%s: want a price, got nil", name)
+		}
+		if want := read + write; math.Abs(*got-want) > 1e-9 {
+			t.Errorf("%s: cost = %v, want %v", name, *got, want)
+		}
 	}
 }
 
 func TestEstimateCostReasoningIsNotBilledTwice(t *testing.T) {
 	// Providers count reasoning inside the output total, so carrying it in the
 	// breakdown must not move the price.
+	price := priced(t, "claude-opus-4-7")
 	base := runTokens{Output: 1_000_000}
 	withReasoning := runTokens{Output: 1_000_000, Reasoning: 400_000}
-	a, b := estimateCost(base, "claude-opus-4-7"), estimateCost(withReasoning, "claude-opus-4-7")
+	a, b := estimateCost(base, price), estimateCost(withReasoning, price)
 	if a == nil || b == nil {
 		t.Fatal("want prices, got nil")
 	}
@@ -48,10 +75,42 @@ func TestEstimateCostReasoningIsNotBilledTwice(t *testing.T) {
 }
 
 func TestEstimateCostUnknownIsNilNotZero(t *testing.T) {
-	tokens := runTokens{Input: 1_000_000, Output: 1_000_000}
-	for _, model := range []string{"", "some-openrouter/model-we-do-not-price"} {
-		if got := estimateCost(tokens, model); got != nil {
-			t.Errorf("model %q: want nil for an unpriced model, got %v", model, *got)
+	if got := estimateCost(runTokens{Input: 1_000_000, Output: 1_000_000}, nil); got != nil {
+		t.Errorf("want nil for an unpriced run, got %v", *got)
+	}
+}
+
+// fixedProvider serves a fixed model list under a given provider id.
+type fixedProvider struct {
+	id     string
+	models []provider.ModelInfo
+}
+
+func (p fixedProvider) ID() string                   { return p.id }
+func (p fixedProvider) Models() []provider.ModelInfo { return p.models }
+func (p fixedProvider) StreamChat(context.Context, provider.StreamRequest) (<-chan provider.StreamEvent, error) {
+	return nil, nil
+}
+
+// The run is priced where its model runs: a host's spelling of a catalogued
+// model finds the catalogue's price, a local model costs nothing to quote, and
+// a model with no --model or no price anywhere has no cost rather than $0.
+func TestRunPriceFollowsTheServingProvider(t *testing.T) {
+	want := priced(t, "claude-opus-4-7")
+	reg := provider.NewRegistry()
+	reg.Register(fixedProvider{id: "anthropic", models: []provider.ModelInfo{{ID: "claude-opus-4-7", InputPricePerM: want.Input, OutputPricePerM: want.Output}}})
+	reg.Register(fixedProvider{id: "ollama", models: []provider.ModelInfo{{ID: "gpt-oss:20b"}}})
+
+	if got := runPrice(reg, "claude-opus-4-7"); got == nil || *got != *want {
+		t.Errorf("catalogued model = %+v, want %+v", got, want)
+	}
+	reg.RegisterCustomModel("anthropic/claude-opus-4.7", "anthropic")
+	if got := runPrice(reg, "anthropic/claude-opus-4.7"); got == nil || *got != *want {
+		t.Errorf("host alias = %+v, want %+v", got, want)
+	}
+	for _, id := range []string{"", "gpt-oss:20b", "some-openrouter/model-we-do-not-price"} {
+		if got := runPrice(reg, id); got != nil {
+			t.Errorf("%q: want no price, got %+v", id, *got)
 		}
 	}
 }
@@ -105,9 +164,10 @@ func TestCollectUsageSumsAssistantTurnsOnly(t *testing.T) {
 	if finish != "stop" {
 		t.Errorf("finish = %q, want the last turn's reason %q", finish, "stop")
 	}
-	// Total excludes cache read (already counted as input when first sent) but
-	// includes cache write (never counted inside input by reporting providers).
-	want := runTokens{Input: 30, Output: 12, CacheRead: 100, CacheWrite: 50, Total: 92}
+	// Total is every token consumed — cache reads and writes included — the same
+	// figure providers report as total_tokens (see TokenCounts.Consumed).
+	// Effective is Total without the 100 cache reads (see TokenCounts.Effective).
+	want := runTokens{Input: 30, Output: 12, CacheRead: 100, CacheWrite: 50, Effective: 92, Total: 192}
 	if tokens != want {
 		t.Errorf("tokens = %+v, want %+v", tokens, want)
 	}
@@ -152,9 +212,9 @@ func TestCollectUsageIncludesUtilityTokens(t *testing.T) {
 
 	tokens, _, _ := collectUsage(store, sess.ID)
 	// Components are the sum of the message and the utility call; Utility reports
-	// just the utility subtotal (input + cache write + output, cache read
-	// excluded from the total the same way per-message counts are).
-	want := runTokens{Input: 110, Output: 25, CacheRead: 5, Utility: 120, Total: 135}
+	// just the utility subtotal, counted the same way as every other total (cache
+	// read included). Effective takes in the utility call too, minus its cache read.
+	want := runTokens{Input: 110, Output: 25, CacheRead: 5, Utility: 125, Effective: 135, Total: 140}
 	if tokens != want {
 		t.Errorf("tokens = %+v, want %+v", tokens, want)
 	}

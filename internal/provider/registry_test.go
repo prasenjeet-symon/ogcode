@@ -107,17 +107,20 @@ func TestRegistryResolveProviderForFallsThroughAnUnregisteredProvider(t *testing
 // context window and the output ceiling cannot disagree about which provider a
 // model came from — the deterministic walk is shared, not re-implemented.
 func TestRegistryModelLookupAgreesAcrossCapabilityReaders(t *testing.T) {
+	// An id the built-in catalogue does not know, so the providers' listings
+	// are the only source (a catalogued id is answered by the catalogue).
+	const model = "acme-coder-1"
 	r := NewRegistry()
-	r.Register(newFake("openai", "glm-5.3-flash"))
-	r.Register(activeWithCapabilities("ogx", "glm-5.3-flash"))
+	r.Register(newFake("openai", model))
+	r.Register(activeWithCapabilities("ogx", model))
 	for i := 0; i < 100; i++ {
-		if got := r.ContextWindow("glm-5.3-flash"); got != 128000 {
+		if got := r.ContextWindow(model); got != 128000 {
 			t.Fatalf("iteration %d: ContextWindow = %d, want the active provider's 128000", i, got)
 		}
-		if r.ModelSupportsImages("glm-5.3-flash") {
+		if r.ModelSupportsImages(model) {
 			t.Fatalf("iteration %d: ModelSupportsImages must read the active provider's value", i)
 		}
-		if got := r.MaxOutputTokens("glm-5.3-flash"); got != 8192 {
+		if got := r.MaxOutputTokens(model); got != 8192 {
 			t.Fatalf("iteration %d: MaxOutputTokens = %d, want the active provider's 8192", i, got)
 		}
 	}
@@ -345,4 +348,26 @@ func TestRegistryConcurrentReplaceAndRead(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// ServingProvider names only a provider that actually serves the model — a
+// custom routing or a listing — and nil otherwise, where ResolveProvider would
+// fall back to the highest-priority provider.
+func TestServingProviderNeverGuesses(t *testing.T) {
+	r := NewRegistry()
+	r.Register(newFake("anthropic", "claude-x"))
+	r.Register(newFake("ollama", "glm-5.3-flash:cloud"))
+	if p := r.ServingProvider("glm-5.3-flash:cloud"); p == nil || p.ID() != "ollama" {
+		t.Errorf("listed model: got %v, want ollama", p)
+	}
+	r.RegisterCustomModel("my-router-model", "ollama")
+	if p := r.ServingProvider("my-router-model"); p == nil || p.ID() != "ollama" {
+		t.Errorf("custom model: got %v, want ollama", p)
+	}
+	if p := r.ServingProvider("nobody-serves-this"); p != nil {
+		t.Errorf("unserved model: got %s, want nil", p.ID())
+	}
+	if p := r.ResolveProvider("nobody-serves-this"); p == nil {
+		t.Error("ResolveProvider should still fall back for routing; the difference is the point")
+	}
 }

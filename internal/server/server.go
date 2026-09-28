@@ -37,6 +37,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/task"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
+	"github.com/prasenjeet-symon/ogcode/internal/usage"
 	"github.com/prasenjeet-symon/ogcode/internal/version"
 )
 
@@ -54,6 +55,7 @@ type Server struct {
 	mode            ServerMode
 	db              *db.DB
 	globalDB        *db.DB // shared config DB at ~/.ogcode/config.db
+	usage           *usage.Ledger
 	bus             *bus.Bus
 	store           *session.Store
 	planStore       *plan.Store
@@ -253,6 +255,15 @@ func (s *Server) serve(ctx context.Context) error {
 	go s.resources.Run(resourceCtx)
 
 	s.store = session.NewStore(database)
+	// The global spend ledger, tagged with this workspace. The project's own
+	// history from before the ledger existed is copied in once, here, before
+	// any turn can run and record into it.
+	s.usage = usage.NewLedger(globalDatabase, s.dir)
+	if steps, util, err := s.usage.Backfill(s.store); err != nil {
+		slog.Warn("usage ledger backfill", "err", err)
+	} else if steps+util > 0 {
+		slog.Info("usage ledger backfilled", "steps", steps, "utility", util)
+	}
 	s.planStore = plan.NewStore(database)
 	s.taskStore = task.NewStore(database)
 	s.noteStore = note.NewStore(database)
@@ -435,8 +446,12 @@ func (s *Server) serve(ctx context.Context) error {
 
 	s.permissions = permission.NewManager(permission.NewStore(s.globalDB))
 	s.questions = question.NewManager()
+	// Each ledger row records the host its provider calls, read from the live
+	// registry so a slot repointed at runtime is recorded as it now is.
+	s.usage.SetHosts(registry.EndpointHost)
 	s.loopRunner = &agent.LoopRunner{
 		Store:           s.store,
+		Usage:           s.usage,
 		Bus:             s.bus,
 		Registry:        registry,
 		DefaultProvider: defaultProvider,

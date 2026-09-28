@@ -6,6 +6,7 @@ import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
 import SessionSidebar from '../components/session-sidebar';
 import TokenPill from '../components/token-pill';
+import ContextMeter from '../components/context-meter';
 import ResourcePill from '../components/resource-pill';
 import SubagentIndicator from '../components/subagent-indicator';
 import ScrcpyStatusPill from '../components/scrcpy-status-pill';
@@ -67,6 +68,7 @@ function ChatContent() {
 
           <div class="flex items-center gap-1.5 shrink-0">
             <SubagentIndicator />
+            <ContextMeter />
             <TokenPill />
             <ResourcePill />
             <ScrcpyStatusPill />

@@ -19,6 +19,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
+	"github.com/prasenjeet-symon/ogcode/internal/usage"
 )
 
 // env is the agent-hosting environment for one workspace directory: the DB,
@@ -131,6 +132,13 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 	// the question routes work here exactly as in an interactive local server.
 	quest := question.NewManager()
 
+	// Spend goes to the global ledger like an interactive server's, after the
+	// workspace's older history is copied in (once per workspace).
+	ledger := usage.NewLedger(globalDatabase, dir)
+	if _, _, err := ledger.Backfill(store); err != nil {
+		slog.Warn("usage ledger backfill", "err", err)
+	}
+	ledger.SetHosts(registry.EndpointHost)
 	lr := &agent.LoopRunner{
 		Store:           store,
 		Bus:             b,
@@ -141,6 +149,7 @@ func buildEnv(ctx context.Context, dir string, logger *slog.Logger) (*env, error
 		Skills:          skillLoader,
 		Permissions:     perm,
 		Questions:       quest,
+		Usage:           ledger,
 	}
 	// The build agent advertises the task sub-agent tool, so it must resolve.
 	toolRegistry.Register(tool.TaskTool{Run: lr.RunTaskSession})

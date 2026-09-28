@@ -54,6 +54,13 @@ type MessageInfo struct {
 	// them into without changing what any model receives.
 	DisplayOnly bool  `json:"displayOnly,omitempty"`
 	CreatedAt   int64 `json:"createdAt"`
+	// Model and Provider are the endpoint that produced an assistant message,
+	// stamped when its step starts. A session can switch models between turns,
+	// so the session's own Model says only what it runs on now; pricing a turn
+	// needs the one that answered it. Empty on messages written before the
+	// fields existed, which are priced at the session's model instead.
+	Model    string `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"`
 }
 
 // InterruptReason classifies why a turn stopped short.
@@ -180,6 +187,29 @@ type TokenCounts struct {
 	Reasoning  int `json:"reasoning,omitempty"`
 	CacheRead  int `json:"cacheRead,omitempty"`
 	CacheWrite int `json:"cacheWrite,omitempty"`
+}
+
+// Consumed is the one definition of a total: every token the call(s) took in or
+// produced — uncached input, both cache variants and output. It is what the
+// providers themselves report as total_tokens, so a session's figure can be
+// checked against their dashboards. Cache reads are included: they are
+// processed and billed (at a discount) on every step that sends them. Reasoning
+// is not added — it is billed inside output, and adding it would count it twice.
+// Every surface that shows a total (per step, per session, utility, `ogcode run`,
+// the web token pill's breakdown) must use this so they agree.
+func (t TokenCounts) Consumed() int {
+	return t.Input + t.CacheRead + t.CacheWrite + t.Output
+}
+
+// Effective is Consumed without cache reads: the tokens spent fresh — uncached
+// input, cache writes and output. Cache reads are the cheapest tokens, and on a
+// long session they are most of Consumed, so a headline built on it mostly
+// counts how often the history was re-sent. Cache writes stay in: they are new
+// input, billed at or above the full input price. Reasoning is inside output,
+// as in Consumed. The web token pill leads with this figure and `ogcode run`
+// reports it beside Total; both must use this so they agree.
+func (t TokenCounts) Effective() int {
+	return t.Input + t.CacheWrite + t.Output
 }
 
 type MessageWithParts struct {

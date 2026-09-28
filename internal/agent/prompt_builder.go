@@ -559,22 +559,65 @@ Return that path (or a full URL made from it) when you produce a file the user m
 }
 
 // previewServingPrompt returns a section advertising the live-preview proxy: a
-// service the agent starts on a loopback port is served by this server at
-// /preview/<port>/, so the agent can hand the user a URL that opens the running
-// app. The prefix is fixed for the whole install, so this belongs in the
-// cacheable base.
-func previewServingPrompt() string {
-	return `
+// service the agent starts on a loopback port is served by this server at its
+// own hostname (<port>.<domain>), so the agent can hand the user a URL that
+// opens the running app. The domain is fixed for the whole install, so this
+// belongs in the cacheable base. The URL carries this server's own port as well
+// as the service's; written without it the browser goes to port 80, which is
+// some other server, and the service never loads.
+//
+// The section also says that a port is served only once it is published —
+// handing the URL back is what publishes it — so the agent writes the URL down
+// rather than expecting an unmentioned port to load, and checks a service at
+// its loopback address rather than through a hostname that may still answer 403.
+func previewServingPrompt(domain string) string {
+	// The *.localhost form is resolved to loopback by Chromium-based browsers
+	// alone, and to the BROWSER's machine at that, so only there do the browser
+	// and where it runs matter; a configured real domain is a wildcard DNS record,
+	// which every browser resolves to this server. Say nothing about either when
+	// the domain is a real one rather than warn about limits it does not have.
+	browserNote := ""
+	if PreviewDomainIsLoopbackOnly(domain) {
+		browserNote = "\nThis URL works in Chromium-based browsers (Chrome, Edge, Brave, …) — they resolve a *.localhost hostname to the machine the browser runs on. Browsers that do not (Safari and Firefox, among others) fail to load it, so if the user reports the URL not opening, tell them to use a Chromium-based browser. Because the name resolves to the browser's own machine, it reaches this server only from a browser on this machine or one that tunnels this server's port (ssh -L); a browser on another machine needs the operator to set OGCODE_PREVIEW_DOMAIN to a wildcard DNS name that points at this server.\n"
+	}
+	return fmt.Sprintf(`
 ## Live service preview
 
-A local service you start on a loopback port is reachable through this server at /preview/<port>/ — a dev server, a player, a dashboard. The port is the one the process listens on:
+A local service you start on a loopback port is reachable through this server at its own hostname — a dev server, a player, a dashboard. The service's port is the first label of the host, and the address also carries the port this server itself listens on:
 
-  /preview/3000/          ->  http://127.0.0.1:3000/
-  /preview/3000/app.js    ->  http://127.0.0.1:3000/app.js
+  http://3000.%s:<server-port>/          ->  http://127.0.0.1:3000/
+  http://3000.%s:<server-port>/app.js    ->  http://127.0.0.1:3000/app.js
 
-The path after the port is forwarded unchanged (WebSockets and streaming responses included), so return a /preview/<port>/ URL when something is running that the user should open in the browser. Only loopback targets are reachable this way, and the port must be listening before the URL will load.
+The two ports are different and both are required: 3000 is what the service listens on, <server-port> is the port in the address you are already using to reach this server. Omit <server-port> only when this server itself listens on 80 or 443 — a URL with no port sends the browser to port 80, where it reaches whatever else is there instead of this server, and the service fails to load. Each service answers at the root of its own origin, so an app that reads its own location or absolute URLs works unchanged. The path after the host is forwarded unchanged (WebSockets and streaming responses included), so return this hostname URL when something is running that the user should open in the browser. Only loopback targets are reachable this way, and the port must be listening before the URL will load.
 
-Starting several services at once is fine: the user's Preview page lists every service running on a loopback port as a grid of tiles, so they can open each one without a URL from you. Label each service meaningfully in its page title, which becomes the tile's name.`
+A port is served at its hostname only once it is published, and writing its live-preview URL in your reply is what publishes it (the user can also add a port on the Preview page). Until then the hostname answers 403, so write the URL as soon as the service is up. To check a service yourself, request http://127.0.0.1:<port>/ directly rather than its preview hostname. This server's own port is never served as a preview.
+%s
+Starting several services at once is fine: the user's Preview page lists the services this project's agent has handed back — the ports you name in a live-preview URL — as a grid of tiles, so they can open each one without a URL from you. A port you never wrote down is not on that page, so state the URL in your reply. Label each service meaningfully in its page title, which becomes the tile's name.`, domain, domain, browserNote)
+}
+
+// serverURLPrompt returns a section naming the origin the user's browser is
+// using to reach this server, so the agent can prefix /public/<name> paths into
+// full URLs and name live services at their own preview hostname. The origin is
+// fixed for the session, but the section is appended outside the cacheable base
+// rather than living in it.
+//
+// When that origin is not a loopback name but the preview domain is the
+// loopback-only *.localhost one, every preview URL resolves to the user's OWN
+// machine, not this server, so the section says so: the agent can then warn the
+// user instead of handing back a link that cannot open for them.
+func serverURLPrompt(serverURL string) string {
+	if serverURL == "" {
+		return ""
+	}
+	remoteNote := ""
+	if domain := PreviewDomain(); PreviewDomainIsLoopbackOnly(domain) && !originIsLoopback(serverURL) {
+		remoteNote = fmt.Sprintf(" The user reached this server at a non-loopback address, but preview hostnames use *.%s, which a browser resolves to its own machine — so a preview URL opens only if their browser runs on this server's machine or tunnels this server's port. When you hand one back, tell them that from another machine it needs the operator to set OGCODE_PREVIEW_DOMAIN to a wildcard DNS name pointing at this server.", domain)
+	}
+	return fmt.Sprintf(`
+
+## This server's address
+
+This ogcode server is reachable at %s. Prefix a /public/<name> path with this origin to give the user a full URL they can open. A live service on a loopback port is instead reached at its own hostname, e.g. %s for a service you started on port 4321. Both are the origin the user's browser is already using, so they hold locally and through a tunnel.%s`, serverURL, PreviewURL(serverURL, 4321), remoteNote)
 }
 
 // viewportPrompt returns a section telling the agent about the user's
@@ -895,6 +938,13 @@ func modelFamilyStylePrompt(family string) string {
 // keeps arriving until the tool is called. The one exception — nothing finished
 // left in context — is named here so the agent can recognise it as the exception
 // rather than a licence to ignore every reminder.
+//
+// The bullet list carries one clause held apart from the rest: when the user was
+// asked questions, their answers must appear verbatim. A Q&A exchange is the
+// steering input for everything that follows, and the one kind of content a
+// summary will flatten into "the user confirmed the approach" unless told not to.
+// The clause is stated conditionally (if you asked) so it stays truthful for the
+// agents that receive this section without holding ask_user.
 func compactContextPrompt() string {
 	return `## Reclaiming Your Own Context
 
@@ -913,6 +963,8 @@ Do not call it on a short turn, or when the material still in context is what yo
 - Decisions you made, and approaches you ruled out — so you do not retry them
 - Exact values you would otherwise have to look up again: names, signatures, flags, commands, config
 - What you deliberately left out, if you decided something was irrelevant
+
+**The answers the user gave you must survive verbatim.** If you put questions to the user with "ask_user", the summary must carry each question and the answer it got — the option the user chose, or the text they typed. Those answers steer every step after them, so a summary that drops or generalises them has lost the steering.
 
 Leave out the raw file contents you have already drawn conclusions from — that is the weight you are trying to shed. Keep the conclusions, drop the transcript.
 

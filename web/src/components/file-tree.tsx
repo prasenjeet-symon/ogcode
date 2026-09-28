@@ -290,7 +290,7 @@ function Highlight(props: { text: string; query: string }) {
     <For each={parts()}>
       {(p) => (
         <Show when={p.hit} fallback={<>{p.text}</>}>
-          <mark class="bg-[color:var(--accent-ring)] text-zinc-100 rounded-[2px] px-px">{p.text}</mark>
+          <mark class="tree-mark">{p.text}</mark>
         </Show>
       )}
     </For>
@@ -311,23 +311,35 @@ export interface TreeRowProps {
   attach?: (el: HTMLDivElement) => void;
 }
 
+/**
+ * One row of the index tree. Status marks the exceptions: once a project is
+ * indexed, "indexed" is every row, so a check on each said nothing and buried
+ * the one file that was not. A file the index does not hold yet carries a ring,
+ * and so does every folder above it, next to the folder's file count.
+ */
 export function TreeRow(props: TreeRowProps) {
   const isDir = () => props.node.kind === 'dir';
   const ext = () => (isDir() ? '' : fileExt(props.node.name));
+  const pending = () => props.node.fileCount - props.node.indexedCount;
 
   return (
     <div
       ref={(el) => props.attach?.(el)}
+      role="treeitem"
+      aria-level={props.depth + 1}
+      aria-selected={props.selected}
+      aria-expanded={isDir() ? props.expanded : undefined}
       onClick={() => {
         props.onSelect(props.node);
         if (isDir()) props.onToggle(props.node.id);
       }}
       class="group relative flex items-center gap-1.5 pr-2.5 cursor-pointer select-none"
       classList={{
-        'bg-[color:var(--accent-soft)]': props.selected,
+        'tree-row-selected': props.selected,
         'hover:bg-[color:var(--bg-elevated)]': !props.selected,
       }}
       style={{ height: `${ROW_HEIGHT}px`, 'padding-left': `${props.depth * INDENT + 6}px` }}
+      title={props.node.id}
     >
       {/* Indent guides */}
       <For each={Array.from({ length: props.depth })}>
@@ -338,10 +350,6 @@ export function TreeRow(props: TreeRowProps) {
           />
         )}
       </For>
-
-      <Show when={props.selected}>
-        <span class="pointer-events-none absolute left-0 top-0 bottom-0 w-[2px] bg-[color:var(--accent)]" />
-      </Show>
 
       {/* Disclosure */}
       <span class="w-3.5 shrink-0 flex items-center justify-center">
@@ -364,61 +372,41 @@ export function TreeRow(props: TreeRowProps) {
       </Show>
 
       <span
-        class="flex-1 truncate text-[12px] leading-none"
+        class="flex-1 min-w-0 truncate text-ui leading-none"
         classList={{
           'text-[color:var(--text-primary)] font-medium': isDir(),
           'text-[color:var(--text-secondary)] group-hover:text-[color:var(--text-primary)]': !isDir() && !props.selected,
           'text-[color:var(--text-primary)]': !isDir() && props.selected,
         }}
-        title={props.node.kind === 'file' ? props.node.id : props.node.id}
       >
         <Highlight text={props.node.name} query={props.query} />
       </span>
 
-      <Show when={isDir()}>
-        <Show when={props.node.indexedCount < props.node.fileCount} fallback={
-          <span class="shrink-0 text-[10px] tabular-nums text-[color:var(--text-muted)] group-hover:text-[color:var(--text-tertiary)]">
-            {props.node.fileCount}
-          </span>
-        }>
-          <span
-            class="shrink-0 text-[10px] tabular-nums flex items-center gap-0.5"
-            title={`${props.node.indexedCount} of ${props.node.fileCount} indexed`}
-          >
-            <span class="text-[color:var(--success)]">{props.node.indexedCount}</span>
-            <span class="text-[color:var(--text-muted)]">/{props.node.fileCount}</span>
-          </span>
-        </Show>
-      </Show>
-
-      <Show when={!isDir()}>
-        <Show when={props.node.indexed} fallback={
-          <span
-            class="shrink-0 w-3 h-3 flex items-center justify-center text-[color:var(--text-muted)] opacity-0 group-hover:opacity-100 transition"
-            title="Not indexed"
-          >
-            <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-          </span>
-        }>
-          <span
-            class="shrink-0 w-3 h-3 flex items-center justify-center text-[color:var(--success)]"
-            title="Indexed"
-          >
-            <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
-          </span>
-        </Show>
-      </Show>
-
       <Show when={!isDir() && props.node.pageCount > 1}>
         <span
-          class="shrink-0 text-[9px] font-mono px-1 py-px rounded"
+          class="shrink-0 text-[0.5625rem] font-mono px-1 py-px rounded"
           style={{ color: langColor(ext()), background: tint(langColor(ext()), 0.1) }}
+          title={`${props.node.pageCount} pages in the index`}
         >
           {props.node.pageCount}p
+        </span>
+      </Show>
+
+      <Show when={isDir()}>
+        <span
+          class="shrink-0 flex items-center gap-1.5 text-[0.625rem] tabular-nums text-[color:var(--text-muted)] group-hover:text-[color:var(--text-tertiary)]"
+          title={pending() > 0 ? `${pending()} of ${props.node.fileCount} not indexed yet` : `${props.node.fileCount} files, all indexed`}
+        >
+          <Show when={pending() > 0}>
+            <span class="idx-pending-dot" />
+          </Show>
+          {props.node.fileCount}
+        </span>
+      </Show>
+
+      <Show when={!isDir() && !props.node.indexed}>
+        <span class="shrink-0 w-3 h-3 flex items-center justify-center" title="Not indexed yet">
+          <span class="idx-pending-dot" />
         </span>
       </Show>
     </div>

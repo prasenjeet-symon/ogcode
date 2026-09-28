@@ -34,7 +34,7 @@ func TestUtilityUsageAccumulates(t *testing.T) {
 	if err := store.AddUtilityUsage(id, TokenCounts{Input: 10, Output: 5, CacheWrite: 2}); err != nil {
 		t.Fatalf("first add: %v", err)
 	}
-	if err := store.AddUtilityUsage(id, TokenCounts{Input: 100, Output: 20, Reasoning: 8}); err != nil {
+	if err := store.AddUtilityUsage(id, TokenCounts{Input: 100, Output: 20, Reasoning: 8, CacheRead: 40}); err != nil {
 		t.Fatalf("second add: %v", err)
 	}
 
@@ -46,11 +46,12 @@ func TestUtilityUsageAccumulates(t *testing.T) {
 		t.Fatal("UtilityTokens is nil, want the accumulated counts")
 	}
 	u := got.UtilityTokens
-	if u.Input != 110 || u.Output != 25 || u.Reasoning != 8 || u.CacheWrite != 2 {
-		t.Errorf("components = %+v, want input=110 output=25 reasoning=8 cacheWrite=2", u)
+	if u.Input != 110 || u.Output != 25 || u.Reasoning != 8 || u.CacheRead != 40 || u.CacheWrite != 2 {
+		t.Errorf("components = %+v, want input=110 output=25 reasoning=8 cacheRead=40 cacheWrite=2", u)
 	}
-	// Total excludes cache read and equals input + cache write + output.
-	if want := 110 + 2 + 25; u.Total != want {
+	// Total is every token consumed: input + cache read + cache write + output.
+	// Reasoning is inside output and must not be added again.
+	if want := 110 + 40 + 2 + 25; u.Total != want {
 		t.Errorf("Total = %d, want %d", u.Total, want)
 	}
 }
@@ -118,5 +119,37 @@ func TestUtilityUsageSurvivesUpdate(t *testing.T) {
 	}
 	if got.UtilityTokens == nil || got.UtilityTokens.Input != 7 || got.UtilityTokens.Output != 3 {
 		t.Errorf("UtilityTokens = %+v, want input=7 output=3 preserved across Update", got.UtilityTokens)
+	}
+}
+
+// Consumed is the single total every surface shows, so pin its exact shape:
+// cache reads count (they are processed and billed each step), reasoning does
+// not (it is already inside output).
+func TestConsumedCountsCacheReadsButNotReasoningTwice(t *testing.T) {
+	tc := TokenCounts{Input: 220, CacheRead: 3072, CacheWrite: 0, Output: 131, Reasoning: 107}
+	// The live groq/gpt-oss-20b figures: prompt 3292 (3072 cached) + completion
+	// 131 (107 of it reasoning) = total_tokens 3423.
+	if got := tc.Consumed(); got != 3423 {
+		t.Errorf("Consumed() = %d, want 3423 (the provider's total_tokens)", got)
+	}
+}
+
+// Effective is the token pill's headline, so pin what it leaves out: cache
+// reads only. Cache writes are fresh input and stay in; reasoning is inside
+// output and is not added again.
+func TestEffectiveLeavesOutCacheReadsOnly(t *testing.T) {
+	// The same groq/gpt-oss-20b step: 220 uncached + 131 output, with the 3072
+	// cached prompt tokens left out.
+	tc := TokenCounts{Input: 220, CacheRead: 3072, Output: 131, Reasoning: 107}
+	if got := tc.Effective(); got != 351 {
+		t.Errorf("Effective() = %d, want 351 (input + output, no cache reads)", got)
+	}
+	// An Anthropic step that wrote the cache: the write counts, the read does not.
+	tc = TokenCounts{Input: 40, CacheRead: 9000, CacheWrite: 1200, Output: 80}
+	if got := tc.Effective(); got != 1320 {
+		t.Errorf("Effective() = %d, want 1320 (input + cache write + output)", got)
+	}
+	if got, want := tc.Consumed()-tc.Effective(), tc.CacheRead; got != want {
+		t.Errorf("Consumed() - Effective() = %d, want the cache reads %d", got, want)
 	}
 }

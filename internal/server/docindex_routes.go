@@ -232,31 +232,9 @@ func (s *Server) handleReadDocContent(w http.ResponseWriter, r *http.Request) {
 		dir = s.dir
 	}
 
-	// Resolve symlinks on both sides before comparing: a symlink inside the
-	// workspace must not become a read of something outside it.
-	root, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		http.Error(w, "workspace unavailable", http.StatusInternalServerError)
-		return
-	}
-	resolved, err := filepath.EvalSymlinks(filepath.Clean(docPath))
-	if err != nil {
-		http.Error(w, "file not found", http.StatusNotFound)
-		return
-	}
-	rel, err := filepath.Rel(root, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		http.Error(w, "file is outside the workspace", http.StatusForbidden)
-		return
-	}
-
-	info, err := os.Stat(resolved)
-	if err != nil {
-		http.Error(w, "file not found", http.StatusNotFound)
-		return
-	}
-	if info.IsDir() {
-		http.Error(w, "path is a directory", http.StatusBadRequest)
+	resolved, info, status, msg := resolveWorkspaceFile(dir, docPath)
+	if status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 
@@ -292,6 +270,129 @@ func (s *Server) handleReadDocContent(w http.ResponseWriter, r *http.Request) {
 		result["content"] = string(data)
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// resolveWorkspaceFile resolves docPath to a regular file inside dir. Symlinks
+// are resolved on both sides before comparing, so a link inside the workspace
+// cannot become a read of something outside it. On failure it returns the HTTP
+// status and message to answer with; status is 0 on success.
+func resolveWorkspaceFile(dir, docPath string) (string, os.FileInfo, int, string) {
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", nil, http.StatusInternalServerError, "workspace unavailable"
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(docPath))
+	if err != nil {
+		return "", nil, http.StatusNotFound, "file not found"
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", nil, http.StatusForbidden, "file is outside the workspace"
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", nil, http.StatusNotFound, "file not found"
+	}
+	if info.IsDir() {
+		return "", nil, http.StatusBadRequest, "path is a directory"
+	}
+	return resolved, info, 0, ""
+}
+
+// docAssetTypes are the file types handleReadDocAsset serves: the images a
+// Markdown document embeds. Anything else is refused, which keeps the endpoint
+// a way to show a README's screenshots rather than a general file server.
+var docAssetTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".avif": "image/avif",
+	".svg":  "image/svg+xml",
+	".ico":  "image/x-icon",
+	".bmp":  "image/bmp",
+}
+
+// handleReadDocAsset serves an image from the workspace, so the file viewer's
+// Markdown preview can show the pictures a document links by relative path — a
+// README's logo, a design note's screenshots. The inside-the-workspace rule is
+// the text viewer's; the type is decided by the file the path resolves to, not
+// by the name it was asked for under.
+//
+// An SVG is a document that can carry script. Inside an <img>, which is how the
+// preview loads it, that script never runs, but the URL can also be opened on
+// its own, so every response is sandboxed by CSP and its type pinned by nosniff.
+func (s *Server) handleReadDocAsset(w http.ResponseWriter, r *http.Request) {
+	docPath := r.URL.Query().Get("path")
+	if docPath == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+	dir := r.URL.Query().Get("directory")
+	if dir == "" {
+		dir = s.dir
+	}
+
+	resolved, info, status, msg := resolveWorkspaceFile(dir, docPath)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	ctype, ok := docAssetTypes[strings.ToLower(filepath.Ext(resolved))]
+	if !ok {
+		http.Error(w, "not an image", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	f, err := os.Open(resolved)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	// The file is on disk and may change under an open preview; revalidate
+	// rather than serve a picture the document no longer has.
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+}
+
+// handleGetIndexedDoc returns what the index holds for one file: the labels and
+// keywords each of its pages was filed under. Those are what an agent searching
+// the index finds the file by, so the viewer shows them next to the file rather
+// than leaving "indexed" as a bare yes. A file with no rows is not in the index,
+// which is a 404 rather than an empty record.
+func (s *Server) handleGetIndexedDoc(w http.ResponseWriter, r *http.Request) {
+	docPath := r.URL.Query().Get("path")
+	if docPath == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+	pages, err := s.docindexStore.GetByDoc(docPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(pages) == 0 {
+		http.Error(w, "not indexed", http.StatusNotFound)
+		return
+	}
+	var indexedAt int64
+	for _, p := range pages {
+		if p.IndexedAt > indexedAt {
+			indexedAt = p.IndexedAt
+		}
+	}
+	writeJSON(w, http.StatusOK, &docindex.DocSummary{
+		DocPath:   docPath,
+		PageCount: len(pages),
+		Pages:     pages,
+		IndexedAt: indexedAt,
+	})
 }
 
 // excludePatternsFor seeds the shipped defaults for dir if this directory has

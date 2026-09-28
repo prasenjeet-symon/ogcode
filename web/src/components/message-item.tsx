@@ -458,7 +458,7 @@ function parsePartData<T>(raw: unknown): T {
   return (raw ?? {}) as T;
 }
 
-const MAX_STRINGIFY_LEN = 10_000;
+const MAX_STRINGIFY_LEN = 200_000;
 
 function safeStringify(obj: any): string {
   try {

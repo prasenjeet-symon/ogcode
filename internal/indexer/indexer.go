@@ -14,6 +14,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/gitignore"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"golang.org/x/sync/errgroup"
 )
@@ -634,7 +635,11 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 		return fmt.Errorf("create user part: %w", err)
 	}
 
-	if err := idx.loopRunner.RunLoop(ctx, sess.ID, "index", 0, 0); err != nil {
+	// Mark the turn as a background index session so its provider requests draw
+	// the index's share of the process-wide in-flight budget rather than the
+	// pool the user's own turns queue in.
+	runCtx := provider.AsIndexSession(ctx)
+	if err := idx.loopRunner.RunLoop(runCtx, sess.ID, "index", 0, 0); err != nil {
 		// Log but don't fail the entire indexing run — other batches can still succeed.
 		slog.Warn("index agent loop failed", "title", title, "err", err)
 		for range b.items {

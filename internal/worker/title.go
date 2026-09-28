@@ -94,13 +94,15 @@ func (e *env) generateTitle(ctx context.Context, sess *session.Session) {
 	// risk check and compaction, it streams usage the main-turn accounting never
 	// sees. Recorded regardless of whether the title is kept below.
 	if e.runner.Store != nil && usage != nil {
-		if err := e.runner.Store.AddUtilityUsage(sessionID, session.TokenCounts{
+		tc := session.TokenCounts{
 			Input:      usage.InputTokens,
 			Output:     usage.OutputTokens,
 			Reasoning:  usage.ReasoningTokens,
 			CacheRead:  usage.CacheReadTokens,
 			CacheWrite: usage.CacheWriteTokens,
-		}); err != nil {
+		}
+		e.runner.Usage.RecordUtility(string(sessionID), p.ID(), titleModel, tc, session.Now())
+		if err := e.runner.Store.AddUtilityUsage(sessionID, tc); err != nil {
 			slog.Warn("record utility usage", "err", err)
 		}
 	}

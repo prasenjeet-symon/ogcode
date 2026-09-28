@@ -82,25 +82,45 @@ func TestLoadAgentMD_Hierarchy(t *testing.T) {
 	}
 }
 
-func TestLoadAgentMD_SizeLimit(t *testing.T) {
+// With no budget configured — the default — a large AGENT.md reaches the model
+// whole. The project's own instructions must not be silently cut.
+func TestLoadAgentMD_NoBudgetByDefault(t *testing.T) {
 	dir := t.TempDir()
-	// Create a file larger than the max size
-	bigContent := make([]byte, maxAgentMDSize+1000)
+	bigContent := strings.Repeat("a", 128*1024)
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(bigContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadAgentMD(dir)
+	if !strings.Contains(got, bigContent) {
+		t.Errorf("expected the whole file with no budget set, got %d bytes", len(got))
+	}
+	if strings.Contains(got, mdTruncationMarker) {
+		t.Error("an uncapped load must not carry the truncation marker")
+	}
+}
+
+// A budget set through the environment caps the total across all files.
+func TestLoadAgentMD_BudgetFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file larger than the budget
+	bigContent := make([]byte, 24*1024)
 	for i := range bigContent {
 		bigContent[i] = 'a'
 	}
 	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), bigContent, 0644); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv(agentMDBudgetEnv, "8192")
 
 	got := LoadAgentMD(dir)
 	if got == "" {
 		t.Fatal("expected non-empty result")
 	}
-	// Should be truncated to maxAgentMDSize
+	// Should be truncated to the configured budget.
 	tagOverhead := len("\n\n<agent-md path=\"AGENT.md\">\n\n</agent-md>")
-	if len(got) > maxAgentMDSize+tagOverhead {
-		t.Errorf("result too long: got %d bytes, expected at most %d", len(got), maxAgentMDSize+tagOverhead)
+	if len(got) > 8192+tagOverhead {
+		t.Errorf("result too long: got %d bytes, expected at most %d", len(got), 8192+tagOverhead)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/server"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
+	"github.com/prasenjeet-symon/ogcode/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -170,8 +171,16 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	toolRegistry.Register(tool.GrepTool{})
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(docindexStore))
 
+	// Indexing spends tokens like a turn, so it goes to the global ledger too,
+	// after the workspace's older history is copied in (once per workspace).
+	ledger := usage.NewLedger(globalDatabase, dir)
+	if _, _, err := ledger.Backfill(sessionStore); err != nil {
+		slog.Warn("usage ledger backfill", "err", err)
+	}
+	ledger.SetHosts(registry.EndpointHost)
 	lr := &agent.LoopRunner{
 		Store:           sessionStore,
+		Usage:           ledger,
 		Bus:             b,
 		Registry:        registry,
 		DefaultProvider: defaultProvider,

@@ -1,7 +1,7 @@
 # Ogcode — Documentation Outline
 
 > Architecture and configuration reference for the ogcode codebase.
-> Regenerated from codebase analysis at **v0.39.1**.
+> Regenerated from codebase analysis at **v0.40.0**.
 
 ---
 
@@ -73,6 +73,8 @@ Persistent flags on the root command: `--ollama-url` (overrides `OLLAMA_BASE_URL
 | `OGCODE_RESEND_COST_WINDOW_MULTIPLE` | Accumulated re-send cost, as a multiple of the model's context window, at which the agent is reminded to compact — every step re-sends the whole context, so a long turn keeps paying for its finished work (default `1`, clamped `[1, 1000]`) |
 | `OGCODE_TURN_MEMORY` | Write a per-turn markdown summary under `.ogcode/memory/` and index it. On by default; falsey disables |
 | `OGCODE_AUTO_INDEX` | Automatically index the workspace's PDFs/DOCX for `pdf_index`/`docx_index`. On by default; falsey disables |
+| `OGCODE_AGENT_MD_MAX_BYTES` | Cap the total bytes of `AGENT.md`/`AGENTS.md` content put in the system prompt. **Unset means no cap** — every discovered file loads whole; a positive value is a byte budget with no upper bound |
+| `OGCODE_MEMORY_MD_MAX_BYTES` | Cap the total bytes of `MEMORY.md` content put in the system prompt. **Unset means no cap**; a positive value is a byte budget with no upper bound |
 | `OGCODE_NO_KEEP_AWAKE` | Skip the macOS power assertion held during an agent turn |
 
 **Web search**
@@ -103,6 +105,7 @@ Persistent flags on the root command: `--ollama-url` (overrides `OLLAMA_BASE_URL
 | `OGX_APP_SECRET` | Shared secret ogcode signs its gateway calls with. Read at **build time** via ldflags (`make build-server`), not at runtime — a release binary carries it, a local build leaves it unset and unasserted. The matching `app` name is `ogcode`. |
 | `OGCODE_STREAM_IDLE_TIMEOUT` | Stream idle budget before a turn is called stalled: a duration (`30m`), bare seconds (`1800`), or `off`. Overrides the per-endpoint defaults (10m local / 2m cloud) |
 | `OGCODE_FORCE_IPV4` | `1`/`true`/`yes`/`on` pins IPv4, `0`/`off`/`never` keeps IPv6. Unset = automatic fallback to IPv4 after two IPv6-path failures |
+| `OGCODE_PROVIDER_MAX_CONCURRENT` | How many chat-completions requests may be in flight across the whole process (default `8`, minimum `2`). Two of those are reserved for interactive turns, so a background project index draws only the remainder — its waves cannot fill every slot ahead of the user's own turn |
 
 **Logging**
 
@@ -119,6 +122,7 @@ Persistent flags on the root command: `--ollama-url` (overrides `OLLAMA_BASE_URL
 | `DISPLAY` / `WAYLAND_DISPLAY` | Used to find a browser for the Safari search backend and MCP auth flows |
 | `OGCODE_SCRCPY_TARGET` | Target of the `/scrcpy/*` proxy (default `http://127.0.0.1:8000`) |
 | `ANDROID_HOME` / `ANDROID_SDK_ROOT` | Android SDK location for the device/scrcpy integration |
+| `OGCODE_PREVIEW_DOMAIN` | Host suffix a live-preview service is served under (default `preview.localhost`). The service on port 3000 answers at `http://3000.<domain>/`, so it sees its own origin root. `*.localhost` resolves to the browser's own machine, so the default works only from a browser on the server's machine (or through `ssh -L`); for a browser anywhere else set a real wildcard DNS name pointing at the server (with a TLS certificate for `*.<domain>` if served over https). Use a dedicated domain: every name under it belongs to previews and is never routed to the ogcode UI — ideally not under the UI's own registrable domain, so preview apps can neither read nor set cookies (an auth proxy's session, say) on it |
 
 **Remote worker**
 
@@ -224,6 +228,7 @@ Ogcode reclaims context on three levels:
 - `AGENTS.md` is the cross-tool convention; `AGENT.md` is ogcode's own name. Within a directory `AGENTS.md` is added first and `AGENT.md` last, so the ogcode-specific file wins. Identical content across the two names is included once
 - **`LoadMemoryMD(dir)`**: the same walk for `MEMORY.md` files
 - Deeper (project-specific) files override root-level ones
+- **No size limit by default** — the whole of every discovered file reaches the model. Set `OGCODE_AGENT_MD_MAX_BYTES` / `OGCODE_MEMORY_MD_MAX_BYTES` to a positive byte total to cap it (the first file that would overrun is cut on a rune boundary with a marker, the rest skipped); an overrun is also logged as a warning
 
 ---
 
@@ -386,6 +391,14 @@ type Provider interface {
 - Because the catalogue is on disk, `Models()` is a pure read and the picker is populated from the last known state *before* any network call, refreshing off the read path
 - Custom models can be added via `POST /api/models/preference` with `isCustom: true`
 - Provider priority for default selection: Anthropic → OpenAI → OpenRouter → Ollama
+
+#### Built-in model facts (`internal/provider/models_catalog.go`)
+
+- One compiled-in catalogue: `AnthropicModels` and `OpenAIModels` (which those providers list), `OpenModels` (major open-weight families, listed by no provider) and `LegacyModels` (retired first-party, still hosted elsewhere). Each entry carries the context window, prices incl. cache read/write, image support, output ceiling and request quirks
+- `LookupCatalogModel` (`catalog_lookup.go`) matches any spelling: org prefix dropped, OpenRouter variants (`:free`, `:batch`…) and Ollama tags (`:latest`, `:cloud`, `-cloud`) stripped, `.` `_` `:` folded to `-`, a trailing snapshot date ignored; `Aliases` list the host ids normalisation cannot reach. Ids that name different models on different hosts are deliberately unmatched
+- Window: `Registry.ContextWindow` is the smaller of the catalogue's and the serving host's figure, and `agent.EffectiveContextWindow` also takes a smaller window learned from an overflow error. `Registry.CatalogModel` skips models running on a local Ollama (`RunsLocally`): their window is the instance's `num_ctx` and their image support is probed
+- Price: `Registry.PriceOn(provider, model)` — the provider's own listed price wins (OpenRouter's, parsed from `/models`; `:free` is free), else the catalogue's first-party price; none for `ollama` and `ogx`, which do not bill per token. Feeds `/api/models` and `ogcode run`'s cost
+- Request shape: Claude entries carry the thinking mode and `RejectsSampling`; OpenAI entries carry `EffortFloor`, `ToolsNeedNoReasoning` (GPT-5.4+ take tools on Chat Completions only with `reasoning_effort: "none"`) and `ResponsesOnly` (not listed: tool calling needs the Responses API) — applied by `shapeForOpenAIModel`, which also sends `max_completion_tokens`
 
 ### 6.5 Stream Events (`provider.StreamEvent`)
 
@@ -558,7 +571,7 @@ Each message has multiple parts, each with a type:
 
 ## 11. REST API (`internal/server/routes.go`)
 
-Chi router; all API routes live under `r.Route("/api", ...)`. Outside `/api`: `/public/*` (workspace public files), `/scrcpy/*` (device UI proxy), `/preview/<port>/*` (loopback service proxy), and the SPA static fallback — all registered before the fallback.
+Chi router; all API routes live under `r.Route("/api", ...)`. Outside `/api`: `/public/*` (workspace public files), `/scrcpy/*` (device UI proxy), `/preview/*` (legacy path form, redirected to the service's own hostname), and the SPA static fallback — all registered before the fallback. A live service is served on its own hostname (`<port>.<preview-domain>`), dispatched by a middleware that runs ahead of ogcode's own (CORS, RealIP) and of every route; see 17.2.
 
 ### 11.1 Route Map
 
@@ -662,8 +675,9 @@ Chi router; all API routes live under `r.Route("/api", ...)`. Outside `/api`: `/
 | GET | `/api/resources` | `handleResources` | Process CPU/RSS/runtime usage |
 | GET | `/api/scrcpy/status` | `handleScrcpyStatus` | Device-UI proxy status |
 | GET | `/api/scrcpy/devices` | `handleScrcpyDevices` | Connected devices (adb) |
-| GET | `/api/preview/status` | `handlePreviewStatus` | Is a given loopback port up |
-| GET | `/api/preview/services` | `handlePreviewServices` | Discovered local services |
+| GET | `/api/preview/services` | `handlePreviewServices` | Published preview services (+ a deep-linked port) |
+| POST | `/api/preview/ports` | `handlePublishPreviewPort` | Publish a port as a preview |
+| DELETE | `/api/preview/ports/{port}` | `handleUnpublishPreviewPort` | Stop previewing a port |
 | POST | `/api/latex` | `handleLatexCompile` | Compile LaTeX to PDF |
 | POST | `/api/latex/pages` | `handleLatexPages` | Render LaTeX page images |
 | GET | `/api/latex/status` | `handleLatexStatus` | LaTeX availability status |
@@ -864,7 +878,7 @@ Port selection runs through `internal/portmap`, which remembers the port each pr
 
 ## 15. Version & Update Checking (`internal/version/`)
 
-- Current version: **v0.39.1** (set via ldflags)
+- Current version: **v0.40.0** (set via ldflags)
 - `CheckUpdate()`: fetches the latest release from the GitHub API (`prasenjeet-symon/ogcode`), cached for 1 hour
 - Detects the install method: Homebrew, winget, scoop, cargo, or the curl script
 - Compares semantic versions and returns update info with the install command
@@ -902,9 +916,14 @@ Notes are saved to `.ogcode/notes/<noteID>.md` as markdown, enabling the NoteAge
 
 ### 17.2 Live Service Preview (`internal/server/preview.go`, `preview_services.go`)
 
-- The server proxies `/preview/<port>/` to `http://127.0.0.1:<port>` so a locally-started dev server, player, or dashboard is browsable at the ogcode origin (streaming and WebSockets included)
-- The target is read from the request path and carried on the request context; the proxy is built once. **Only loopback is reachable** — the host is the literal `127.0.0.1`, so the path's port is the only caller-controlled part
-- `preview_services.go` discovers live loopback listeners (`lsof`), keeps those that answer HTML, and returns a grid for the Preview page; hand-added ports are always kept even when down
+- Each live service is served at its **own origin** — `http://<port>.<preview-domain>/` (default `preview.localhost`) — reverse-proxied to `http://127.0.0.1:<port>` (streaming and WebSockets included). The preview host is matched by a middleware (`previewHostDispatch`) that runs ahead of the routes, so the app sees `location.pathname === "/"` and bootstraps normally (Next.js, Nuxt, SvelteKit)
+- The preview host is a transparent pass-through: it runs ahead of ogcode's own CORS middleware (a service's OPTIONS reaches it, and no `Access-Control-Allow-Origin: *` is stamped on its responses) and of RealIP. The upstream `Host` is `127.0.0.1:<port>` (what dev-server host checks accept); `X-Forwarded-Host`/`-Proto`/`-For` carry the browser-facing host, the scheme the browser used, and the client chain. A `Location` naming the service's own loopback origin is mapped back onto the preview host; `X-Frame-Options` and CSP `frame-ancestors` are dropped so the grid can frame it
+- **Only published ports are served.** A port is published when the build agent writes its live-preview URL in its prose (recorded as each step ends — `agent.LoopRunner.recordAnnouncedPorts` → `announced_preview_port`) or when the user adds it on the Preview page; anything else answers 403, and so does the server's own port, always. Loopback-only keeps the proxy off other hosts, but loopback ports are often private *because* they are loopback-only (a database console, a debugger, another ogcode), and a preview link is meant to be shared
+- **The preview domain is reserved**: any other name under it (`x.<domain>`, `03000.<domain>`, the bare domain) answers 404 and never reaches the ogcode UI/API, so an operator who exposes the preview wildcard more widely than the main host does not expose ogcode. Port labels are canonical (digits, no sign or leading zero)
+- The domain comes from `OGCODE_PREVIEW_DOMAIN` (normalized; a malformed value falls back to the default with a warning). `*.localhost` resolves to the *browser's* machine (RFC 6761), so the default needs no DNS or TLS but reaches the server only from its own machine or through `ssh -L`; the agent prompt and the Preview page both say so when the UI is reached by another name. The origin's scheme and port are carried over into every preview URL
+- A legacy `/preview/<port>/…` path is served by `servePreview`: a published port is **307-redirected** to its hostname URL (path escaping and query kept), an unpublished one is 303'd to the Preview page (`/preview?port=N`) where it can be added; bare `/preview` still opens the page, and a path that names no valid port is a 400
+- `preview_services.go` lists the published ports for a project and probes each (following redirects only within the service's own loopback origin; one that leaves it is up-but-not-embeddable). A port the page merely names (`?ports=`, capped) is listed unpublished and is **never probed**, so the endpoint cannot fingerprint the rest of loopback. `POST/DELETE /api/preview/ports` publish and un-publish; both require a JSON body and refuse a browser request whose `Sec-Fetch-Site` is not this origin's own
+- The Preview page embeds a published, HTML-serving service in an iframe sandboxed with `allow-same-origin` (safe because the preview is always a different origin from the UI — it gives the app its *own* storage and same-origin requests), keeps tiles reconciled by port so the 10 s poll never remounts an open frame, and never tears down a frame once shown
 - `/scrcpy/*` is the same pattern for the single hardcoded device-UI target
 
 ### 17.3 Remote Workers (`internal/worker/`)

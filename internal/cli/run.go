@@ -22,6 +22,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
+	"github.com/prasenjeet-symon/ogcode/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -293,8 +294,16 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		slog.Info("web search disabled by configuration")
 	}
 
+	// Headless runs spend like any other, so they go to the global ledger too,
+	// after the workspace's older history is copied in (once per workspace).
+	ledger := usage.NewLedger(globalDatabase, dir)
+	if _, _, err := ledger.Backfill(store); err != nil {
+		slog.Warn("usage ledger backfill", "err", err)
+	}
+	ledger.SetHosts(registry.EndpointHost)
 	lr := &agent.LoopRunner{
 		Store:           store,
+		Usage:           ledger,
 		Bus:             b,
 		Registry:        registry,
 		DefaultProvider: defaultProvider,
@@ -332,6 +341,8 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	price := runPrice(registry, runModel)
+
 	loopDone := make(chan error, 1)
 	go func() {
 		loopDone <- lr.RunLoop(ctx, sess.ID, runAgentName, 0, 0)
@@ -345,7 +356,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		select {
 		case evt, ok := <-events:
 			if !ok {
-				return printResult(&fullText, store, sess.ID, runModel, runOutputFormat)
+				return printResult(&fullText, store, sess.ID, runModel, price, runOutputFormat)
 			}
 			switch evt.Type {
 			case "message.part.updated":
@@ -380,14 +391,14 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 					continue
 				}
 				if props.SessionID == string(sess.ID) {
-					return printResult(&fullText, store, sess.ID, runModel, runOutputFormat)
+					return printResult(&fullText, store, sess.ID, runModel, price, runOutputFormat)
 				}
 			}
 		case err := <-loopDone:
 			if err != nil {
 				return err
 			}
-			return printResult(&fullText, store, sess.ID, runModel, runOutputFormat)
+			return printResult(&fullText, store, sess.ID, runModel, price, runOutputFormat)
 		}
 	}
 }
@@ -402,12 +413,16 @@ type runTokens struct {
 	Reasoning  int `json:"reasoning"`
 	CacheRead  int `json:"cache_read"`
 	CacheWrite int `json:"cache_write"`
-	// Utility is the token subtotal spent by utility calls (title generation,
-	// command risk assessment, context compaction). It is also folded into the
-	// component fields above, so Total and cost already include it; this reports
-	// how much of that was utility work.
+	// Utility is the token subtotal spent outside the main step loop (title
+	// generation, command risk assessment, context compaction, sub-agents, deep
+	// search, turn-memory summaries). It is also folded into the component fields
+	// above, so Total and cost already include it; this reports how much of that
+	// was utility work. Total counts cache reads (see TokenCounts.Consumed).
 	Utility int `json:"utility"`
-	Total   int `json:"total"`
+	// Effective is Total without cache reads: the tokens the run spent fresh
+	// (see TokenCounts.Effective), the figure the web token pill leads with.
+	Effective int `json:"effective"`
+	Total     int `json:"total"`
 }
 
 // runResult is the JSON document `--output-format json` prints.
@@ -423,14 +438,12 @@ type runResult struct {
 	CostUSD *float64 `json:"cost_usd"`
 }
 
-// Cache-token prices as a multiple of the model's base input price. The
-// catalog stores one input price per model, and both providers it covers bill
-// cache traffic off that number: Anthropic charges 1.25x to write an entry and
-// 0.1x to read one, and the OpenAI models listed discount cached input to 0.1x
-// while never billing a write separately (their cache write count stays 0).
+// Cache-token prices as a multiple of the model's base input price, used only
+// when the catalogue does not publish the model's own cache prices. The one
+// definition lives beside ModelPrice.Cost, which applies them.
 const (
-	cacheWriteMultiplier = 1.25
-	cacheReadMultiplier  = 0.10
+	cacheWriteMultiplier = provider.CacheWriteMultiplier
+	cacheReadMultiplier  = provider.CacheReadMultiplier
 )
 
 // allTurnsLimit is a ceiling, not a page size — every message of the session is
@@ -463,16 +476,16 @@ func collectUsage(store *session.Store, sessionID session.SessionID) (tokens run
 		tokens.Reasoning += t.Reasoning
 		tokens.CacheRead += t.CacheRead
 		tokens.CacheWrite += t.CacheWrite
-		// Cache read is excluded: cached tokens were already counted as input when
-		// first sent, so summing them over a session re-counts the same context
-		// prefix once per turn. Cache write stays — providers that report it never
-		// count it inside input.
-		tokens.Total += t.Input + t.CacheWrite + t.Output
+		// Every token each step consumed, cache reads included, which is what
+		// the provider reports as total_tokens and bills for.
+		tokens.Total += t.Consumed()
+		tokens.Effective += t.Effective()
 	}
-	// Utility calls (title, risk check, compaction) spend tokens of their own
-	// that the loop accumulates on the session row rather than on a message. Fold
-	// them into the components so the cost and Total formulas include them, and
-	// record the utility subtotal so the caller can see how much that was.
+	// Utility work (titles, risk checks, compaction, sub-agents, deep search,
+	// turn-memory summaries) spends tokens of its own that the loop accumulates
+	// on the session row rather than on a message. Fold them into the components
+	// so the cost and Total formulas include them, and record the utility
+	// subtotal so the caller can see how much that was.
 	if sess, err := store.Get(sessionID); err == nil && sess != nil && sess.UtilityTokens != nil {
 		u := sess.UtilityTokens
 		tokens.Input += u.Input
@@ -480,37 +493,47 @@ func collectUsage(store *session.Store, sessionID session.SessionID) (tokens run
 		tokens.Reasoning += u.Reasoning
 		tokens.CacheRead += u.CacheRead
 		tokens.CacheWrite += u.CacheWrite
-		tokens.Total += u.Input + u.CacheWrite + u.Output
-		tokens.Utility = u.Input + u.CacheWrite + u.Output
+		tokens.Total += u.Consumed()
+		tokens.Effective += u.Effective()
+		tokens.Utility = u.Consumed()
 	}
 	return tokens, turns, finish
 }
 
-// estimateCost prices a run against the static catalog, or returns nil when it
-// cannot: with no --model the provider applies its own default and the CLI
-// never learns which model answered, and a dynamic provider's models are not in
-// the catalog at all. Reasoning tokens are not added separately — providers
-// bill them inside the output count, which is why TokenCounts.Total excludes
-// them too.
-func estimateCost(t runTokens, modelID string) *float64 {
+// runPrice is what the run's model costs where it runs (see
+// Registry.PriceOn), or nil when there is nothing to quote: with no --model the
+// provider applies its own default and the CLI never learns which model
+// answered; local and subscription providers bill nothing per token; and a
+// model neither its provider nor the catalogue prices is unknown, not free.
+func runPrice(reg *provider.Registry, modelID string) *provider.ModelPrice {
 	if modelID == "" {
 		return nil
 	}
-	m, ok := provider.CatalogModelByID(modelID)
-	if !ok || (m.InputPricePerM == 0 && m.OutputPricePerM == 0) {
+	p := reg.ResolveProvider(modelID)
+	if p == nil {
 		return nil
 	}
-	const perMillion = 1_000_000.0
-	cost := (float64(t.Input)*m.InputPricePerM +
-		float64(t.CacheWrite)*m.InputPricePerM*cacheWriteMultiplier +
-		float64(t.CacheRead)*m.InputPricePerM*cacheReadMultiplier +
-		float64(t.Output)*m.OutputPricePerM) / perMillion
+	price, ok := reg.PriceOn(p.ID(), modelID)
+	if !ok {
+		return nil
+	}
+	return &price
+}
+
+// estimateCost prices a run, or returns nil when there is no price. Reasoning
+// tokens are not added separately — providers bill them inside the output
+// count, which is why TokenCounts.Total excludes them too.
+func estimateCost(t runTokens, price *provider.ModelPrice) *float64 {
+	if price == nil {
+		return nil
+	}
+	cost := price.Cost(t.Input, t.Output, t.CacheRead, t.CacheWrite)
 	return &cost
 }
 
-func printResult(text *strings.Builder, store *session.Store, sessionID session.SessionID, modelID, format string) error {
+func printResult(text *strings.Builder, store *session.Store, sessionID session.SessionID, modelID string, price *provider.ModelPrice, format string) error {
 	tokens, turns, finish := collectUsage(store, sessionID)
-	cost := estimateCost(tokens, modelID)
+	cost := estimateCost(tokens, price)
 
 	switch format {
 	case "json":
@@ -533,8 +556,8 @@ func printResult(text *strings.Builder, store *session.Store, sessionID session.
 		if cost != nil {
 			costStr = fmt.Sprintf("$%.4f", *cost)
 		}
-		fmt.Fprintf(os.Stderr, "turns=%d finish=%s in=%d out=%d cache_read=%d cache_write=%d utility=%d total=%d cost=%s\n",
-			turns, finish, tokens.Input, tokens.Output, tokens.CacheRead, tokens.CacheWrite, tokens.Utility, tokens.Total, costStr)
+		fmt.Fprintf(os.Stderr, "turns=%d finish=%s in=%d out=%d cache_read=%d cache_write=%d utility=%d effective=%d total=%d cost=%s\n",
+			turns, finish, tokens.Input, tokens.Output, tokens.CacheRead, tokens.CacheWrite, tokens.Utility, tokens.Effective, tokens.Total, costStr)
 		return nil
 	}
 }

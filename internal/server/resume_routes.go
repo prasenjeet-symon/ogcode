@@ -84,7 +84,7 @@ func (s *Server) handleResumeSession(w http.ResponseWriter, r *http.Request) {
 	if agentName == "" {
 		agentName = "build"
 	}
-	s.startSessionLoop(sessionID, agentName, 0, 0)
+	s.startSessionLoop(sessionID, agentName, 0, 0, requestOrigin(r))
 
 	writeResumeResult(w, http.StatusAccepted, resumeResponse{Resumed: true})
 }
@@ -138,6 +138,26 @@ func (s *Server) recoverInterruptedSessions() {
 	}
 }
 
+// requestOrigin reconstructs the scheme://host the client used to reach this
+// server, from the Host header and (behind a TLS-terminating proxy) the
+// X-Forwarded-Proto header. It is echoed into the agent's system prompt, so a
+// Host carrying anything unexpected is dropped rather than passed through.
+func requestOrigin(r *http.Request) string {
+	host := r.Host
+	if host == "" {
+		return ""
+	}
+	for _, c := range host {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.', c == '-', c == '_', c == ':', c == '[', c == ']':
+		default:
+			return ""
+		}
+	}
+	return requestScheme(r) + "://" + host
+}
+
 // startSessionLoop starts the agent loop for a session in the background with
 // the same context, gating and bookkeeping a prompt would set up.
 //
@@ -145,7 +165,7 @@ func (s *Server) recoverInterruptedSessions() {
 // is not a second, subtly different way of running one — a resume that skipped
 // permission gating, or that failed to register its cancel func, would be a
 // loop the user could neither approve tools in nor stop.
-func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string, viewportWidth, viewportHeight int) {
+func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string, viewportWidth, viewportHeight int, serverURL string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// A LoopControl lets the user inject mid-loop guidance and cancel in-flight
 	// tools without killing the loop.
@@ -155,6 +175,11 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 	// prompts, so mark it gated: mutating tools (bash/write/edit) will pause for
 	// approval. Headless loops (task/breakdown/note/search) never set this flag.
 	ctx = agent.WithPermissionGating(ctx)
+	// The origin the client reached this server by, so the agent can hand back
+	// absolute /preview/ and /public/ URLs. Empty on the RPC-driven hosting path.
+	if serverURL != "" {
+		ctx = agent.WithServerURL(ctx, serverURL)
+	}
 
 	s.mu.Lock()
 	if old, ok := s.running[sessionID]; ok {

@@ -65,7 +65,7 @@ func TestResolveImageSupport_CustomOpenAIModelIsProbed(t *testing.T) {
 		p := &imageProbeProvider{id: "openai", acceptImage: true}
 		lr, database := newImageSupportRunner(t, p)
 
-		const modelID = "gpt-4o-2024-11-20" // absent from the static OpenAI catalog
+		const modelID = "acme-vision-7b" // absent from the built-in catalogue
 		lr.Registry.RegisterCustomModel(modelID, "openai")
 
 		if !lr.resolveImageSupport(context.Background(), p, modelID) {
@@ -130,5 +130,23 @@ func TestResolveImageSupport_BuiltInCatalogModelIsNotProbed(t *testing.T) {
 	}
 	if p.streamCalls != 0 {
 		t.Fatalf("catalog model was probed (%d calls); expected the catalog short-circuit", p.streamCalls)
+	}
+}
+
+// A model the built-in catalogue knows keeps its catalogued image support even
+// when a user added it by hand under a generic slot, so it costs no probe call.
+func TestResolveImageSupport_CataloguedCustomModelIsNotProbed(t *testing.T) {
+	cm := provider.AnthropicModels[0]
+	p := &imageProbeProvider{id: "openai", acceptImage: !cm.SupportsImages} // probing would flip it
+	lr, _ := newImageSupportRunner(t, p)
+
+	modelID := "anthropic/" + cm.ID // a host's spelling, not the catalogue's
+	lr.Registry.RegisterCustomModel(modelID, "openai")
+
+	if got := lr.resolveImageSupport(context.Background(), p, modelID); got != cm.SupportsImages {
+		t.Fatalf("resolved %v, want the catalogue's %v", got, cm.SupportsImages)
+	}
+	if p.streamCalls != 0 {
+		t.Fatalf("catalogued model was probed (%d calls)", p.streamCalls)
 	}
 }

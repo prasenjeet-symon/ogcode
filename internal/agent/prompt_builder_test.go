@@ -501,13 +501,50 @@ func TestBuildAgent_SystemPrompt_ContainsPreviewServing(t *testing.T) {
 	if !strings.Contains(p, "Live service preview") {
 		t.Error("BuildAgent prompt should include the live service preview section")
 	}
-	if !strings.Contains(p, "/preview/<port>/") {
-		t.Error("BuildAgent prompt should name the /preview/<port>/ URL pattern")
+	if !strings.Contains(p, "3000."+PreviewDomain()) {
+		t.Error("BuildAgent prompt should name the <port>.<domain> preview hostname pattern")
 	}
 	// The grid is what removes the need to hand back a URL per service; the
 	// agent can only rely on it if the prompt says it exists.
 	if !strings.Contains(p, "grid of tiles") {
 		t.Error("BuildAgent prompt should tell the agent the Preview page lists every service")
+	}
+	// The address also carries this server's own port. Written without it the
+	// browser goes to port 80, which is not this server, and the service never
+	// loads — so the section must name the port AND must not show a portless URL
+	// as the copyable example.
+	if !strings.Contains(p, "<server-port>") {
+		t.Error("BuildAgent prompt should show this server's own port in the preview URL")
+	}
+	if strings.Contains(p, "3000."+PreviewDomain()+"/") {
+		t.Error("BuildAgent prompt must not show a portless preview URL as a copyable example")
+	}
+	// Only Chromium-based browsers resolve a *.localhost hostname to loopback
+	// on their own, so the agent must be able to tell the user which browser to
+	// open the URL in when it does not load.
+	if !strings.Contains(p, "Chromium-based browsers") {
+		t.Error("BuildAgent prompt should name the browsers the preview URL works in")
+	}
+}
+
+// TestPreviewServingPrompt_BrowserNoteOnlyForLocalhost pins the browser caveat to
+// the default *.localhost domain: only there does the browser resolving the host
+// matter, so a configured real domain (a wildcard DNS record every browser
+// resolves) must not carry a warning about a limitation it does not have.
+func TestPreviewServingPrompt_BrowserNoteOnlyForLocalhost(t *testing.T) {
+	local := previewServingPrompt("preview.localhost")
+	if !strings.Contains(local, "Chromium-based browsers") {
+		t.Error("a *.localhost preview domain should carry the Chromium browser note")
+	}
+	real := previewServingPrompt("preview.example.com")
+	if strings.Contains(real, "Chromium-based browsers") {
+		t.Error("a real preview domain should not carry the Chromium browser note")
+	}
+	// The rest of the section is domain-independent and must survive the gate.
+	for _, want := range []string{"Live service preview", "3000.preview.example.com", "<server-port>"} {
+		if !strings.Contains(real, want) {
+			t.Errorf("real-domain preview section should still contain %q", want)
+		}
 	}
 }
 
@@ -1065,5 +1102,32 @@ func TestAskUserPrompt_LeadsWithTheRuleAndKeepsTheBoundary(t *testing.T) {
 	}
 	if strings.Contains(p, "Most ambiguity is yours to resolve") {
 		t.Error("the old prohibition opener is back, ahead of the rule")
+	}
+}
+
+// An ask_user exchange steers the rest of the session, so the compaction
+// guidance has to hold the questions and their answers apart from the general
+// "what you established" material and require them verbatim. The clause is
+// conditional ("if you put questions to the user") because the section reaches
+// agents that hold read but not ask_user, for whom the rule would be
+// unfollowable.
+func TestCompactContextPrompt_CarriesTheUserAnswersVerbatim(t *testing.T) {
+	p := compactContextPrompt()
+
+	for _, want := range []string{
+		"ask_user",
+		"verbatim",
+		"the answer it got",
+		"steer every step after them",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("compactContextPrompt is missing %q", want)
+		}
+	}
+
+	// Conditional, so an agent without ask_user is not handed a rule it cannot
+	// carry out.
+	if !strings.Contains(p, "If you put questions to the user") {
+		t.Error("the ask_user clause is not stated conditionally")
 	}
 }

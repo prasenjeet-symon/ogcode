@@ -1165,7 +1165,16 @@ function ModelItem(props: { model: ModelInfo; onToggle: () => void; onRemove: ()
       </span>
 
       <span
-        class="shrink-0 w-[6rem] text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]"
+        class="hidden sm:block shrink-0 w-[3.5rem] text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]"
+        title={props.model.contextWindow ? `Context window: ${props.model.contextWindow.toLocaleString()} tokens` : 'Context window unknown'}
+      >
+        <Show when={props.model.contextWindow} fallback={<span class="text-[color:var(--text-muted)]">—</span>}>
+          {(w) => fmtWindow(w())}
+        </Show>
+      </span>
+
+      <span
+        class="shrink-0 w-[7rem] whitespace-nowrap text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]"
         title="Input / output price per 1M tokens"
       >
         <Show when={hasPrice()} fallback={<span class="text-[color:var(--text-muted)]">—</span>}>
@@ -1298,6 +1307,12 @@ function AddModelRow(props: {
       </div>
     </Show>
   );
+}
+
+// A window in the unit it is quoted in: "1M", "1.05M", "200K", "922K".
+function fmtWindow(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2).replace(/\.?0+$/, '') + 'M';
+  return Math.round(n / 1000) + 'K';
 }
 
 // Always two decimals. In a right-aligned tabular column, "$1.6" next to

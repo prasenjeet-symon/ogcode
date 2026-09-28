@@ -158,6 +158,7 @@ func (m *windowCatalogProvider) ID() string { return "mock" }
 func (m *windowCatalogProvider) Models() []provider.ModelInfo {
 	return []provider.ModelInfo{
 		{ID: "ctx-model", ProviderID: "mock", ContextWindow: 64000},
+		{ID: "overstated-model", ProviderID: "mock", ContextWindow: 64000},
 		{ID: "zero-model", ProviderID: "mock", ContextWindow: 0},
 	}
 }
@@ -169,10 +170,11 @@ func (m *windowCatalogProvider) StreamChat(ctx context.Context, req provider.Str
 }
 
 // TestResolveRunModel_ContextWindowPreference pins the resolution order the
-// loop's compaction sizing rides on: the catalog is authoritative when it
-// knows the model; a window learned from an overflow error fills in ONLY when
-// the catalog is silent; and with neither source the window stays 0 (the
-// compaction threshold then falls back to the fixed 128k cap).
+// loop's compaction sizing rides on: the smallest known window wins. A window
+// learned from an overflow error can only lower the listed one (the host said
+// it serves less), never raise it; it fills in when the listing is silent; and
+// with neither source the window stays 0 (the compaction threshold then falls
+// back to the fixed 128k cap).
 func TestResolveRunModel_ContextWindowPreference(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -185,7 +187,7 @@ func TestResolveRunModel_ContextWindowPreference(t *testing.T) {
 	// record-shaped seed (window 0) also keeps resolveImageSupport off the
 	// probe path. Seeding a record with window 0 is what the image probe does
 	// on a fresh model, so this is the real-world shape.
-	for model, window := range map[string]int{"ctx-model": 0, "zero-model": 123456, "unseeded-model": 0} {
+	for model, window := range map[string]int{"ctx-model": 0, "overstated-model": 32000, "zero-model": 123456, "unseeded-model": 0} {
 		if err := session.SetModelCapability(database, &session.ModelCapability{
 			ModelID: model, SupportsImages: false, ProbedAt: session.Now(), ContextWindow: window,
 		}); err != nil {
@@ -206,7 +208,8 @@ func TestResolveRunModel_ContextWindowPreference(t *testing.T) {
 		want    int
 		because string
 	}{
-		{"catalog wins over everything", "ctx-model", 64000, "the catalog is authoritative when it knows the model"},
+		{"listed window stands", "ctx-model", 64000, "nothing smaller is known"},
+		{"a smaller learned window wins", "overstated-model", 32000, "the host overflowed at 32000 → the listed 64000 is more than it serves"},
 		{"learned fills the silent catalog", "zero-model", 123456, "catalog reports 0 → the learned window fills in"},
 		{"no source at all stays 0", "unseeded-model", 0, "neither catalog nor a learned window → unknown"},
 	}

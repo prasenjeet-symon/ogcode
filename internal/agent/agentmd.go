@@ -9,7 +9,10 @@ import (
 
 const (
 	agentMDFilename = "AGENT.md"
-	maxAgentMDSize  = 32 * 1024 // 32KB max total across all files
+	// agentMDBudgetEnv optionally caps the total bytes of AGENT.md content
+	// interpolated into the system prompt across all discovered files. Unset —
+	// the default — means no cap at all: every file is loaded whole.
+	agentMDBudgetEnv = "OGCODE_AGENT_MD_MAX_BYTES"
 )
 
 // agentMDFilenames are the instruction files read from each directory, in the
@@ -28,6 +31,11 @@ var agentMDFilenames = []string{"AGENTS.md", agentMDFilename}
 // first), so that closer/leaf files appear later in the concatenated result
 // and naturally take precedence for the LLM.
 //
+// There is no size limit by default — the whole of every discovered file
+// reaches the model. Set OGCODE_AGENT_MD_MAX_BYTES to a positive number of
+// bytes to cap the total, in which case the first file that would overrun it is
+// cut (on a rune boundary, with a marker) and the remainder are skipped.
+//
 // Missing files are silently skipped. Permission or read errors are logged
 // as warnings and the file is skipped.
 func LoadAgentMD(dir string) string {
@@ -38,6 +46,9 @@ func LoadAgentMD(dir string) string {
 
 	var b strings.Builder
 	var totalSize int
+	// 0 means no budget: include every file whole. A positive value is the total
+	// across all discovered files.
+	limit := mdSizeLimit(agentMDBudgetEnv)
 	// Content already included, so a project carrying AGENTS.md and AGENT.md with
 	// the same text — a copy, or two tools generating the same file — states its
 	// instructions once rather than twice. Only an exact match is skipped: files
@@ -64,10 +75,15 @@ func LoadAgentMD(dir string) string {
 		}
 		seen[trimmed] = true
 
-		remaining := maxAgentMDSize - totalSize
-		if remaining <= 0 {
-			slog.Warn("AGENT.md total size exceeds limit, skipping remaining files", "limit", maxAgentMDSize)
-			break
+		// remaining is 0 (uncapped) unless an operator set a budget, in which
+		// case it is what is left of that budget for this file.
+		remaining := 0
+		if limit > 0 {
+			remaining = limit - totalSize
+			if remaining <= 0 {
+				slog.Warn("AGENT.md total size exceeds budget, skipping remaining files", "limit", limit)
+				break
+			}
 		}
 
 		relPath, err := filepath.Rel(dir, p)
@@ -86,7 +102,7 @@ func LoadAgentMD(dir string) string {
 		// renderMDBlock.
 		block, used, truncated := renderMDBlock("agent-md", relPath, trimmed, remaining)
 		if truncated {
-			slog.Warn("AGENT.md truncated due to size limit", "path", p, "limit", maxAgentMDSize)
+			slog.Warn("AGENT.md truncated due to size budget", "path", p, "limit", limit)
 		}
 		b.WriteString(block)
 		totalSize += used

@@ -345,9 +345,14 @@ const (
 // every item still in context is in active use for the next action, so a summary
 // would lose something still needed. Because the reminder re-arms rather than
 // giving up, it keeps arriving until the agent compacts; the text says so.
+//
+// The enumeration of what to carry ends on the user's answers, when there are
+// any: an ask_user exchange is steering input, and the terse reminder is the one
+// place it would otherwise go unnamed.
 const compactDirective = "You must call compact_context now, before reading anything else. Write a summary that " +
 	"carries every file path, line range, conclusion, decision, and exact value you would " +
-	"otherwise have to look up again, then continue the task from the summary. Do not hold " +
+	"otherwise have to look up again — and, if you asked the user anything, each question with " +
+	"the answer it got. Then continue the task from the summary. Do not hold " +
 	"off to save tokens or to keep a cached prefix intact; a focused context is worth more.\n\n" +
 	"There is exactly one reason to carry on without compacting: nothing finished is left in " +
 	"your context — every item still in front of you is in active use for the immediate next " +

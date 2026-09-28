@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/git"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -79,6 +80,16 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		InputPricePerM  float64 `json:"inputPricePerM"`
 		OutputPricePerM float64 `json:"outputPricePerM"`
 		SupportsImages  bool    `json:"supportsImages"`
+		// ContextWindow is the window the agent loop sizes compaction against
+		// (catalogue, else learned from an overflow; 0 = unknown), and
+		// CompactAtTokens is the request size at which it compacts. The context
+		// meter reads both, so it agrees with what the loop will actually do.
+		ContextWindow   int `json:"contextWindow,omitempty"`
+		CompactAtTokens int `json:"compactAtTokens"`
+	}
+	windowOf := func(modelID string) (int, int) {
+		w, _ := agent.EffectiveContextWindow(s.registry, s.db, modelID)
+		return w, agent.CompactionThreshold(w)
 	}
 
 	var result []ModelEntry
@@ -87,12 +98,20 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		if pref, ok := prefMap[m.ID+"\x00"+m.ProviderID]; ok {
 			defaultEnabled = pref.Enabled
 		}
-		// Prefer a probed/cached capability; otherwise fall back to the catalog
-		// or heuristic value. Never probes here — this is a read-only listing.
+		// Prefer a probed/cached capability; otherwise the built-in catalogue,
+		// then the provider's own (often heuristic) value. Never probes here —
+		// this is a read-only listing.
 		supportsImages := m.SupportsImages
+		if cm, ok := s.registry.CatalogModel(m.ID); ok {
+			supportsImages = cm.SupportsImages
+		}
+		// What the user pays where the model runs: a provider's own listed price,
+		// else the catalogue's; nothing for local and subscription providers.
+		price, _ := s.registry.PriceOn(m.ProviderID, m.ID)
 		if cap, ok, err := session.GetModelCapability(s.db, m.ID); err == nil && ok {
 			supportsImages = cap.SupportsImages
 		}
+		window, compactAt := windowOf(m.ID)
 		entry := ModelEntry{
 			ID:              m.ID,
 			Name:            m.Name,
@@ -101,9 +120,11 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			Enabled:         defaultEnabled,
 			IsCustom:        false,
 			Collection:      m.Collection,
-			InputPricePerM:  m.InputPricePerM,
-			OutputPricePerM: m.OutputPricePerM,
+			InputPricePerM:  price.Input,
+			OutputPricePerM: price.Output,
 			SupportsImages:  supportsImages,
+			ContextWindow:   window,
+			CompactAtTokens: compactAt,
 		}
 		result = append(result, entry)
 	}
@@ -115,22 +136,32 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		if !availableProviders[p.ProviderID] && !p.Enabled {
 			continue
 		}
-		// Custom models carry no catalog capability, so a probed/cached result is
-		// the only source of truth for image support. Fall back to false when the
-		// model has not been probed yet (mirrors the built-in branch above).
+		// A custom model is whatever id the user typed. If the built-in catalogue
+		// knows it under that name, its facts apply; otherwise a probed/cached
+		// result is the only source of truth for image support, and false until
+		// the model has been probed (mirrors the built-in branch above).
 		supportsImages := false
+		if cm, ok := s.registry.CatalogModel(p.ID); ok {
+			supportsImages = cm.SupportsImages
+		}
+		price, _ := s.registry.PriceOn(p.ProviderID, p.ID)
 		if cap, ok, err := session.GetModelCapability(s.db, p.ID); err == nil && ok {
 			supportsImages = cap.SupportsImages
 		}
+		window, compactAt := windowOf(p.ID)
 		result = append(result, ModelEntry{
-			ID:             p.ID,
-			Name:           p.DisplayName,
-			ProviderID:     p.ProviderID,
-			Default:        false,
-			Enabled:        p.Enabled,
-			IsCustom:       true,
-			Collection:     p.Collection,
-			SupportsImages: supportsImages,
+			ID:              p.ID,
+			Name:            p.DisplayName,
+			ProviderID:      p.ProviderID,
+			Default:         false,
+			Enabled:         p.Enabled,
+			IsCustom:        true,
+			Collection:      p.Collection,
+			InputPricePerM:  price.Input,
+			OutputPricePerM: price.Output,
+			SupportsImages:  supportsImages,
+			ContextWindow:   window,
+			CompactAtTokens: compactAt,
 		})
 	}
 

@@ -33,7 +33,7 @@ const LANG_ALIASES: Record<string, string> = {
   sum: 'plaintext',
 };
 
-function hljsLanguage(ext: string): string | null {
+export function hljsLanguage(ext: string): string | null {
   const name = LANG_ALIASES[ext] ?? ext;
   return name && hljs.getLanguage(name) ? name : null;
 }

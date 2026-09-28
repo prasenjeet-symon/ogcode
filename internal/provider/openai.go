@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -88,7 +89,7 @@ func NewOpenAIProvider() *OpenAIProvider {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	model := os.Getenv("OPENAI_MODEL")
 	if model == "" {
-		model = "gpt-4o"
+		model = "gpt-6-sol"
 	}
 	baseURL := os.Getenv("OPENAI_BASE_URL")
 	if baseURL == "" {
@@ -102,7 +103,7 @@ func NewOpenRouterProvider() *OpenAIProvider {
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
 	model := os.Getenv("OPENROUTER_MODEL")
 	if model == "" {
-		model = "anthropic/claude-sonnet-4.6"
+		model = "anthropic/claude-sonnet-5"
 	}
 	return &OpenAIProvider{
 		id:      "openrouter",
@@ -270,6 +271,17 @@ func (p *OpenAIProvider) storeCatalog(list []ModelInfo) {
 	p.modelsMu.Unlock()
 }
 
+// RunsLocally reports whether modelID runs on this machine: any model a local
+// Ollama instance serves, except its ":cloud" / "-cloud" tags, which the
+// instance forwards to ollama.com (see cloudModelID).
+func (p *OpenAIProvider) RunsLocally(modelID string) bool {
+	if p.id != "ollama" || isCloudURL(p.baseURL) {
+		return false
+	}
+	id := strings.ToLower(modelID)
+	return !strings.HasSuffix(id, ollamaCloudTag) && !strings.HasSuffix(id, ollamaCloudSuffix)
+}
+
 // isCloudOllama returns true if the base URL points to a remote/cloud endpoint
 // (i.e. not localhost or a local network address).
 func isCloudURL(baseURL string) bool {
@@ -298,6 +310,41 @@ type oaiModelEntry struct {
 	// Parsed leniently below — some mirrors send it as a string — and 0 means
 	// "endpoint did not report one"; the caller must not guess.
 	ContextLength any `json:"context_length,omitempty"`
+	// Pricing is OpenRouter's per-token USD price; nil where an endpoint sends
+	// none (OpenAI, DeepSeek, Ollama).
+	Pricing *oaiModelPricing `json:"pricing,omitempty"`
+}
+
+// oaiModelPricing holds per-token prices as OpenRouter sends them: decimal
+// strings ("0.000003"), with "-1" for a router whose price depends on the
+// model it picks.
+type oaiModelPricing struct {
+	Prompt     any `json:"prompt"`
+	Completion any `json:"completion"`
+}
+
+// oaiPricePerM converts a models-list per-token price to per million tokens.
+// Anything unparsable, negative or zero is 0 — unknown, never guessed — and the
+// result is rounded to a millionth of a dollar so "0.000003" reads back as
+// exactly 3, not 2.9999999999999996.
+func oaiPricePerM(v any) float64 {
+	var f float64
+	switch n := v.(type) {
+	case float64:
+		f = n
+	case string:
+		p, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		if err != nil {
+			return 0
+		}
+		f = p
+	default:
+		return 0
+	}
+	if !(f > 0) || math.IsInf(f, 0) {
+		return 0
+	}
+	return math.Round(f*1e12) / 1e6
 }
 
 // oaiContextWindow coerces a models-list context_length into an int. OpenRouter
@@ -360,7 +407,7 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 		if name == "" {
 			name = m.ID
 		}
-		models = append(models, ModelInfo{
+		info := ModelInfo{
 			ID:             m.ID,
 			Name:           name,
 			ProviderID:     p.id,
@@ -369,7 +416,12 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 			// Only an endpoint-reported length is stored; 0 stays 0 so callers
 			// keep treating the window as unknown rather than guessing.
 			ContextWindow: oaiContextWindow(m.ContextLength),
-		})
+		}
+		if m.Pricing != nil {
+			info.InputPricePerM = oaiPricePerM(m.Pricing.Prompt)
+			info.OutputPricePerM = oaiPricePerM(m.Pricing.Completion)
+		}
+		models = append(models, info)
 	}
 	slog.Info("dynamically fetched models from endpoint", "provider", p.id, "count", len(models))
 	// Ensure we return a non-nil (possibly empty) slice so the caller can cache it.
@@ -379,31 +431,33 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 	return models
 }
 
-// openRouterActiveDefaults is the curated subset that starts enabled.
+// openRouterActiveDefaults is the curated subset that starts enabled: the
+// current generation of the catalogued families (see models_catalog.go).
 // All other live-fetched OpenRouter models are fetched but disabled until the user enables them.
 var openRouterActiveDefaults = map[string]bool{
-	"anthropic/claude-sonnet-4.6":       true,
-	"anthropic/claude-opus-4.6":         true,
-	"anthropic/claude-haiku-4.5":        true,
-	"openai/gpt-4o":                     true,
-	"openai/o4-mini":                    true,
-	"google/gemini-2.5-pro":             true,
-	"deepseek/deepseek-r1":              true,
-	"meta-llama/llama-3.3-70b-instruct": true,
+	"anthropic/claude-sonnet-5":    true,
+	"anthropic/claude-opus-5.5":    true,
+	"anthropic/claude-haiku-4.5":   true,
+	"openai/gpt-6-sol":             true,
+	"google/gemini-3.8-flash":      true,
+	"deepseek/deepseek-v4.1-flash": true,
+	"z-ai/glm-5.3":                 true,
+	"moonshotai/kimi-k3":           true,
 }
 
 // openRouterStaticCatalog is the compiled-in fallback used when the endpoint
 // cannot be reached (or has not been reached yet). Every entry starts enabled,
 // since it is the curated list the user sees on a fresh install.
 var openRouterStaticCatalog = []ModelInfo{
-	{ID: "anthropic/claude-sonnet-4.6", Name: "Anthropic: Claude Sonnet 4.6", ProviderID: "openrouter", ActiveByDefault: true},
-	{ID: "anthropic/claude-opus-4.6", Name: "Anthropic: Claude Opus 4.6", ProviderID: "openrouter", ActiveByDefault: true},
-	{ID: "anthropic/claude-haiku-4.5", Name: "Anthropic: Claude Haiku 4.5", ProviderID: "openrouter", ActiveByDefault: true},
-	{ID: "openai/gpt-4o", Name: "OpenAI: GPT-4o", ProviderID: "openrouter", ActiveByDefault: true},
-	{ID: "openai/o4-mini", Name: "OpenAI: o4 Mini", ProviderID: "openrouter", ActiveByDefault: true},
-	{ID: "google/gemini-2.5-pro", Name: "Google: Gemini 2.5 Pro", ProviderID: "openrouter", ActiveByDefault: true},
-	{ID: "deepseek/deepseek-r1", Name: "DeepSeek: R1", ProviderID: "openrouter", ActiveByDefault: true},
-	{ID: "meta-llama/llama-3.3-70b-instruct", Name: "Meta: Llama 3.3 70B Instruct", ProviderID: "openrouter", ActiveByDefault: false},
+	{ID: "anthropic/claude-sonnet-5", Name: "Anthropic: Claude Sonnet 5", ProviderID: "openrouter", ActiveByDefault: true, SupportsImages: true},
+	{ID: "anthropic/claude-opus-5.5", Name: "Anthropic: Claude Opus 5.5", ProviderID: "openrouter", ActiveByDefault: true, SupportsImages: true},
+	{ID: "anthropic/claude-haiku-4.5", Name: "Anthropic: Claude Haiku 4.5", ProviderID: "openrouter", ActiveByDefault: true, SupportsImages: true},
+	{ID: "openai/gpt-6-sol", Name: "OpenAI: GPT-6 Sol", ProviderID: "openrouter", ActiveByDefault: true, SupportsImages: true},
+	{ID: "google/gemini-3.8-flash", Name: "Google: Gemini 3.8 Flash", ProviderID: "openrouter", ActiveByDefault: true, SupportsImages: true},
+	{ID: "deepseek/deepseek-v4.1-flash", Name: "DeepSeek: DeepSeek V4.1 Flash", ProviderID: "openrouter", ActiveByDefault: true, SupportsImages: true},
+	{ID: "z-ai/glm-5.3", Name: "Z.ai: GLM 5.3", ProviderID: "openrouter", ActiveByDefault: true},
+	{ID: "moonshotai/kimi-k3", Name: "MoonshotAI: Kimi K3", ProviderID: "openrouter", ActiveByDefault: true, SupportsImages: true},
+	{ID: "qwen/qwen3.8-27b", Name: "Qwen: Qwen3.8 27B", ProviderID: "openrouter", ActiveByDefault: false, SupportsImages: true},
 }
 
 // ollamaLocalFallback is used when local Ollama is not running or has no models pulled.
@@ -440,14 +494,18 @@ var ollamaLocalFallback = []ModelInfo{
 	{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 1048576},
 }
 
-// ollamaCloudFallback is used when the cloud Ollama endpoint is unreachable.
+// ollamaCloudFallback is used when the cloud Ollama endpoint is unreachable:
+// names Ollama's cloud served on 2026-09-28. Windows come from the catalogue.
 var ollamaCloudFallback = []ModelInfo{
-	{ID: "qwen3-coder-next", Name: "Qwen3 Coder Next", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "kimi-k2.6", Name: "Kimi K2.6", ProviderID: "ollama", ActiveByDefault: true, ContextWindow: 262144},
-	{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ProviderID: "ollama", ActiveByDefault: true, ContextWindow: 1048576},
-	{ID: "glm-5.1", Name: "GLM-5.1", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 202752},
-	{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 1048576},
-	{ID: "mistral-large-3", Name: "Mistral Large 3", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash", ProviderID: "ollama", ActiveByDefault: true},
+	{ID: "glm-5.3-flash", Name: "GLM-5.3 Flash", ProviderID: "ollama", ActiveByDefault: true},
+	{ID: "kimi-k2.7-code", Name: "Kimi K2.7 Code", ProviderID: "ollama", ActiveByDefault: true},
+	{ID: "glm-5.3", Name: "GLM-5.3", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "kimi-k3", Name: "Kimi K3", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "deepseek-v4-pro:0813", Name: "DeepSeek V4 Pro", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "minimax-m3", Name: "MiniMax M3", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "gpt-oss:120b", Name: "gpt-oss-120b", ProviderID: "ollama", ActiveByDefault: false},
+	{ID: "mistral-large-3:675b", Name: "Mistral Large 3", ProviderID: "ollama", ActiveByDefault: false},
 }
 
 // Models returns the provider's model catalogue. It is a PURE READ: it never
@@ -508,10 +566,15 @@ func (p *OpenAIProvider) staticFallback() []ModelInfo {
 	return openAICatalog()
 }
 
-// openAICatalog renders the compiled-in OpenAI model list.
+// openAICatalog renders the compiled-in OpenAI model list, minus the models
+// whose tool calling needs the Responses API: every agent request carries
+// tools over Chat Completions, so offering one would only offer a failure.
 func openAICatalog() []ModelInfo {
 	list := make([]ModelInfo, 0, len(OpenAIModels))
 	for _, m := range OpenAIModels {
+		if m.ResponsesOnly {
+			continue
+		}
 		list = append(list, ModelInfo{
 			ID:              m.ID,
 			Name:            m.Name,
@@ -525,6 +588,54 @@ func openAICatalog() []ModelInfo {
 		})
 	}
 	return list
+}
+
+var (
+	openAICatalogOnce sync.Once
+	openAICatalogIdx  catalogIndex
+)
+
+// openAICatalogModel looks up an OpenAI model's catalogued facts under any of
+// its spellings — a dated snapshot, a proxy's "openai/gpt-6-sol". Only OpenAI
+// entries answer, so another vendor's model on a compatible endpoint keeps the
+// request exactly as the caller built it.
+func openAICatalogModel(id string) (CatalogModel, bool) {
+	openAICatalogOnce.Do(func() {
+		openAICatalogIdx = newCatalogIndex(OpenAIModels)
+	})
+	return openAICatalogIdx.lookup(id)
+}
+
+// shapeForOpenAIModel fits a Chat Completions request to what a catalogued
+// OpenAI model accepts:
+//
+//   - max_completion_tokens replaces max_tokens, which the reasoning models
+//     reject and OpenAI has deprecated for the rest. It bounds reasoning and
+//     answer together.
+//   - reasoning_effort "none" goes with tools to a model that takes tools on
+//     Chat Completions only with reasoning off (GPT-5.4 and later). Otherwise a
+//     call that did not ask for thinking gets the model's lowest effort, so a
+//     utility call's small budget is not spent on reasoning it did not want.
+//   - temperature is dropped whenever the model will reason, since a reasoning
+//     model rejects it.
+func shapeForOpenAIModel(body *oaiRequest, thinking bool) {
+	m, ok := openAICatalogModel(body.Model)
+	if !ok {
+		return
+	}
+	body.MaxCompletionTokens, body.MaxTokens = body.MaxTokens, 0
+	if m.EffortFloor == "" {
+		return
+	}
+	switch {
+	case len(body.Tools) > 0 && m.ToolsNeedNoReasoning:
+		body.ReasoningEffort = "none"
+	case !thinking:
+		body.ReasoningEffort = m.EffortFloor
+	}
+	if body.ReasoningEffort != "none" {
+		body.Temperature = 0
+	}
 }
 
 // collectionFromBaseURL infers a grouping label from an OpenAI-compatible base
@@ -799,6 +910,15 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
 	}
+	if p.id == "openai" {
+		shapeForOpenAIModel(&body, req.Thinking)
+	}
+	// A model that refuses sampling parameters — Kimi's current models, Claude
+	// Opus 4.7 and later behind a compatible host — fails the whole request
+	// over a temperature it would not have honoured anyway.
+	if cm, ok := LookupCatalogModel(model); ok && cm.RejectsSampling {
+		body.Temperature = 0
+	}
 	if p.sendsPromptCacheKey() {
 		body.PromptCacheKey = req.CacheKey
 	}
@@ -834,6 +954,30 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	p.setChatHeaders(httpReq)
 
 	client := streamHTTPClient
+
+	// Take a place in the process-wide in-flight budget before the first send,
+	// and hold it for the whole request. A request made by a background index
+	// session draws the index's share of that budget, so its waves can never
+	// fill every slot ahead of the user's own turn; everything else draws the
+	// shared pool.
+	releaseSlot, err := acquireRequest(reqCtx)
+	if err != nil {
+		return nil, fmt.Errorf("wait for request slot: %w", err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			releaseSlot()
+		}
+	}
+	// Until a reader goroutine owns the slot, release it on every return: the
+	// retry loop and the API-error path below both leave without one.
+	defer func() {
+		if !streamStarted {
+			release()
+		}
+	}()
 
 	var resp *http.Response
 	retryDelays := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
@@ -892,7 +1036,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 
 	ch := make(chan StreamEvent, 256)
 	streamStarted = true
-	go p.streamEvents(resp.Body, ch, reqCancel, toolNames)
+	// The reservation is released when this body is closed, at the end of the
+	// stream rather than at the first byte: the generation still holds the
+	// endpoint's attention while the body is being drained.
+	go p.streamEvents(&budgetBody{ReadCloser: resp.Body, release: release}, ch, reqCancel, toolNames)
 	return ch, nil
 }
 
@@ -1201,6 +1348,10 @@ type oaiRequest struct {
 	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
 	Temperature   float64           `json:"temperature,omitempty"`
 	MaxTokens     int               `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens and ReasoningEffort are sent only to catalogued OpenAI
+	// models — see shapeForOpenAIModel.
+	MaxCompletionTokens int    `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string `json:"reasoning_effort,omitempty"`
 	// PromptCacheKey routes a conversation's requests to the cache node that
 	// already holds its prefix. Sent only where it is known to be understood —
 	// see sendsPromptCacheKey.
@@ -1273,6 +1424,9 @@ func usageFromOAI(u *oaiUsage) *TokenUsage {
 		InputTokens:  u.PromptTokens,
 		OutputTokens: u.CompletionTokens,
 	}
+	if u.CompletionTokensDetails != nil {
+		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
 	// The cache hit count is reported two ways in the wild: OpenAI nests
 	// cached_tokens inside prompt_tokens_details, while DeepSeek's native API
 	// puts a top-level prompt_cache_hit_tokens beside it. Prefer the nested
@@ -1281,17 +1435,37 @@ func usageFromOAI(u *oaiUsage) *TokenUsage {
 	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
 		cached = u.PromptTokensDetails.CachedTokens
 	}
+	// total_tokens is the provider's own sum, and it can hold tokens the two
+	// counts above leave out. A gap beyond prompt + completion is one of two
+	// things:
+	//   - the cached count, when a server reports it exclusive of prompt_tokens
+	//     (the gap equals it exactly). prompt_tokens is then already the uncached
+	//     input, and subtracting the cache again would erase it.
+	//   - output the completion count omits. Gemini's OpenAI-compatible endpoint
+	//     bills thinking as output but reports it only in total_tokens, with no
+	//     reasoning breakdown, so without this a thinking step's output reads as
+	//     a fraction of what was spent.
+	// A missing total_tokens (0) leaves a negative gap and changes nothing.
+	gap := u.TotalTokens - u.PromptTokens - u.CompletionTokens
+	cachedExclusive := cached > 0 && gap == cached
 	if cached > 0 {
 		usage.CacheReadTokens = cached
-		usage.InputTokens -= usage.CacheReadTokens
-		// A server that reports the cached count exclusive of prompt_tokens, or
-		// simply reports the two inconsistently, must not drive input negative.
-		if usage.InputTokens < 0 {
-			usage.InputTokens = 0
+		if !cachedExclusive {
+			usage.InputTokens -= cached
+			// A server that reports the two inconsistently must not drive
+			// input negative.
+			if usage.InputTokens < 0 {
+				usage.InputTokens = 0
+			}
 		}
 	}
-	if u.CompletionTokensDetails != nil {
-		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	if gap > 0 && !cachedExclusive {
+		usage.OutputTokens += gap
+		// Reasoning is a subset of output. A provider that already itemised
+		// it (and left it out of completion_tokens) keeps its own figure.
+		if usage.ReasoningTokens < gap {
+			usage.ReasoningTokens = gap
+		}
 	}
 	return usage
 }

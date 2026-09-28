@@ -513,7 +513,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	// the two share one path — a resumed loop that skipped permission gating, or
 	// that failed to register its cancel func, would be a loop the user could
 	// neither approve tools in nor stop.
-	s.startSessionLoop(sessionID, input.Agent, input.ViewportWidth, input.ViewportHeight)
+	s.startSessionLoop(sessionID, input.Agent, input.ViewportWidth, input.ViewportHeight, requestOrigin(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -526,7 +526,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 // and compaction in the agent loop — stream usage on a call the main-turn
 // accounting never sees, so without this it is dropped from every total. A
 // no-op when there is no store or nothing was reported.
-func (s *Server) recordUtilityUsage(sessionID session.SessionID, usage *provider.TokenUsage) {
+func (s *Server) recordUtilityUsage(sessionID session.SessionID, providerID, modelID string, usage *provider.TokenUsage) {
 	if s.store == nil || usage == nil {
 		return
 	}
@@ -537,6 +537,8 @@ func (s *Server) recordUtilityUsage(sessionID session.SessionID, usage *provider
 		CacheRead:  usage.CacheReadTokens,
 		CacheWrite: usage.CacheWriteTokens,
 	}
+	// The global ledger prices the call at the model that made it.
+	s.usage.RecordUtility(string(sessionID), providerID, modelID, tc, session.Now())
 	if err := s.store.AddUtilityUsage(sessionID, tc); err != nil {
 		slog.Warn("record utility usage", "err", err)
 		return
@@ -622,7 +624,7 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 	// Record what the title call spent: like the risk check and compaction, it
 	// streams usage the main-turn accounting never sees. Recorded even when the
 	// generated title is discarded below — the tokens were spent regardless.
-	s.recordUtilityUsage(sessionID, usage)
+	s.recordUtilityUsage(sessionID, p.ID(), titleModel, usage)
 
 	generated := strings.TrimSpace(title.String())
 	// Strip surrounding quotes if the model adds them

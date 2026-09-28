@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/prasenjeet-symon/ogcode/internal/provider"
+import (
+	"github.com/prasenjeet-symon/ogcode/internal/db"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/session"
+)
 
 // Token budgeting for proactive compaction. We can't run the model's exact
 // tokenizer locally (Anthropic's is closed; OpenAI's needs a large vendored
@@ -144,6 +148,31 @@ func compactionThresholdTokens(contextWindow int) int {
 		reserve = contextWindow / 2
 	}
 	return contextWindow - reserve
+}
+
+// EffectiveContextWindow is the context window the loop sizes compaction
+// against for modelID: the smallest figure anything knows — the catalogue's,
+// the serving host's (see Registry.ContextWindow), or one learned from an
+// earlier overflow error, which is the host's own word that it serves less —
+// else 0 (unknown). learned reports that the learned figure was used. The web
+// UI's context meter reads the same value through /api/models, so what it shows
+// and when the loop compacts cannot drift apart.
+func EffectiveContextWindow(reg *provider.Registry, database *db.DB, modelID string) (window int, learned bool) {
+	if reg != nil {
+		window = reg.ContextWindow(modelID)
+	}
+	if database != nil {
+		if cap, ok, err := session.GetModelCapability(database, modelID); err == nil && ok && cap.ContextWindow > 0 && (window <= 0 || cap.ContextWindow < window) {
+			return cap.ContextWindow, true
+		}
+	}
+	return window, false
+}
+
+// CompactionThreshold is the request size, in tokens, above which the loop
+// compacts before sending — exported so the UI can mark it on the meter.
+func CompactionThreshold(contextWindow int) int {
+	return compactionThresholdTokens(contextWindow)
 }
 
 // outputTokenBudget sizes a request's max_tokens. Without one, a provider that

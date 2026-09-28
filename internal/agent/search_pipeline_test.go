@@ -31,7 +31,7 @@ func TestOneShotLLMReturnsStreamErrors(t *testing.T) {
 		{Type: provider.EventError, Error: "stream disconnected"},
 	}}
 
-	got, err := oneShotLLM(context.Background(), p, "test-model", "system", "user", 100)
+	got, _, err := oneShotLLM(context.Background(), p, "test-model", "system", "user", 100)
 	if err == nil {
 		t.Fatalf("oneShotLLM returned partial output without an error: %q", got)
 	}

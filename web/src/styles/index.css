@@ -1438,3 +1438,596 @@ body.drawer-open {
     max-width: 100%;
   }
 }
+
+/* ============================================================
+   Project Index
+   The index screen is a workbench — a file tree, a viewer and two
+   dialogs. These classes carry what utilities cannot: colour mixes
+   against the runtime theme variables, the shared segmented control
+   and popover, and the rendered Markdown document.
+   ============================================================ */
+
+/* Segmented control: a recessed track with a raised thumb on the chosen
+   option. Preview/Source, the scope tabs and Changes/Commits all use it, so
+   every "one of these" choice in the module reads the same way. */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+}
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  height: 1.375rem;
+  padding-inline: 0.5rem;
+  border-radius: 6px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg-btn:hover {
+  color: var(--text-secondary);
+}
+.seg-btn[aria-selected="true"],
+.seg-btn[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border-default), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.seg-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.seg-count {
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.seg-btn[aria-selected="true"] .seg-count {
+  color: var(--text-tertiary);
+}
+
+/* Quiet toolbar button with an optional inline count — the count sits inside
+   the button rather than as a badge hung off its corner, where it clipped. */
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 1.75rem;
+  padding-inline: 0.5rem;
+  border-radius: 7px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tool-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: transparent;
+}
+.tool-btn[aria-pressed="true"],
+.tool-btn.is-open {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.tool-count {
+  min-width: 1rem;
+  height: 1rem;
+  padding-inline: 0.25rem;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+.tool-count.is-accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Split primary button: the incremental run is the button, the full rebuild
+   hides behind its chevron — a costly action one deliberate click away. */
+.split-btn {
+  display: inline-flex;
+  align-items: stretch;
+  height: 2rem;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-primary);
+  box-shadow: var(--shadow-sm);
+}
+.split-btn > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: inherit;
+  cursor: pointer;
+}
+.split-btn > button:first-child {
+  padding-inline: 0.625rem 0.75rem;
+  border-radius: 8px 0 0 8px;
+}
+.split-btn > button:last-child {
+  padding-inline: 0.4375rem;
+  border-radius: 0 8px 8px 0;
+  border-left: 1px solid color-mix(in srgb, var(--on-primary) 22%, transparent);
+}
+.split-btn > button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--on-primary) 10%, transparent);
+}
+.split-btn > button:disabled {
+  cursor: not-allowed;
+}
+.split-btn:has(> button:first-child:disabled) {
+  opacity: 0.55;
+}
+
+/* Popover — anchored panel for menus, the outline and the index details.
+   Rises from the edge it opens on; `forwards` so a throttled renderer
+   degrades to "no animation", never to "no panel". */
+@keyframes popRise {
+  from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes popDrop {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.pop {
+  position: fixed;
+  z-index: 230;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: popRise 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.pop[data-side="top"] {
+  animation-name: popDrop;
+}
+.pop:focus-visible {
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.pop-label {
+  padding: 0.5rem 0.75rem 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.pop-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.4375rem 0.625rem;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.pop-item:hover,
+.pop-item:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+.pop-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+}
+.pop-sep {
+  height: 1px;
+  margin: 0.25rem 0.5rem;
+  background: var(--border-subtle);
+}
+
+/* Dialog panel: scales in on desktop, rises as a bottom sheet on phones. */
+@keyframes sheetUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: none; }
+}
+.dlg-panel {
+  animation: scaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.dlg-panel:focus-visible {
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+@media (max-width: 639px) {
+  .dlg-panel {
+    animation-name: sheetUp;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* Skeleton block for loading states that must hold their final height. */
+.skel {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--bg-elevated) 0%, var(--bg-hover) 50%, var(--bg-elevated) 100%);
+  background-size: 400px 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Tree status: the index marks what it does not hold yet. A finished index
+   is the normal state, so a check on every row was 600 marks saying nothing;
+   the ring on the exceptions is the one thing worth finding. */
+.idx-pending-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  flex-shrink: 0;
+}
+.idx-done-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+  flex-shrink: 0;
+}
+.idx-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  overflow: hidden;
+}
+.idx-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-ring);
+  transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tree-row-selected {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.tree-row-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+.tree-mark {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--text-primary);
+  border-radius: 2px;
+}
+
+/* Remove buttons that only appear on hover stay visible on touch screens,
+   where there is no hover to reveal them. */
+@media (hover: none) {
+  .hover-reveal {
+    opacity: 1 !important;
+  }
+}
+
+/* ------------------------------------------------------------
+   Rendered Markdown document (the viewer's Preview mode)
+   A document you read, not a chat reply: GitHub's structure — ruled
+   h1/h2, bordered tables, alerts, task lists — in the app's palette.
+   Kept apart from .prose-chat so the chat's compact rhythm and a
+   README's reading rhythm can each be right.
+   ------------------------------------------------------------ */
+.md-doc {
+  max-width: 52rem;
+  margin-inline: auto;
+  padding: 1.75rem 2.25rem 4rem;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: #d4d4d8;
+  letter-spacing: -0.003em;
+  overflow-wrap: break-word;
+}
+@media (max-width: 767px) {
+  .md-doc {
+    padding: 1.25rem 1rem 3rem;
+    font-size: 0.875rem;
+  }
+}
+.md-doc > :first-child { margin-top: 0 !important; }
+.md-doc > :last-child { margin-bottom: 0 !important; }
+.md-doc p,
+.md-doc ul,
+.md-doc ol,
+.md-doc blockquote,
+.md-doc pre,
+.md-doc details,
+.md-doc .md-table,
+.md-doc .md-alert,
+.md-doc .code-block,
+.md-doc .math-block {
+  margin: 0 0 1rem;
+}
+.md-doc .code-block > pre {
+  margin: 0;
+}
+.md-doc h1,
+.md-doc h2,
+.md-doc h3,
+.md-doc h4,
+.md-doc h5,
+.md-doc h6 {
+  margin: 1.75em 0 0.6em;
+  font-weight: 640;
+  line-height: 1.3;
+  letter-spacing: -0.018em;
+  color: var(--text-primary);
+  scroll-margin-top: 1rem;
+}
+.md-doc h1 {
+  font-size: 1.75em;
+  padding-bottom: 0.35em;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.md-doc h2 {
+  font-size: 1.375em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.md-doc h3 { font-size: 1.15em; }
+.md-doc h4 { font-size: 1em; }
+.md-doc h5 { font-size: 0.9em; }
+.md-doc h6 { font-size: 0.85em; color: var(--text-tertiary); }
+.md-doc .md-flash {
+  animation: mdFlash 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes mdFlash {
+  0%   { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { background: transparent; }
+}
+.md-doc strong { color: var(--text-primary); font-weight: 620; }
+.md-doc a {
+  color: #8b9cf7;
+  text-decoration: none;
+}
+.md-doc a:hover {
+  color: #aab4f8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md-doc ul,
+.md-doc ol {
+  padding-left: 1.6em;
+}
+.md-doc ul { list-style: disc; }
+.md-doc ol { list-style: decimal; }
+.md-doc ul ul { list-style: circle; }
+.md-doc ul ul ul { list-style: square; }
+.md-doc li + li { margin-top: 0.3em; }
+.md-doc li > ul,
+.md-doc li > ol { margin: 0.3em 0 0; }
+.md-doc li > p { margin: 0 0 0.5em; }
+.md-doc li::marker { color: var(--text-muted); }
+.md-doc li:has(> input[type="checkbox"]),
+.md-doc li:has(> p:first-child > input[type="checkbox"]:first-child) {
+  list-style: none;
+  margin-left: -1.4em;
+}
+.md-doc input[type="checkbox"] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin: 0 0.5em 0 0;
+  vertical-align: -0.14em;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+}
+.md-doc input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.md-doc input[type="checkbox"]:checked::after {
+  content: '';
+  width: 0.45rem;
+  height: 0.25rem;
+  margin-top: -0.1rem;
+  border: solid var(--on-primary);
+  border-width: 0 0 1.75px 1.75px;
+  transform: rotate(-45deg);
+}
+.md-doc code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  color: #e4e4e7;
+}
+.md-doc pre {
+  background: #0d0d10;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.md-doc pre code,
+.md-doc pre code.hljs {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+  color: #e4e4e7;
+  white-space: pre;
+}
+.md-doc blockquote {
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.md-doc blockquote > :last-child { margin-bottom: 0; }
+.md-doc hr {
+  height: 1px;
+  margin: 2rem 0;
+  border: 0;
+  background: var(--border-default);
+}
+.md-doc img {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+}
+.md-doc .md-img-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+.md-doc .md-table {
+  overflow-x: auto;
+}
+.md-doc table {
+  border-collapse: collapse;
+  font-size: 0.875em;
+}
+.md-doc th,
+.md-doc td {
+  padding: 0.45em 0.85em;
+  border: 1px solid var(--border-default);
+  vertical-align: top;
+}
+.md-doc th:not([align]),
+.md-doc td:not([align]) {
+  text-align: left;
+}
+.md-doc th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.md-doc tbody tr:nth-child(2n) td {
+  background: color-mix(in srgb, var(--bg-surface) 85%, transparent);
+}
+.md-doc kbd {
+  display: inline-block;
+  padding: 0 0.35em;
+  border: 1px solid var(--border-default);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: var(--text-secondary);
+}
+.md-doc details {
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.md-doc summary {
+  cursor: pointer;
+  font-weight: 550;
+  color: var(--text-primary);
+}
+.md-doc details[open] > summary {
+  margin-bottom: 0.5rem;
+}
+.md-doc .mermaid {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  margin: 0 0 1rem;
+  overflow-x: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.md-doc .math-block {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* GitHub alerts: > [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]. */
+.md-alert {
+  padding: 0.625rem 1rem;
+  border-left: 3px solid var(--md-alert);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--md-alert) 7%, transparent);
+  color: var(--text-secondary);
+}
+.md-alert > :last-child { margin-bottom: 0; }
+.md-doc .md-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.25rem;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--md-alert);
+}
+.md-alert-note      { --md-alert: #58a6ff; }
+.md-alert-tip       { --md-alert: var(--success); }
+.md-alert-important { --md-alert: var(--reasoning); }
+.md-alert-warning   { --md-alert: var(--warning); }
+.md-alert-caution   { --md-alert: var(--danger); }
+/* YAML front matter, shown the way GitHub does: as a table, not a stray rule. */
+.md-front {
+  margin: 0 0 1.5rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.md-front-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+}
+.md-front-row + .md-front-row {
+  border-top: 1px solid var(--border-subtle);
+}
+.md-front-key {
+  padding: 0.375rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+}
+.md-front-val {
+  padding: 0.375rem 0.75rem;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}

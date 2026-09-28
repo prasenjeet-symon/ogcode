@@ -1,3 +1,151 @@
+# Release Notes — v0.40.0
+
+## Minor: A built-in catalogue of model facts
+
+ogcode now knows the context window, prices (cache reads and writes included)
+and image support of the current Anthropic and OpenAI models and the major
+open-weight families — DeepSeek, Qwen, Kimi, GLM, MiniMax, Llama and Muse,
+Mistral, Gemma, gpt-oss, Nemotron and Phi — checked against each vendor's docs
+on 2026-09-28. The facts follow the model, not the provider: it is recognised
+under any host's name for it (`anthropic/claude-sonnet-5:batch` on OpenRouter,
+`glm-5.3-flash:cloud` on Ollama, `llama-3.3-70b-versatile` on Groq), including
+a model you add by hand. A name that means different models on different hosts,
+like `deepseek-r1`, is left unknown rather than guessed.
+
+- **Windows.** Compaction and the context meter use the smallest window
+  anything knows: the catalogue's, the host's own listing, or one learned from
+  an overflow. A host that serves less than the vendor (MiniMax M3 at 512K)
+  wins; one that claims more (OpenRouter's 1M for Claude Sonnet 4.5) does not.
+  A model running on your own Ollama is left to what the instance reports, since
+  it runs at `num_ctx`, not the model's maximum. Settings → Models shows each
+  model's window next to its price, and a context meter beside the token pill
+  shows how full the last request was and where compaction happens.
+- **Prices.** OpenRouter's own per-model prices are now read, so a `:free`
+  variant shows as free and a hosted model at OpenRouter's rate. Elsewhere the
+  vendor's price applies, and local Ollama, Ollama Cloud and OGX show none, since
+  none of them bills per token. `ogcode run` prices cache traffic at the
+  published cache rates.
+- **OpenAI requests.** GPT-5.4 and later take tools on Chat Completions only
+  with reasoning off, so agent steps to them send `reasoning_effort: "none"`;
+  utility calls send each model's lowest effort, reasoning models get no
+  `temperature`, and `max_completion_tokens` replaces `max_tokens`. Models whose
+  tools need the Responses API (GPT-6 Astra, the pro and Codex models) are no
+  longer offered. Kimi's current models and Claude Opus 4.7+ get no temperature
+  on any host.
+- **Defaults.** New installs start on Claude Sonnet 5, GPT-6 Sol and, on
+  OpenRouter, `anthropic/claude-sonnet-5`, with the current generation enabled
+  (Claude Fable 5.1, Opus 5.5, Sonnet 5, Haiku 4.5; GPT-6 Sol and Luna, GPT-5.6
+  Sol and Terra). Retired models are gone from the lists; the ones other hosts
+  still serve stay catalogued.
+
+## Minor: Token totals count every token, and every call
+
+Three accounting fixes, found by checking live usage from Groq, Gemini,
+OpenRouter, Ollama Cloud and a local Ollama against what ogcode recorded.
+
+- **Gemini's thinking is counted.** Its OpenAI-compatible endpoint bills thinking
+  as output but reports it only in `total_tokens`. The gap between that and
+  prompt + completion now goes to output and reasoning; a live gemini-2.5-flash
+  step had recorded 24 output tokens where 263 were billed. When the gap instead
+  equals the cached count, the server reported the cache outside
+  `prompt_tokens`, so input is kept rather than clamped to zero.
+- **One definition of a total.** Every total — per step, per session, utility,
+  `ogcode run`'s `total`, the token pill — is now input + cache read + cache
+  write + output (`TokenCounts.Consumed`), the figure providers report as
+  `total_tokens`. v0.35.0 had left cache reads out of session totals, which
+  showed a well-cached step that processed 3,267 tokens as 25 and left the pill's
+  rows not adding up to its total. Cache reads are processed and billed on every
+  step that sends them, so they count. The pill now marks reasoning and utility
+  as parts of the rows above them.
+- **Work outside the step loop is charged to its session.** Task and
+  memory-recall sub-agents ran in ephemeral sessions that were deleted with
+  their tokens, and the deep-search pipeline, the per-turn memory summary and
+  plan auto-naming discarded their usage. The loop now stamps its session on the
+  context: a sub-agent's run is folded into the session that spawned it before
+  deletion, and the one-shot calls charge it directly, all in the utility
+  subtotal. The Notes rewrite and transform calls have no session and are still
+  not counted.
+
+## Minor: Live previews at their own hostname, served only when published
+
+A service the agent starts is now previewed at its own origin —
+`http://3000.preview.localhost:<server-port>/` — instead of under
+`/preview/3000/`, so an app that boots off its own location (Next.js and
+friends) starts normally. Old `/preview/<port>/` links redirect there.
+
+A preview hostname now serves only ports that were **published**: the agent
+publishes a port by writing its preview URL in its reply (it takes effect as
+soon as that step ends, not when the turn does), and you can add or remove one
+on the Preview page. Everything else answers 403, and ogcode's own port is never
+served. A loopback port is often private precisely because it is loopback-only,
+and a preview link is something you share, so the proxy no longer opens every
+port on the machine. Any other name under the preview domain answers 404 rather
+than reaching ogcode, so a preview wildcard exposed more widely than the main
+address never exposes ogcode itself.
+
+Previewed apps behave as they do on their own: ogcode's CORS headers no longer
+leak onto their responses (or swallow their preflights), they get their own
+storage and cookies inside the Preview page, redirects to their loopback address
+land back on the preview, and the scheme behind a TLS-terminating proxy is passed
+on. An open preview no longer reloads every ten seconds.
+
+`*.localhost` names resolve to the browser's own machine, so the default works
+from a browser on the server (or through `ssh -L`). To open previews from
+another machine, set `OGCODE_PREVIEW_DOMAIN` to a dedicated wildcard DNS name that
+points at the server; the Preview page and the agent say so when they detect the
+mismatch.
+
+## Minor: A shared in-flight budget for provider requests
+
+Provider requests are now capped process-wide, so a project index that fans out
+across many documents can no longer put its whole wave on the endpoint at once.
+The failure this prevents is not slowness but refusal: an index starts a session
+per batch, each a full agent turn of two or more requests, and the burst can trip
+the endpoint's rate limiter — which the retry path then answers with further
+retries, so the burst amplifies the very throttling it caused. One shared ceiling
+turns the wave into a queue that drains at the rate the endpoint accepts.
+
+The ceiling is `OGCODE_PROVIDER_MAX_CONCURRENT` (default 8, minimum 2). Two of
+those slots are reserved for interactive turns: the index and your own turns
+share one endpoint and one rate limit, so without a reserve a background refresh
+could hold every slot and leave your next message waiting behind it. The cap sits
+on the provider send path for both OpenAI and Anthropic, so it is independent of
+the indexer's own concurrency setting.
+
+## Minor: A ledger of what you have spent
+
+Every agent step and every utility call now writes one row to a ledger, so the
+spend of every project, session and model can be totalled in one view. Settings
+→ Usage shows it over Today, 7 days, 30 days or all time, for this workspace
+(its task worktrees included), for all projects, or for one project opened from
+the list.
+
+The ledger keeps two very different numbers apart. **Billed** is what per-token
+providers charged, at their own price. **Plan value** is what a flat plan or a
+local model did, priced at the vendor's list price — the bill the plan spared
+you, not a charge. A daily chart shows the shape of the spend, folding to weeks
+on the longer ranges.
+
+Prices are not stored with a row; they are applied when the ledger is read, from
+the provider's listing or the built-in catalogue, so a corrected price reaches
+history instead of being frozen into it. Each workspace's usage from before the
+ledger existed is folded in once, and a row outlives the session it came from.
+
+- **The endpoint is recorded, not just the provider.** A provider slot pointed
+  somewhere else — the OpenAI slot at Z.ai, the Anthropic slot at DeepSeek —
+  bills at neither the slot's name nor the model's, so the row keeps the host it
+  actually called and is priced and named by it. Work whose provider was never
+  recorded is inferred from what serves the model today, and says so; work that
+  cannot be priced is never counted as a charge.
+- **Rows are keyed, not appended blindly.** An agent step is filed under its
+  assistant message id, so the same step recorded twice overwrites rather than
+  doubles, and a utility call is one row of its own. Sessions deleted with their
+  tokens leave their spend behind.
+- **One source for session cost too.** The token pill's cost and `ogcode run`'s
+  figures read from the same pricing, so a session's total and the ledger agree.
+
+---
+
 # Release Notes — v0.39.1
 
 ## Minor: First-party identity for the OGX gateway

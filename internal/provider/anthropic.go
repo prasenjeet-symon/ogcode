@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
 // AnthropicProvider implements Provider for the Anthropic Messages API.
@@ -24,7 +25,7 @@ func NewAnthropicProvider() *AnthropicProvider {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	model := os.Getenv("ANTHROPIC_MODEL")
 	if model == "" {
-		model = "claude-sonnet-4-6"
+		model = "claude-sonnet-5"
 	}
 	baseURL := os.Getenv("ANTHROPIC_BASE_URL")
 	if baseURL == "" {
@@ -34,6 +35,10 @@ func NewAnthropicProvider() *AnthropicProvider {
 }
 
 func (p *AnthropicProvider) ID() string { return "anthropic" }
+
+// BaseURL is the endpoint requests go to: Anthropic's own API, or any
+// Anthropic-compatible host the slot was pointed at.
+func (p *AnthropicProvider) BaseURL() string { return p.baseURL }
 
 func (p *AnthropicProvider) Models() []ModelInfo {
 	all := make([]ModelInfo, 0, len(AnthropicModels))
@@ -73,16 +78,28 @@ func anthropicThinkingBlock(rp ReasoningPart) map[string]any {
 	}
 }
 
-// anthropicCatalogModel looks up a model's catalogued facts. A model the catalog
-// does not know — a future ID, or one reached through a proxy — resolves to
-// nothing, and callers fall back to what is safe for any model.
+var (
+	claudeCatalogOnce sync.Once
+	claudeCatalogIdx  catalogIndex
+)
+
+// anthropicCatalogModel looks up a Claude model's catalogued facts under any of
+// its spellings — the undated alias the API also accepts, or a proxy's
+// "anthropic/claude-opus-4.7". Only Claude entries answer: an open model served
+// over an Anthropic-compatible endpoint must not inherit Claude's thinking
+// mode. A model the catalog does not know — a future ID — resolves to nothing,
+// and callers fall back to what is safe for any model.
 func anthropicCatalogModel(id string) (CatalogModel, bool) {
-	for _, m := range AnthropicModels {
-		if m.ID == id {
-			return m, true
+	claudeCatalogOnce.Do(func() {
+		var legacy []CatalogModel
+		for _, m := range LegacyModels {
+			if strings.HasPrefix(m.ID, "claude-") {
+				legacy = append(legacy, m)
+			}
 		}
-	}
-	return CatalogModel{}, false
+		claudeCatalogIdx = newCatalogIndex(AnthropicModels, legacy)
+	})
+	return claudeCatalogIdx.lookup(id)
 }
 
 // thinkingConfigFor returns the thinking configuration for a model, or nil when
@@ -359,6 +376,12 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		// the two for an agent loop, so it wins.
 		temperature = 0
 	}
+	if m, ok := anthropicCatalogModel(model); ok && m.RejectsSampling {
+		// Opus 4.7 and later reject temperature whether or not they think, so a
+		// utility call that asks for a low temperature (plan naming, titles)
+		// would fail outright. Temperature 0 is omitted from the request.
+		temperature = 0
+	}
 
 	maxTokens := max(req.MaxTokens, 4096)
 	if thinking != nil && req.MaxTokens == 0 {
@@ -399,6 +422,28 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		}
 	}()
 
+	// Take a place in the process-wide in-flight budget and hold it for the whole
+	// request. A background index session draws the index's share of that budget,
+	// so its waves cannot fill every slot ahead of the user's own turn.
+	releaseSlot, err := acquireRequest(reqCtx)
+	if err != nil {
+		return nil, fmt.Errorf("wait for request slot: %w", err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			releaseSlot()
+		}
+	}
+	// Until a reader goroutine owns the slot, release it on every return: both the
+	// send-error and the non-200 paths below leave without one.
+	defer func() {
+		if !streamStarted {
+			release()
+		}
+	}()
+
 	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", strings.TrimRight(p.baseURL, "/")+"/messages", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -425,7 +470,10 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 
 	ch := make(chan StreamEvent, 256)
 	streamStarted = true
-	go p.streamEvents(resp.Body, ch, reqCancel)
+	// The reservation is released when this body is closed, at the end of the
+	// stream rather than at the first byte: the generation still holds the
+	// endpoint's attention while the body is being drained.
+	go p.streamEvents(&budgetBody{ReadCloser: resp.Body, release: release}, ch, reqCancel)
 	return ch, nil
 }
 
