@@ -337,6 +337,8 @@
     .og-still #product .pr-pulse, .og-still #product .pr-spin,
     .og-still #product .pr-mg-wires path, .og-still #product .pr-mg-node .halo,
     .og-still #product .pr-band::after, .og-still #product .pr-caret,
+    .og-still #cluster .hc-a, .og-still #cluster .hc-lane i, .og-still #cluster .hc-racks::after,
+    .og-still #cluster .hc-node::before, .og-still #cluster .hc-node::after,
     .og-still #review .rv-caret { animation-play-state: paused !important; }
 
     /* ══ Page guides ════════════════════════════════════════════
@@ -1095,6 +1097,120 @@
   #recall .rc-node::after { animation: none; opacity: 0; }
 }
 
+/* ── #context — "A small context. Sharp models." ──────────────────────
+   One real session drawn as the tokens sent with each request, under a
+   dashed 200K line, beside three measured figures and a two-up "why".
+   The line draws in once when the box is revealed; the plot takes a
+   pointer or the arrow keys for a per-stretch readout. Everything is
+   scoped to #context or prefixed cx-. */
+#context {
+  /* --dim alone is ~3.6:1 on the canvas; this mix keeps small mono copy at ≥4.5:1 */
+  --cx-faint: color-mix(in srgb, var(--muted) 42%, var(--dim));
+}
+#context .sec-head { max-width: 880px; }
+#context .cx-grid { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); }
+#context .cx-chart {
+  margin: 0;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: clamp(20px, 2.6vw, 34px);
+}
+#context .cx-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+#context .cx-eye { font: 500 11.5px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--brand-ink); }
+#context .cx-meta { font: 400 12.5px/1.4 var(--mono); color: var(--muted); }
+#context .cx-plot {
+  position: relative;
+  height: clamp(220px, 23vw, 290px);
+  margin: 26px 0 0 46px;          /* room for the y labels and the peak tag */
+  touch-action: pan-y;
+}
+#context .cx-plot:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 8px; border-radius: 4px; }
+#context .cx-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+#context .cx-grid-l { fill: none; stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+#context .cx-area { fill: url(#cx-fill); transition: opacity .9s var(--ease) .5s; }
+#context .cx-line {
+  fill: none;
+  stroke: var(--brand-ink); stroke-width: 2;
+  stroke-linejoin: round; stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 1; stroke-dashoffset: 0;
+}
+/* the draw-in: hidden only until the box is revealed, so a renderer that
+   never animates still shows the finished line */
+.js #context .cx-box:not(.in) .cx-line { stroke-dashoffset: 1; }
+.js #context .cx-box:not(.in) .cx-area { opacity: 0; }
+.js #context .cx-box.in .cx-line { animation: cx-draw 1.8s var(--ease) forwards; }
+@keyframes cx-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+/* the 200K line: dashed, since a threshold is the one line that should read as one */
+#context .cx-limit { position: absolute; left: 0; right: 0; top: 20%; border-top: 1.5px dashed rgba(240,227,222,.5); }
+#context .cx-limit span {
+  position: absolute; right: 0; bottom: 6px;
+  padding: 3px 7px; border-radius: 5px;
+  background: var(--bg-3);
+  font: 500 12px/1 var(--mono); color: var(--bright);
+}
+#context .cx-y {
+  position: absolute; left: -46px; width: 38px;
+  transform: translateY(-50%);
+  text-align: right;
+  font: 400 11px/1 var(--mono); color: var(--cx-faint);
+}
+#context .cx-peak {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 12px));
+  font: 500 12px/1.2 var(--mono); color: var(--bright);
+  white-space: nowrap; pointer-events: none;
+}
+#context .cx-peak::after {
+  content: ""; position: absolute; left: 50%; top: calc(100% + 7px);
+  width: 8px; height: 8px; margin-left: -4px; border-radius: 50%;
+  background: var(--brand-ink); box-shadow: 0 0 0 2px var(--bg);
+}
+#context .cx-x { display: flex; justify-content: space-between; margin-left: 46px; font: 400 11px/1 var(--mono); color: var(--cx-faint); }
+#context .cx-cap { font-size: 14px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+#context .cx-cap b { color: var(--text); font-weight: 500; }
+/* the readout under the pointer (or the arrow keys) */
+#context .cx-cross { position: absolute; top: -8px; bottom: 0; width: 1px; background: var(--line-3); pointer-events: none; opacity: 0; }
+#context .cx-dot {
+  position: absolute; width: 10px; height: 10px; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--brand-ink); box-shadow: 0 0 0 2px var(--bg);
+  pointer-events: none; opacity: 0;
+}
+#context .cx-tip {
+  position: absolute; top: -34px; transform: translateX(-50%);
+  padding: 5px 9px; border: 1px solid var(--line-2); border-radius: 8px;
+  background: var(--bg-3);
+  font: 400 12px/1.3 var(--mono); color: var(--muted); white-space: nowrap;
+  pointer-events: none; opacity: 0;
+}
+#context .cx-tip b { color: var(--bright); font-weight: 500; }
+#context .cx-on .cx-cross, #context .cx-on .cx-dot, #context .cx-on .cx-tip { opacity: 1; }
+#context .cx-on .cx-peak { opacity: 0; }
+
+/* three figures beside the chart */
+#context .cx-stats { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); }
+#context .cx-stat { display: flex; flex-direction: column; justify-content: center; padding: clamp(18px, 2.3vw, 30px); background: var(--bg); }
+#context .cx-n { font: 500 clamp(42px, 4.4vw, 60px)/.95 var(--font); letter-spacing: -0.04em; color: var(--bright); }
+#context .cx-n [data-count] { font-variant-numeric: tabular-nums; }
+#context .cx-lab { margin: 10px 0 0; font: 500 11.5px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--brand-ink); }
+#context .cx-stat .p { margin-top: 6px; font-size: 14px; }
+
+/* the two-up why, under the chart */
+#context .cx-why { border-top: 1px solid var(--line); }
+#context .cx-why .ico { color: var(--brand-ink); }
+
+@media (max-width: 960px) {
+  #context .cx-grid { grid-template-columns: minmax(0, 1fr); }
+  #context .cx-stats { grid-template-rows: none; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  #context .cx-stats, #context .cx-why { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #context .cx-line { animation: none !important; stroke-dashoffset: 0 !important; }
+  #context .cx-area { opacity: 1 !important; transition: none; }
+}
+
 /* ── section: models ── */
 /* ── #models — "Your model. Your keys." (provider window + logo belt) ── */
 
@@ -1439,6 +1555,253 @@
   #models .md-logo { transition: none; }
   #models .md-pause { display: none; }
   #models .md-marquee .marquee-set { row-gap: 18px; }
+}
+
+/* ── section: cluster ── */
+/* ── #cluster — "Or use ours. Hosted in-house." ─────────────────────────
+   OGX's models on our own inference cluster: a session on the left, the racks
+   on the right, the prompt going out along the wire and tokens streaming
+   back; under it the measured speeds and the flat price. The static base is
+   the finished picture; every loop lives under `no-preference`, parks while
+   the box is off-screen (.og-idle) and holds for the footer's pause
+   (.og-still). Everything is scoped to #cluster or prefixed hc-. */
+@property --hc-p { syntax: '<number>'; inherits: true; initial-value: 1; }
+
+#cluster {
+  /* --dim alone is ~3.6:1 on the canvas; this mix keeps small mono copy at ≥4.5:1 */
+  --hc-faint: color-mix(in srgb, var(--muted) 42%, var(--dim));
+}
+#cluster .sec-head { max-width: 820px; }
+
+/* ── the stage: a floor-plan grid, warm where the racks stand ── */
+#cluster .hc-map {
+  position: relative; isolation: isolate; overflow: hidden;
+  margin: 0;
+  display: flex; flex-direction: column; gap: 18px;
+  padding: clamp(20px, 2.6vw, 34px);
+}
+#cluster .hc-map::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: center;
+  -webkit-mask-image: radial-gradient(70% 80% at 64% 52%, #000 25%, transparent 100%);
+  mask-image: radial-gradient(70% 80% at 64% 52%, #000 25%, transparent 100%);
+}
+#cluster .hc-map::after {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  right: 2%; top: 14%; width: 60%; height: 76%;
+  background: radial-gradient(closest-side, rgba(255,94,31,.15), rgba(255,94,31,0));
+}
+#cluster .hc-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+#cluster .hc-eye { font: 500 11.5px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--brand-ink); }
+#cluster .hc-meta { font: 400 12.5px/1.4 var(--mono); color: var(--muted); }
+#cluster .hc-stage {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(88px, 1fr) auto;
+  align-items: center;
+  padding: clamp(10px, 1.6vw, 22px) 0;
+}
+#cluster .hc-cap { max-width: 720px; font-size: 14px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+#cluster .hc-cap b { color: var(--text); font-weight: 500; }
+
+/* ── the session: a small ogcode window, the answer streaming in ── */
+#cluster .hc-src {
+  position: relative; z-index: 1; overflow: hidden;
+  border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  background: var(--bg-2);
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,.75);
+}
+#cluster .hc-src-bar { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+#cluster .hc-src-bar .win-dots i { width: 8px; height: 8px; }
+#cluster .hc-src-t { font: 400 11.5px/1 var(--mono); color: var(--hc-faint); }
+#cluster .hc-src-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 12px; }
+#cluster .hc-q { font: 400 12.5px/1.4 var(--mono); color: var(--text); }
+#cluster .hc-q::before { content: "› "; color: var(--brand-ink); }
+#cluster .hc-a { display: flex; flex-direction: column; gap: 7px; min-height: 73px; }
+#cluster .hc-a i {
+  display: block; height: 6px; width: var(--w); border-radius: 3px;
+  background: rgba(240,227,222,.2);
+  transform-origin: left center;
+}
+#cluster .hc-a i:last-child { background: rgba(255,112,56,.6); }
+#cluster .hc-rd {
+  display: flex; flex-wrap: wrap; gap: 4px 8px;
+  padding-top: 10px; border-top: 1px solid var(--line);
+  font: 400 11px/1.3 var(--mono); color: var(--hc-faint);
+}
+#cluster .hc-rd b { color: var(--bright); font-weight: 500; }
+
+/* ── the wire: the prompt goes out, tokens pour back ── */
+#cluster .hc-wire { display: flex; flex-direction: column; gap: 10px; padding: 0 16px; }
+#cluster .hc-lab { font: 400 11px/1 var(--mono); color: var(--hc-faint); }
+#cluster .hc-lab-out { align-self: flex-end; }
+#cluster .hc-lane { position: relative; height: 2px; }
+#cluster .hc-lane i {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg, currentColor 0 6px, transparent 6px 14px);
+}
+#cluster .hc-lane::after {
+  content: ""; position: absolute; top: 50%;
+  width: 7px; height: 7px;
+  border: solid currentColor; border-width: 2px 2px 0 0;
+}
+#cluster .hc-out { color: var(--line-3); }
+#cluster .hc-out::after { right: 0; transform: translateY(-50%) rotate(45deg); }
+#cluster .hc-back { color: var(--brand-ink); margin-top: 12px; filter: drop-shadow(0 0 5px rgba(255,112,56,.55)); }
+#cluster .hc-back i { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 10px); }
+#cluster .hc-back::after { left: 0; transform: translateY(-50%) rotate(-135deg); }
+
+/* ── the cluster: racks of nodes, a status light per rack, one LED and one
+   load bar per node, vents on the right ── */
+#cluster .hc-racks {
+  position: relative; overflow: hidden;
+  display: grid; grid-template-columns: repeat(6, 84px); gap: 10px;
+  padding: 22px 14px 14px;
+  border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  background: rgba(21,20,20,.78);
+}
+#cluster .hc-racks-tag {
+  position: absolute; top: 7px; left: 14px;
+  font: 500 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--hc-faint);
+}
+#cluster .hc-rack {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 8px 6px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--bg-2);
+}
+#cluster .hc-rid {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 3px;
+  font: 500 10px/1 var(--mono); letter-spacing: .06em; color: var(--hc-faint);
+}
+#cluster .hc-rid::after {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 6px rgba(62,207,142,.7);
+}
+#cluster .hc-node {
+  position: relative; display: block; height: 13px;
+  border: 1px solid var(--line-2); border-radius: 3px;
+  background:
+    repeating-linear-gradient(90deg, rgba(240,227,222,.16) 0 1px, transparent 1px 3px) right 5px center / 15px 5px no-repeat,
+    var(--bg-3);
+}
+#cluster .hc-node::before {
+  content: ""; position: absolute; left: 5px; top: 50%;
+  width: 4px; height: 4px; margin-top: -2px; border-radius: 50%;
+  background: var(--brand-ink); box-shadow: 0 0 5px var(--brand-ink);
+}
+#cluster .hc-node::after {
+  content: ""; position: absolute; left: 14px; right: 25px; top: 50%;
+  height: 2px; margin-top: -1px; border-radius: 1px;
+  background: rgba(255,112,56,.6);
+  transform-origin: left center; transform: scaleX(var(--l, .6));
+}
+#cluster .hc-node.z::before { background: rgba(240,227,222,.28); box-shadow: none; }
+#cluster .hc-node.z::after { opacity: .3; }
+/* a request fanning out across the cluster: one soft band sweeping down */
+#cluster .hc-racks::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 44px;
+  background: linear-gradient(180deg, rgba(255,112,56,0), rgba(255,112,56,.09), rgba(255,112,56,0));
+  pointer-events: none; opacity: 0;
+}
+
+/* ── speeds and the price ── */
+#cluster .hc-row { grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+#cluster .hc-stat { display: flex; flex-direction: column; padding: clamp(20px, 2.4vw, 32px); }
+#cluster .hc-n {
+  display: flex; align-items: baseline; gap: 2px;
+  font: 500 clamp(40px, 4.2vw, 56px)/.95 var(--font); letter-spacing: -0.04em; color: var(--bright);
+}
+#cluster .hc-n [data-count] { font-variant-numeric: tabular-nums; }
+#cluster .hc-t { font-size: .6em; margin-right: .04em; align-self: center; opacity: .7; }
+#cluster .hc-u { margin-left: 8px; font: 500 14px/1 var(--mono); letter-spacing: 0; color: var(--muted); }
+#cluster .hc-l { margin: 12px 0 0; font: 500 11.5px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--brand-ink); }
+#cluster .hc-stat .p { margin-top: 6px; font-size: 14px; }
+#cluster .hc-cta .hc-n, #cluster .hc-cta .hc-t { color: #fff; }
+#cluster .hc-cta .hc-u, #cluster .hc-cta .hc-l { color: rgba(255,255,255,.88); }
+#cluster .hc-go {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: auto; padding-top: 16px;
+  font-size: 15px; font-weight: 500; color: #fff;
+}
+#cluster .hc-go span { transition: transform .2s var(--ease); }
+#cluster .hc-go:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+#cluster .hc-go:hover span { transform: translateX(3px); }
+
+/* ── motion ── */
+@media (prefers-reduced-motion: no-preference) {
+  /* one 4.8 s turn: the wait to the first token (0.9 s), six lines pouring
+     in, a hold, then the answer clears for the next prompt */
+  #cluster .hc-a {
+    animation: hc-stream 4.8s linear infinite;
+    opacity: clamp(0, calc((1 - var(--hc-p)) * 14), 1);
+  }
+  #cluster .hc-a i { transform: scaleX(clamp(0, calc((var(--hc-p) - var(--s)) * 20), 1)); }
+  #cluster .hc-out i { animation: hc-right 1.4s linear infinite; }
+  #cluster .hc-back i { animation: hc-left .32s linear infinite; }
+  #cluster .hc-node::before { animation: hc-blink var(--t, 1.6s) steps(1, end) var(--d, 0s) infinite; }
+  #cluster .hc-node::after { animation: hc-load var(--u, 2.4s) ease-in-out var(--d, 0s) infinite alternate; }
+  #cluster .hc-node.z::before, #cluster .hc-node.z::after { animation: none; }
+  #cluster .hc-racks::after { animation: hc-sweep 3.2s var(--ease) infinite; }
+}
+@keyframes hc-stream { from { --hc-p: 0; } to { --hc-p: 1; } }
+@keyframes hc-right { from { background-position: 0 0; } to { background-position: 14px 0; } }
+@keyframes hc-left { from { background-position: 0 0; } to { background-position: -10px 0; } }
+@keyframes hc-blink {
+  0%, 100% { opacity: 1; }
+  17% { opacity: .25; } 23% { opacity: 1; }
+  51% { opacity: .35; } 57% { opacity: 1; }
+  78% { opacity: .5; } 82% { opacity: 1; }
+}
+@keyframes hc-load { from { transform: scaleX(var(--l, .6)); } to { transform: scaleX(var(--m, .3)); } }
+@keyframes hc-sweep {
+  0% { top: -44px; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+#cluster .hc-box.og-idle .hc-a,
+#cluster .hc-box.og-idle .hc-lane i,
+#cluster .hc-box.og-idle .hc-node::before,
+#cluster .hc-box.og-idle .hc-node::after,
+#cluster .hc-box.og-idle .hc-racks::after { animation-play-state: paused; }
+
+/* ── narrower screens: four racks, then the session stacks over the cluster
+   and the wire turns vertical ── */
+@media (max-width: 1100px) {
+  #cluster .hc-racks { grid-template-columns: repeat(4, 84px); }
+  #cluster .hc-rack:nth-child(n+6) { display: none; }  /* child 1 is the tag */
+  #cluster .hc-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 820px) {
+  #cluster .hc-stage { grid-template-columns: minmax(0, 1fr); justify-items: center; padding: 4px 0 0; }
+  #cluster .hc-src { width: min(100%, 340px); }
+  #cluster .hc-wire { flex-direction: row; align-items: center; gap: 10px; height: 76px; padding: 12px 0; }
+  #cluster .hc-lab-out { align-self: center; order: -1; }
+  #cluster .hc-lane { width: 2px; height: 100%; }
+  #cluster .hc-back { margin-top: 0; margin-left: 12px; }
+  #cluster .hc-lane i { background: repeating-linear-gradient(180deg, currentColor 0 6px, transparent 6px 14px); }
+  #cluster .hc-back i { background: repeating-linear-gradient(180deg, currentColor 0 4px, transparent 4px 10px); }
+  #cluster .hc-lane::after { top: auto; left: 50%; }
+  #cluster .hc-out::after { right: auto; bottom: 0; transform: translateX(-50%) rotate(135deg); }
+  #cluster .hc-back::after { top: 0; transform: translateX(-50%) rotate(-45deg); }
+  #cluster .hc-racks { width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 820px) and (prefers-reduced-motion: no-preference) {
+  #cluster .hc-out i { animation-name: hc-down; }
+  #cluster .hc-back i { animation-name: hc-up; }
+}
+@keyframes hc-down { from { background-position: 0 0; } to { background-position: 0 14px; } }
+@keyframes hc-up { from { background-position: 0 0; } to { background-position: 0 -10px; } }
+@media (max-width: 560px) {
+  #cluster .hc-row { grid-template-columns: minmax(0, 1fr); }
+  #cluster .hc-racks { gap: 6px; padding-inline: 10px; }
+  #cluster .hc-rack { padding-inline: 4px; }
 }
 
 /* ── section: why ── */
@@ -2215,7 +2578,7 @@
 }
 #cost .co-tag { margin: 2px 0 0; font-size: 14px; line-height: 1.45; color: var(--muted); }
 #cost .co-price {
-  margin-top: 22px;
+  margin: 22px 0 28px;
   min-height: calc(clamp(32px, 3vw, 40px) + 26px);
 }
 #cost .co-amount { margin: 0; font-size: 14px; line-height: 1; color: var(--muted); }
@@ -2227,26 +2590,7 @@
 }
 #cost .co-num[data-count] { font-variant-numeric: tabular-nums; }
 #cost .co-note { margin: 8px 0 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
-#cost .co-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 18px 0 28px;
-  padding: 0;
-  list-style: none;
-}
-#cost .co-chips .chip { border-style: dashed; }
 #cost .co-cta { margin-top: auto; }
-
-#cost .co-foot {
-  max-width: 820px;
-  margin: 22px auto 0;
-  padding: 0 12px;
-  text-align: center;
-  font: 400 13px/1.6 var(--mono);
-  color: var(--co-faint);
-  text-wrap: balance;
-}
 
 /* ── motion (only once the box has been revealed — `.in` is added by the page
    script, so none of this runs without JS — and only on the shown panel) ── */
@@ -2367,8 +2711,8 @@
 #cost .co-box.in .co-play .co-acc-chip { animation: co-pop-file calc(1.1s + var(--k) * .22s) var(--ease) forwards; }
 
 /* ── responsive ──────────────────────────────────────────────── */
-/* four narrow plan columns: a little less side padding keeps the longest
-   chip on one line */
+/* four narrow plan columns: a little less side padding keeps the widest
+   price ("Self-host") on one line */
 @media (min-width: 1001px) and (max-width: 1100px) {
   #cost .co-plans > .co-plan { padding-inline: 20px; }
 }
@@ -2377,8 +2721,7 @@
   #cost .co-copy { max-width: 560px; }
 }
 @media (max-width: 640px) {
-  #cost .co-price { min-height: 0; }
-  #cost .co-chips { margin-bottom: 24px; }
+  #cost .co-price { min-height: 0; margin-bottom: 24px; }
 }
 @media (max-width: 480px) {
   #cost .co-viz { padding: 14px 12px 12px; }
@@ -3933,6 +4276,88 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
     </div>
   </div>
 </section>
+<!-- ══ Context ═════════════════════════════════════════════════ -->
+<section class="sec" id="context" aria-labelledby="context-title">
+  <div class="frame">
+    <div class="sec-head reveal">
+      <h2 class="h2" id="context-title">A small context. <span class="hl">Sharp models.</span></h2>
+      <p class="sub">Ogcode sends only what the current turn needs, so requests stay well under 200K tokens however long a session runs. Models read a lean context most accurately, which is why smaller, cheaper and local models do their best work here.</p>
+    </div>
+
+    <div class="box cx-box reveal d1">
+      <i class="cn tl"></i><i class="cn tr"></i><i class="cn bl"></i><i class="cn br"></i>
+      <div class="cells cx-grid">
+        <figure class="cx-chart">
+          <div class="cx-head">
+            <span class="cx-eye">One real session</span>
+            <span class="cx-meta">GLM-5.3 Flash · 42 hours · 2,589 steps</span>
+          </div>
+          <!-- Measured, not drawn: each point is the largest request in its
+               stretch of the session (about 11 steps), from ogcode's own
+               usage record. -->
+          <div class="cx-plot" tabindex="0" role="img" data-steps="2589" data-pts="35.8,51.3,44.9,61.8,29.6,50.4,57.7,59.8,51.3,47.1,53.2,47.2,52.5,68.0,73.9,87.6,60.7,67.2,72.5,76.1,81.7,82.2,57.9,64.4,71.0,77.6,86.0,92.5,96.7,100.6,107.3,111.1,48.3,52.4,54.1,44.0,54.7,165.9,44.2,59.2,62.2,45.8,52.0,57.4,61.0,61.8,46.5,50.6,40.5,51.9,55.2,37.0,42.2,43.5,57.9,71.6,79.5,86.5,86.9,57.4,124.7,128.4,136.9,168.2,44.3,63.6,78.2,69.2,35.3,40.3,45.3,47.4,49.7,57.0,61.6,63.9,68.9,75.0,78.1,71.8,64.4,78.3,78.9,47.1,52.7,55.1,69.6,75.6,80.9,85.9,91.5,95.2,97.6,99.0,101.8,104.5,107.9,113.7,116.6,36.1,38.9,40.6,44.8,48.4,52.6,56.5,60.3,52.5,61.1,71.5,40.3,45.0,49.1,69.3,87.7,47.5,66.6,74.0,75.0,46.3,49.3,57.7,60.8,41.3,53.6,39.9,53.6,62.9,72.5,81.0,47.5,49.6,61.9,34.3,43.7,50.1,53.9,58.9,36.3,41.6,54.2,74.2,84.7,83.6,53.1,61.6,77.4,95.3,98.6,102.1,110.1,118.6,121.6,33.7,38.3,40.8,53.0,33.9,35.4,45.9,51.6,60.6,66.9,40.8,58.9,64.5,68.2,72.1,79.3,42.3,51.2,56.3,67.2,74.2,48.2,56.7,66.3,71.6,34.2,37.5,37.9,31.2,33.4,34.3,37.2,41.6,62.1,76.6,78.7,82.8,84.5,52.8,62.9,53.5,67.2,71.1,78.4,81.6,83.7,48.7,66.4,82.7,61.7,74.2,78.6,87.8,92.1,103.5,111.7,117.3,123.4,128.3,133.9,134.3,30.5,34.8,38.0,51.9,59.6,63.5,66.3,66.9,41.8,48.0,34.2,69.1,76.4,73.0,74.8,38.3,38.3,79.1,75.5,82.3,88.1,99.0,102.1,108.9,112.7,115.0"
+               aria-label="Chart of one real 2,589-step ogcode session on GLM-5.3 Flash: the tokens sent with each request stay between about 26K and 168K for all 42 hours, with a median of 53K, below a dashed line at 200K. The context does not grow as the session goes on.">
+            <span class="cx-y" style="top:100%" aria-hidden="true">0</span>
+            <span class="cx-y" style="top:60%" aria-hidden="true">100K</span>
+            <svg class="cx-svg" viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+              <defs>
+                <linearGradient id="cx-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#ff7038" stop-opacity=".2"/>
+                  <stop offset="1" stop-color="#ff7038" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path class="cx-grid-l" d="M0 240H1000M0 180H1000M0 120H1000M0 299.5H1000"/>
+              <path class="cx-area" d="M0.0 257.1 L4.2 238.4 L8.4 246.2 L12.6 225.9 L16.7 264.5 L20.9 239.5 L25.1 230.8 L29.3 228.2 L33.5 238.4 L37.7 243.5 L41.8 236.1 L46.0 243.4 L50.2 237.1 L54.4 218.4 L58.6 211.3 L62.8 194.9 L66.9 227.1 L71.1 219.3 L75.3 213.0 L79.5 208.7 L83.7 201.9 L87.9 201.3 L92.1 230.5 L96.2 222.7 L100.4 214.8 L104.6 206.9 L108.8 196.8 L113.0 189.0 L117.2 183.9 L121.3 179.3 L125.5 171.2 L129.7 166.7 L133.9 242.1 L138.1 237.1 L142.3 235.0 L146.4 247.2 L150.6 234.4 L154.8 100.9 L159.0 246.9 L163.2 229.0 L167.4 225.3 L171.5 245.0 L175.7 237.5 L179.9 231.2 L184.1 226.8 L188.3 225.8 L192.5 244.1 L196.7 239.3 L200.8 251.4 L205.0 237.7 L209.2 233.7 L213.4 255.7 L217.6 249.3 L221.8 247.8 L225.9 230.6 L230.1 214.1 L234.3 204.5 L238.5 196.2 L242.7 195.8 L246.9 231.1 L251.0 150.4 L255.2 145.9 L259.4 135.7 L263.6 98.2 L267.8 246.9 L272.0 223.7 L276.2 206.1 L280.3 217.0 L284.5 257.7 L288.7 251.6 L292.9 245.7 L297.1 243.1 L301.3 240.4 L305.4 231.5 L309.6 226.0 L313.8 223.4 L318.0 217.3 L322.2 210.0 L326.4 206.3 L330.5 213.8 L334.7 222.8 L338.9 206.0 L343.1 205.3 L347.3 243.5 L351.5 236.7 L355.6 233.9 L359.8 216.5 L364.0 209.3 L368.2 202.9 L372.4 196.9 L376.6 190.2 L380.8 185.7 L384.9 182.9 L389.1 181.2 L393.3 177.9 L397.5 174.6 L401.7 170.6 L405.9 163.6 L410.0 160.0 L414.2 256.7 L418.4 253.3 L422.6 251.3 L426.8 246.3 L431.0 241.9 L435.1 236.9 L439.3 232.3 L443.5 227.6 L447.7 237.0 L451.9 226.7 L456.1 214.2 L460.3 251.6 L464.4 246.0 L468.6 241.1 L472.8 216.8 L477.0 194.7 L481.2 243.0 L485.4 220.0 L489.5 211.2 L493.7 209.9 L497.9 244.4 L502.1 240.9 L506.3 230.8 L510.5 227.1 L514.6 250.5 L518.8 235.7 L523.0 252.1 L527.2 235.7 L531.4 224.5 L535.6 213.0 L539.7 202.8 L543.9 243.1 L548.1 240.5 L552.3 225.8 L556.5 258.8 L560.7 247.5 L564.9 239.8 L569.0 235.3 L573.2 229.3 L577.4 256.5 L581.6 250.0 L585.8 235.0 L590.0 211.0 L594.1 198.4 L598.3 199.7 L602.5 236.2 L606.7 226.1 L610.9 207.1 L615.1 185.7 L619.2 181.7 L623.4 177.4 L627.6 167.8 L631.8 157.7 L636.0 154.1 L640.2 259.6 L644.4 254.0 L648.5 251.1 L652.7 236.4 L656.9 259.3 L661.1 257.5 L665.3 244.9 L669.5 238.1 L673.6 227.3 L677.8 219.7 L682.0 251.0 L686.2 229.3 L690.4 222.6 L694.6 218.2 L698.7 213.4 L702.9 204.9 L707.1 249.2 L711.3 238.5 L715.5 232.5 L719.7 219.4 L723.8 211.0 L728.0 242.2 L732.2 232.0 L736.4 220.5 L740.6 214.0 L744.8 258.9 L749.0 255.0 L753.1 254.5 L757.3 262.6 L761.5 259.9 L765.7 258.9 L769.9 255.3 L774.1 250.0 L778.2 225.5 L782.4 208.1 L786.6 205.6 L790.8 200.6 L795.0 198.6 L799.2 236.6 L803.3 224.5 L807.5 235.8 L811.7 219.4 L815.9 214.7 L820.1 205.9 L824.3 202.1 L828.5 199.5 L832.6 241.6 L836.8 220.3 L841.0 200.7 L845.2 226.0 L849.4 211.0 L853.6 205.6 L857.7 194.6 L861.9 189.4 L866.1 175.8 L870.3 165.9 L874.5 159.2 L878.7 151.9 L882.8 146.1 L887.0 139.4 L891.2 138.9 L895.4 263.4 L899.6 258.3 L903.8 254.4 L907.9 237.7 L912.1 228.5 L916.3 223.8 L920.5 220.4 L924.7 219.7 L928.9 249.8 L933.1 242.3 L937.2 259.0 L941.4 217.1 L945.6 208.3 L949.8 212.4 L954.0 210.2 L958.2 254.1 L962.3 254.0 L966.5 205.0 L970.7 209.4 L974.9 201.3 L979.1 194.3 L983.3 181.2 L987.4 177.5 L991.6 169.3 L995.8 164.8 L1000.0 161.9 L1000 300 L0 300Z"/>
+              <path class="cx-line" pathLength="1" d="M0.0 257.1 L4.2 238.4 L8.4 246.2 L12.6 225.9 L16.7 264.5 L20.9 239.5 L25.1 230.8 L29.3 228.2 L33.5 238.4 L37.7 243.5 L41.8 236.1 L46.0 243.4 L50.2 237.1 L54.4 218.4 L58.6 211.3 L62.8 194.9 L66.9 227.1 L71.1 219.3 L75.3 213.0 L79.5 208.7 L83.7 201.9 L87.9 201.3 L92.1 230.5 L96.2 222.7 L100.4 214.8 L104.6 206.9 L108.8 196.8 L113.0 189.0 L117.2 183.9 L121.3 179.3 L125.5 171.2 L129.7 166.7 L133.9 242.1 L138.1 237.1 L142.3 235.0 L146.4 247.2 L150.6 234.4 L154.8 100.9 L159.0 246.9 L163.2 229.0 L167.4 225.3 L171.5 245.0 L175.7 237.5 L179.9 231.2 L184.1 226.8 L188.3 225.8 L192.5 244.1 L196.7 239.3 L200.8 251.4 L205.0 237.7 L209.2 233.7 L213.4 255.7 L217.6 249.3 L221.8 247.8 L225.9 230.6 L230.1 214.1 L234.3 204.5 L238.5 196.2 L242.7 195.8 L246.9 231.1 L251.0 150.4 L255.2 145.9 L259.4 135.7 L263.6 98.2 L267.8 246.9 L272.0 223.7 L276.2 206.1 L280.3 217.0 L284.5 257.7 L288.7 251.6 L292.9 245.7 L297.1 243.1 L301.3 240.4 L305.4 231.5 L309.6 226.0 L313.8 223.4 L318.0 217.3 L322.2 210.0 L326.4 206.3 L330.5 213.8 L334.7 222.8 L338.9 206.0 L343.1 205.3 L347.3 243.5 L351.5 236.7 L355.6 233.9 L359.8 216.5 L364.0 209.3 L368.2 202.9 L372.4 196.9 L376.6 190.2 L380.8 185.7 L384.9 182.9 L389.1 181.2 L393.3 177.9 L397.5 174.6 L401.7 170.6 L405.9 163.6 L410.0 160.0 L414.2 256.7 L418.4 253.3 L422.6 251.3 L426.8 246.3 L431.0 241.9 L435.1 236.9 L439.3 232.3 L443.5 227.6 L447.7 237.0 L451.9 226.7 L456.1 214.2 L460.3 251.6 L464.4 246.0 L468.6 241.1 L472.8 216.8 L477.0 194.7 L481.2 243.0 L485.4 220.0 L489.5 211.2 L493.7 209.9 L497.9 244.4 L502.1 240.9 L506.3 230.8 L510.5 227.1 L514.6 250.5 L518.8 235.7 L523.0 252.1 L527.2 235.7 L531.4 224.5 L535.6 213.0 L539.7 202.8 L543.9 243.1 L548.1 240.5 L552.3 225.8 L556.5 258.8 L560.7 247.5 L564.9 239.8 L569.0 235.3 L573.2 229.3 L577.4 256.5 L581.6 250.0 L585.8 235.0 L590.0 211.0 L594.1 198.4 L598.3 199.7 L602.5 236.2 L606.7 226.1 L610.9 207.1 L615.1 185.7 L619.2 181.7 L623.4 177.4 L627.6 167.8 L631.8 157.7 L636.0 154.1 L640.2 259.6 L644.4 254.0 L648.5 251.1 L652.7 236.4 L656.9 259.3 L661.1 257.5 L665.3 244.9 L669.5 238.1 L673.6 227.3 L677.8 219.7 L682.0 251.0 L686.2 229.3 L690.4 222.6 L694.6 218.2 L698.7 213.4 L702.9 204.9 L707.1 249.2 L711.3 238.5 L715.5 232.5 L719.7 219.4 L723.8 211.0 L728.0 242.2 L732.2 232.0 L736.4 220.5 L740.6 214.0 L744.8 258.9 L749.0 255.0 L753.1 254.5 L757.3 262.6 L761.5 259.9 L765.7 258.9 L769.9 255.3 L774.1 250.0 L778.2 225.5 L782.4 208.1 L786.6 205.6 L790.8 200.6 L795.0 198.6 L799.2 236.6 L803.3 224.5 L807.5 235.8 L811.7 219.4 L815.9 214.7 L820.1 205.9 L824.3 202.1 L828.5 199.5 L832.6 241.6 L836.8 220.3 L841.0 200.7 L845.2 226.0 L849.4 211.0 L853.6 205.6 L857.7 194.6 L861.9 189.4 L866.1 175.8 L870.3 165.9 L874.5 159.2 L878.7 151.9 L882.8 146.1 L887.0 139.4 L891.2 138.9 L895.4 263.4 L899.6 258.3 L903.8 254.4 L907.9 237.7 L912.1 228.5 L916.3 223.8 L920.5 220.4 L924.7 219.7 L928.9 249.8 L933.1 242.3 L937.2 259.0 L941.4 217.1 L945.6 208.3 L949.8 212.4 L954.0 210.2 L958.2 254.1 L962.3 254.0 L966.5 205.0 L970.7 209.4 L974.9 201.3 L979.1 194.3 L983.3 181.2 L987.4 177.5 L991.6 169.3 L995.8 164.8 L1000.0 161.9"/>
+            </svg>
+            <div class="cx-limit" aria-hidden="true"><span>200K</span></div>
+            <span class="cx-peak" style="left:26.36%;top:32.72%" aria-hidden="true">peak 168K</span>
+            <i class="cx-cross" aria-hidden="true"></i><i class="cx-dot" aria-hidden="true"></i>
+            <span class="cx-tip" aria-hidden="true"></span>
+          </div>
+          <div class="cx-x" aria-hidden="true"><span>step 1</span><span>step 2,589</span></div>
+          <figcaption class="cx-cap">Tokens sent with each request, cached input included. Half carried under <b>54K</b>, the busiest never passed <b>168K</b>, and the context stayed level from the first hour to the last. The model’s window is 1M; the session used a sixth of it at most.</figcaption>
+        </figure>
+
+        <div class="cx-stats">
+          <div class="cx-stat">
+            <p class="cx-n"><span data-count="54" data-suffix="K">54K</span></p>
+            <p class="cx-lab">Typical request</p>
+            <p class="p">The median across 21,252 requests in 449 sessions.</p>
+          </div>
+          <div class="cx-stat">
+            <p class="cx-n"><span data-count="99" data-suffix="%">99%</span></p>
+            <p class="cx-lab">Under 180K</p>
+            <p class="p">Almost every request leaves the model room to think.</p>
+          </div>
+          <div class="cx-stat">
+            <p class="cx-n"><span data-count="168" data-suffix="K">168K</span></p>
+            <p class="cx-lab">Longest session’s peak</p>
+            <p class="p">2,589 steps, and the context never crept up.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="cells cells-2 cx-why">
+        <div class="cell">
+          <div class="reveal">
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></span>
+            <h3 class="h3">Accuracy holds up</h3>
+            <p class="p">Models read a short, focused prompt more reliably than a long one. Details buried deep in a huge context are the first to be missed, so a lean request keeps every answer grounded.</p>
+          </div>
+        </div>
+        <div class="cell">
+          <div class="reveal d1">
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M13 2 4.5 13.5H12L11 22l8.5-11.5H12z"/></svg></span>
+            <h3 class="h3">Small models keep up</h3>
+            <p class="p">Flash, mini and local models that stumble on a bloated context do solid work on a lean one. Pick the cheaper model and still get the job done.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="sec" id="models" aria-labelledby="models-title">
   <div class="frame">
     <div class="sec-head reveal">
@@ -4022,7 +4447,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       </div>
     </div>
 
-    <p class="md-ogx reveal d2">Rather pay one flat price? <a class="link" href="/ogx/">OGX: code all day with ogcode for ₹499 a month <span aria-hidden="true">→</span></a></p>
+    <p class="md-ogx reveal d2">Rather pay one flat price? <a class="link" href="/ogx/">OGX: $2 of tokens every day, for $5 a month <span aria-hidden="true">→</span></a></p>
 
     <div class="md-belt reveal d2">
       <p class="md-more" id="md-more">And any OpenAI-compatible endpoint…</p>
@@ -4055,6 +4480,79 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
     </div>
   </div>
 </section>
+<section class="sec" id="cluster" aria-labelledby="cluster-title">
+  <div class="frame">
+    <div class="sec-head reveal">
+      <h2 class="h2" id="cluster-title">Or use ours. <span class="hl">Hosted in-house.</span></h2>
+      <p class="sub">OGX runs DeepSeek and GLM on our own high-performance inference cluster. Replies start in about a second and stream faster than you can read them.</p>
+    </div>
+
+    <div class="box hc-box reveal d1">
+      <i class="cn tl"></i><i class="cn tr"></i><i class="cn bl"></i><i class="cn br"></i>
+      <figure class="hc-map">
+        <div class="hc-head">
+          <span class="hc-eye">OGX · in-house inference cluster</span>
+          <span class="hc-meta">DeepSeek V4.1 Flash · GLM 5.3 Flash</span>
+        </div>
+
+        <div class="hc-stage" role="img" aria-label="An ogcode session sends its prompt to OGX's in-house inference cluster, racks of servers we run ourselves, and the answer streams straight back: the first token in 0.9 seconds, then 312 tokens a second.">
+          <div class="hc-src">
+            <div class="hc-src-bar"><span class="win-dots"><i></i><i></i><i></i></span><span class="hc-src-t">ogcode</span></div>
+            <div class="hc-src-body">
+              <p class="hc-q">paginate the orders page</p>
+              <p class="hc-a"><i style="--w:94%;--s:.19"></i><i style="--w:81%;--s:.24"></i><i style="--w:88%;--s:.29"></i><i style="--w:62%;--s:.34"></i><i style="--w:90%;--s:.39"></i><i style="--w:47%;--s:.44"></i></p>
+              <p class="hc-rd"><span>first token <b>0.9 s</b></span><span aria-hidden="true">·</span><span><b>312</b> tok/s</span></p>
+            </div>
+          </div>
+
+          <div class="hc-wire">
+            <span class="hc-lab hc-lab-out">prompt</span>
+            <span class="hc-lane hc-out"><i></i></span>
+            <span class="hc-lane hc-back"><i></i></span>
+            <span class="hc-lab">tokens</span>
+          </div>
+
+          <div class="hc-racks">
+            <span class="hc-racks-tag">High-performance inference</span>
+              <div class="hc-rack"><span class="hc-rid">R01</span><i class="hc-node" style="--l:0.61;--m:0.36;--t:1.3s;--u:2.4s;--d:-1.1s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.57;--m:0.28;--t:1.3s;--u:1.6s;--d:-1.3s"></i><i class="hc-node" style="--l:0.60;--m:0.26;--t:2.5s;--u:3.1s;--d:-1.7s"></i><i class="hc-node" style="--l:0.97;--m:0.36;--t:3.1s;--u:1.9s;--d:-0.4s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.90;--m:0.37;--t:2.4s;--u:2.6s;--d:-1.1s"></i><i class="hc-node" style="--l:0.58;--m:0.21;--t:1.6s;--u:2.6s;--d:-1.3s"></i><i class="hc-node" style="--l:0.80;--m:0.41;--t:1.8s;--u:2.8s;--d:-2.1s"></i><i class="hc-node" style="--l:0.80;--m:0.43;--t:3.1s;--u:2.7s;--d:-0.9s"></i></div>
+              <div class="hc-rack"><span class="hc-rid">R02</span><i class="hc-node" style="--l:0.60;--m:0.30;--t:2.8s;--u:1.7s;--d:-1.5s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.88;--m:0.48;--t:3.1s;--u:2.0s;--d:-2.1s"></i><i class="hc-node" style="--l:0.80;--m:0.41;--t:3.0s;--u:3.1s;--d:-1.4s"></i><i class="hc-node" style="--l:0.58;--m:0.34;--t:2.6s;--u:3.2s;--d:-2.5s"></i><i class="hc-node" style="--l:0.72;--m:0.42;--t:1.2s;--u:2.2s;--d:-0.5s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.61;--m:0.26;--t:2.0s;--u:3.0s;--d:-0.2s"></i><i class="hc-node" style="--l:0.79;--m:0.52;--t:3.0s;--u:3.0s;--d:-0.8s"></i></div>
+              <div class="hc-rack"><span class="hc-rid">R03</span><i class="hc-node" style="--l:0.70;--m:0.46;--t:3.3s;--u:1.7s;--d:-0.5s"></i><i class="hc-node" style="--l:0.65;--m:0.34;--t:2.5s;--u:1.9s;--d:-0.0s"></i><i class="hc-node" style="--l:0.71;--m:0.39;--t:3.3s;--u:2.6s;--d:-1.5s"></i><i class="hc-node" style="--l:0.84;--m:0.31;--t:3.2s;--u:2.8s;--d:-2.6s"></i><i class="hc-node" style="--l:0.72;--m:0.35;--t:1.3s;--u:2.5s;--d:-0.2s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.62;--m:0.29;--t:1.2s;--u:1.4s;--d:-0.5s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.56;--m:0.37;--t:2.5s;--u:1.7s;--d:-0.8s"></i><i class="hc-node" style="--l:0.71;--m:0.28;--t:3.1s;--u:3.2s;--d:-1.4s"></i></div>
+              <div class="hc-rack"><span class="hc-rid">R04</span><i class="hc-node" style="--l:0.59;--m:0.23;--t:1.9s;--u:1.9s;--d:-2.5s"></i><i class="hc-node" style="--l:0.56;--m:0.38;--t:2.3s;--u:1.7s;--d:-1.6s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.97;--m:0.63;--t:2.7s;--u:1.9s;--d:-1.1s"></i><i class="hc-node" style="--l:0.88;--m:0.47;--t:2.9s;--u:2.0s;--d:-0.7s"></i><i class="hc-node" style="--l:0.97;--m:0.63;--t:3.0s;--u:2.9s;--d:-2.2s"></i><i class="hc-node" style="--l:0.77;--m:0.37;--t:1.2s;--u:1.5s;--d:-0.8s"></i><i class="hc-node" style="--l:0.85;--m:0.58;--t:2.1s;--u:3.1s;--d:-3.0s"></i><i class="hc-node" style="--l:0.71;--m:0.30;--t:1.6s;--u:1.8s;--d:-0.6s"></i><i class="hc-node" style="--l:0.94;--m:0.60;--t:2.2s;--u:2.6s;--d:-2.4s"></i></div>
+              <div class="hc-rack"><span class="hc-rid">R05</span><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.94;--m:0.59;--t:2.8s;--u:2.3s;--d:-0.5s"></i><i class="hc-node" style="--l:0.69;--m:0.44;--t:3.3s;--u:2.1s;--d:-1.2s"></i><i class="hc-node" style="--l:0.86;--m:0.35;--t:1.4s;--u:1.7s;--d:-2.7s"></i><i class="hc-node" style="--l:0.61;--m:0.39;--t:3.4s;--u:2.6s;--d:-1.1s"></i><i class="hc-node" style="--l:0.61;--m:0.22;--t:3.3s;--u:2.6s;--d:-1.6s"></i><i class="hc-node" style="--l:0.74;--m:0.48;--t:3.0s;--u:1.8s;--d:-0.8s"></i><i class="hc-node" style="--l:0.65;--m:0.36;--t:1.7s;--u:2.2s;--d:-0.4s"></i><i class="hc-node" style="--l:0.70;--m:0.36;--t:2.4s;--u:3.0s;--d:-1.3s"></i><i class="hc-node" style="--l:0.77;--m:0.41;--t:2.3s;--u:1.4s;--d:-1.3s"></i></div>
+              <div class="hc-rack"><span class="hc-rid">R06</span><i class="hc-node" style="--l:0.55;--m:0.35;--t:1.5s;--u:2.3s;--d:-2.2s"></i><i class="hc-node" style="--l:0.69;--m:0.37;--t:2.4s;--u:2.8s;--d:-0.3s"></i><i class="hc-node" style="--l:0.66;--m:0.29;--t:2.9s;--u:2.3s;--d:-1.7s"></i><i class="hc-node" style="--l:0.94;--m:0.48;--t:2.5s;--u:2.3s;--d:-1.5s"></i><i class="hc-node" style="--l:0.74;--m:0.40;--t:2.2s;--u:3.1s;--d:-2.1s"></i><i class="hc-node" style="--l:0.96;--m:0.42;--t:2.4s;--u:3.1s;--d:-2.5s"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node z" style="--l:.18"></i><i class="hc-node" style="--l:0.58;--m:0.25;--t:1.3s;--u:2.6s;--d:-2.4s"></i><i class="hc-node" style="--l:0.62;--m:0.37;--t:2.6s;--u:1.7s;--d:-2.6s"></i></div>
+          </div>
+        </div>
+
+        <figcaption class="hc-cap">Both models run on <b>hardware we operate ourselves</b>, so the speed you see and the uptime you get are ours to answer for.</figcaption>
+      </figure>
+
+      <div class="cells hc-row">
+        <div class="hc-stat">
+          <p class="hc-n"><span class="sr">about </span><span class="hc-t" aria-hidden="true">~</span><span data-count="310">310</span><span class="hc-u">tok/s</span></p>
+          <p class="hc-l">DeepSeek V4.1 Flash</p>
+          <p class="p">Median output speed on real coding prompts.</p>
+        </div>
+        <div class="hc-stat">
+          <p class="hc-n"><span class="sr">about </span><span class="hc-t" aria-hidden="true">~</span><span data-count="215">215</span><span class="hc-u">tok/s</span></p>
+          <p class="hc-l">GLM 5.3 Flash</p>
+          <p class="p">Median output speed on the same prompts.</p>
+        </div>
+        <div class="hc-stat">
+          <p class="hc-n"><span class="sr">about </span><span class="hc-t" aria-hidden="true">~</span><span data-count="1">1</span><span class="hc-u">s</span></p>
+          <p class="hc-l">To first token</p>
+          <p class="p">Replies begin about a second after you send, on both models.</p>
+        </div>
+        <div class="hc-stat hc-cta on-brand">
+          <p class="hc-n">$5<span class="hc-u">/ month</span></p>
+          <p class="hc-l">One flat price</p>
+          <p class="p">Both models come with OGX: $2 of tokens every day, $60 a month, and a bill that never moves.</p>
+          <a class="hc-go" href="/ogx/">See the OGX plan <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="sec" id="why" aria-labelledby="why-title">
   <div class="frame">
     <div class="sec-head reveal">
@@ -4310,11 +4808,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <div class="co-price">
             <p class="co-amount"><span class="co-num">$0</span> <span class="co-unit">/forever</span></p>
           </div>
-          <ul class="co-chips">
-            <li class="chip">AGPL-3.0</li>
-            <li class="chip">One Go binary</li>
-            <li class="chip">No account</li>
-          </ul>
           <a class="btn btn-line btn-sm co-cta" href="https://github.com/prasenjeet-symon/ogcode/blob/main/LICENSING.md" target="_blank" rel="noopener">Read the license</a>
         </div>
 
@@ -4325,11 +4818,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <p class="co-amount"><span class="co-num" data-count="70" data-prefix="−" data-suffix="%">−70%</span> <span class="co-unit">tokens</span></p>
             <p class="co-note">vs. full-transcript replay</p>
           </div>
-          <ul class="co-chips">
-            <li class="chip">Anthropic</li>
-            <li class="chip">OpenAI</li>
-            <li class="chip">OpenRouter</li>
-          </ul>
           <a class="btn btn-line btn-sm co-cta" href="https://github.com/prasenjeet-symon/ogcode#remember-the-work" target="_blank" rel="noopener">See the numbers</a>
         </div>
 
@@ -4339,11 +4827,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <div class="co-price">
             <p class="co-amount"><span class="co-num">$0</span> <span class="co-unit">/offline</span></p>
           </div>
-          <ul class="co-chips">
-            <li class="chip">Auto-detected</li>
-            <li class="chip">Runs offline</li>
-            <li class="chip">Prompts stay local</li>
-          </ul>
           <a class="btn btn-line btn-sm co-cta" href="https://github.com/prasenjeet-symon/ogcode#quick-start" target="_blank" rel="noopener">Run it locally</a>
         </div>
 
@@ -4352,20 +4835,12 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <p class="co-tag">for teams</p>
           <div class="co-price">
             <p class="co-amount"><span class="co-num">Self-host</span></p>
-            <p class="co-note">port 9595, behind your auth</p>
+            <p class="co-note">behind your own auth</p>
           </div>
-          <ul class="co-chips">
-            <li class="chip">Reverse proxy</li>
-            <li class="chip">SSH tunnel</li>
-            <li class="chip">VPN</li>
-          </ul>
           <a class="btn btn-line btn-sm co-cta" href="https://github.com/prasenjeet-symon/ogcode#remote-deployment-and-security" target="_blank" rel="noopener">Remote deployment</a>
         </div>
       </div>
     </div>
-
-    <p class="co-foot">Savings measured against full-transcript replay in internal long-session testing — ≈68% at 50 messages, ≈76% at 1,000. Short sessions save less.</p>
-
   </div>
 </section>
 <section class="sec" id="product" aria-labelledby="product-title">
@@ -4711,12 +5186,16 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <div class="ans">It doesn't drop them — it moves them. What matters is remembered and brought back when it's relevant. In practice it forgets <em>less</em> than other agents, which eventually run out of window and start losing the beginning of the conversation.</div>
           </details>
           <details>
+            <summary><span class="fq-sum"><span class="fq-q">Can a small, cheap model really keep up?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
+            <div class="ans">Far better than in an agent that lets the context balloon. Ogcode keeps each request lean: across 449 sessions the median request carried 54K tokens and 99% stayed under 180K. Models, small ones most of all, answer most accurately when the prompt is short and focused. Our own longest session ran 2,589 steps on GLM-5.3 Flash and never carried more than 168K. <a class="link" href="#context">See the chart <span aria-hidden="true">↑</span></a></div>
+          </details>
+          <details>
             <summary><span class="fq-sum"><span class="fq-q">Does it work on Windows?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
             <div class="ans">Yes — <code>irm https://ogcode.xyz/install.ps1 | iex</code> in PowerShell, or run the Docker image. Opening PRs automatically needs the <a class="link" href="https://cli.github.com" target="_blank" rel="noopener">GitHub CLI</a> authenticated.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Can I run it on a server and use it from my laptop?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Yes. It's a normal web server on port 9595 — put it behind nginx or Caddy with a password. Don't expose it to the open internet unprotected, since it can run commands on your machine. Setup notes are in the <a class="link" href="https://github.com/prasenjeet-symon/ogcode#remote-deployment-and-security" target="_blank" rel="noopener">remote deployment guide</a>.</div>
+            <div class="ans">Yes. It's a normal web server — put it behind nginx or Caddy with a password. Don't expose it to the open internet unprotected, since it can run commands on your machine. Setup notes are in the <a class="link" href="https://github.com/prasenjeet-symon/ogcode#remote-deployment-and-security" target="_blank" rel="noopener">remote deployment guide</a>.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">What does it cost?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
@@ -4728,7 +5207,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">How is this different from just a bigger context window?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">A bigger window still re-sends everything, every turn — you pay for it either way. Ogcode brings back only what's relevant, so the bill stays flat no matter how long you work.</div>
+            <div class="ans">A bigger window still re-sends everything, every turn — you pay for it either way, and models get less accurate as the prompt grows. Ogcode brings back only what's relevant, so requests stay well under 200K and the bill stays flat no matter how long you work.</div>
           </details>
         </div>
 
@@ -4744,7 +5223,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <ul class="fq-stats" aria-label="At a glance">
               <li>AGPL-3.0</li>
               <li>one binary</li>
-              <li>port 9595</li>
             </ul>
           </div>
         </div>
@@ -5216,13 +5694,13 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       });
     }
 
-    /* ── Off-screen loops hold still: marquees, CTA tiles, #cost ping,
-       #review caret (the other sections park their own) ──────────── */
+    /* ── Off-screen loops hold still: marquees, CTA tiles, #cluster racks,
+       #cost ping, #review caret (the other sections park their own) ──────────── */
     if (!reduced && 'IntersectionObserver' in window) {
       var parkIO = new IntersectionObserver(function (entries) {
         entries.forEach(function (e) { e.target.classList.toggle('og-idle', !e.isIntersecting); });
       }, { rootMargin: '120px 0px' });
-      document.querySelectorAll('.marquee, .cta, #cost .co-box, #review .rv-win').forEach(function (el) { parkIO.observe(el); });
+      document.querySelectorAll('.marquee, .cta, #cluster .hc-box, #cost .co-box, #review .rv-win').forEach(function (el) { parkIO.observe(el); });
     }
 
     /* ── Live version + stars, with graceful failure ──────── */
@@ -5927,5 +6405,62 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 })();
 </script>
 
+<script>
+(function () {
+  'use strict';
+  // #context — the readout for the session chart. The pointer, or the arrow
+  // keys once the plot has focus, picks a stretch of the session and the tip
+  // reads its largest request. The caption and the three figures tell the
+  // same story without it, so a failure here costs nothing.
+  try {
+    var plot = document.querySelector('#context .cx-plot');
+    if (!plot) return;
+    var pts = (plot.getAttribute('data-pts') || '').split(',').map(Number);
+    var steps = parseInt(plot.getAttribute('data-steps'), 10) || 0;
+    if (pts.length < 2 || !steps) return;
+    var TOP = 250;   // K, the plot's ceiling
+    var cross = plot.querySelector('.cx-cross');
+    var dot = plot.querySelector('.cx-dot');
+    var tip = plot.querySelector('.cx-tip');
+    var peak = pts.indexOf(Math.max.apply(null, pts));
+    var idx = -1;
+
+    function comma(n) { return n.toLocaleString('en-US'); }
+    function show(i) {
+      idx = Math.max(0, Math.min(pts.length - 1, i));
+      var x = idx / (pts.length - 1) * 100;
+      cross.style.left = x + '%';
+      dot.style.left = x + '%';
+      dot.style.top = (1 - pts[idx] / TOP) * 100 + '%';
+      tip.style.left = Math.min(86, Math.max(14, x)) + '%';
+      var lo = Math.floor(idx * steps / pts.length) + 1;
+      var hi = Math.floor((idx + 1) * steps / pts.length);
+      var b = document.createElement('b');
+      b.textContent = Math.round(pts[idx]) + 'K';
+      tip.textContent = '';
+      tip.appendChild(b);
+      tip.appendChild(document.createTextNode(' max · steps ' + comma(lo) + '–' + comma(hi)));
+      plot.classList.add('cx-on');
+    }
+    function hide() { plot.classList.remove('cx-on'); }
+
+    plot.addEventListener('pointermove', function (e) {
+      var r = plot.getBoundingClientRect();
+      show(Math.round((e.clientX - r.left) / r.width * (pts.length - 1)));
+    });
+    plot.addEventListener('pointerleave', hide);
+    plot.addEventListener('focus', function () { show(idx < 0 ? peak : idx); });
+    plot.addEventListener('blur', hide);
+    plot.addEventListener('keydown', function (e) {
+      var jump = e.shiftKey ? 10 : 1;
+      var next = e.key === 'ArrowRight' ? idx + jump : e.key === 'ArrowLeft' ? idx - jump :
+        e.key === 'Home' ? 0 : e.key === 'End' ? pts.length - 1 : null;
+      if (next === null) return;
+      e.preventDefault();
+      show(next);
+    });
+  } catch (err) { /* decorative only — never break the page */ }
+})();
+</script>
 </body>
 </html>

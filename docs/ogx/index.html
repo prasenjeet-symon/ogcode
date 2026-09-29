@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OGX — code all day with ogcode for ₹499 a month</title>
-  <meta name="description" content="Code all day in ogcode for one flat ₹499 a month: two fast models, 500 requests a day, room to borrow on heavy days and no overage.">
+  <title>OGX — code all day with ogcode for $5 a month</title>
+  <meta name="description" content="Code all day in ogcode for one flat $5 a month: two fast models and $2 of tokens a day at list prices, room to borrow on heavy days and no overage.">
   <link rel="canonical" href="https://ogcode.xyz/ogx/">
   <meta name="theme-color" content="#151414">
   <meta name="color-scheme" content="dark">
@@ -13,15 +13,15 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Ogcode">
   <meta property="og:url" content="https://ogcode.xyz/ogx/">
-  <meta property="og:title" content="OGX — code all day with ogcode for ₹499 a month">
-  <meta property="og:description" content="The plan made for ogcode: two fast models, one flat ₹499 a month and 500 requests a day, with room to borrow on heavy days. No overage, ever.">
+  <meta property="og:title" content="OGX — code all day with ogcode for $5 a month">
+  <meta property="og:description" content="The plan made for ogcode: two fast models and $60 of tokens a month at list prices, for one flat $5. Room to borrow on heavy days. No overage, ever.">
   <meta property="og:image" content="https://ogcode.xyz/media/ogx-og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="OGX, the plan built for ogcode: code all day for ₹499 a month.">
+  <meta property="og:image:alt" content="OGX, the plan built for ogcode: code all day for $5 a month, with $2 of tokens a day.">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="OGX — code all day with ogcode for ₹499 a month">
-  <meta name="twitter:description" content="Two fast models, one flat ₹499 a month and a budget that refills every day. Made for ogcode.">
+  <meta name="twitter:title" content="OGX — code all day with ogcode for $5 a month">
+  <meta name="twitter:description" content="Two fast models and $2 of tokens a day, for one flat $5 a month. Made for ogcode.">
   <meta name="twitter:image" content="https://ogcode.xyz/media/ogx-og.png">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23FF5E1F'/><path d='M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33' transform='translate(9 9) scale(0.72)' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round'/></svg>">
@@ -715,10 +715,6 @@
        #plan, #models and #made sections. #why and #faq further down
        are the homepage's patterns with OGX's copy. */
 
-    /* The self-hosted Inter and JetBrains Mono carry no rupee sign; the
-       platform UI face draws a clean one instead of a random fallback. */
-    .inr { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif; }
-
     /* the current page reads the same as on the blog (blog.css) */
     .nav-menu a[aria-current] { background: rgba(255,255,255,.07); }
     .sheet-link[aria-current] svg { color: var(--brand-ink); }
@@ -753,8 +749,6 @@
       font: 600 24px/1 var(--font); letter-spacing: -0.025em;
       color: #fff; white-space: nowrap; font-variant-numeric: tabular-nums;
     }
-    .hero-stats b .inr { font-weight: 600; letter-spacing: 0; }
-    .hero-stats b .hs-pre { font-size: 13px; font-weight: 500; letter-spacing: 0; vertical-align: .28em; }
     .hero-stats span.hs-l { font-size: 13px; line-height: 1.2; color: #fff; white-space: nowrap; }
     /* where the speed chips come from, in the section footnotes' mono */
     .hero-meth {
@@ -1351,7 +1345,7 @@
 #plan .fp-bar {
   display: block;
   width: 46%;
-  height: 40%;          /* ₹499 sits on the 60% line */
+  height: 40%;          /* $5 sits on the 60% line */
   border-radius: 6px 6px 0 0;
   background: linear-gradient(180deg, var(--brand-ink), var(--brand));
   box-shadow: 0 0 26px rgba(255,112,56, .35);
@@ -1366,7 +1360,6 @@
   color: var(--bright);
   white-space: nowrap;
 }
-#plan .fp-val .inr { font-weight: 600; }
 #plan .fp-flat {
   position: absolute;
   left: 0; right: 0;
@@ -1385,8 +1378,8 @@
 }
 #plan .fp-axis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); text-align: center; }
 
-/* 2 · all-day budget: one day in IST, 09:00 → midnight of work, the night
-   off, and the 05:30 IST (00:00 UTC) refill before the next morning */
+/* 2 · all-day budget: one day in UTC, 09:00 → midnight of work, then the
+   00:00 UTC refill and a full budget waiting through the night */
 #plan .pl-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 #plan .pl-big {
   font: 500 clamp(30px, 3vw, 38px)/1 var(--font);
@@ -1411,15 +1404,6 @@
   filter: drop-shadow(0 0 5px rgba(255,112,56, .5));
 }
 #plan .db-night { fill: rgba(240, 227, 222, .035); }
-#plan .db-idle {
-  fill: none;
-  stroke: var(--brand-ink);
-  stroke-width: 2;
-  stroke-dasharray: 2 5;
-  stroke-linecap: round;
-  opacity: .55;
-  vector-effect: non-scaling-stroke;
-}
 #plan .db-night-lab {
   position: absolute;
   left: calc(485 / 600 * 100%);
@@ -1438,7 +1422,7 @@
 }
 #plan .db-tag {
   position: absolute;
-  right: calc(100% - 93.33% + 10px);
+  right: calc(100% - 68.33% + 10px);
   top: 0;
   translate: 0 -50%;
   padding: 3px 7px;
@@ -1451,7 +1435,7 @@
 #plan .db-axis { position: relative; height: 16px; margin-top: 10px; font: 400 11px/1.2 var(--mono); color: var(--co-faint); }
 #plan .db-axis > span { position: absolute; top: 0; translate: -50% 0; white-space: nowrap; }
 #plan .db-axis > span:first-child { translate: 0 0; }
-#plan .db-axis > span:last-child { left: auto !important; right: 0; translate: 0 0; color: var(--brand-ink); }
+#plan .db-axis > span:last-child { color: var(--brand-ink); }
 
 /* the plan card + the receipt */
 #plan .pl-plans { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
@@ -1489,7 +1473,6 @@
   color: #fff;
   font-variant-numeric: tabular-nums;
 }
-#plan .co-num .inr { font-weight: 500; letter-spacing: 0; margin-right: -.05em; }
 #plan .co-unit { font-size: 16px; color: #fff; }
 #plan .co-note { margin: 12px 0 0; font-size: 15px; line-height: 1.45; color: #fff; }
 /* capped so the six chips split 3 + 3 on a wide card */
@@ -1545,7 +1528,6 @@
 #plan .rc-total::after { display: none; }
 #plan .rc-total dt { flex: 1; color: var(--bright); font-weight: 500; }
 #plan .rc-total dd { font: 600 22px/1 var(--font); letter-spacing: -0.02em; color: var(--brand-ink); }
-#plan .rc-total dd .inr { font-weight: 600; }
 
 /* motion — only once the box is revealed (.in, from the page script) and
    only on the shown panel (.co-play). Late steps use plateaus, never
@@ -1557,7 +1539,6 @@
 #plan .co-box.in .co-play .fp-dot { animation: pl-fade-later 2.6s ease forwards; }
 #plan .co-box.in .co-play .db-line { animation: pl-draw 1.8s var(--ease) forwards; }
 #plan .co-box.in .co-play .db-area { animation: pl-fade-late 1.8s ease forwards; }
-#plan .co-box.in .co-play .db-idle,
 #plan .co-box.in .co-play .db-night-lab { animation: pl-fade-late 2s ease forwards; }
 #plan .co-box.in .co-play .db-refill,
 #plan .co-box.in .co-play .db-tag { animation: pl-fade-later 2.4s ease forwards; }
@@ -1593,7 +1574,7 @@
   #plan .fp-val { font-size: 12.5px; }
   #plan .fp-lab { font-size: 10.5px; }
   #plan .db-axis > span:nth-child(2), #plan .db-axis > span:nth-child(4), #plan .db-axis > span:nth-child(5) { display: none; }
-  #plan .db-axis .db-tz { display: none; }   /* the header tag already says IST */
+  #plan .db-axis .db-tz { display: none; }   /* the header tag already says UTC */
 }
 @container (max-width: 300px) {
   #plan .co-vh { flex-wrap: wrap; justify-content: space-between; row-gap: 8px; }
@@ -1615,13 +1596,13 @@ html:not(.js) #plan .co-panel.co-off { visibility: visible; opacity: 1; transfor
   #plan .co-panel.co-off,
   #plan .co-more span { transition: none; }
   #plan .fp-bar, #plan .fp-val, #plan .fp-line, #plan .fp-lab, #plan .fp-dot,
-  #plan .db-line, #plan .db-area, #plan .db-refill, #plan .db-tag, #plan .db-idle, #plan .db-night-lab { animation: none !important; }
+  #plan .db-line, #plan .db-area, #plan .db-refill, #plan .db-tag, #plan .db-night-lab { animation: none !important; }
 }
 
 /* ── #heavy — "Heavy day? Keep going." ──────────────────────────────
    A two-cell bento. Left, the dark "borrow ahead" card with a live demo:
    pick 1–3 days and that many days lift off the end of the cycle, land
-   on today, and today's budget counts up to 500 × (1 + days). Right, the
+   on today, and today's budget counts up to a day's $2 × (1 + days). Right, the
    orange "surprise boosts" card: one calm morning notification. The
    markup is the 2-day state, so no JS or reduced motion still shows a
    finished example; the page script only animates between states. */
@@ -1703,7 +1684,7 @@ html:not(.js) #plan .co-panel.co-off { visibility: visible; opacity: 1; transfor
   transform: translateX(calc((var(--sel, 2) - 1) * 100%));
   transition: transform .42s var(--ease), opacity .35s var(--ease);
 }
-/* the intro's plain-500 frame: no segment looks picked yet (aria-checked
+/* the intro's plain-day frame: no segment looks picked yet (aria-checked
    still names the 2-day example, which the sr sentence describes) */
 #heavy .hv-intro .hv-thumb { opacity: 0; }
 #heavy .hv-intro .hv-seg .pill-tab[aria-checked="true"] { color: var(--muted); }
@@ -3045,9 +3026,9 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
             </span>
           </a>
 
-          <h1 class="hero-title rise r2" id="heroTitle">Code all day for <span class="nw"><span class="inr">₹</span>499</span> a month.</h1>
+          <h1 class="hero-title rise r2" id="heroTitle">Code all day for <span class="nw">$5</span> a month.</h1>
 
-          <p class="hero-sub rise r3">OGX is the plan made for ogcode. Two fast models, one flat price and a full budget every day, so you can work from morning to midnight <strong>without watching a meter or waiting for a bill.</strong></p>
+          <p class="hero-sub rise r3">OGX is the plan made for ogcode. Two fast models and $2 of tokens every day, refilled each morning, for one flat price. Work from morning to midnight <strong>without watching a meter or waiting for a bill.</strong></p>
 
           <div class="hero-actions rise r4">
             <a class="btn btn-light btn-lg" href="https://oglab.ogcode.xyz" data-ogx="get" target="_blank" rel="noopener">
@@ -3058,12 +3039,13 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           </div>
 
           <ul class="hero-stats rise r5" role="list" aria-label="OGX at a glance">
-            <li><b><span class="inr">₹</span>499</b><span class="hs-l">per month</span></li>
-            <li><b>500</b><span class="hs-l">requests a day</span></li>
+            <li><b>$5</b><span class="hs-l">per month</span></li>
+            <li><b>$2</b><span class="hs-l">of tokens a day</span></li>
             <li><b><span class="sr">about </span><span aria-hidden="true">~</span>300</b><span class="hs-l">tokens / sec</span></li>
             <li><b><span class="sr">about </span><span aria-hidden="true">~</span>1&nbsp;s</b><span class="hs-l">to first token</span></li>
           </ul>
 
+          <p class="hero-meth rise r5">$60 of tokens every 30-day cycle, at list prices</p>
           <p class="hero-meth rise r5">Medians, Sep 2026: DeepSeek ~310&nbsp;tok/s, GLM ~215 · <a href="#speed-method">how we measured <span aria-hidden="true">↓</span></a></p>
 
           <p class="hero-note rise r6">
@@ -3246,11 +3228,11 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="plan-title"><span class="pl-h-a">One price.</span> <span class="hl">No surprises.</span></h2>
-      <p class="sub">(<span class="inr">₹</span>499 is the whole bill. It cannot be anything else.)</p>
+      <p class="sub">($5 is the whole bill. It cannot be anything else.)</p>
     </div>
 
     <div class="co-switch reveal d1">
-      <div class="pill-tabs co-tabs" role="tablist" aria-label="What ₹499 a month gets you">
+      <div class="pill-tabs co-tabs" role="tablist" aria-label="What $5 a month gets you">
         <button class="pill-tab" type="button" role="tab" id="pl-tab-price" aria-selected="true" aria-controls="pl-panel-price" tabindex="0">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>
           Flat price
@@ -3271,10 +3253,10 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
         <div class="co-panel co-play" id="pl-panel-price" role="tabpanel" aria-labelledby="pl-tab-price" tabindex="0">
           <div class="co-copy">
             <h3 class="h3">The bill never moves.</h3>
-            <p class="p"><strong><span class="inr">₹</span>499 a month, every month.</strong> There is no overage: when a day's budget is spent, requests simply pause until the next daily refill (or <a class="link" href="#heavy">borrow ahead <span aria-hidden="true">↓</span></a>). Nothing is billed extra, so you are never charged more than <span class="inr">₹</span>499.</p>
+            <p class="p"><strong>$5 a month, every month.</strong> There is no overage: when a day's tokens are spent, OGX simply pauses until the next daily refill (or <a class="link" href="#heavy">borrow ahead <span aria-hidden="true">↓</span></a>). Nothing is billed extra, so you are never charged more than $5.</p>
             <p class="p">No top-ups, no billing alerts, no <span class="nw">end-of-month</span> surprises.</p>
           </div>
-          <div class="co-viz" role="img" aria-label="Illustration: three months of OGX bills, July, August and September, each exactly ₹499, drawn as three equal bars. Behind them, an illustrative pay-per-token bill swings up and down from week to week and ends on a spike.">
+          <div class="co-viz" role="img" aria-label="Illustration: three months of OGX bills, July, August and September, each exactly $5, drawn as three equal bars. Behind them, an illustrative pay-per-token bill swings up and down from week to week and ends on a spike.">
             <i class="co-tk tl"></i><i class="co-tk tr"></i><i class="co-tk bl"></i><i class="co-tk br"></i>
             <div class="co-vh"><span>your bill · 3 months</span><i class="co-vh-rule"></i><span class="co-vh-tag">OGX · flat</span></div>
             <div class="fp-chart">
@@ -3286,9 +3268,9 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
               </svg>
               <i class="fp-flat" aria-hidden="true"></i>
               <div class="fp-bars" aria-hidden="true">
-                <div class="fp-col"><i class="fp-bar" style="--k:0"></i><span class="fp-val" style="--k:0"><span class="inr">₹</span>499</span></div>
-                <div class="fp-col"><i class="fp-bar" style="--k:1"></i><span class="fp-val" style="--k:1"><span class="inr">₹</span>499</span></div>
-                <div class="fp-col"><i class="fp-bar" style="--k:2"></i><span class="fp-val" style="--k:2"><span class="inr">₹</span>499</span></div>
+                <div class="fp-col"><i class="fp-bar" style="--k:0"></i><span class="fp-val" style="--k:0">$5</span></div>
+                <div class="fp-col"><i class="fp-bar" style="--k:1"></i><span class="fp-val" style="--k:1">$5</span></div>
+                <div class="fp-col"><i class="fp-bar" style="--k:2"></i><span class="fp-val" style="--k:2">$5</span></div>
               </div>
               <span class="fp-lab" aria-hidden="true">pay per token · illustrative</span>
             </div>
@@ -3300,14 +3282,14 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
         <div class="co-panel co-off" id="pl-panel-day" role="tabpanel" aria-labelledby="pl-tab-day" tabindex="0">
           <div class="co-copy">
             <h3 class="h3">Sized for a full day of work.</h3>
-            <p class="p"><strong>500 requests a day</strong>, enough to start at 9 and still be shipping at midnight.</p>
-            <p class="p">The budget refills at 05:30&nbsp;IST (00:00&nbsp;UTC), so every morning starts with a full&nbsp;500.</p>
+            <p class="p"><strong>$2 of tokens a day</strong> at list prices, enough to start at 9 and still be shipping at midnight.</p>
+            <p class="p">The budget refills at 00:00&nbsp;UTC, so each day starts with a full day of&nbsp;tokens.</p>
             <a class="link co-more co-more-down" href="#heavy">Heavy day? See how to keep going <span aria-hidden="true">↓</span></a>
           </div>
-          <div class="co-viz" role="img" aria-label="Illustration of one working day in India time: from 09:00 to midnight the day's 500 requests are spent steadily, with pauses for lunch and dinner. Nothing is spent overnight, and at 05:30 IST, which is 00:00 UTC, the budget refills to 500 before the next morning.">
+          <div class="co-viz" role="img" aria-label="Illustration of one working day in UTC: from 09:00 to midnight the day's budget, $2 of tokens, is spent steadily, with pauses for lunch and dinner. At 00:00 UTC it refills to a full day, which waits untouched through the night for the next morning.">
             <i class="co-tk tl"></i><i class="co-tk tr"></i><i class="co-tk bl"></i><i class="co-tk br"></i>
-            <div class="co-vh"><span>one working day</span><i class="co-vh-rule"></i><span class="co-vh-tag">refills 05:30 IST</span></div>
-            <div class="pl-sum"><span class="pl-big">500</span><span class="pl-of">requests to spend, every day</span></div>
+            <div class="co-vh"><span>one working day</span><i class="co-vh-rule"></i><span class="co-vh-tag">refills 00:00 UTC</span></div>
+            <div class="pl-sum"><span class="pl-big">$2</span><span class="pl-of">of tokens to spend, every day</span></div>
             <div class="db-chart">
               <svg class="db-svg" viewBox="0 0 600 190" preserveAspectRatio="none" focusable="false" aria-hidden="true">
                 <defs>
@@ -3319,16 +3301,15 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
                 <rect class="db-night" x="410" y="0" width="150" height="176"/>
                 <path class="db-grid" d="M0 16H600M0 96H600"/>
                 <path class="db-base" d="M0 176.5H600"/>
-                <path class="db-area" d="M0 16L41 38L96 70L123 70L164 96L219 125L260 131L287 131L342 147L396 163L560 163L560 176L0 176Z" fill="url(#db-fill)"/>
+                <path class="db-area" d="M0 16L41 38L96 70L123 70L164 96L219 125L260 131L287 131L342 147L396 163L410 163L410 176L0 176Z" fill="url(#db-fill)"/>
                 <path class="db-line" pathLength="1" d="M0 16L41 38L96 70L123 70L164 96L219 125L260 131L287 131L342 147L396 163L410 163"/>
-                <path class="db-idle" d="M410 163H560"/>
-                <path class="db-refill" d="M560 163V16H600"/>
+                <path class="db-refill" d="M410 163V16H600"/>
               </svg>
               <span class="db-night-lab" aria-hidden="true">night</span>
-              <span class="db-tag" aria-hidden="true">refill · 500</span>
+              <span class="db-tag" aria-hidden="true">refill · $2</span>
             </div>
-            <div class="db-axis" aria-hidden="true"><span style="left:0">09:00</span><span style="left:13.67%">12:00</span><span style="left:27.33%">15:00</span><span style="left:41%">18:00</span><span style="left:54.67%">21:00</span><span style="left:68.33%">00:00</span><span>05:30<span class="db-tz"> IST</span></span></div>
-            <p class="pl-cap">An illustrative day. 05:30&nbsp;IST is 00:00&nbsp;UTC.</p>
+            <div class="db-axis" aria-hidden="true"><span style="left:0">09:00</span><span style="left:13.67%">12:00</span><span style="left:27.33%">15:00</span><span style="left:41%">18:00</span><span style="left:54.67%">21:00</span><span style="left:68.33%">00:00<span class="db-tz"> UTC</span></span></div>
+            <p class="pl-cap">An illustrative day, in UTC.</p>
           </div>
         </div>
       </div>
@@ -3340,17 +3321,17 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
               <h3 class="co-name">OGX</h3>
               <p class="co-tag">the plan made for ogcode</p>
             </div>
-            <span class="pl-badge">by OG Lab</span>
+            <span class="pl-badge">by OGLAB</span>
           </div>
           <div class="co-price">
-            <p class="co-amount"><span class="co-num"><span class="inr">₹</span>499</span> <span class="co-unit">/month</span></p>
+            <p class="co-amount"><span class="co-num">$5</span> <span class="co-unit">/month</span></p>
             <p class="co-note">One flat price that renews each cycle.</p>
           </div>
           <ul class="co-chips" role="list">
-            <li class="chip">500 requests a day</li>
-            <li class="chip">15,000 per cycle</li>
-            <li class="chip"><span>≈ <span class="inr">₹</span>16 a day</span></li>
-            <li class="chip">≈ 3 paise a request</li>
+            <li class="chip">$2 of tokens a day</li>
+            <li class="chip">$60 of tokens a cycle</li>
+            <li class="chip">≈ 17¢ a day</li>
+            <li class="chip">Both models, one budget</li>
             <li class="chip">No overage, ever</li>
             <li class="chip">Cancel anytime</li>
           </ul>
@@ -3365,23 +3346,21 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
 
         <div class="cell pl-rc">
           <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg></span>
-          <h3 class="h3" style="margin-top:18px">What <span class="inr">₹</span>499 buys</h3>
+          <h3 class="h3" style="margin-top:18px">What $5 buys</h3>
           <div class="rc-paper">
             <p class="rc-head"><span>OGX · 30-day cycle</span><span>receipt</span></p>
             <dl class="rc-list">
-              <div class="rc-row"><dt>Requests, every day</dt><dd>500</dd></div>
-              <div class="rc-row"><dt>Requests, every cycle</dt><dd>15,000</dd></div>
-              <div class="rc-row"><dt>Cost per day</dt><dd>≈ <span class="inr">₹</span>16</dd></div>
-              <div class="rc-row"><dt>Cost per request</dt><dd>≈ 3 paise</dd></div>
-              <div class="rc-row"><dt>Overage</dt><dd><span class="inr">₹</span>0</dd></div>
-              <div class="rc-row rc-total"><dt>Your bill</dt><dd><span class="inr">₹</span>499</dd></div>
+              <div class="rc-row"><dt>Tokens, every day</dt><dd>$2</dd></div>
+              <div class="rc-row"><dt>Tokens, every cycle</dt><dd>$60</dd></div>
+              <div class="rc-row"><dt>Cost per day</dt><dd>≈ 17¢</dd></div>
+              <div class="rc-row"><dt>Per $1 of tokens</dt><dd>≈ 8¢</dd></div>
+              <div class="rc-row"><dt>Overage</dt><dd>$0</dd></div>
+              <div class="rc-row rc-total"><dt>Your bill</dt><dd>$5</dd></div>
             </dl>
           </div>
         </div>
       </div>
     </div>
-
-    <p class="foot">Diagrams are illustrative. The plan today: <span class="inr">₹</span>499&nbsp;a&nbsp;month, 500 requests a day, 15,000 a cycle, refilled daily at 00:00 UTC (05:30 IST).</p>
   </div>
 </section>
 
@@ -3401,7 +3380,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
         <article class="hv-borrow" aria-labelledby="hv-borrow-h">
           <p class="hv-eye"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/><path d="M15.5 15.5h-7m0 0 2.5-2.5m-2.5 2.5 2.5 2.5"/></svg>Borrow ahead</p>
           <h3 class="hv-h" id="hv-borrow-h">Need more today? Borrow up to three days.</h3>
-          <p class="hv-lead">Deadline tonight and today’s budget is gone? Pull days from the end of your cycle and turn today’s 500 into as many as <strong>2,000&nbsp;requests</strong>, one tap from your dashboard. No extra charge: they’re your own days, used early.</p>
+          <p class="hv-lead">Deadline tonight and today’s budget is gone? Pull days from the end of your cycle and turn today’s $2 of tokens into as much as <strong>$8</strong>, one tap from your dashboard. No extra charge: they’re your own days, used early.</p>
 
           <div class="hv-demo" data-k="2" style="--k:2;--sel:2">
             <i class="hv-tk tl"></i><i class="hv-tk tr"></i><i class="hv-tk bl"></i><i class="hv-tk br"></i>
@@ -3420,12 +3399,12 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
             <div class="hv-read" aria-hidden="true">
               <div>
                 <p class="hv-lab">Today’s budget</p>
-                <p class="hv-big"><span class="hv-n" data-hv="n">1,500</span><span class="hv-u">requests</span></p>
+                <p class="hv-big"><span class="hv-n" data-hv="n">$6.00</span><span class="hv-u">of tokens</span></p>
               </div>
               <dl class="hv-sum">
-                <div><dt>today’s own</dt><dd>500</dd></div>
-                <div class="hv-add"><dt>borrowed · <span data-hv="d">2 days</span></dt><dd data-hv="b">+1,000</dd></div>
-                <div class="hv-free"><dt>extra charge</dt><dd><span class="inr">₹</span>0</dd></div>
+                <div><dt>today’s own</dt><dd>$2.00</dd></div>
+                <div class="hv-add"><dt>borrowed · <span data-hv="d">2 days</span></dt><dd data-hv="b">+$4.00</dd></div>
+                <div class="hv-free"><dt>extra charge</dt><dd>$0.00</dd></div>
               </dl>
             </div>
 
@@ -3441,7 +3420,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
             </div>
 
             <p class="hv-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5h.01"/></svg>A cycle lends three days in all.</p>
-            <p class="sr" aria-live="polite" data-hv="sr">Borrowing 2 days: today’s budget is 1,500 requests, 500 of today’s own plus 1,000 borrowed, at no extra charge.</p>
+            <p class="sr" aria-live="polite" data-hv="sr">Borrowing 2 days: today’s budget is up to $6.00 of tokens, $2.00 of today’s own plus $4.00 borrowed, at no extra charge.</p>
           </div>
         </article>
 
@@ -3453,7 +3432,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
             <p class="hv-lead">Use OGX heavily and you may wake up to extra budget for the day, on the house. We’ll email you when it happens.</p>
           </div>
 
-          <div class="hv-stage" role="img" aria-label="Illustration: an email notification from OG Lab at 05:30 IST that reads: Surprise! Extra budget added to today.">
+          <div class="hv-stage" role="img" aria-label="Illustration: an email notification from OGLAB at 00:00 UTC that reads: Surprise! Extra budget added to today.">
             <i class="hv-ring r1" aria-hidden="true"></i><i class="hv-ring r2" aria-hidden="true"></i><i class="hv-ring r3" aria-hidden="true"></i>
             <i class="hv-ping" aria-hidden="true"></i>
             <div class="hv-pile" aria-hidden="true">
@@ -3462,7 +3441,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
                 <span class="hv-gift"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg></span>
                 <span>
                   <span class="hv-tt">Surprise! Extra budget added to&nbsp;today</span>
-                  <span class="hv-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>05:30 IST · from OG Lab</span>
+                  <span class="hv-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>00:00 UTC · from OGLAB</span>
                 </span>
               </div>
               <span class="hv-spark s1"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 0c.6 6.6 5.4 11.4 12 12-6.6.6-11.4 5.4-12 12-.6-6.6-5.4-11.4-12-12C6.6 11.4 11.4 6.6 12 0z" fill="currentColor"/></svg></span>
@@ -3479,7 +3458,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
       </div>
     </div>
 
-    <p class="foot">Illustrative. Borrowing and surprise boosts never change your <span class="inr">₹</span>499 bill.</p>
+    <p class="foot">Illustrative. Borrowing and surprise boosts never change your $5 bill.</p>
   </div>
 </section>
 
@@ -3488,7 +3467,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="models-title">Two fast models. <span class="hl">One budget.</span></h2>
-      <p class="sub">Mix them freely all day. Both draw on the same 500 requests.</p>
+      <p class="sub">Mix them freely all day. Both draw on the same daily budget.</p>
     </div>
 
     <div class="box ml-box reveal d1">
@@ -3522,8 +3501,8 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           </div>
           <div class="ml-cost">
             <dl class="ml-cost-in">
-              <div class="ml-cc"><dt>Per call</dt><dd><span class="ml-pips" aria-hidden="true"><i></i></span><b>1</b> request</dd></div>
-              <div class="ml-cc"><dt>Calls a day</dt><dd>up to <b>500</b></dd></div>
+              <div class="ml-cc"><dt>Typical call</dt><dd>≈&nbsp;<b>$0.0027</b> of tokens</dd></div>
+              <div class="ml-cc"><dt>Daily budget</dt><dd><b>$2</b> of tokens, shared</dd></div>
             </dl>
           </div>
         </article>
@@ -3555,8 +3534,8 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           </div>
           <div class="ml-cost">
             <dl class="ml-cost-in">
-              <div class="ml-cc"><dt>Per call</dt><dd><span class="ml-pips" aria-hidden="true"><i></i><i></i><i class="h"></i></span><b>2.5</b> requests</dd></div>
-              <div class="ml-cc"><dt>Calls a day</dt><dd>up to <b>200</b></dd></div>
+              <div class="ml-cc"><dt>Typical call</dt><dd>≈&nbsp;<b>$0.0091</b> of tokens</dd></div>
+              <div class="ml-cc"><dt>Daily budget</dt><dd><b>$2</b> of tokens, shared</dd></div>
             </dl>
           </div>
         </article>
@@ -3566,16 +3545,16 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
       <div class="ml-mix">
         <div>
           <h3 class="h3">Mix freely.</h3>
-          <p class="p">Switch models whenever you like. For example, 300 DeepSeek calls and 80 GLM calls add up to exactly one day's 500 requests.</p>
+          <p class="p">Switch models whenever you like. Spend $1.20 of the day on DeepSeek and $0.80 on GLM, for example: both come out of the same $2.</p>
         </div>
-        <div role="img" aria-label="Example day: 300 DeepSeek calls at 1 request each and 80 GLM calls at 2.5 requests each fill the 500-request budget, 300 and 200 requests.">
-          <div class="mx-bar" aria-hidden="true"><i class="mx-ds" style="--w:60%">300 × 1</i><i class="mx-glm" style="--w:40%">80 × 2.5</i></div>
-          <div class="mx-axis" aria-hidden="true"><span>DeepSeek · <b>300</b></span><span>GLM · <b>200</b></span><span>= <b>500</b></span></div>
+        <div role="img" aria-label="Example day: 60% of the budget on DeepSeek, $1.20 of tokens, and 40% on GLM, $0.80, together the day’s $2.">
+          <div class="mx-bar" aria-hidden="true"><i class="mx-ds" style="--w:60%">60% · $1.20</i><i class="mx-glm" style="--w:40%">40% · $0.80</i></div>
+          <div class="mx-axis" aria-hidden="true"><span>DeepSeek · <b>$1.20</b></span><span>GLM · <b>$0.80</b></span><span>= <b>$2</b></span></div>
         </div>
       </div>
     </div>
 
-    <p class="foot">Speeds are medians of 12 streamed coding prompts per model, measured Sep 2026 against the plan's model host. First token counts the first streamed token, reasoning included; your own network adds a round trip.</p>
+    <p class="foot">Speeds are medians of 12 streamed coding prompts per model, measured Sep 2026 against the plan's model host. First token counts the first streamed token, reasoning included; your own network adds a round trip. Token values are list prices on ogcode’s own traffic.</p>
   </div>
 </section>
 
@@ -3583,7 +3562,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
 <section class="sec" id="why" aria-labelledby="why-title">
   <div class="frame">
     <div class="sec-head reveal">
-      <h2 class="h2" id="why-title">The only bill you’ll see is <span class="nw"><span class="inr">₹</span>499.</span></h2>
+      <h2 class="h2" id="why-title">The only bill you’ll see is <span class="nw">$5.</span></h2>
       <p class="sub">Paying per token means watching a meter while you work. With OGX the price is fixed, so there is nothing to watch but your code.</p>
     </div>
 
@@ -3633,7 +3612,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
               <span class="wy-card wy-ghost wy-ghost-1"></span>
               <span class="wy-card wy-front">
                 <svg class="wy-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
-                <span class="wy-t">Invoice: <span class="wy-num"><span class="inr">₹</span>3,840</span> this month</span>
+                <span class="wy-t">Invoice: <span class="wy-num">$46.20</span> this month</span>
               </span>
             </div>
           </div>
@@ -3643,16 +3622,16 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
         <div class="wy-cell wy-calm on-brand">
           <span class="wy-glow" aria-hidden="true"></span>
           <h3 class="wy-title">One plan<br> with OGX</h3>
-          <p class="sr">With OGX the bill is ₹499 every month, the budget refills to 500 requests every day, heavy days can borrow up to three days, heavy users may wake up to a surprise boost, and a late night of shipping leaves the bill unchanged.</p>
+          <p class="sr">With OGX the bill is $5 every month, the budget refills to a full day of tokens, $2 worth, every day, heavy days can borrow up to three days, heavy users may wake up to a surprise boost, and a late night of shipping leaves the bill unchanged.</p>
 
           <div class="wy-eq wy-eq-calm" aria-hidden="true"><i style="--h:.15;--i:0"></i><i style="--h:.18;--i:1"></i><i style="--h:.15;--i:2"></i><i style="--h:.14;--i:3"></i><i style="--h:.16;--i:4"></i><i style="--h:.17;--i:5"></i><i style="--h:.18;--i:6"></i><i style="--h:.14;--i:7"></i><i style="--h:.13;--i:8"></i><i style="--h:.15;--i:9"></i><i style="--h:.13;--i:10"></i><i style="--h:.18;--i:11"></i><i style="--h:.18;--i:12"></i><i style="--h:.16;--i:13"></i><i style="--h:.17;--i:14"></i><i style="--h:.16;--i:15"></i><i style="--h:.15;--i:16"></i><i style="--h:.16;--i:17"></i><i style="--h:.17;--i:18"></i><i style="--h:.18;--i:19"></i><i style="--h:.17;--i:20"></i><i style="--h:.13;--i:21"></i><i style="--h:.13;--i:22"></i><i style="--h:.14;--i:23"></i><i style="--h:.14;--i:24"></i><i style="--h:.14;--i:25"></i><i style="--h:.17;--i:26"></i><i style="--h:.18;--i:27"></i><i style="--h:.15;--i:28"></i><i style="--h:.14;--i:29"></i><i style="--h:.14;--i:30"></i><i style="--h:.17;--i:31"></i><i style="--h:.17;--i:32"></i><i style="--h:.14;--i:33"></i><i style="--h:.15;--i:34"></i><i style="--h:.15;--i:35"></i><i style="--h:.16;--i:36"></i><i style="--h:.14;--i:37"></i><i style="--h:.13;--i:38"></i><i style="--h:.17;--i:39"></i><i style="--h:.15;--i:40"></i><i style="--h:.15;--i:41"></i><i style="--h:.14;--i:42"></i><i style="--h:.15;--i:43"></i><i style="--h:.17;--i:44"></i><i style="--h:.13;--i:45"></i><i style="--h:.13;--i:46"></i><i style="--h:.17;--i:47"></i><i style="--h:.15;--i:48"></i><i style="--h:.14;--i:49"></i><i style="--h:.17;--i:50"></i><i style="--h:.15;--i:51"></i><i style="--h:.16;--i:52"></i><i style="--h:.16;--i:53"></i><i style="--h:.14;--i:54"></i><i style="--h:.17;--i:55"></i><i style="--h:.14;--i:56"></i><i style="--h:.18;--i:57"></i><i style="--h:.16;--i:58"></i><i style="--h:.14;--i:59"></i></div>
 
           <div class="wy-queue" aria-hidden="true">
-            <div class="wy-toast" data-pos="main"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg"><span class="inr">₹</span>499 this month. Same as last month.</span></div>
-            <div class="wy-toast" data-pos="next"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Budget refilled · 500 requests</span></div>
+            <div class="wy-toast" data-pos="main"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">$5 this month. Same as last month.</span></div>
+            <div class="wy-toast" data-pos="next"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Budget refilled · $2 of tokens</span></div>
             <div class="wy-toast" data-pos="wait"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Borrowed 2 days · keep going</span></div>
             <div class="wy-toast" data-pos="wait"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5c.5 5.6 4.9 10 10.5 10.5-5.6.5-10 4.9-10.5 10.5-.5-5.6-4.9-10-10.5-10.5C7.1 11.5 11.5 7.1 12 1.5z"/></svg></span><span class="wy-msg">Surprise boost: extra budget today</span></div>
-            <div class="wy-toast" data-pos="wait"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Evening. Still requests left today.</span></div>
+            <div class="wy-toast" data-pos="wait"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Evening. Still budget left today.</span></div>
             <div class="wy-toast" data-pos="out"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Shipped at midnight. Bill unchanged.</span></div>
           </div>
 
@@ -3681,7 +3660,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           <div class="reveal">
             <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8.5 7h7"/><path d="M9 11h.01M12 11h.01M15 11h.01M9 14.5h.01M12 14.5h.01M15 14.5h.01M9 18h.01M12 18h.01M15 18h.01"/></svg></span>
             <h3 class="h3">Nothing to count</h3>
-            <p class="p">You never price a prompt before you send it. The day’s 500 requests are already paid for.</p>
+            <p class="p">You never price a prompt before you send it. The day’s tokens, $2 worth, are already paid for.</p>
           </div>
         </div>
         <div class="cell">
@@ -3695,7 +3674,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           <div class="reveal d2">
             <span class="ico" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none" focusable="false"><path d="M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33" stroke="currentColor" stroke-width="5.5" stroke-linecap="round"/></svg></span>
             <h3 class="h3">Nothing but ogcode</h3>
-            <p class="p">OGX works only inside ogcode. One subscription, one app, and every rupee goes into your day of coding there.</p>
+            <p class="p">OGX works only inside ogcode. One subscription, one app, and every dollar goes into your day of coding there.</p>
           </div>
         </div>
       </div>
@@ -3708,7 +3687,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="faq-title">Before you subscribe.</h2>
-      <p class="sub">What <span class="inr">₹</span>499 a month gets you, answered plainly.</p>
+      <p class="sub">What $5 a month gets you, answered plainly.</p>
     </div>
 
     <div class="box fq-box reveal d1">
@@ -3717,16 +3696,20 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
 
         <div class="faq fq-list">
           <details>
-            <summary><span class="fq-sum"><span class="fq-q">Will I ever pay more than <span class="inr">₹</span>499?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">No. <span class="inr">₹</span>499 a month is the whole bill, and there is no overage. When a day's budget is spent, requests simply pause until the daily refill at 00:00 UTC (05:30 IST), or you can borrow ahead from your own cycle. Borrowing is free, and nothing extra is ever charged.</div>
+            <summary><span class="fq-sum"><span class="fq-q">Will I ever pay more than $5?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
+            <div class="ans">No. $5 a month is the whole bill, and there is no overage. When a day's budget is spent, OGX simply pauses until the daily refill at 00:00 UTC, or you can borrow ahead from your own cycle. Borrowing is free, and nothing extra is ever charged.</div>
+          </details>
+          <details>
+            <summary><span class="fq-sum"><span class="fq-q">What does “$2 of tokens a day” mean?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
+            <div class="ans">It is your daily budget, counted at the models’ own list prices: each call draws its list-price cost from the day’s $2, whichever model you use. That comes to $60 of tokens over a 30-day cycle, and the bill stays $5.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">What happens if I use up today's budget?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Requests pause until the budget refills at 00:00 UTC (05:30 IST), and nothing is charged. On a heavy day you can <a class="link" href="#heavy">borrow up to three days</a> from the end of your cycle and keep going, and heavy users may also wake up to a surprise boost.</div>
+            <div class="ans">OGX pauses until the budget refills at 00:00 UTC, and nothing is charged. On a heavy day you can <a class="link" href="#heavy">borrow up to three days</a> from the end of your cycle and keep going, and heavy users may also wake up to a surprise boost.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">How does borrowing work?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">With one tap from your OG Lab dashboard, you can take one, two or three days from the end of your current cycle and add them to today. Each day brings a full day’s budget, so borrow 2 and today becomes 1,500 requests. There is no extra charge: they are your own days, used early, and your cycle ends that many days lighter. A cycle lends three days in all, and borrowing is available while your cycle has more than three days left.</div>
+            <div class="ans">With one tap from your OGLAB dashboard, you can take one, two or three days from the end of your current cycle and add them to today. Each day brings a full day’s budget, so borrow 2 and today holds $6 of tokens instead of $2. There is no extra charge: they are your own days, used early, and your cycle ends that many days lighter. A cycle lends three days in all, and borrowing is available while your cycle has more than three days left.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">What’s a surprise boost?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
@@ -3734,7 +3717,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Which models are included?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Two: DeepSeek V4.1 Flash and GLM 5.3 Flash. Both draw on the same daily budget. A DeepSeek call counts as 1 request (up to 500 a day) and a GLM call as 2.5 (up to 200 a day), and you can mix them however you like.</div>
+            <div class="ans">Two: DeepSeek V4.1 Flash and GLM 5.3 Flash. Both draw on the same daily budget, and you can mix them however you like. At list prices a GLM call costs more than a DeepSeek call, so it draws more of the day’s $2, and is worth more too.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">How fast is it, really?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
@@ -3746,11 +3729,11 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Is there a free tier?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">No. OGX is <span class="inr">₹</span>499 a month. ogcode itself stays free and open source.</div>
+            <div class="ans">No. OGX is $5 a month. ogcode itself stays free and open source.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Can I cancel anytime?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Yes. Cancel from the <a class="link" href="https://oglab.ogcode.xyz" target="_blank" rel="noopener">OG Lab dashboard</a>. Cancelling stops future charges and gives up your seat.</div>
+            <div class="ans">Yes. Cancel from the <a class="link" href="https://oglab.ogcode.xyz" target="_blank" rel="noopener">OGLAB dashboard</a>. Cancelling stops future charges and gives up your seat.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">What does “seats are limited” mean?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
@@ -3768,8 +3751,8 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
               <a class="btn btn-line btn-sm" href="https://discord.gg/JQP9t8y2Zv" target="_blank" rel="noopener"><svg fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 4.4A19.8 19.8 0 0015.4 3l-.3.5c1.5.4 2.7.9 4 1.7a13.6 13.6 0 00-11.9 0c1.2-.8 2.6-1.3 4-1.7L10.6 3a19.8 19.8 0 00-4.9 1.4C2.5 9.1 1.7 13.7 2.1 18.3a20 20 0 006 3l.5-.7c-1-.4-2-1-2.8-1.6l.7-.5a14.2 14.2 0 0012.7 0l.7.5c-.9.6-1.8 1.2-2.8 1.6l.5.7a20 20 0 006-3c.5-5.3-.8-9.9-3.3-14zM8.5 15c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2zm7 0c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2z"/></svg>Join the Discord</a>
             </div>
             <ul class="fq-stats" aria-label="At a glance">
-              <li><span class="inr">₹</span>499 flat</li>
-              <li>500 a day</li>
+              <li>$5 flat</li>
+              <li>$2 of tokens a day</li>
               <li>2 fast models</li>
             </ul>
           </div>
@@ -3798,7 +3781,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
 
         <div class="cta-in">
           <h2 class="cta-title reveal" id="ctaTitle">Stop watching the meter.</h2>
-          <p class="cta-sub reveal d1"><span class="inr">₹</span>499&nbsp;a&nbsp;month, two fast models, a budget that refills every day, and room to borrow on heavy ones. Made for ogcode.</p>
+          <p class="cta-sub reveal d1">$5&nbsp;a&nbsp;month for $60 of tokens a cycle: two fast models, a budget that refills every day, and room to borrow on heavy ones. Made for ogcode.</p>
           <div class="cta-actions reveal d2">
             <a class="btn btn-light btn-lg" href="https://oglab.ogcode.xyz" data-ogx="get" target="_blank" rel="noopener">
               Get OGX
@@ -3815,9 +3798,9 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
           <div class="marquee">
             <div class="marquee-track">
               <ul class="marquee-set" role="list">
-              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg><span><span class="inr">₹</span>499 a month</span></li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg><span>$5 a month</span></li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>No overage, ever</li>
-              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>500 requests a day</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>$2 of tokens a day</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Two fast models</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Refills every day</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Borrow up to 3 days</li>
@@ -3826,9 +3809,9 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Cancel anytime</li>
               </ul>
               <ul class="marquee-set" role="list" aria-hidden="true">
-              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg><span><span class="inr">₹</span>499 a month</span></li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg><span>$5 a month</span></li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>No overage, ever</li>
-              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>500 requests a day</li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>$2 of tokens a day</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Two fast models</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Refills every day</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Borrow up to 3 days</li>
@@ -3926,22 +3909,22 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
     "@context": "https://schema.org",
     "@type": "Product",
     "name": "OGX",
-    "description": "The plan made for ogcode by OG Lab: two fast models (DeepSeek V4.1 Flash and GLM 5.3 Flash), 500 requests a day refilled every day at midnight UTC, and one flat price of ₹499 a month with no overage.",
+    "description": "The plan made for ogcode by OGLAB: two fast models (DeepSeek V4.1 Flash and GLM 5.3 Flash), $2 of tokens a day at list prices, refilled every day at midnight UTC, and one flat price of $5 a month with no overage.",
     "url": "https://ogcode.xyz/ogx/",
     "image": "https://ogcode.xyz/media/ogx-og.png",
-    "brand": { "@type": "Brand", "name": "OG Lab" },
+    "brand": { "@type": "Brand", "name": "OGLAB" },
     "offers": {
       "@type": "Offer",
-      "price": "499",
-      "priceCurrency": "INR",
+      "price": "5",
+      "priceCurrency": "USD",
       "url": "https://oglab.ogcode.xyz",
       "priceSpecification": {
         "@type": "UnitPriceSpecification",
-        "price": "499",
-        "priceCurrency": "INR",
+        "price": "5",
+        "priceCurrency": "USD",
         "billingDuration": "P30D"
       },
-      "seller": { "@type": "Organization", "name": "OG Lab", "url": "https://oglab.ogcode.xyz" }
+      "seller": { "@type": "Organization", "name": "OGLAB", "url": "https://oglab.ogcode.xyz" }
     }
   }
   </script>
@@ -4609,10 +4592,11 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
 
   // #heavy — the borrow demo. A real radio group (roving tabindex, arrow
   // keys, Home/End): picking 1–3 days lifts that many days off the end of
-  // the cycle onto today and counts today's budget to 500 × (1 + days).
-  // The markup is the 2-day state, so no JS or reduced motion still shows
-  // a finished example. With motion, the first time the demo is on screen
-  // it starts from a plain 500 and borrows the 2 days itself.
+  // the cycle onto today and counts today's budget, in dollars of tokens at
+  // list price, to a day's $2 × (1 + days). The markup is the 2-day
+  // state, so no JS or reduced motion still shows a finished example. With
+  // motion, the first time the demo is on screen it starts from a plain day
+  // and borrows the 2 days itself.
   try {
     var root = document.getElementById('heavy');
     if (!root) return;
@@ -4623,20 +4607,22 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
     var og = window.og || {};
     var reduced = !!og.reduced ||
       !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    var DAY = 500;
+    // A day's budget at list price, in cents ($2 a day): counting in
+    // whole cents keeps the animation's steps exact.
+    var DAY = 200;
     function q(k) { return demo.querySelector('[data-hv="' + k + '"]'); }
     var elN = q('n'), elB = q('b'), elD = q('d'), elPlus = q('plus'), elTail = q('tail'), elSr = q('sr');
 
     var sel = 2;          // the checked radio
-    var shown = 1500;     // what the big number reads right now
+    var shown = 600;      // what the big number reads right now, in cents
     var cur = 2;          // the days the strip shows (0 only during the intro)
     var raf = 0, touched = false;
 
-    function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+    function fmt(cents) { return '$' + (cents / 100).toFixed(2); }
     function days(k) { return k === 0 ? 'none' : k === 1 ? '1 day' : k + ' days'; }
 
     // the big number and the borrowed line move together, so the sum
-    // on screen always adds up: today's own 500 + borrowed = today's budget
+    // on screen always adds up: today's own $2 + borrowed = today's budget
     function paint(v) {
       shown = v;
       if (elN) elN.textContent = fmt(v);
@@ -4662,7 +4648,7 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
     }
 
     // draw the strip and the sum for k borrowed days. k = 0 is the intro's
-    // plain-500 frame, where no segment looks picked yet
+    // plain-day frame, where no segment looks picked yet
     function show(k, now) {
       cur = k;
       demo.classList.toggle('hv-intro', k === 0);
@@ -4693,8 +4679,8 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
       show(k, false);
       // the visual readout is aria-hidden (it animates); this one sentence
       // is what assistive tech reads, and announces each change
-      if (elSr) elSr.textContent = 'Borrowing ' + days(k) + ': today’s budget is ' + fmt(DAY * (1 + k)) +
-        ' requests, 500 of today’s own plus ' + fmt(DAY * k) + ' borrowed, at no extra charge.';
+      if (elSr) elSr.textContent = 'Borrowing ' + days(k) + ': today’s budget is up to ' + fmt(DAY * (1 + k)) +
+        ' of tokens, ' + fmt(DAY) + ' of today’s own plus ' + fmt(DAY * k) + ' borrowed, at no extra charge.';
       if (og.ph) og.ph('ogx_borrow_demo', { days: k });
     }
 
@@ -4736,8 +4722,8 @@ html:not(.js) #heavy .hv-read { margin-top: 0; }
       var dn = d && d.querySelector('[data-hv="n"]');
       var db = d && d.querySelector('[data-hv="b"]');
       if (d) { d.classList.remove('hv-intro'); d.setAttribute('data-k', '2'); d.style.setProperty('--k', '2'); }
-      if (dn) dn.textContent = '1,500';
-      if (db) db.textContent = '+1,000';
+      if (dn) dn.textContent = '$6.00';
+      if (db) db.textContent = '+$4.00';
     } catch (e2) { /* nothing more to do */ }
   }
 })();
