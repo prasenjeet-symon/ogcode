@@ -14,7 +14,6 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -170,6 +169,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// No-op off macOS and when OGCODE_NO_KEEP_AWAKE is set. The defer runs on
 	// every exit path, including panic recovery below.
 	defer keepawake.Acquire("ogcode agent turn")()
+
+	// Keep the background index to its narrow share of the provider budget for
+	// as long as this turn runs, including while its tools do, so the turn's own
+	// requests never queue behind index work. A no-op for the index's own turns.
+	defer provider.BeginTurn(ctx)()
 
 	// Always notify the frontend when the loop exits, regardless of reason.
 	// Without this, any early return (DB error, stream error, panic recovery)
@@ -2514,34 +2518,31 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		lc.SetToolCancel(toolCancel)
 	}
 
-	// Execute all ready tool calls concurrently
-	var wg sync.WaitGroup
-	for i := range readyCalls {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			tc := readyCalls[idx]
-			// A panic in a tool runs on this goroutine, where nothing above it
-			// can recover: an unrecovered panic in any goroutine takes the whole
-			// process down, so one bad tool call kills every session the server
-			// is serving, not just this turn. Convert it into a failed tool call
-			// — the loop already knows how to report one to the model and to the
-			// user — and log the stack so the bug is still diagnosable.
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("tool panicked",
-						"session", sessionID, "tool", tc.Name, "panic", r,
-						"stack", string(debug.Stack()))
-					execInfos[idx].result = tool.Result{}
-					execInfos[idx].err = fmt.Errorf("tool %s panicked: %v", tc.Name, r)
-				}
-			}()
-			result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID, providerID)
-			execInfos[idx].result = result
-			execInfos[idx].err = err
-		}(i)
-	}
-	wg.Wait()
+	// Execute all ready tool calls concurrently — except that calls on the same
+	// file run in the order the model wrote them (see sameFileWaits), so a read
+	// or check written after an edit sees the edit, and two edits to one file
+	// apply in the order written rather than whichever takes its lock first.
+	runInFileOrder(toolCtx, sameFileWaits(readyCalls, workDir), func(idx int) {
+		tc := readyCalls[idx]
+		// A panic in a tool runs on this goroutine, where nothing above it
+		// can recover: an unrecovered panic in any goroutine takes the whole
+		// process down, so one bad tool call kills every session the server
+		// is serving, not just this turn. Convert it into a failed tool call
+		// — the loop already knows how to report one to the model and to the
+		// user — and log the stack so the bug is still diagnosable.
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("tool panicked",
+					"session", sessionID, "tool", tc.Name, "panic", r,
+					"stack", string(debug.Stack()))
+				execInfos[idx].result = tool.Result{}
+				execInfos[idx].err = fmt.Errorf("tool %s panicked: %v", tc.Name, r)
+			}
+		}()
+		result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID, providerID)
+		execInfos[idx].result = result
+		execInfos[idx].err = err
+	})
 
 	// Fold this step's reading into the turn's running total and, if a reminder is
 	// due, append it below the first content-returning result. This has to happen

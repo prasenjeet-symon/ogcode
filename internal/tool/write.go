@@ -109,7 +109,7 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	// — a truncated write or a body assembled from two fragments produces a file
 	// that saves without complaint. prior is nil for a file that did not exist,
 	// which is the right baseline: in a new file every error is this call's.
-	note, check := syntaxNote(path, prior, []byte(input.Content))
+	note, check := syntaxNote(path, input.Path, prior, []byte(input.Content))
 
 	verb := "Wrote"
 	if created {

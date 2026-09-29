@@ -8,9 +8,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
+)
+
+// tempImageDirs holds every directory writeMCPImageToTemp has created, so the
+// owning Manager can remove them all at Close. Image files must outlive their
+// Execute call (the agent reads them with view_image later in the turn), so they
+// cannot be removed with a per-call defer; instead they are swept at process
+// shutdown, when no further view_image call can need them. Guarded by
+// tempImageMu because a turn may run several MCP tools concurrently.
+var (
+	tempImageMu   sync.Mutex
+	tempImageDirs []string
 )
 
 // newMCPTool adapts a discovered MCP tool (t) from server into ogcode's
@@ -138,7 +150,8 @@ func (mt mcpTool) Execute(ctx context.Context, input json.RawMessage, _ tool.Con
 
 // writeMCPImageToTemp persists a single MCP image content item to a temporary
 // file and returns its path. The file lives under an ogcode-specific temp
-// directory so it is easy to find and clean up. The filename extension is
+// directory so it is easy to find, and the directory is recorded so
+// Manager.Close can sweep it (see sweepTempImages). The filename extension is
 // derived from the MIME type.
 func writeMCPImageToTemp(c *mcp.ImageContent) (string, error) {
 	dir, err := os.MkdirTemp("", "ogcode-mcp-image-*")
@@ -151,7 +164,26 @@ func writeMCPImageToTemp(c *mcp.ImageContent) (string, error) {
 		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("write image: %w", err)
 	}
+	tempImageMu.Lock()
+	tempImageDirs = append(tempImageDirs, dir)
+	tempImageMu.Unlock()
 	return path, nil
+}
+
+// sweepTempImages removes every temp directory created for MCP image content.
+// It is called from Manager.Close so no image file outlives the process that
+// wrote it. Removal is best-effort: a failure is logged, not returned, because
+// the remaining files sit in the OS temp dir and cannot block shutdown.
+func sweepTempImages() {
+	tempImageMu.Lock()
+	dirs := tempImageDirs
+	tempImageDirs = nil
+	tempImageMu.Unlock()
+	for _, dir := range dirs {
+		if err := os.RemoveAll(dir); err != nil {
+			slog.Warn("mcp: failed to remove temp image dir", "dir", dir, "err", err)
+		}
+	}
 }
 
 // mimeExtension returns a file extension (with leading dot) for common image

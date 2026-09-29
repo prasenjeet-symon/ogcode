@@ -635,9 +635,9 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 		return fmt.Errorf("create user part: %w", err)
 	}
 
-	// Mark the turn as a background index session so its provider requests draw
-	// the index's share of the process-wide in-flight budget rather than the
-	// pool the user's own turns queue in.
+	// Mark the turn as a background index session so its provider requests yield
+	// to the user's: they start only into room the user's work leaves, one at a
+	// time while a turn is running.
 	runCtx := provider.AsIndexSession(ctx)
 	if err := idx.loopRunner.RunLoop(runCtx, sess.ID, "index", 0, 0); err != nil {
 		// Log but don't fail the entire indexing run — other batches can still succeed.

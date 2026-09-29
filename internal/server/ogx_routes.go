@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -163,16 +166,90 @@ func (s *Server) handleOGXStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read OGX account", http.StatusInternalServerError)
 		return
 	}
+	writeJSON(w, http.StatusOK, ogxStatusBody(acct))
+}
+
+// ogxStatusBody is the status payload for a stored link, or the disconnected
+// one for none.
+func ogxStatusBody(acct *session.OGXAccount) map[string]any {
 	if acct == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"connected": false})
-		return
+		return map[string]any{"connected": false}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"connected":   true,
 		"email":       acct.Email,
 		"plan":        acct.Plan,
 		"connectedAt": acct.TimeConnected,
-	})
+	}
+}
+
+// ogxCheckTimeout bounds the live plan check. The settings tab runs it in the
+// background when it opens, so a slow gateway only delays the refresh.
+const ogxCheckTimeout = 10 * time.Second
+
+// handleOGXRefresh re-reads the plan from the gateway, the only thing that
+// knows it now: the connect flow records the plan once, so a plan bought after
+// connecting, or one that has since lapsed or been cancelled, is invisible
+// until something asks. A change is written back to the stored link and the
+// registry is reloaded, so the plan's models arrive — or leave — without the
+// disconnect-and-reconnect the tab used to ask for.
+//
+// The payload is the status plus "check": "ok" (with the model count),
+// "revoked" when the gateway no longer accepts the token, or "unreachable".
+// Only an "ok" answer changes anything: a gateway that cannot be asked says
+// nothing about the plan.
+func (s *Server) handleOGXRefresh(w http.ResponseWriter, r *http.Request) {
+	acct, err := session.GetOGXAccount(s.globalDB)
+	if err != nil {
+		http.Error(w, "failed to read OGX account", http.StatusInternalServerError)
+		return
+	}
+	if acct == nil {
+		writeJSON(w, http.StatusOK, ogxStatusBody(nil))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), ogxCheckTimeout)
+	defer cancel()
+	models, err := provider.CheckOGXPlan(ctx, acct.Token)
+	if err != nil {
+		check := "unreachable"
+		if errors.Is(err, provider.ErrOGXTokenRevoked) {
+			check = "revoked"
+		} else {
+			slog.Warn("ogx plan check failed", "err", err)
+		}
+		body := ogxStatusBody(acct)
+		body["check"] = check
+		writeJSON(w, http.StatusOK, body)
+		return
+	}
+
+	// The gateway's catalogue IS the plan. A link recorded without one that now
+	// lists models has been bought since; the plan id is recorded so the
+	// registration gate lets the provider in. One that lists nothing has lapsed
+	// or been cancelled, and is recorded as planless so the provider — which
+	// could serve nothing — stops outranking the others.
+	plan := acct.Plan
+	switch {
+	case models > 0 && !acct.HasPlan():
+		plan = provider.OGXProviderID
+	case models == 0 && acct.HasPlan():
+		plan = session.OGXPlanNone
+	}
+	if plan != acct.Plan {
+		acct.Plan = plan
+		if err := session.SetOGXAccount(s.globalDB, acct); err != nil {
+			http.Error(w, "failed to save OGX account", http.StatusInternalServerError)
+			return
+		}
+		s.reloadProviders()
+	}
+
+	body := ogxStatusBody(acct)
+	body["check"] = "ok"
+	body["models"] = models
+	writeJSON(w, http.StatusOK, body)
 }
 
 // handleOGXDisconnect forgets the local connection. The plan and account on

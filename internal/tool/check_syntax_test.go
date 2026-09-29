@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,9 +62,9 @@ func Target() error {
 // collapsed.
 func TestCheckSyntaxTool_UnknownTypeDoesNotReadAsPass(t *testing.T) {
 	dir := t.TempDir()
-	mustWriteFile(t, filepath.Join(dir, "conf.yaml"), "key: [unclosed\n")
+	mustWriteFile(t, filepath.Join(dir, "deploy.sh"), "if [ -z \"$X\" ]; then\n")
 
-	res := checkSyntax(t, dir, "conf.yaml")
+	res := checkSyntax(t, dir, "deploy.sh")
 	if strings.Contains(res.Title, "OK") {
 		t.Errorf("Title = %q claims OK for an unchecked file", res.Title)
 	}
@@ -81,5 +82,38 @@ func TestCheckSyntaxTool_MissingFileIsOutputNotError(t *testing.T) {
 	res := checkSyntax(t, t.TempDir(), "nope.go")
 	if !strings.Contains(res.Output, "does not exist") {
 		t.Errorf("output = %q, want it to say the file is missing", res.Output)
+	}
+}
+
+// A directory is an ordinary wrong turn, answered as output with what to do
+// instead, not as a tool failure.
+func TestCheckSyntaxTool_DirectoryIsOutputNotError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := checkSyntax(t, dir, "pkg")
+	if !strings.Contains(res.Output, "is a directory") {
+		t.Errorf("output = %q, want it to say the path is a directory", res.Output)
+	}
+}
+
+// A capped count reads as capped in the title the agent sees collapsed, and
+// the metadata says the list stops short.
+func TestCheckSyntaxTool_CappedCountSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "mess.go"), "package p\n"+strings.Repeat("func a( {}\n", 60))
+
+	res := checkSyntax(t, dir, "mess.go")
+	if !strings.Contains(res.Title, "20+ syntax errors") {
+		t.Errorf("Title = %q, want the capped count marked with +", res.Title)
+	}
+	if res.Metadata["errorsTruncated"] != true {
+		t.Errorf("metadata errorsTruncated = %v, want true", res.Metadata["errorsTruncated"])
+	}
+
+	mustWriteFile(t, filepath.Join(dir, "one.go"), "package p\n\nfunc f( {}\n")
+	if res := checkSyntax(t, dir, "one.go"); !strings.HasSuffix(res.Title, "— 1 syntax error") {
+		t.Errorf("Title = %q, want the singular for one error", res.Title)
 	}
 }

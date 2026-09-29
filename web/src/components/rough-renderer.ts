@@ -26,6 +26,7 @@
 
 import rough from 'roughjs';
 import type { Options } from 'roughjs/bin/core';
+import type { RoughSVG } from 'roughjs/bin/svg';
 
 export interface RoughElement {
   type: string;
@@ -71,13 +72,12 @@ function buildOptions(el: RoughElement, globalOpts: Options): Options {
 }
 
 function drawArrowHead(
-  svg: SVGSVGElement,
+  rc: RoughSVG,
   x1: number, y1: number,
   x2: number, y2: number,
   size: number,
   options: Options,
 ) {
-  const rc = rough.svg(svg);
   const angle = Math.atan2(y2 - y1, x2 - x1);
   const a1 = angle + Math.PI * 0.8;
   const a2 = angle - Math.PI * 0.8;
@@ -149,7 +149,7 @@ export function renderRoughDiagram(container: HTMLElement, spec: RoughSpec): voi
         svg.appendChild(lineNode);
         const headSize = Number(el.headSize ?? ARROW_HEAD_SIZE);
         const head = drawArrowHead(
-          svg,
+          rc,
           Number(el.x1), Number(el.y1),
           Number(el.x2), Number(el.y2),
           headSize, opts,
@@ -187,7 +187,10 @@ export function renderRoughDiagram(container: HTMLElement, spec: RoughSpec): voi
         const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         textEl.setAttribute('x', String(el.x));
         textEl.setAttribute('y', String(el.y));
-        textEl.setAttribute('fill', String(opts.stroke ?? DEFAULT_TEXT_FILL));
+        const textFill = opts.fill !== 'transparent' && opts.fill
+          ? opts.fill
+          : (el.fill ?? DEFAULT_TEXT_FILL);
+        textEl.setAttribute('fill', String(textFill));
         textEl.setAttribute('font-size', String(el.fontSize ?? 14));
         textEl.setAttribute('font-family', 'var(--font-sans)');
         textEl.setAttribute('text-anchor', String(el.textAnchor ?? 'middle'));

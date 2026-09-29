@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,9 @@ func TestEdit_ReportsDamageItCaused(t *testing.T) {
 	if res.Metadata["syntaxOK"] != false {
 		t.Errorf("metadata syntaxOK = %v, want false", res.Metadata["syntaxOK"])
 	}
+	if _, ok := res.Metadata["syntaxPreexisting"]; ok {
+		t.Error("metadata marks damage this edit caused as pre-existing")
+	}
 	// The edit itself still succeeded — the file on disk holds the new content.
 	// Reporting the breakage must not look like the write was rolled back.
 	if !strings.HasPrefix(res.Output, "Edited ") {
@@ -96,6 +100,9 @@ func TestEdit_DoesNotBlameItselfForPriorDamage(t *testing.T) {
 	if !strings.Contains(res.Output, "also had errors before") {
 		t.Errorf("note does not say the damage predates the edit:\n%s", res.Output)
 	}
+	if res.Metadata["syntaxPreexisting"] != true {
+		t.Errorf("metadata syntaxPreexisting = %v, want true so the UI does not blame the edit", res.Metadata["syntaxPreexisting"])
+	}
 }
 
 // A new file has no baseline, so every error in it belongs to the write.
@@ -126,16 +133,16 @@ func TestWrite_SilentOnAValidFile(t *testing.T) {
 	}
 }
 
-// Writing prose, config, or any file type with no grammar must never produce a
+// Writing prose, config, or any file type with no parser must never produce a
 // note — there is nothing to check, and a warning would be a lie either way.
 //
-// None of these extensions may be a registered grammar: style.css was here
-// until CSS gained one, and the write tool grew a syntax verdict it cannot
-// honestly give.
+// None of these extensions may have a parser: style.css was here until CSS
+// gained one, and data.json, conf.yaml and config.toml until their validators
+// landed — each time the write tool grew a verdict it could not honestly give.
 func TestWrite_SilentOnUncheckableTypes(t *testing.T) {
 	dir := t.TempDir()
 
-	for _, name := range []string{"notes.md", "conf.yaml", "data.json", "config.toml"} {
+	for _, name := range []string{"notes.md", "deploy.sh", "query.sql", "settings.ini"} {
 		res := writeFile(t, dir, name, "key: [unclosed\n{{{ not valid anything\n")
 		if strings.Contains(res.Output, "SYNTAX") {
 			t.Errorf("%s: unparseable-by-no-grammar file produced a note:\n%s", name, res.Output)
@@ -166,5 +173,54 @@ func TestEdit_NoteCapsItsDiagnosticList(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("file missing after edit: %v", err)
+	}
+}
+
+// The case the check most needed and missed: an edit that breaks Python's
+// indentation. The grammar parses it, so this rests on codemap's own pass.
+func TestEdit_ReportsBrokenPythonIndentation(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "app.py"), "def handler(req):\n    if req:\n        return 1\n    return 0\n")
+
+	res := edit(t, dir, "app.py", "    return 0\n", "   return 0\n")
+
+	if !strings.Contains(res.Output, "SYNTAX ERROR") || !strings.Contains(res.Output, "unindent does not match") {
+		t.Fatalf("edit that broke the indentation was not reported:\n%s", res.Output)
+	}
+	if res.Metadata["syntaxOK"] != false {
+		t.Errorf("metadata syntaxOK = %v, want false", res.Metadata["syntaxOK"])
+	}
+}
+
+// Config files are checked too: a JSON edit that drops a comma is damage.
+func TestWrite_ReportsBrokenDataFiles(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"package.json":   "{\n  \"name\": \"x\"\n  \"version\": \"1.0.0\"\n}\n",
+		"conf.yaml":      "a:\n  b: 1\n c: 2\n",
+		"pyproject.toml": "[project]\nname = \"x\n",
+	} {
+		res := writeFile(t, dir, name, content)
+		if !strings.Contains(res.Output, "SYNTAX ERROR") {
+			t.Errorf("%s: broken file written without a note:\n%s", name, res.Output)
+		}
+	}
+}
+
+// When a note truncates its list, it points at check_syntax with the path as
+// the caller gave it — a bare file name would resolve against the project
+// root and check the wrong file, or none.
+func TestEdit_NoteHintUsesTheCallersPath(t *testing.T) {
+	dir := t.TempDir()
+	rel := filepath.Join("internal", "pkg", "mess.go")
+	mustWriteFile(t, filepath.Join(dir, rel), "package demo\n\nfunc Target() error {\n\treturn nil\n}\n")
+
+	res := edit(t, dir, rel, "return nil", "}\n"+strings.Repeat("func a( {}\n", 30))
+
+	if want := "check_syntax(" + strconv.Quote(rel) + ")"; !strings.Contains(res.Output, want) {
+		t.Errorf("note does not point at %s:\n%s", want, res.Output)
+	}
+	if !strings.Contains(res.Output, "20+ syntax errors") {
+		t.Errorf("note does not mark its count as capped:\n%s", res.Output)
 	}
 }

@@ -24,12 +24,26 @@ func signatureFor(node *ts.Node, src []byte, kind string, names []string, lang *
 		return capSig(collapse(firstLine(sliceOf(node, src, node.EndByte()))))
 
 	case "type", "const", "var":
+		line := collapse(firstLine(sliceOf(node, src, node.EndByte())))
 		// A grouped declaration's first line is just `const (`, which tells a
-		// reader nothing. List what it binds instead.
-		if len(names) > 1 {
+		// reader nothing. List what it binds instead — a group of one included.
+		if len(names) > 1 || (len(names) == 1 && line == kind+" (") {
 			return fmt.Sprintf("%s ( %s )", kind, joinCapped(names, maxGroupNames))
 		}
-		return capSig(trimOpenBrace(collapse(firstLine(sliceOf(node, src, node.EndByte())))))
+		sig := trimOpenBrace(line)
+		// A C typedef states its name last, after the body — `typedef struct {`
+		// on the first line and `} pair_t;` at the end — so the first line
+		// alone never says what the type is called.
+		if node.Kind() == "type_definition" && len(names) == 1 && !strings.Contains(sig, names[0]) {
+			sig += " … " + names[0]
+		}
+		return capSig(sig)
+
+	case "macro":
+		// A C macro that runs over several lines ends its first with the
+		// continuation backslash, which is punctuation, not signature. Rust's
+		// macro_rules! opens its body on the first line, as a function does.
+		return capSig(trimOpenBrace(strings.TrimSuffix(collapse(firstLine(sliceOf(node, src, node.EndByte()))), "\\")))
 
 	case "rule":
 		// The selectors are the rule's signature — its name is already those
@@ -77,6 +91,15 @@ func signatureFor(node *ts.Node, src []byte, kind string, names []string, lang *
 // note into the signature and spend the length cap on it. Braced languages keep
 // such a comment inside the body, where this never fires.
 func bodyStart(n *ts.Node, lang *language) (uint, bool) {
+	// An object-literal property and an anonymous default export hold their
+	// function as a value, and the body is that function's.
+	if k := n.Kind(); k == "pair" || k == "export_statement" {
+		if value := n.ChildByFieldName("value"); value != nil {
+			if body := value.ChildByFieldName("body"); body != nil {
+				return body.StartByte(), true
+			}
+		}
+	}
 	if body := n.ChildByFieldName("body"); body != nil {
 		end := body.StartByte()
 		if len(lang.commentKinds) > 0 {

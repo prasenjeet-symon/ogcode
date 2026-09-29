@@ -406,21 +406,32 @@ export function setProviderConfig(id: string, cfg: Omit<ProviderConfig, 'provide
   });
 }
 
-// OGX — the OG Lab plan. Sign-up, payment and plan state live on the web
-// side; these calls only start the browser hand-off and report whether the
-// resulting token is stored locally. The token itself never reaches the UI.
+// OGX — the OGLAB plan. Sign-up, payment and plan state live on the web
+// side; these calls only start the browser hand-off, report whether the
+// resulting token is stored locally, and re-read the plan from the gateway.
+// The token itself never reaches the UI.
 export interface OGXStatus {
   connected: boolean;
   email?: string;
   plan?: string;
   connectedAt?: number;
+  /** Set by refreshOGX: what the live check against the gateway came to. */
+  check?: 'ok' | 'revoked' | 'unreachable';
+  /** With check "ok": how many models the plan grants right now. */
+  models?: number;
 }
 
 export function getOGXStatus(): Promise<OGXStatus> {
   return fetchAPI('/ogx/status');
 }
 
-/** Mints a connect state and returns the OG Lab URL to open in a new tab. */
+/** Asks the gateway what the plan is now and records any change, so a plan
+ *  bought or lapsed since connecting shows up without a reconnect. */
+export function refreshOGX(): Promise<OGXStatus> {
+  return fetchAPI('/ogx/refresh', { method: 'POST' });
+}
+
+/** Mints a connect state and returns the OGLAB URL to open in a new tab. */
 export function startOGXConnect(): Promise<{ url: string }> {
   return fetchAPI('/ogx/connect', { method: 'POST' });
 }

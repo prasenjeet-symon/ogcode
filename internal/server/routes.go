@@ -79,6 +79,7 @@ func (s *Server) routes() http.Handler {
 		r.Post("/ogx/connect", s.handleOGXConnect)
 		r.Get("/ogx/callback", s.handleOGXCallback)
 		r.Get("/ogx/status", s.handleOGXStatus)
+		r.Post("/ogx/refresh", s.handleOGXRefresh)
 		r.Delete("/ogx", s.handleOGXDisconnect)
 
 		r.Get("/pricing", s.handleGetPricing)

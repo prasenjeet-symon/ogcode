@@ -423,8 +423,8 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	}()
 
 	// Take a place in the process-wide in-flight budget and hold it for the whole
-	// request. A background index session draws the index's share of that budget,
-	// so its waves cannot fill every slot ahead of the user's own turn.
+	// request. A background index session's request waits for room the user's
+	// own work leaves; every other request goes ahead of it.
 	releaseSlot, err := acquireRequest(reqCtx)
 	if err != nil {
 		return nil, fmt.Errorf("wait for request slot: %w", err)

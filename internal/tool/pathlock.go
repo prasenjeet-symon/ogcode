@@ -13,9 +13,12 @@ import (
 // aimed at the same file would race — a lost update, or edit reading a
 // half-written file. Reads are intentionally NOT gated here: a torn read is
 // recoverable (the model re-reads), whereas a lost write is silent data loss.
-// bash is not covered either — a shell command can touch any path, so there is
-// nothing to key its writes on; a bash mutation racing an edit in the same
-// turn remains the caller's hazard.
+// The order between calls on one file is the agent loop's job, not this lock's:
+// it runs a batch's calls on the same file in the order the model wrote them
+// (see agent.sameFileWaits, keyed by FileKey), so a read written after an edit
+// sees the edit. bash is not covered either — a shell command can touch any
+// path, so there is nothing to key its writes on; a bash mutation racing an
+// edit in the same turn remains the caller's hazard.
 //
 // The map grows by one entry per distinct file touched in the process lifetime,
 // which is bounded by the number of files a session edits — acceptable, and far
@@ -29,6 +32,18 @@ var fileLocks sync.Map // map[string]*sync.Mutex
 // while not folding on a case-insensitive one hands two spellings of a single
 // file different locks — exactly the race this map exists to prevent.
 var caseInsensitivePaths = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
+// FileKey is the identity the file tools give a path, for callers outside this
+// package that need to know whether two tool calls touch the same file: path
+// resolved against dir the way the tools resolve a relative path, then keyed
+// exactly as lockPath keys it — so "a.go", "./a.go", its absolute spelling and
+// a symlink to it all agree.
+func FileKey(dir, path string) string {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	return lockKey(path)
+}
 
 // lockPath acquires the per-path mutex for path and returns the unlock func.
 func lockPath(path string) func() {

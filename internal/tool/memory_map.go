@@ -30,20 +30,28 @@ import (
 // otherwise run to hundreds of KB.
 const memoryMapBudget = 100 * 1024
 
+// minTagLen is the shortest tag memory_map shows for a conversation. Tags grow
+// past it only as far as they must to stay unique among the conversations
+// listed (see conversationTags), so an 8-character tag from before tags were
+// made unique still resolves whenever it names one conversation.
+const minTagLen = 8
+
 // sessionLabelCap is the maximum number of topic labels shown on a collapsed
 // conversation's summary line.
 //
-// Equal to codebase_map's folderLabelCap: a conversation line stands for a
-// whole branch of turns exactly as a folder line stands for a branch of
-// directories, so the two carry the same label budget. Referenced rather than
-// restated so the two cannot drift apart. The byte budget still bounds the
-// level: on a wide one, renderMemoryMap lowers this rung by rung.
+// Equal to codebase_map's folderLabelCap, and for the same reason: the labels
+// are a sample drawn evenly from every turn (see sampleLabels), so twenty is
+// enough to say what a conversation covered. It was forty "most common"
+// labels — but a turn's labels are nearly all its own, so the counts tied at
+// one and the line was really an alphabetical slice of the conversation. The
+// byte budget still bounds the level: on a wide one, renderMemoryMap lowers
+// this rung by rung.
 const sessionLabelCap = folderLabelCap
 
 // MemoryMapTool is the index over a project's per-turn markdown memory — the
 // memory analogue of codebase_map. At project scope every conversation is
-// collapsed to ONE line carrying its most common topic labels and its turn
-// count; calling again with subdir set to a conversation tag descends into it
+// collapsed to ONE line carrying its turn count and a sample of topic labels
+// drawn from across its turns; calling again with subdir set to a conversation tag descends into it
 // and lists that conversation's summaries as file lines — file name and topic
 // labels, the way codebase_map lists a folder's files. Scope (project vs a
 // single session) comes from the recall context, never from the model.
@@ -59,7 +67,7 @@ func NewMemoryMapTool(store *memfile.Store) MemoryMapTool {
 func (t MemoryMapTool) ID() string { return "memory_map" }
 
 func (t MemoryMapTool) Description() string {
-	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. Every conversation (session) is shown as a SINGLE line ending in \"/\": its most common topic labels and the number of turns inside it. To look inside a conversation, call again with subdir set to its tag (e.g. \"ses01M26\") — the call then lists that conversation's summaries as one line each: file name and topic labels. Use this to find which conversation holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, start_line, end_line) pulls just that section."
+	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. Every conversation (session) is shown as a SINGLE line: its tag ending in \"/\", the number of turns inside it, and a sample of topic labels drawn from across all its turns. Labels are separated by semicolons. Each tag names exactly one conversation. To look inside a conversation, call again with subdir set to its tag (e.g. \"ses01M269J\") — the call then lists that conversation's summaries as one line each: file name and topic labels. Use this to find which conversation holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, start_line, end_line) pulls just that section."
 }
 
 func (t MemoryMapTool) Parameters() json.RawMessage {
@@ -68,7 +76,7 @@ func (t MemoryMapTool) Parameters() json.RawMessage {
 		"properties": {
 			"subdir": {
 				"type": "string",
-				"description": "Optional conversation tag (e.g. \"ses01M26\") to descend into. The map then lists that conversation's turns individually instead of collapsing it to one line. Omit to start at the project level."
+				"description": "Optional conversation tag (e.g. \"ses01M269J\"), exactly as the map shows it, to descend into. Any longer prefix of the conversation's session id works too. The map then lists that conversation's turns individually instead of collapsing it to one line. Omit to start at the project level."
 			}
 		}
 	}`)
@@ -118,31 +126,55 @@ func (t MemoryMapTool) Execute(ctx context.Context, args json.RawMessage, tctx C
 	// under session scope too costs nothing and reads the same.
 	sessionScoped := haveScope && scope.Scope == "session" && scope.SessionID != ""
 	flat := sessionScoped // one conversation's turns — there is nothing to collapse
-	if sessionScoped {
-		if params.Subdir != "" && params.Subdir != memfile.SessionTag(scope.SessionID) {
-			// Session scope pins the conversation; a subdir of something else is
-			// out of scope.
-			return Result{Title: "Memory Map", Output: fmt.Sprintf("This recall is scoped to conversation %q; subdir %q is not part of it.", memfile.SessionTag(scope.SessionID), params.Subdir)}, nil
+	shownTag := params.Subdir
+	if sessionScoped && params.Subdir != "" {
+		// Session scope pins the conversation; a subdir naming anything else is
+		// out of scope. Any prefix of this conversation's key names it.
+		own := memfile.SessionTag(scope.SessionID)
+		if !strings.HasPrefix(memfile.SessionKey(scope.SessionID), memfile.SessionKey(params.Subdir)) {
+			return Result{Title: "Memory Map", Output: fmt.Sprintf("This recall is scoped to conversation %q; subdir %q is not part of it.", own, params.Subdir)}, nil
 		}
+		shownTag = own
 	}
 	if params.Subdir != "" && !sessionScoped {
 		// Project scope + subdir: keep only the named conversation's entries.
+		// The tag is a prefix of one conversation's key; a prefix that fits
+		// several — a short tag from before tags were made unique — is refused
+		// with the tags that tell them apart, never answered with a blend.
+		tags := conversationTags(entries)
+		matched := resolveConversation(params.Subdir, entries)
+		switch len(matched) {
+		case 0:
+			return Result{Title: "Memory Map", Output: fmt.Sprintf("No conversation with tag %q in %s's memory. The tags are the prefixes ending in \"/\" above; call without subdir to list them.", params.Subdir, label)}, nil
+		case 1:
+		default:
+			var b strings.Builder
+			fmt.Fprintf(&b, "Tag %q fits %d conversations in %s's memory. Call again with one of their tags:\n", params.Subdir, len(matched), label)
+			for _, key := range matched {
+				n := 0
+				for _, e := range entries {
+					if memfile.SessionKey(e.SessionID) == key {
+						n++
+					}
+				}
+				fmt.Fprintf(&b, "%s/ (%s)\n", tags[key], turnCount(n))
+			}
+			return Result{Title: "Memory Map", Output: b.String()}, nil
+		}
 		scoped := make([]*memfile.Entry, 0, len(entries))
 		for _, e := range entries {
-			if memfile.SessionTag(e.SessionID) == params.Subdir {
+			if memfile.SessionKey(e.SessionID) == matched[0] {
 				scoped = append(scoped, e)
 			}
 		}
 		entries = scoped
-		if len(entries) == 0 {
-			return Result{Title: "Memory Map", Output: fmt.Sprintf("No conversation with tag %q in %s's memory. The tags are the prefixes ending in \"/\" above; call without subdir to list them.", params.Subdir, label)}, nil
-		}
+		shownTag = tags[matched[0]]
 	}
 	flat = flat || params.Subdir != ""
 
 	return Result{
 		Title:  "Memory Map",
-		Output: renderMemoryMap(entries, label, flat, params.Subdir),
+		Output: renderMemoryMap(entries, label, flat, shownTag),
 		// Rendered to memoryMapBudget, which sits above the generic 50 KB cap,
 		// so opt out of the loop's backstop: it would otherwise head-truncate
 		// the map mid-conversation. The budget is what bounds this result.
@@ -151,9 +183,10 @@ func (t MemoryMapTool) Execute(ctx context.Context, args json.RawMessage, tctx C
 }
 
 // renderSummaryLine renders one summary the way codebase_map renders a file:
-// name and topic labels on one line. The filename already carries the rest —
-// the UTC timestamp leads it and the session tag and title slug follow — and
-// the heading outline is file_map's job, not the map's.
+// name, then its topic labels after "—", semicolon-separated. The filename
+// already carries the rest — the UTC timestamp leads it and the session tag
+// and title slug follow — and the heading outline is file_map's job, not the
+// map's.
 //
 // labelCap bounds the labels shown, exactly as renderProjectLevel does for a
 // loose file; renderMemoryMap lowers it rung by rung when a level will not fit
@@ -164,58 +197,139 @@ func renderSummaryLine(e *memfile.Entry, labelCap int) string {
 	if len(labels) > labelCap {
 		labels = labels[:labelCap]
 	}
-	if len(labels) == 0 {
-		return name + "\n"
+	if joined := joinLabels(labels); joined != "" {
+		return name + " — " + joined + "\n"
 	}
-	return name + "  " + strings.Join(labels, ", ") + "\n"
+	return name + "\n"
 }
 
-// turnSummary is one collapsed conversation: the grouping tag, its entries, and
-// the topic-label frequencies across them.
+// turnSummary is one collapsed conversation: the grouping tag and its entries.
 type turnSummary struct {
 	tag     string
 	entries []*memfile.Entry
-	labels  map[string]int
 }
 
-// summarizeSessions groups entries by their session tag — the token Filename
-// embeds in every summary of one conversation — and counts label frequencies
-// the way codebase_map's dirStatsOf does: once per turn, not once per
-// occurrence. Groups come back sorted by tag.
-func summarizeSessions(entries []*memfile.Entry) []turnSummary {
-	byTag := make(map[string][]*memfile.Entry)
-	order := make([]string, 0, len(byTag))
-	for _, e := range entries {
-		tag := memfile.SessionTag(e.SessionID)
-		if _, seen := byTag[tag]; !seen {
-			order = append(order, tag)
+// labels samples the conversation's topics for its line: every turn offers its
+// own labels, most important first, and sampleLabels shares the line among
+// them — evenly, since every turn counts the same, and spread across the
+// conversation rather than read off one end of it. The newest turn leads: it
+// is where the conversation ended up, and the oldest is often just a greeting.
+func (s turnSummary) labels(n int) []string {
+	turns := append([]*memfile.Entry(nil), s.entries...)
+	sort.SliceStable(turns, func(i, j int) bool {
+		if turns[i].CreatedAt != turns[j].CreatedAt {
+			return turns[i].CreatedAt > turns[j].CreatedAt
 		}
-		byTag[tag] = append(byTag[tag], e)
+		return turns[i].Path < turns[j].Path
+	})
+	sources := make([]labelSource, 0, len(turns))
+	for i, e := range turns {
+		sources = append(sources, labelSource{name: filepath.Base(e.Path), order: i, size: 1, labels: e.Labels})
 	}
-	sort.Strings(order)
+	return sampleLabels(sources, n)
+}
 
-	summaries := make([]turnSummary, 0, len(order))
-	for _, tag := range order {
-		s := turnSummary{tag: tag, entries: byTag[tag], labels: make(map[string]int)}
-		for _, e := range s.entries {
-			seen := make(map[string]struct{}, len(e.Labels))
-			for _, l := range e.Labels {
-				if _, dup := seen[l]; dup {
-					continue
-				}
-				seen[l] = struct{}{}
-				s.labels[l]++
-			}
-		}
-		summaries = append(summaries, s)
+// summarizeSessions groups entries by conversation — by the full session key,
+// never by a shortened tag, which conversations begun close together can share
+// — and names each group by its tag from conversationTags. Groups come back
+// sorted by tag, which for ogcode's time-ordered session ids is oldest first.
+func summarizeSessions(entries []*memfile.Entry) []turnSummary {
+	tags := conversationTags(entries)
+	byKey := make(map[string][]*memfile.Entry)
+	for _, e := range entries {
+		key := memfile.SessionKey(e.SessionID)
+		byKey[key] = append(byKey[key], e)
 	}
+	summaries := make([]turnSummary, 0, len(byKey))
+	for key, group := range byKey {
+		summaries = append(summaries, turnSummary{tag: tags[key], entries: group})
+	}
+	sort.Slice(summaries, func(i, j int) bool { return summaries[i].tag < summaries[j].tag })
 	return summaries
+}
+
+// conversationTags gives every conversation among entries the shortest tag
+// that no other conversation's key starts with — a prefix of its own session
+// key, never under minTagLen, the way git shortens a commit hash. Keyed by
+// session key.
+//
+// A fixed-length tag cannot do this: ogcode's session ids lead with their
+// creation time, so a short fixed prefix is the same for every conversation
+// begun in the same couple of hours, and memory_map used to fold them all into
+// one line and one drilldown. A unique prefix is as short as the listing
+// allows and grows only where two conversations are close.
+func conversationTags(entries []*memfile.Entry) map[string]string {
+	seen := make(map[string]struct{}, len(entries))
+	keys := make([]string, 0, len(entries))
+	for _, e := range entries {
+		key := memfile.SessionKey(e.SessionID)
+		if _, dup := seen[key]; !dup {
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	commonPrefix := func(a, b string) int {
+		n := 0
+		for n < len(a) && n < len(b) && a[n] == b[n] {
+			n++
+		}
+		return n
+	}
+	tags := make(map[string]string, len(keys))
+	for i, key := range keys {
+		// In sorted order a key shares its longest prefix with a neighbour, so
+		// one character past both neighbours' shared prefixes tells it from
+		// every other key.
+		need := minTagLen
+		if i > 0 {
+			need = max(need, commonPrefix(key, keys[i-1])+1)
+		}
+		if i+1 < len(keys) {
+			need = max(need, commonPrefix(key, keys[i+1])+1)
+		}
+		tags[key] = key[:min(need, len(key))]
+	}
+	return tags
+}
+
+// resolveConversation returns the session keys among entries that a tag names:
+// every key it is a prefix of, or just the one it equals exactly when there is
+// one. The tag is reduced the way a key is, so "ses_01M269J" and "ses01M269J"
+// name the same conversation.
+func resolveConversation(tag string, entries []*memfile.Entry) []string {
+	want := memfile.SessionKey(tag)
+	seen := make(map[string]struct{})
+	var matched []string
+	for _, e := range entries {
+		key := memfile.SessionKey(e.SessionID)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		if key == want {
+			return []string{key}
+		}
+		if strings.HasPrefix(key, want) {
+			matched = append(matched, key)
+		}
+	}
+	sort.Strings(matched)
+	return matched
+}
+
+// turnCount is a turn tally with the right noun.
+func turnCount(n int) string {
+	if n == 1 {
+		return "1 turn"
+	}
+	return fmt.Sprintf("%d turns", n)
 }
 
 // renderMemoryMap renders one level of the memory map. Flat renders each entry
 // as one file line — name plus labels (a conversation's turns, after a subdir
 // drilldown or under session scope); otherwise every conversation is one line:
-// tag/  top topics  (N turns) — the codebase_map folder-line shape.
+// tag/ (N turns) — sampled topics — the codebase_map folder-line shape.
 //
 // Like codebase_map's renderProjectMap, it degrades gracefully if the result
 // would not fit the budget: collapsing every conversation bounds the output by
@@ -226,12 +340,7 @@ func summarizeSessions(entries []*memfile.Entry) []turnSummary {
 // them wholesale. Dropping labels entirely is the last resort, for a level
 // where even one label per entry will not fit.
 func renderMemoryMap(entries []*memfile.Entry, label string, flat bool, subdir string) string {
-	turnNoun := func(n int) string {
-		if n == 1 {
-			return "1 turn"
-		}
-		return fmt.Sprintf("%d turns", n)
-	}
+	turnNoun := turnCount
 	// Grouped once, and only on the collapsed path: a flat render lists the
 	// entries themselves and never collapses a conversation.
 	var summaries []turnSummary
@@ -252,11 +361,11 @@ func renderMemoryMap(entries []*memfile.Entry, label string, flat bool, subdir s
 		var b strings.Builder
 		if flat {
 			fmt.Fprintf(&b, "%s in %s, newest first.\n", turnNoun(len(entries)), scopeName(subdir))
-			fmt.Fprintf(&b, "Summaries live in %s. Each line below is one summary file and its topics. Call file_map on a summary for its heading outline with line ranges, then read(path, start_line=N, end_line=M) for just that section.\n\n", memoryDirOf(entries))
+			fmt.Fprintf(&b, "Summaries live in %s. Each line below is one summary file, then its topics after \"—\", separated by \";\". Call file_map on a summary for its heading outline with line ranges, then read(path, start_line=N, end_line=M) for just that section.\n\n", memoryDirOf(entries))
 			renderFlat(entries, &b, rung.fileCap)
 		} else {
 			fmt.Fprintf(&b, "%s in %s.\n", turnNoun(len(entries)), label)
-			b.WriteString("Conversations end in \"/\" and are shown as ONE line each: the conversation's most common topics and the number of turns inside it. To see a conversation's turns, call again with subdir set to its tag (e.g. subdir=\"ses01M26\").\n\n")
+			fmt.Fprintf(&b, "Each conversation is ONE line: its tag ending in \"/\"; in parentheses, how many turns it holds; then, after \"—\", a sample of topics drawn from across all its turns, separated by \";\". To see a conversation's turns, call again with subdir set to its tag (e.g. subdir=%q).\n\n", exampleTag(summaries))
 			renderSessions(summaries, &b, rung.sessionCap, turnNoun)
 		}
 		if b.Len() <= memoryMapBudget {
@@ -275,8 +384,8 @@ func renderMemoryMap(entries []*memfile.Entry, label string, flat bool, subdir s
 		renderFlat(entries, &b, 0)
 	} else {
 		fmt.Fprintf(&b, "%s in %s.\n", turnNoun(len(entries)), label)
-		b.WriteString("Conversations end in \"/\". This level is too wide to show topics, so only the names are listed.\n")
-		fmt.Fprintf(&b, "Call memory_map again with subdir set to a conversation tag to get topics for its turns.\n\n")
+		b.WriteString("Conversations end in \"/\", with their turn count in parentheses. This level is too wide to show topics, so only the names are listed.\n")
+		fmt.Fprintf(&b, "Call memory_map again with subdir set to a conversation tag (e.g. subdir=%q) to get topics for its turns.\n\n", exampleTag(summaries))
 		renderSessions(summaries, &b, 0, turnNoun)
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
@@ -310,18 +419,32 @@ func renderFlat(entries []*memfile.Entry, b *strings.Builder, labelCap int) {
 	}
 }
 
-// renderSessions writes one line per conversation: its tag, its most common
-// topics, and its turn count — the codebase_map folder line. labelCap bounds
-// the topics shown; renderMemoryMap lowers it rung by rung when the level will
-// not fit the budget, and 0 degrades to names and counts only.
+// renderSessions writes one line per conversation — its tag, its turn count,
+// then a sample of its topics — the codebase_map folder line:
+//
+//	ses01M26/ (64 turns) — OGX Onboarding Screens; Country Whitelist; …
+//
+// labelCap bounds the topics shown; renderMemoryMap lowers it rung by rung
+// when the level will not fit the budget, and 0 degrades to names and counts
+// only.
 func renderSessions(summaries []turnSummary, b *strings.Builder, labelCap int, turnNoun func(int) string) {
 	for _, s := range summaries {
-		summary := "(" + turnNoun(len(s.entries)) + ")"
-		if labelCap > 0 && len(s.labels) > 0 {
-			if top := topLabels(s.labels, nil, labelCap); len(top) > 0 {
-				summary = strings.Join(top, ", ") + "  " + summary
-			}
+		line := fmt.Sprintf("%s/ (%s)", s.tag, turnNoun(len(s.entries)))
+		if labels := joinLabels(s.labels(labelCap)); labels != "" {
+			line += " — " + labels
 		}
-		fmt.Fprintf(b, "%s/  %s\n", s.tag, summary)
+		b.WriteString(line + "\n")
 	}
+}
+
+// exampleTag is a real conversation tag for the header's next-step example:
+// the conversation with the most turns, the likeliest one to open.
+func exampleTag(summaries []turnSummary) string {
+	best, most := "ses01M269J", -1
+	for _, s := range summaries {
+		if n := len(s.entries); n > most || (n == most && s.tag < best) {
+			best, most = s.tag, n
+		}
+	}
+	return best
 }

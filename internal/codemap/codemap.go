@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
@@ -77,6 +79,12 @@ type Symbol struct {
 	// Depth is how many symbols enclose this one — 0 at file scope, 1 for a
 	// class member. Rendered as indentation.
 	Depth int
+
+	// startByte and endByte span the same text as StartLine and EndLine, in
+	// bytes. Nesting is decided on these rather than on lines: two siblings
+	// can share a line — `</li><li class="b">`, `.a{}.b{}` — and judged by
+	// lines alone the second reads as nested inside the first.
+	startByte, endByte int
 }
 
 // FileMap is the outline of one file.
@@ -85,8 +93,20 @@ type FileMap struct {
 	Lang       string
 	TotalLines int
 	Symbols    []*Symbol
+	// FromLine and ToLine bound a map of one region (see OutlineRange); both
+	// are zero for a map of the whole file.
+	FromLine, ToLine int
 	// Omitted counts symbols dropped by the MaxSymbols cap.
 	Omitted int
+	// OmittedDepth, when the cap dropped anything, is the shallowest nesting
+	// level it dropped: every entry that deep or deeper is left out, all
+	// through the file, so what remains still covers the file end to end. Zero
+	// when even the file-scope entries did not fit, and the map ends at
+	// StopLine instead.
+	OmittedDepth int
+	// StopLine is the last line a map cut short by the cap still covers; zero
+	// when it runs to the end.
+	StopLine int
 	// Fallback is true when no grammar covered this extension and the
 	// heuristic scanner produced the outline.
 	Fallback bool
@@ -99,12 +119,23 @@ type FileMap struct {
 
 // Outline parses path and returns its structural map.
 func Outline(path string) (*FileMap, error) {
+	return OutlineRange(path, 0, 0)
+}
+
+// OutlineRange maps only the declarations that reach into lines from through to
+// (1-based, inclusive; to 0 runs to the end of the file), together with the
+// ones enclosing them, so a region the whole-file map had to leave out can be
+// seen in full. from 0 maps the whole file.
+//
+// The MaxSymbols cap applies to what the region holds, not to the file, which
+// is what makes zooming in on a region of a capped map useful.
+func OutlineRange(path string, from, to int) (*FileMap, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 	if info.IsDir() {
-		return nil, fmt.Errorf("%s is a directory", path)
+		return nil, fmt.Errorf("%s: %w", path, ErrDirectory)
 	}
 	if info.Size() > MaxFileSize {
 		return nil, &TooLargeError{Size: info.Size()}
@@ -120,7 +151,7 @@ func Outline(path string) (*FileMap, error) {
 
 	fm := &FileMap{Path: path, TotalLines: countLines(src)}
 
-	lang := lookup(path)
+	lang := lookupForOutline(path)
 	if lang == nil {
 		fm.Lang = "text"
 		fm.Symbols = fallbackSymbols(path, src)
@@ -135,11 +166,77 @@ func Outline(path string) (*FileMap, error) {
 		fm.ParseError = parseErr
 	}
 
-	if len(fm.Symbols) > MaxSymbols {
-		fm.Omitted = len(fm.Symbols) - MaxSymbols
-		fm.Symbols = fm.Symbols[:MaxSymbols]
+	if from > 0 {
+		fm.FromLine, fm.ToLine = from, to
+		if to <= 0 || to > fm.TotalLines {
+			fm.ToLine = fm.TotalLines
+		}
+		fm.Symbols = within(fm.Symbols, fm.FromLine, fm.ToLine)
 	}
+	capSymbols(fm)
 	return fm, nil
+}
+
+// within keeps the symbols whose range reaches into lines from..to. A
+// declaration that encloses the region stays too: it is what the region's
+// entries are nested in, and without it their indentation would hang from
+// nothing.
+func within(symbols []*Symbol, from, to int) []*Symbol {
+	out := symbols[:0]
+	for _, s := range symbols {
+		if s.EndLine >= from && s.StartLine <= to {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// capSymbols holds the outline to MaxSymbols entries.
+//
+// The deepest entries go first. Cutting by position instead kept the top of
+// the file in full and dropped the rest outright: a long HTML page, where every
+// element carrying a class earns an entry, mapped its header and decorations
+// and then stopped halfway down, leaving the lower half of the page with no
+// map at all. Keeping every level that fits keeps the whole file covered —
+// coarser where it has to be — and a region can still be mapped in full with
+// OutlineRange.
+//
+// Only when the file-scope entries alone overflow the cap is the map cut by
+// position, and then it records where it stops.
+func capSymbols(fm *FileMap) {
+	total := len(fm.Symbols)
+	if total <= MaxSymbols {
+		return
+	}
+
+	perDepth := map[int]int{}
+	for _, s := range fm.Symbols {
+		perDepth[s.Depth]++
+	}
+	keepDepth, kept := -1, 0
+	for d := 0; kept+perDepth[d] <= MaxSymbols && perDepth[d] > 0; d++ {
+		kept += perDepth[d]
+		keepDepth = d
+	}
+
+	out := fm.Symbols[:0]
+	if keepDepth >= 0 {
+		for _, s := range fm.Symbols {
+			if s.Depth <= keepDepth {
+				out = append(out, s)
+			}
+		}
+		fm.OmittedDepth = keepDepth + 1
+	} else {
+		for _, s := range fm.Symbols {
+			if s.Depth == 0 && len(out) < MaxSymbols {
+				out = append(out, s)
+			}
+		}
+		fm.StopLine = out[len(out)-1].EndLine
+	}
+	fm.Symbols = out
+	fm.Omitted = total - len(out)
 }
 
 // parseSymbols runs the language's outline query over src.
@@ -177,6 +274,9 @@ func parseSymbols(src []byte, lang *language) ([]*Symbol, bool, error) {
 				continue
 			}
 			node := capture.Node
+			if lang.localScopeKind != "" && hasAncestor(&node, lang.localScopeKind) {
+				continue
+			}
 			symbols = append(symbols, buildSymbol(&node, src, kind, lang))
 		}
 	}
@@ -185,7 +285,42 @@ func parseSymbols(src []byte, lang *language) ([]*Symbol, bool, error) {
 	symbols = dedupSymbols(symbols)
 	symbols = mergeImports(symbols)
 	assignDepth(symbols)
-	return symbols, root.HasError(), nil
+
+	parseErr := root.HasError()
+	if parseErr && len(src) > 0 && src[len(src)-1] != '\n' {
+		parseErr = stillBrokenWithFinalNewline(parser, src)
+	}
+	return symbols, parseErr, nil
+}
+
+// hasAncestor reports whether any node enclosing node is of the given kind.
+func hasAncestor(node *ts.Node, kind string) bool {
+	for p := node.Parent(); p != nil; p = p.Parent() {
+		if p.Kind() == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// stillBrokenWithFinalNewline reports whether src has a syntax error once its
+// last line is ended.
+//
+// Some grammars expect every top-level declaration to be closed by a newline.
+// A Go file whose last line has none parses to a tree ending in a MISSING
+// terminator that no visible node holds, and HasError reports it — for a file
+// the compiler accepts as written. Parsing once more with the newline in place
+// separates that from damage the file really has.
+func stillBrokenWithFinalNewline(parser *ts.Parser, src []byte) bool {
+	ended := make([]byte, len(src)+1)
+	copy(ended, src)
+	ended[len(src)] = '\n'
+	tree := parser.Parse(ended, nil)
+	if tree == nil {
+		return true
+	}
+	defer tree.Close()
+	return tree.RootNode().HasError()
 }
 
 // dedupSymbols drops consecutive symbols that describe the same declaration
@@ -256,7 +391,9 @@ func buildSymbol(node *ts.Node, src []byte, kind string, lang *language) *Symbol
 	}
 
 	startLine := int(anchor.StartPosition().Row) + 1
+	startByte := int(anchor.StartByte())
 	endLine := int(node.EndPosition().Row) + 1
+	endByte := int(node.EndByte())
 	// A node whose end lands in column 0 stops at the very start of the next
 	// line, so its last line of content is the one before.
 	if node.EndPosition().Column == 0 && endLine > startLine {
@@ -272,6 +409,7 @@ func buildSymbol(node *ts.Node, src []byte, kind string, lang *language) *Symbol
 		if end := lastContentRow(body) + 1; end > endLine {
 			endLine = end
 		}
+		endByte = max(endByte, int(body.EndByte()))
 	}
 
 	// A docstring is inside the body, so it never moves the start line the way
@@ -282,9 +420,10 @@ func buildSymbol(node *ts.Node, src []byte, kind string, lang *language) *Symbol
 		docText = docstringOf(node, src)
 	}
 	if docText == "" {
-		docLine, fromComment := docStart(anchor, src, lang)
+		docLine, docByte, fromComment := docStart(anchor, src, lang)
 		if docLine > 0 && docLine < startLine {
 			startLine = docLine
+			startByte = docByte
 		}
 		docText = fromComment
 	}
@@ -295,6 +434,8 @@ func buildSymbol(node *ts.Node, src []byte, kind string, lang *language) *Symbol
 		Doc:       docText,
 		StartLine: startLine,
 		EndLine:   endLine,
+		startByte: startByte,
+		endByte:   endByte,
 	}
 	if len(names) > 0 {
 		sym.Name = names[0]
@@ -368,9 +509,9 @@ func docstringOf(node *ts.Node, src []byte) string {
 // wrap at around 77 columns, so the first physical line almost always ends
 // mid-sentence — joining lets the caller cut at a sentence boundary instead of
 // wherever the author happened to hit the margin.
-func docStart(node *ts.Node, src []byte, lang *language) (int, string) {
+func docStart(node *ts.Node, src []byte, lang *language) (int, int, string) {
 	if len(lang.commentKinds) == 0 {
-		return 0, ""
+		return 0, 0, ""
 	}
 	anchor := docAnchor(node)
 	var block []*ts.Node
@@ -391,25 +532,65 @@ func docStart(node *ts.Node, src []byte, lang *language) (int, string) {
 	}
 
 	if len(block) == 0 {
-		return 0, ""
+		return 0, 0, ""
 	}
 
 	// block was collected bottom-up; read it back in source order.
 	var parts []string
 	for i := len(block) - 1; i >= 0; i-- {
 		for _, line := range strings.Split(block[i].Utf8Text(src), "\n") {
+			if isDirective(line) {
+				continue
+			}
 			if stripped := firstDocLine(line); stripped != "" {
 				parts = append(parts, stripped)
 			}
 		}
 	}
 
-	topLine := int(block[len(block)-1].StartPosition().Row) + 1
+	top := block[len(block)-1]
 	doc := strings.Join(parts, " ")
 	if lang.xmlDocs {
 		doc = summaryFromXMLDoc(doc)
 	}
-	return topLine, doc
+	return int(top.StartPosition().Row) + 1, int(top.StartByte()), doc
+}
+
+// goDirective matches the text after "//" of a Go-style directive comment —
+// //go:embed, //nolint:errcheck, //lint:ignore — the form go/doc leaves out of
+// a doc comment.
+var goDirective = regexp.MustCompile(`^[a-z0-9]+:[a-z0-9]`)
+
+// toolDirectives open a comment addressed to a linter, formatter or type
+// checker rather than to a reader.
+var toolDirectives = []string{
+	"eslint-disable", "eslint-enable", "@ts-", "prettier-ignore", "biome-ignore",
+	"istanbul ignore", "c8 ignore", "noqa", "pylint:", "type: ignore", "fmt: off",
+	"fmt: on", "+build ", "-*-",
+}
+
+// isDirective reports whether one line of a comment is an instruction to a tool
+// rather than a description of the code.
+//
+// A directive still annotates the declaration, so its line stays in the range.
+// It is only kept out of the doc text, where it read as the summary — the
+// excerpt of an embedded file system was "go:embed all:dist" — and spent the
+// excerpt's length before the sentence that says what the declaration is for.
+func isDirective(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if rest, ok := strings.CutPrefix(s, "//"); ok {
+		if goDirective.MatchString(rest) ||
+			strings.HasPrefix(rest, "line ") || strings.HasPrefix(rest, "export ") || strings.HasPrefix(rest, "extern ") {
+			return true
+		}
+	}
+	text := strings.TrimSpace(strings.TrimLeft(s, "/*#!"))
+	for _, d := range toolDirectives {
+		if strings.HasPrefix(text, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // summaryFromXMLDoc reduces a C# XML documentation comment to the prose a
@@ -547,6 +728,19 @@ func docAnchor(node *ts.Node) *ts.Node {
 // a `<!-- primary nav -->` above a nav element keeps its markers and reads as
 // markup rather than as the description it is.
 func firstDocLine(raw string) string {
+	return strings.TrimSpace(decorationRun.ReplaceAllString(stripDocMarkers(raw), ""))
+}
+
+// decorationRun matches a run of rule characters at either end of a comment
+// line. Section banners — "/* ==== Typefaces ==== */", "# ------ model",
+// "<!-- ══ Nav ════ -->" — are drawn with them, and left in they filled the doc
+// excerpt with "=====" before the word that names the section. An ASCII run
+// needs three or more, so a "--flag" or a "- list item" keeps its text; a
+// box-drawing character is never prose, so any run of those goes.
+var decorationRun = regexp.MustCompile(`^(?:[-=*#~_+/]{3,}|[═─━]+)\s*|\s*(?:[-=*#~_+/]{3,}|[═─━]+)$`)
+
+// stripDocMarkers removes the comment syntax from one line of a comment.
+func stripDocMarkers(raw string) string {
 	s := strings.TrimSpace(raw)
 	if rest, ok := strings.CutPrefix(s, "//"); ok {
 		// Rust marks an outer doc with a third slash and an inner doc with a
@@ -607,11 +801,17 @@ func startsItsLine(node *ts.Node, src []byte) bool {
 			return true
 		}
 		if src[i] != ' ' && src[i] != '\t' {
-			return false
+			// A byte-order mark opening the file is not content: the comment
+			// after it still starts its line. Counted as text, it cost the first
+			// declaration of every such file its doc comment.
+			return i == len(utf8BOM)-1 && bytes.HasPrefix(src, utf8BOM)
 		}
 	}
 	return true
 }
+
+// utf8BOM is the byte-order mark some editors write at the start of a file.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
 // namesOf extracts the identifiers a declaration binds.
 //
@@ -635,6 +835,15 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 	// this only fires where it is meant to.
 	if n := node.ChildByFieldName("left"); n != nil {
 		return []string{n.Utf8Text(src)}
+	}
+
+	// C and C++ bury a declaration's name inside its declarator — behind a
+	// pointer, a reference, an array or a function's parameter list — rather
+	// than naming a field for it: `static char *name(void)` is a
+	// function_definition whose name sits three declarators down. A
+	// declaration can declare several (`int a, b;`), so each is followed.
+	if names := declaratorNames(node, src); len(names) > 0 {
+		return names
 	}
 
 	// A Rust impl block declares no identifier of its own; it is known by the
@@ -673,6 +882,16 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 	// captures elements that carry one of the two, so the tag fallback fires
 	// for script and style, whose tag is the only name they have.
 	switch node.Kind() {
+	case "pair":
+		// A function-valued property of an object-literal module is known by
+		// its key: `post: async () => {…}` is `post`.
+		if key := node.ChildByFieldName("key"); key != nil {
+			return []string{strings.Trim(key.Utf8Text(src), `"'`)}
+		}
+	case "export_statement":
+		// Captured whole only when the export has no declaration to name —
+		// `export default () => {…}` — so the name is the one it is imported by.
+		return []string{"default"}
 	case "element", "script_element", "style_element":
 		if name := htmlElementName(node, src); name != "" {
 			return []string{name}
@@ -701,11 +920,8 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 	// them is what makes a grouped declaration worth a line, since its own
 	// first line is only `const (`.
 	var names []string
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		spec := node.NamedChild(i)
-		if spec == nil {
-			continue
-		}
+	specs := specsOf(node)
+	for _, spec := range specs {
 		for j := uint(0); j < spec.NamedChildCount(); j++ {
 			if spec.FieldNameForNamedChild(uint32(j)) != "name" {
 				continue
@@ -716,9 +932,72 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 		}
 	}
 	if len(names) == 0 {
-		names = namesByKind(node, src)
+		names = namesByKind(specs, src)
 	}
 	return names
+}
+
+// specsOf returns the specs a grouped declaration binds its names through.
+//
+// Most grammars hang them directly under the declaration, but Go's var group
+// puts a var_spec_list in between — `var ( A = 1 )` is (var_declaration
+// (var_spec_list (var_spec …))) where the const group has no such layer — so a
+// walk one level down found only the list, and every `var ( … )` block showed
+// as a bare "var (" with none of its names.
+func specsOf(node *ts.Node) []*ts.Node {
+	var specs []*ts.Node
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		if strings.HasSuffix(child.Kind(), "_spec_list") {
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				if spec := child.NamedChild(j); spec != nil {
+					specs = append(specs, spec)
+				}
+			}
+			continue
+		}
+		specs = append(specs, child)
+	}
+	return specs
+}
+
+// declaratorNames follows each of node's `declarator` fields down to the name
+// it declares. It returns nothing for a node without one, which is every
+// grammar but C's and C++'s.
+func declaratorNames(node *ts.Node, src []byte) []string {
+	var names []string
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if node.FieldNameForNamedChild(uint32(i)) != "declarator" {
+			continue
+		}
+		if name := declaratorName(node.NamedChild(i), src); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// declaratorName unwraps one C or C++ declarator to the name inside it.
+func declaratorName(d *ts.Node, src []byte) string {
+	for range 16 {
+		if d == nil {
+			return ""
+		}
+		switch d.Kind() {
+		case "identifier", "field_identifier", "type_identifier", "qualified_identifier",
+			"destructor_name", "operator_name", "template_function":
+			return d.Utf8Text(src)
+		case "parenthesized_declarator", "reference_declarator":
+			// These hold the inner declarator as a plain child, not a field.
+			d = d.NamedChild(0)
+			continue
+		}
+		d = d.ChildByFieldName("declarator")
+	}
+	return ""
 }
 
 // dartNameChild maps a Dart declaration kind to the child kinds that can carry
@@ -751,13 +1030,9 @@ func firstChildOfKind(node *ts.Node, kinds []string) *ts.Node {
 // It runs only when the field walk came back empty, so Go's const_spec and
 // TypeScript's variable_declarator — both of which do name the field — never
 // reach it.
-func namesByKind(node *ts.Node, src []byte) []string {
+func namesByKind(specs []*ts.Node, src []byte) []string {
 	var names []string
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		spec := node.NamedChild(i)
-		if spec == nil {
-			continue
-		}
+	for _, spec := range specs {
 		for j := uint(0); j < spec.NamedChildCount(); j++ {
 			child := spec.NamedChild(j)
 			if child != nil && child.Kind() == "name" {
@@ -887,9 +1162,11 @@ func mergeImports(symbols []*Symbol) []*Symbol {
 	out := symbols[:0]
 	for _, s := range symbols {
 		if s.Kind == "import" && len(out) > 0 && out[len(out)-1].Kind == "import" {
-			if prev := out[len(out)-1]; s.EndLine > prev.EndLine {
+			prev := out[len(out)-1]
+			if s.EndLine > prev.EndLine {
 				prev.EndLine = s.EndLine
 			}
+			prev.endByte = max(prev.endByte, s.endByte)
 			continue
 		}
 		out = append(out, s)
@@ -898,13 +1175,22 @@ func mergeImports(symbols []*Symbol) []*Symbol {
 }
 
 // assignDepth marks how deeply each symbol nests, by containment over the
-// line-sorted list: a symbol starting before the previous one ends is inside it.
-// This keeps class members visibly attached to their class without the renderer
-// needing to know anything about class syntax.
+// position-sorted list: a symbol lying wholly inside the one before it is its
+// child. This keeps class members visibly attached to their class without the
+// renderer needing to know anything about class syntax.
+//
+// Containment is judged on byte spans. On lines alone, a symbol starting on
+// the line where the previous one ends read as inside it, and siblings sharing
+// a line chained ever deeper — `<li class="a">…</li><li class="b">` put b under
+// a, and a run of such siblings each under the one before.
 func assignDepth(symbols []*Symbol) {
 	var stack []*Symbol
 	for _, s := range symbols {
-		for len(stack) > 0 && s.StartLine > stack[len(stack)-1].EndLine {
+		for len(stack) > 0 {
+			top := stack[len(stack)-1]
+			if s.startByte < top.endByte && s.endByte <= top.endByte {
+				break
+			}
 			stack = stack[:len(stack)-1]
 		}
 		s.Depth = len(stack)
@@ -912,10 +1198,13 @@ func assignDepth(symbols []*Symbol) {
 	}
 }
 
+// sortByPosition orders symbols by where they start and, among those starting
+// at the same place, puts the enclosing one first so its contents follow it.
 func sortByPosition(symbols []*Symbol) {
-	for i := 1; i < len(symbols); i++ {
-		for j := i; j > 0 && symbols[j].StartLine < symbols[j-1].StartLine; j-- {
-			symbols[j], symbols[j-1] = symbols[j-1], symbols[j]
+	sort.SliceStable(symbols, func(i, j int) bool {
+		if symbols[i].startByte != symbols[j].startByte {
+			return symbols[i].startByte < symbols[j].startByte
 		}
-	}
+		return symbols[i].endByte > symbols[j].endByte
+	})
 }

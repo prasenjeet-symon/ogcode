@@ -173,7 +173,7 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// run for several turns. The bytes on both sides are already in hand here,
 	// so the check costs one parse and reports the damage while the change that
 	// caused it is still the last thing that happened.
-	note, check := syntaxNote(path, data, newContent)
+	note, check := syntaxNote(path, input.Path, data, newContent)
 
 	return applySyntaxNote(Result{
 		Title:  filepath.Base(path),

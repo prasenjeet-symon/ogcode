@@ -65,11 +65,11 @@ func memEntry(sessionID, title string, created time.Time, labels ...string) *mem
 // A conversation line is capped at sessionLabelCap labels however many distinct
 // topics its turns carry: one line stands for a whole branch of turns, and the
 // per-turn detail arrives on drill-down — the codebase_map folder-line rule.
+// Every turn is heard before any turn is heard twice.
 func TestMemoryMap_ConversationLineCappedAtTheSessionCeiling(t *testing.T) {
 	base := time.Date(2026, 9, 9, 10, 0, 0, 0, time.UTC)
 	// Six turns of eight labels each: 48 distinct topics in one conversation,
-	// more than the cap allows. All appear once, so alphabetical ties decide
-	// which survive.
+	// more than the cap allows.
 	entries := make([]*memfile.Entry, 0, 6)
 	for turn := 0; turn < 6; turn++ {
 		labels := make([]string, 8)
@@ -80,21 +80,15 @@ func TestMemoryMap_ConversationLineCappedAtTheSessionCeiling(t *testing.T) {
 	}
 
 	out := renderMemoryMap(entries, "this project", false, "")
-	line := ""
-	for _, l := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(l), "sessAABB/") {
-			line = l
-			break
+	line := folderLine(t, out, "sessAABB/")
+	if got := len(lineLabels(line)); got != sessionLabelCap {
+		t.Errorf("conversation line carries %d labels, want the cap of %d:\n%s", got, sessionLabelCap, line)
+	}
+	// Each turn's first — most important — label is on the line.
+	for turn := 0; turn < 6; turn++ {
+		if !strings.Contains(line, fmt.Sprintf("topic%02d", turn*8)) {
+			t.Errorf("turn %d went unheard:\n%s", turn, line)
 		}
-	}
-	if line == "" {
-		t.Fatalf("no collapsed line for the conversation:\n%s", out)
-	}
-	if !strings.Contains(line, "topic00") || !strings.Contains(line, fmt.Sprintf("topic%02d", sessionLabelCap-1)) {
-		t.Errorf("labels within the cap were dropped:\n%s", line)
-	}
-	if strings.Contains(line, fmt.Sprintf("topic%02d", sessionLabelCap)) {
-		t.Errorf("a label past the cap of %d was kept:\n%s", sessionLabelCap, line)
 	}
 }
 
@@ -137,7 +131,7 @@ func TestMemoryMap_WideLevelShowsFewerLabelsRatherThanNone(t *testing.T) {
 	}
 	// And they survive at reduced depth: three labels per line must not fit a
 	// level this wide, so the render had to go below that rung.
-	atThree := "conversation behaviour topic 0, conversation behaviour topic 1, conversation behaviour topic 2"
+	atThree := "conversation behaviour topic 0; conversation behaviour topic 1; conversation behaviour topic 2"
 	if strings.Contains(out, atThree) {
 		t.Error("expected a cap below 3 labels per conversation for a level this wide")
 	}
@@ -210,8 +204,8 @@ func TestMemoryMap_ResultOptsOutOfTheGenericOutputCap(t *testing.T) {
 }
 
 // Project scope with no subdir must render the codebase_map shape: every
-// conversation collapsed to ONE line — tag/, its most common topics ranked by
-// frequency, its turn count — and nothing else.
+// conversation collapsed to ONE line — tag/, its turn count, a sample of its
+// topics — and nothing else.
 func TestMemoryMap_ProjectScopeCollapsesConversations(t *testing.T) {
 	s := newMemoryMapTestStore(t)
 	dir := t.TempDir()
@@ -231,18 +225,19 @@ func TestMemoryMap_ProjectScopeCollapsesConversations(t *testing.T) {
 	if !strings.Contains(out, "4 turns in this project") {
 		t.Fatalf("missing total in header:\n%s", out)
 	}
-	// The conversation line carries the ranked topics and the count.
-	if !strings.Contains(out, "sessAABB/  migrations, schema, tooling  (3 turns)") {
+	// The conversation line carries the count and the topics, each once.
+	if !strings.Contains(out, "sessAABB/ (3 turns) — migrations; schema; tooling") {
 		t.Fatalf("missing collapsed line for sessAABBCC:\n%s", out)
 	}
-	if !strings.Contains(out, "sessXXYY/  ui  (1 turn)") {
+	if !strings.Contains(out, "sessXXYY/ (1 turn) — ui") {
 		t.Fatalf("missing collapsed line for sessXXYYZZ:\n%s", out)
 	}
 	// Collapsed means collapsed: no outline, no path at this level.
 	if strings.Contains(out, "## Request") || strings.Contains(out, ".md") {
 		t.Fatalf("project level leaked per-turn detail:\n%s", out)
 	}
-	if strings.Contains(out, "Conversations end in \"/\"") == false {
+	// The drilldown hint names a real tag: the conversation with the most turns.
+	if !strings.Contains(out, `call again with subdir set to its tag (e.g. subdir="sessAABB")`) {
 		t.Fatalf("missing drilldown hint:\n%s", out)
 	}
 }
@@ -267,7 +262,7 @@ func TestMemoryMap_SubdirDrillsIntoConversation(t *testing.T) {
 		t.Fatalf("missing drilldown header:\n%s", out)
 	}
 	// The codebase_map file-line shape: name and labels on one line.
-	if !strings.Contains(out, "2026-09-09T100000Z--sessAABB--first.md  migrations") {
+	if !strings.Contains(out, "2026-09-09T100000Z--sessAABBCC--first.md — migrations") {
 		t.Fatalf("drilldown missing the file line for the turn:\n%s", out)
 	}
 	// Collapsed means collapsed: no old-style detail lines, no other conversation.
@@ -312,7 +307,7 @@ func TestMemoryMap_SessionScopeStaysFlat(t *testing.T) {
 	if !strings.Contains(out, "2 turns in this conversation") {
 		t.Fatalf("missing flat header:\n%s", out)
 	}
-	if !strings.Contains(out, "--sessAABB--first.md  migrations") || !strings.Contains(out, "--sessAABB--second.md  tooling") {
+	if !strings.Contains(out, "--sessAABBCC--first.md — migrations") || !strings.Contains(out, "--sessAABBCC--second.md — tooling") {
 		t.Fatalf("flat render missing file lines:\n%s", out)
 	}
 	// No collapsed lines, no other conversation's summaries, no outline.
@@ -336,5 +331,145 @@ func TestMemoryMap_SessionScopeRejectsForeignSubdir(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "scoped to conversation") {
 		t.Fatalf("expected scope refusal, got:\n%s", res.Output)
+	}
+}
+
+// A conversation line samples the whole conversation, not its alphabetical
+// head: a turn's labels are nearly all its own, so a ranking by how many turns
+// carry a label ties everywhere and its tie-break decided the line.
+func TestMemoryMap_ConversationLineSamplesEveryPartOfIt(t *testing.T) {
+	base := time.Date(2026, 9, 9, 10, 0, 0, 0, time.UTC)
+	entries := make([]*memfile.Entry, 0, 60)
+	for turn := 0; turn < 60; turn++ {
+		// Labels that sort in the opposite order to time, so a head-of-alphabet
+		// pick and a head-of-time pick would both miss most of the conversation.
+		entries = append(entries, memEntry("sessAABBCC", fmt.Sprintf("turn %02d", turn),
+			base.Add(time.Duration(turn)*time.Minute), fmt.Sprintf("topic %02d", 59-turn)))
+	}
+	labels := lineLabels(folderLine(t, renderMemoryMap(entries, "this project", false, ""), "sessAABB/"))
+	if len(labels) != sessionLabelCap {
+		t.Fatalf("conversation line carries %d labels, want %d: %q", len(labels), sessionLabelCap, labels)
+	}
+	var early, middle, late bool
+	for _, l := range labels {
+		var n int
+		fmt.Sscanf(l, "topic %d", &n)
+		turn := 59 - n
+		switch {
+		case turn < 20:
+			early = true
+		case turn < 40:
+			middle = true
+		default:
+			late = true
+		}
+	}
+	if !early || !middle || !late {
+		t.Errorf("labels come from only part of the conversation (early %v, middle %v, late %v): %q", early, middle, late, labels)
+	}
+}
+
+// A summary line joins its labels with semicolons, after a dash, so a label
+// with commas of its own reads as one — and one carrying a semicolon is
+// cleaned rather than split.
+func TestMemoryMap_SummaryLineSeparatesLabelsUnambiguously(t *testing.T) {
+	e := memEntry("sessAABBCC", "First", time.Date(2026, 9, 9, 10, 0, 0, 0, time.UTC),
+		"Yamux Tunnel, Reverse Proxy", "Auth; Sessions")
+	got := renderSummaryLine(e, textLabelCap)
+	want := "2026-09-09T100000Z--sessAABBCC--first.md — Yamux Tunnel, Reverse Proxy; Auth, Sessions\n"
+	if got != want {
+		t.Errorf("summary line = %q, want %q", got, want)
+	}
+}
+
+// Conversations begun within a couple of hours of each other share the leading
+// characters of their session ids — the ids lead with the creation time — and
+// used to share one tag, one map line and one drilldown. Each now keeps its own
+// line under the shortest tag that tells it apart, and a short tag that fits
+// several is refused with the tags that do, never answered with a blend.
+func TestMemoryMap_ConversationsBegunTogetherKeepTheirOwnLines(t *testing.T) {
+	s := newMemoryMapTestStore(t)
+	dir := t.TempDir()
+	base := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	const (
+		first  = "ses_01M269J8TM53WGCRH83WZY8QD7"
+		second = "ses_01M268Y4TGXSBJB7PYHTB8399B"
+		later  = "ses_01M32MFDSH78P6VXWYQ72MRP9X"
+	)
+	indexSummary(t, s, dir, first, "Deploy plan", []string{"deploy"}, base)
+	indexSummary(t, s, dir, first, "Deploy again", []string{"rollback"}, base.Add(time.Hour))
+	indexSummary(t, s, dir, second, "Pricing", []string{"pricing"}, base.Add(30*time.Minute))
+	indexSummary(t, s, dir, later, "Onboarding", []string{"onboarding"}, base.Add(72*time.Hour))
+	tool := NewMemoryMapTool(s)
+
+	res, err := tool.Execute(projectScopeCtx(), nil, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{
+		"ses01M268/ (1 turn) — pricing",
+		"ses01M269/ (2 turns) — rollback; deploy",
+		"ses01M32/ (1 turn) — onboarding",
+	} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("map missing %q:\n%s", want, res.Output)
+		}
+	}
+
+	drill := func(subdir string) string {
+		t.Helper()
+		args, _ := json.Marshal(map[string]any{"subdir": subdir})
+		res, err := tool.Execute(projectScopeCtx(), args, Context{SessionDir: dir})
+		if err != nil {
+			t.Fatalf("Execute(%q): %v", subdir, err)
+		}
+		return res.Output
+	}
+
+	// The old shared tag fits both, so it names neither.
+	amb := drill("ses01M26")
+	if !strings.Contains(amb, "fits 2 conversations") ||
+		!strings.Contains(amb, "ses01M268/ (1 turn)") || !strings.Contains(amb, "ses01M269/ (2 turns)") {
+		t.Errorf("an ambiguous tag was not refused with the tags that tell the conversations apart:\n%s", amb)
+	}
+	if strings.Contains(amb, "pricing") || strings.Contains(amb, "deploy") {
+		t.Errorf("an ambiguous tag listed turns:\n%s", amb)
+	}
+
+	// The shown tag, a longer prefix and the session id itself all name one.
+	for _, subdir := range []string{"ses01M269", "ses01M269J8TM", first} {
+		out := drill(subdir)
+		if !strings.Contains(out, "2 turns in conversation ses01M269") ||
+			!strings.Contains(out, "rollback") || strings.Contains(out, "pricing") {
+			t.Errorf("subdir %q did not open just its conversation:\n%s", subdir, out)
+		}
+	}
+}
+
+// A tag is the shortest prefix of its conversation's key that no other key
+// starts with, never under minTagLen — and a key that is itself a prefix of
+// another still resolves to exactly itself.
+func TestMemoryMap_ConversationTagsAreUniquePrefixes(t *testing.T) {
+	entries := []*memfile.Entry{
+		{SessionID: "ses_01M269J8TM53WGCRH83WZY8QD7"},
+		{SessionID: "ses_01M268Y4TGXSBJB7PYHTB8399B"},
+		{SessionID: "ses_01M32MFDSH78P6VXWYQ72MRP9X"},
+		{SessionID: "sessAB"},
+		{SessionID: "sessABCD1234"},
+	}
+	tags := conversationTags(entries)
+	for key, want := range map[string]string{
+		"ses01M269J8TM53WGCRH83WZY8QD7": "ses01M269",
+		"ses01M268Y4TGXSBJB7PYHTB8399B": "ses01M268",
+		"ses01M32MFDSH78P6VXWYQ72MRP9X": "ses01M32",
+		"sessAB":                        "sessAB",
+		"sessABCD1234":                  "sessABCD",
+	} {
+		if got := tags[key]; got != want {
+			t.Errorf("tag for %s = %q, want %q", key, got, want)
+		}
+	}
+	if got := resolveConversation("sessAB", entries); len(got) != 1 || got[0] != "sessAB" {
+		t.Errorf("an exact key did not resolve to itself alone: %v", got)
 	}
 }

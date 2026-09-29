@@ -298,13 +298,17 @@ export function Select(props: {
   );
 }
 
-type ButtonVariant = 'filled' | 'outlined' | 'text';
+type ButtonVariant = 'filled' | 'outlined' | 'text' | 'danger';
 
 const VARIANTS: Record<ButtonVariant, string> = {
   filled: 'bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:bg-[color:var(--accent-hover)] border border-transparent',
   outlined: 'bg-[color:var(--bg-elevated)] text-[color:var(--accent)] border border-transparent hover:brightness-125',
   // An action, not a value: tinted text, no chrome around it.
   text: 'bg-transparent text-[color:var(--accent)] border border-transparent hover:opacity-70',
+  // The way out of something — disconnect, remove. Quiet until pointed at, so
+  // it never competes with the action a row is really for.
+  danger:
+    'bg-transparent text-[color:var(--danger)] border border-[color:var(--border-default)] hover:border-[color:var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_10%,transparent)]',
 };
 
 export function Button(props: {

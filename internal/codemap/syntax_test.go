@@ -1,6 +1,7 @@
 package codemap
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -136,7 +137,7 @@ func TestCheckDiagnosticsAre1Based(t *testing.T) {
 // OK() reports unknown rather than clean, because an agent that reads silence
 // as success has bought exactly the false confidence this tool exists to deny.
 func TestCheckUnsupportedLanguageIsNotOK(t *testing.T) {
-	path := write(t, "config.yaml", "key: [unclosed\n")
+	path := write(t, "deploy.sh", "if [ -z \"$X\" ]; then\n  echo unclosed\n")
 
 	res, err := Check(path)
 	if err != nil {
@@ -216,5 +217,107 @@ func TestRenderCheckVerdicts(t *testing.T) {
 	}
 	if !strings.Contains(out, "3:") {
 		t.Errorf("broken render omits the error position:\n%s", out)
+	}
+}
+
+// Some breakage leaves nothing but a MISSING token of a hidden kind — Go's
+// statement terminator — which no visible node carries. The tree still reports
+// an error, so the check must too, and on the damaged line.
+func TestCheckReportsErrorsOnlyAHiddenTokenMarks(t *testing.T) {
+	for name, c := range map[string]struct {
+		src  string
+		line int
+	}{
+		"split keyword":        {"pa;ckage tool\n\nfunc F() {}\n", 1},
+		"func fused to a name": {"package p\n\nfuncTestX(t *testing.T) {\n\tx := 1\n}\n", 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, err := CheckSource("a.go", []byte(c.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.OK() {
+				t.Fatal("reported OK; the Go compiler rejects this file")
+			}
+			if d := res.Diagnostics[0]; d.Line != c.line {
+				t.Errorf("diagnostic on line %d (%s), want line %d", d.Line, d.Message, c.line)
+			}
+		})
+	}
+}
+
+// missingAfterNamedChild reads the one place a hidden MISSING token shows up.
+func TestMissingAfterNamedChild(t *testing.T) {
+	for sexp, want := range map[string]int{
+		`(source_file (a) (b) (MISSING "source_file_token1") (c))`: 2,
+		`(x (MISSING ";") (y))`: 0,
+		`(x (call arguments: (args (MISSING ")"))) (MISSING "t"))`: 1,
+	} {
+		got, ok := missingAfterNamedChild(sexp)
+		if !ok || got != want {
+			t.Errorf("missingAfterNamedChild(%s) = %d, %v; want %d", sexp, got, ok, want)
+		}
+	}
+	if _, ok := missingAfterNamedChild(`(x (y) (z))`); ok {
+		t.Error("found a MISSING child where there is none")
+	}
+}
+
+// A column counts characters: "é" and "世" are one column each, as an editor
+// shows them, though they take two and three bytes.
+func TestCheckColumnsCountCharacters(t *testing.T) {
+	res, err := CheckSource("a.go", []byte("package p\n\nvar s = \"héllo 世界\"; @\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK() {
+		t.Fatal("stray @ not reported")
+	}
+	// "@" is the 21st character; counting bytes would put it at 26.
+	if d := res.Diagnostics[0]; d.Line != 3 || d.Column != 21 {
+		t.Errorf("position = %d:%d, want 3:21", d.Line, d.Column)
+	}
+}
+
+// When the cap cuts the list, the count says so: 20 would be a number of
+// errors the file does not have.
+func TestCheckCountLabelMarksTruncation(t *testing.T) {
+	res, err := CheckSource("mess.go", []byte("package p\n"+strings.Repeat("func a( {}\n", 60)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Truncated || res.CountLabel() != "20+" {
+		t.Errorf("Truncated = %v, CountLabel = %q; want true, 20+", res.Truncated, res.CountLabel())
+	}
+	if out := RenderCheck(res); !strings.HasPrefix(out, "SYNTAX ERRORS: 20+ in") {
+		t.Errorf("render header does not mark the cap:\n%s", out)
+	}
+
+	one, _ := CheckSource("a.go", []byte("package p\n\nfunc f( {}\n"))
+	if one.Truncated || one.CountLabel() != "1" {
+		t.Errorf("CountLabel = %q for a single error, want 1", one.CountLabel())
+	}
+}
+
+// Every report of errors ends with how to tell a real error from syntax newer
+// than the grammar, so a valid construct is not rewritten to please the parser.
+func TestRenderCheckWarnsAboutNewerSyntax(t *testing.T) {
+	// C# 14 extension blocks: valid, and beyond the grammar and any shim.
+	res, _ := CheckSource("a.cs", []byte("static class E { extension(string s) { public bool IsEmpty => s.Length == 0; } }\n"))
+	if res.OK() {
+		t.Skip("the grammar now knows C# extension blocks; pick another construct it lags on")
+	}
+	if out := RenderCheck(res); !strings.Contains(out, "syntax newer than this parser") {
+		t.Errorf("error report lacks the newer-syntax caveat:\n%s", out)
+	}
+}
+
+// A directory is its own error, so callers can say so plainly.
+func TestCheckDirectoryIsErrDirectory(t *testing.T) {
+	if _, err := Check(t.TempDir()); !errors.Is(err, ErrDirectory) {
+		t.Errorf("Check(dir) error = %v, want ErrDirectory", err)
+	}
+	if _, err := Outline(t.TempDir()); !errors.Is(err, ErrDirectory) {
+		t.Errorf("Outline(dir) error = %v, want ErrDirectory", err)
 	}
 }

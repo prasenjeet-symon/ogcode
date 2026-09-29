@@ -28,12 +28,13 @@ func TestProjectIndex_CollapsesEveryFolderAndListsLooseFiles(t *testing.T) {
 	out := renderProjectMap(tree, "")
 
 	// internal/ holds only two files and still collapses: size is not the
-	// criterion, being a folder is. Its labels merge up from the whole branch.
-	if !strings.Contains(out, "internal/  file reading, line offsets, string replace  (2 files)") {
+	// criterion, being a folder is. The count and its subfolders lead, then its
+	// labels, drawn up from the whole branch.
+	if !strings.Contains(out, "internal/ (2 files; subfolders: tool) — string replace; file reading; line offsets") {
 		t.Errorf("folder not collapsed to a single line:\n%s", out)
 	}
 	// A file sitting at the rendered level is listed with its own labels.
-	if !strings.Contains(out, "main.go  entrypoint") {
+	if !strings.Contains(out, "main.go — entrypoint") {
 		t.Errorf("loose file at this level not listed:\n%s", out)
 	}
 	// Nothing below the first level appears — that is what subdir is for.
@@ -49,11 +50,10 @@ func TestProjectIndex_CollapsesEveryFolderAndListsLooseFiles(t *testing.T) {
 	}
 }
 
-// A folder's line merges the labels of everything beneath it, ranked by how
-// many files carry each. This is the contract that bounds the map by how wide
-// a level is rather than by how many files the project holds.
+// A folder's line merges the labels of everything beneath it, each label once.
+// This is the contract that bounds the map by how wide a level is rather than
+// by how many files the project holds.
 func TestProjectIndex_CollapsedFolderMergesLabels(t *testing.T) {
-	// All three labels tie at 4 files each, so they order alphabetically.
 	entries := make([]*docindex.PageEntry, 0, 12)
 	for i := 0; i < 12; i++ {
 		label := "shared topic"
@@ -69,87 +69,83 @@ func TestProjectIndex_CollapsedFolderMergesLabels(t *testing.T) {
 
 	out := renderProjectMap(tree, "")
 
-	if !strings.Contains(out, "pkg/  alpha topic, gamma topic, shared topic  (12 files)") {
-		t.Errorf("large folder not summarized correctly:\n%s", out)
+	line := folderLine(t, out, "pkg/")
+	if !strings.HasPrefix(line, "pkg/ (12 files) — ") {
+		t.Errorf("large folder not summarized as one line:\n%s", out)
+	}
+	if got := lineLabels(line); len(got) != 3 {
+		t.Errorf("folder line labels = %q, want the three distinct labels once each", got)
 	}
 	if strings.Contains(out, "file00.go") {
 		t.Errorf("collapsed folder still lists loose files:\n%s", out)
 	}
 }
 
-// Frequency decides which labels survive on a folder line — not what came
-// first — and ties break alphabetically. Map iteration order must not leak
-// into the output.
-func TestProjectIndex_FolderLabelsRankedByFrequency(t *testing.T) {
-	// Counts: zebra 12 (last file adds a second occurrence), yak 11.
-	entries := make([]*docindex.PageEntry, 0, 12)
-	for i := 0; i < 11; i++ {
-		entries = append(entries, textEntry(fmt.Sprintf("/proj/pkg/f%02d.go", i), "zebra", "yak"))
+// A folder line samples every part of the folder, not its alphabetical head.
+// An index's labels are nearly all unique, so a ranking by how many files carry
+// a label ties everywhere and its tie-break picks: that is how a folder of
+// sixty files came to be described by the twenty that sorted first.
+func TestProjectIndex_FolderLineSamplesTheWholeFolder(t *testing.T) {
+	entries := make([]*docindex.PageEntry, 0, 60)
+	for i := 0; i < 60; i++ {
+		entries = append(entries, textEntry(fmt.Sprintf("/proj/pkg/f%02d.go", i), fmt.Sprintf("topic%02d", i)))
 	}
-	entries = append(entries, textEntry("/proj/pkg/extra.go", "zebra"))
+	line := folderLine(t, renderProjectMap(buildProjectTree("/proj", entries, nil, nil), ""), "pkg/")
 
-	tree := buildProjectTree("/proj", entries, nil, nil)
-	out := renderProjectMap(tree, "")
-
-	line := ""
-	for _, l := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(l), "pkg/") && strings.Contains(l, "files)") {
-			line = l
-			break
+	labels := lineLabels(line)
+	if len(labels) != folderLabelCap {
+		t.Fatalf("folder line carries %d labels, want %d:\n%s", len(labels), folderLabelCap, line)
+	}
+	var early, middle, late bool
+	for _, l := range labels {
+		var n int
+		fmt.Sscanf(l, "topic%d", &n)
+		switch {
+		case n < 20:
+			early = true
+		case n < 40:
+			middle = true
+		default:
+			late = true
 		}
 	}
-	if line == "" {
-		t.Fatalf("no collapsed line for pkg/:\n%s", out)
-	}
-	if !strings.Contains(line, "zebra") || !strings.Contains(line, "yak") {
-		t.Errorf("collapsed line lost a label:\n%s", line)
-	}
-	// Both labels are within folderLabelCap so both appear, in frequency
-	// order: zebra (12) before yak (11).
-	if strings.Index(line, "yak") < strings.Index(line, "zebra") {
-		t.Errorf("frequency ranking ignored — yak (11) before zebra (12):\n%s", line)
+	if !early || !middle || !late {
+		t.Errorf("labels come from only part of the folder (early %v, middle %v, late %v):\n%s", early, middle, late, line)
 	}
 }
 
-// A folder line summarizes the whole branch, so a label carried by several
-// subfolders outranks one merely dense in a single large subtree. Spread
-// (directories carrying the label) ranks ahead of frequency (files carrying it),
-// which is what keeps a small but distinctive child from being crowded out.
-func TestProjectIndex_FolderLineSpreadsLabelsAcrossSubfolders(t *testing.T) {
+// Slots go by size, but not all of them: a 20-file subfolder takes most of
+// the line, and the two one-file subfolders beside it still get a word in —
+// a small but distinctive child is not crowded out by a big one.
+func TestProjectIndex_SmallSubfolderStillGetsAWord(t *testing.T) {
 	entries := make([]*docindex.PageEntry, 0, 22)
-	// One big subfolder carrying only "bulk topic" — 20 files, so it wins on
-	// frequency by a wide margin.
 	for i := 0; i < 20; i++ {
-		entries = append(entries, textEntry(fmt.Sprintf("/proj/pkg/a/f%02d.go", i), "bulk topic"))
+		entries = append(entries, textEntry(fmt.Sprintf("/proj/pkg/a/f%02d.go", i), fmt.Sprintf("bulk topic %02d", i)))
 	}
-	// Two small subfolders that happen to share a label — 2 files in total, but
-	// spread across two directories.
-	entries = append(entries, textEntry("/proj/pkg/b/one.go", "shared topic"))
-	entries = append(entries, textEntry("/proj/pkg/c/two.go", "shared topic"))
+	entries = append(entries, textEntry("/proj/pkg/b/one.go", "small b topic"))
+	entries = append(entries, textEntry("/proj/pkg/c/two.go", "small c topic"))
 
-	tree := buildProjectTree("/proj", entries, nil, nil)
-	out := renderProjectMap(tree, "")
+	line := folderLine(t, renderProjectMap(buildProjectTree("/proj", entries, nil, nil), ""), "pkg/")
+	labels := lineLabels(line)
 
-	line := ""
-	for _, l := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(l), "pkg/") && strings.Contains(l, "files)") {
-			line = l
-			break
+	bulk := 0
+	for _, l := range labels {
+		if strings.HasPrefix(l, "bulk") {
+			bulk++
 		}
 	}
-	if line == "" {
-		t.Fatalf("no collapsed line for pkg/:\n%s", out)
+	if !strings.Contains(line, "small b topic") || !strings.Contains(line, "small c topic") {
+		t.Errorf("a one-file subfolder was crowded out:\n%s", line)
 	}
-	// "shared topic" is in 2 directories, "bulk topic" in 1, so despite being
-	// 2 files against 20 the spread ranks it first.
-	if strings.Index(line, "bulk") < strings.Index(line, "shared") {
-		t.Errorf("spread ranking ignored — bulk (20 files, 1 folder) before shared (2 files, 2 folders):\n%s", line)
+	if bulk <= len(labels)/2 {
+		t.Errorf("the 20-file subfolder got %d of %d labels, want most of the line:\n%s", bulk, len(labels), line)
 	}
 }
 
 // A folder line is capped at folderLabelCap labels however many distinct labels
 // its branch holds: one folder line stands for a whole branch, and the per-file
-// detail arrives on drill-down.
+// detail arrives on drill-down. What is dropped is not the tail: the last file
+// is as likely to be heard as the first.
 func TestProjectIndex_FolderLineCappedAtTheFolderCeiling(t *testing.T) {
 	// One distinct label per file, so the folder sees one more distinct label
 	// than the cap allows.
@@ -160,23 +156,12 @@ func TestProjectIndex_FolderLineCappedAtTheFolderCeiling(t *testing.T) {
 	tree := buildProjectTree("/proj", entries, nil, nil)
 	out := renderProjectMap(tree, "")
 
-	line := ""
-	for _, l := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(l), "pkg/") && strings.Contains(l, "files)") {
-			line = l
-			break
-		}
+	line := folderLine(t, out, "pkg/")
+	if got := len(lineLabels(line)); got != folderLabelCap {
+		t.Errorf("folder line carries %d labels, want the cap of %d:\n%s", got, folderLabelCap, line)
 	}
-	if line == "" {
-		t.Fatalf("no collapsed line for pkg/:\n%s", out)
-	}
-	// Alphabetical ties mean the first folderLabelCap labels survive and the
-	// one past the cap is dropped.
-	if !strings.Contains(line, "topic00") || !strings.Contains(line, fmt.Sprintf("topic%02d", folderLabelCap-1)) {
-		t.Errorf("labels within the cap were dropped:\n%s", line)
-	}
-	if strings.Contains(line, fmt.Sprintf("topic%02d", folderLabelCap)) {
-		t.Errorf("a label past the cap of %d was kept:\n%s", folderLabelCap, line)
+	if !strings.Contains(line, "topic00") || !strings.Contains(line, fmt.Sprintf("topic%02d", folderLabelCap)) {
+		t.Errorf("the first or the last file went unheard:\n%s", line)
 	}
 }
 
@@ -194,8 +179,8 @@ func TestProjectIndex_UnlabeledFileAndFolderStillListed(t *testing.T) {
 	if !strings.Contains(out, "empty.go") {
 		t.Errorf("unlabeled file dropped from the map:\n%s", out)
 	}
-	if !strings.Contains(out, "pkg/  (11 files)") {
-		t.Errorf("unlabeled collapsed folder lost its file count:\n%s", out)
+	if !strings.Contains(out, "pkg/ (11 files)\n") {
+		t.Errorf("unlabeled collapsed folder lost its file count, or gained a dangling dash:\n%s", out)
 	}
 }
 
@@ -234,7 +219,7 @@ func TestProjectIndex_SubdirExpandsTargetAndDropsPrefix(t *testing.T) {
 	if strings.Contains(out, "internal/tool/") {
 		t.Errorf("drill-down kept the redundant path prefix:\n%s", out)
 	}
-	if !strings.Contains(out, "f00.go  tool topic") {
+	if !strings.Contains(out, "f00.go — tool topic") {
 		t.Errorf("target folder's files not listed:\n%s", out)
 	}
 }
@@ -259,10 +244,10 @@ func TestProjectIndex_MixedDocumentTypesAggregateIntoFolderStats(t *testing.T) {
 	// documents are the loose files of the rendered level and each leaf shows.
 	out := renderProjectMap(buildProjectTree("/proj/docs", texts, pdf, docx), "docs")
 
-	if !strings.Contains(out, "report.pdf  paper topic") || !strings.Contains(out, "notes.docx  paper topic") {
+	if !strings.Contains(out, "report.pdf — paper topic") || !strings.Contains(out, "notes.docx — paper topic") {
 		t.Errorf("document leaves missing from the map:\n%s", out)
 	}
-	if !strings.Contains(out, "paper topic, extra topic") {
+	if !strings.Contains(out, "paper topic; extra topic") {
 		t.Errorf("text file labels missing:\n%s", out)
 	}
 
@@ -344,7 +329,7 @@ func TestProjectIndex_StaysUnderOutputCap(t *testing.T) {
 			// (internal/, many packages) is itself summarized — expanding
 			// further is what a subdir call is for. What must survive is the
 			// summary structure itself, at every size.
-			if !strings.Contains(out, "internal/") || !strings.Contains(out, "files)") {
+			if !strings.Contains(out, fmt.Sprintf("internal/ (%d files; subfolders: ", files)) {
 				t.Errorf("map lost its folder summaries at %d files", files)
 			}
 		})
@@ -389,7 +374,7 @@ func TestProjectIndex_WideLevelShowsFewerLabelsRatherThanNone(t *testing.T) {
 	}
 	// And they survive at reduced depth: rung 2 caps every entry at 10 labels,
 	// so a level that overflows at full depth must show no more than that.
-	atFolderRung := "subsystem behaviour topic 0, subsystem behaviour topic 1, subsystem behaviour topic 2, subsystem behaviour topic 3, subsystem behaviour topic 4, subsystem behaviour topic 5, subsystem behaviour topic 6, subsystem behaviour topic 7, subsystem behaviour topic 8, subsystem behaviour topic 9, subsystem behaviour topic 10"
+	atFolderRung := "subsystem behaviour topic 0; subsystem behaviour topic 1; subsystem behaviour topic 2; subsystem behaviour topic 3; subsystem behaviour topic 4; subsystem behaviour topic 5; subsystem behaviour topic 6; subsystem behaviour topic 7; subsystem behaviour topic 8; subsystem behaviour topic 9; subsystem behaviour topic 10"
 	if strings.Contains(out, atFolderRung) {
 		t.Error("expected a cap below 10 labels per file for a level this wide")
 	}
@@ -401,10 +386,13 @@ func TestProjectIndex_WideLevelShowsFewerLabelsRatherThanNone(t *testing.T) {
 // fabricated index is one flat directory of 3000 loose files — past the 100 KB
 // budget even once the render is down to a single label each.
 func TestProjectIndex_LargeProjectDropsLabelsWithGuidance(t *testing.T) {
-	flat := make([]*docindex.PageEntry, 0, 3000)
+	flat := make([]*docindex.PageEntry, 0, 3001)
 	for i := 0; i < 3000; i++ {
 		flat = append(flat, textEntry(fmt.Sprintf("/proj/f%04d.go", i), "subsystem behaviour topic 0-0"))
 	}
+	// One folder beside them, so there is somewhere to narrow into — and the
+	// guidance names it, from the project root.
+	flat = append(flat, textEntry("/proj/pkg/inner/x.go", "inner topic"))
 
 	smallHasLabels := renderProjectMap(buildProjectTree("/proj", bigIndex(50), nil, nil), "")
 	large := renderProjectMap(buildProjectTree("/proj", flat, nil, nil), "")
@@ -415,8 +403,11 @@ func TestProjectIndex_LargeProjectDropsLabelsWithGuidance(t *testing.T) {
 	if strings.Contains(large, "subsystem behaviour topic 0-0") {
 		t.Error("an oversized project should drop labels, not keep them")
 	}
-	if !strings.Contains(large, "subdir=") {
-		t.Errorf("oversized map does not tell the agent how to get labels back:\n%s", large[:300])
+	if !strings.Contains(large, `subdir="pkg/inner"`) {
+		t.Errorf("oversized map does not tell the agent how to get labels back:\n%s", large[:400])
+	}
+	if !strings.Contains(large, "pkg/ (1 file; subfolders: inner)") {
+		t.Errorf("the label-less outline dropped a folder's count or subfolders:\n%s", large[:400])
 	}
 }
 
@@ -480,10 +471,9 @@ func TestProjectIndex_ResultOptsOutOfTheGenericOutputCap(t *testing.T) {
 	}
 }
 
-// A label repeated within one file's stored array must neither render twice on
-// the file's line nor count twice toward its folder's summary — the folder
-// line reports files carrying a label, not occurrences of one.
-func TestProjectIndex_DuplicateLabelsCountedOncePerFile(t *testing.T) {
+// A label repeated within one file's stored array, or across the files of a
+// folder, renders once — on the file's line and on the folder's.
+func TestProjectIndex_DuplicateLabelsShownOnce(t *testing.T) {
 	entries := []*docindex.PageEntry{
 		textEntry("/proj/pkg/a.go", "shared topic", "shared topic", "other topic"),
 		textEntry("/proj/pkg/b.go", "shared topic"),
@@ -492,18 +482,16 @@ func TestProjectIndex_DuplicateLabelsCountedOncePerFile(t *testing.T) {
 	// lines are visible.
 	out := renderProjectMap(buildProjectTree("/proj/pkg", entries, nil, nil), "pkg")
 
-	if strings.Contains(out, "a.go  shared topic, shared topic") {
+	if strings.Contains(out, "a.go — shared topic; shared topic") {
 		t.Errorf("duplicate label rendered twice on the file line:\n%s", out)
 	}
-	if !strings.Contains(out, "a.go  shared topic, other topic") {
+	if !strings.Contains(out, "a.go — shared topic; other topic") {
 		t.Errorf("dedup reordered or dropped unique labels:\n%s", out)
 	}
 
-	// And the folder line counts "shared topic" once per file (2), not once
-	// per occurrence (3), so a repeated label cannot inflate a folder's rank.
 	rolled := renderProjectMap(buildProjectTree("/proj", entries, nil, nil), "")
-	if !strings.Contains(rolled, "pkg/  shared topic, other topic  (2 files)") {
-		t.Errorf("folder summary miscounted a repeated label:\n%s", rolled)
+	if !strings.Contains(rolled, "pkg/ (2 files) — shared topic; other topic") {
+		t.Errorf("folder summary repeated a shared label:\n%s", rolled)
 	}
 }
 
@@ -736,5 +724,143 @@ func TestProjectIndex_OutputStatesTheIndexedTotal(t *testing.T) {
 	one := renderProjectMap(buildProjectTree("/proj", entries[3:], nil, nil), "")
 	if !strings.Contains(one, "1 file indexed in this project.") || strings.Contains(one, "1 files") {
 		t.Errorf("singular total misspelled:\n%s", one)
+	}
+}
+
+// folderLine returns the rendered line for a folder at this level, failing the
+// test when it is missing.
+func folderLine(t *testing.T, out, folder string) string {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, folder+" (") {
+			return l
+		}
+	}
+	t.Fatalf("no line for %s:\n%s", folder, out)
+	return ""
+}
+
+// lineLabels splits the labels off a folder or file line.
+func lineLabels(line string) []string {
+	_, labels, ok := strings.Cut(line, " — ")
+	if !ok {
+		return nil
+	}
+	return strings.Split(labels, "; ")
+}
+
+// A folder line names its subfolders — each one a subdir the agent can jump
+// straight to — and past the cap keeps the largest and counts the rest.
+func TestProjectIndex_FolderLineNamesItsSubfolders(t *testing.T) {
+	entries := []*docindex.PageEntry{
+		textEntry("/proj/pkg/zeta/a.go", "z"),
+		textEntry("/proj/pkg/alpha/b.go", "a"),
+		textEntry("/proj/pkg/loose.go", "l"),
+	}
+	line := folderLine(t, renderProjectMap(buildProjectTree("/proj", entries, nil, nil), ""), "pkg/")
+	if !strings.HasPrefix(line, "pkg/ (3 files; subfolders: alpha, zeta) — ") {
+		t.Errorf("folder line does not name its subfolders, alphabetically:\n%s", line)
+	}
+
+	// Past the cap: the largest are named, the rest counted.
+	var wide []*docindex.PageEntry
+	for i := 0; i < subfolderNameCap+3; i++ {
+		files := 1
+		if i < subfolderNameCap {
+			files = 2 // the ones that must be kept
+		}
+		for f := 0; f < files; f++ {
+			wide = append(wide, textEntry(fmt.Sprintf("/proj/big/s%02d/f%d.go", i, f), "t"))
+		}
+	}
+	line = folderLine(t, renderProjectMap(buildProjectTree("/proj", wide, nil, nil), ""), "big/")
+	if !strings.Contains(line, ", +3 more)") {
+		t.Errorf("subfolders past the cap are not counted:\n%s", line)
+	}
+	for i := subfolderNameCap; i < subfolderNameCap+3; i++ {
+		if strings.Contains(line, fmt.Sprintf("s%02d", i)) {
+			t.Errorf("a smaller subfolder s%02d was named over a larger one:\n%s", i, line)
+		}
+	}
+}
+
+// Labels are separated by semicolons, so a label with commas of its own reads
+// as one label — and a label that carries a semicolon or a line break is
+// cleaned rather than split or allowed to break the line.
+func TestProjectIndex_LabelsSeparatedUnambiguously(t *testing.T) {
+	tree := buildProjectTree("/proj", []*docindex.PageEntry{
+		textEntry("/proj/tunnel.go", "Yamux Tunnel, Reverse Proxy, Subdomains", "Auth; Sessions", "Line\nBreak"),
+	}, nil, nil)
+	out := renderProjectMap(tree, "")
+
+	if !strings.Contains(out, "tunnel.go — Yamux Tunnel, Reverse Proxy, Subdomains; Auth, Sessions; Line Break\n") {
+		t.Errorf("labels not joined unambiguously:\n%s", out)
+	}
+}
+
+// The header's next-step example is a real folder at this level — and from the
+// project root, because a drill-down lists "agent/" but the call that opens it
+// names "internal/agent".
+func TestProjectIndex_NextStepExampleIsFromTheProjectRoot(t *testing.T) {
+	entries := []*docindex.PageEntry{
+		textEntry("/proj/internal/agent/loop/run.go", "x"),
+		textEntry("/proj/internal/agent/loop/step.go", "x"),
+		textEntry("/proj/internal/bus/bus.go", "y"),
+	}
+	root := renderProjectMap(buildProjectTree("/proj", entries, nil, nil), "")
+	if !strings.Contains(root, `(e.g. subdir="internal/agent")`) {
+		t.Errorf("root map's example is not a real path from the root:\n%s", root)
+	}
+	drill := renderProjectMap(buildProjectTree("/proj/internal", entries, nil, nil), "internal")
+	if !strings.Contains(drill, `(e.g. subdir="internal/agent/loop")`) {
+		t.Errorf("drill-down's example is not from the project root:\n%s", drill)
+	}
+	// A level with no folders has nowhere to send the agent, and says nothing.
+	leaf := renderProjectMap(buildProjectTree("/proj/internal/bus", entries[2:], nil, nil), "internal/bus")
+	if strings.Contains(leaf, "e.g. subdir=") {
+		t.Errorf("a level without folders offered a subdir example:\n%s", leaf)
+	}
+}
+
+// Test files speak after the code they cover: at half weight, a folder line
+// leads with what the package does, not with what its tests check.
+func TestProjectIndex_TestFilesSpeakAfterCode(t *testing.T) {
+	entries := []*docindex.PageEntry{
+		textEntry("/proj/pkg/a_test.go", "A Unit Tests"),
+		textEntry("/proj/pkg/b_test.go", "B Unit Tests"),
+		textEntry("/proj/pkg/a.go", "Alpha Behaviour"),
+		textEntry("/proj/pkg/b.go", "Beta Behaviour"),
+	}
+	labels := lineLabels(folderLine(t, renderProjectMap(buildProjectTree("/proj", entries, nil, nil), ""), "pkg/"))
+	if len(labels) != 4 {
+		t.Fatalf("labels = %q, want all four", labels)
+	}
+	for _, l := range labels[:2] {
+		if strings.Contains(l, "Tests") {
+			t.Errorf("a test label led the folder line: %q", labels)
+		}
+	}
+}
+
+// spreadOrder is a permutation whose every prefix is spread across the range —
+// the property that turns "take the first k" into an even sample.
+func TestSpreadOrder(t *testing.T) {
+	for m := 0; m <= 40; m++ {
+		order := spreadOrder(m)
+		if len(order) != m {
+			t.Fatalf("spreadOrder(%d) has %d entries", m, len(order))
+		}
+		seen := make(map[int]bool, m)
+		for _, i := range order {
+			if i < 0 || i >= m || seen[i] {
+				t.Fatalf("spreadOrder(%d) = %v is not a permutation", m, order)
+			}
+			seen[i] = true
+		}
+	}
+	// The first two of sixteen are the ends of the range's halves, the first
+	// four its quarters: 0, 8, 4, 12.
+	if got := spreadOrder(16)[:4]; got[0] != 0 || got[1] != 8 || got[2] != 4 || got[3] != 12 {
+		t.Errorf("spreadOrder(16) starts %v, want [0 8 4 12]", got)
 	}
 }

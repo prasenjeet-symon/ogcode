@@ -51,8 +51,16 @@ func TestFilenameChronological(t *testing.T) {
 func TestFilenameShape(t *testing.T) {
 	ts := time.Date(2026, 9, 9, 14, 30, 5, 0, time.UTC)
 	got := Filename(ts, "abc123def456", "Wire the Recall Agent!")
-	if !strings.HasPrefix(got, "2026-09-09T143005Z--abc123de--") {
+	if !strings.HasPrefix(got, "2026-09-09T143005Z--abc123def456--") {
 		t.Fatalf("unexpected prefix: %q", got)
+	}
+	// A real session id keeps its whole millisecond timestamp and two
+	// characters of randomness, so conversations begun the same afternoon no
+	// longer share a tag.
+	a := Filename(ts, "ses_01M269J8TM53WGCRH83WZY8QD7", "x")
+	b := Filename(ts, "ses_01M268Y4TGXSBJB7PYHTB8399B", "x")
+	if !strings.Contains(a, "--ses01M269J8TM53--") || a == b {
+		t.Fatalf("session tags collide or lost their timestamp: %q vs %q", a, b)
 	}
 	if !strings.HasSuffix(got, "wire-the-recall-agent.md") {
 		t.Fatalf("unexpected slug/suffix: %q", got)

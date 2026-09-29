@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,11 +18,13 @@ import (
 // upfront.
 //
 // The map shows one level at a time. Every folder at that level is a single
-// line — its most common topic labels and how many files it holds — whatever
-// its size, and the files sitting directly at that level are listed with their
-// own labels. The subdir parameter is the only way down: each call re-roots the
-// map one directory deeper. Output size therefore tracks how wide a level is,
-// never how large the project is beneath it.
+// line — how many files it holds, the subfolders directly inside it, and a
+// sample of topic labels drawn from across the whole branch — whatever its
+// size, and the files sitting directly at that level are listed with their own
+// labels. The subdir parameter is the only way down: each call re-roots the map
+// at that folder, and a subfolder named on a folder line can be jumped to
+// directly. Output size therefore tracks how wide a level is, never how large
+// the project is beneath it.
 //
 // Text, code, PDF, and DOCX leaves all carry a flat topic-label array. A text or
 // code file shows every label the index holds for it (the store caps that at
@@ -39,7 +42,7 @@ func NewProjectIndexTool(store *docindex.Store) ProjectIndexTool {
 func (ProjectIndexTool) ID() string { return "codebase_map" }
 
 func (ProjectIndexTool) Description() string {
-	return fmt.Sprintf("Return one level of a labeled map of indexed files — text, code, PDF, and DOCX documents. Every folder is shown as a SINGLE line with its most representative topic labels and the number of files inside it; files sitting directly at that level are listed individually with their own labels. To look inside a folder, call again with subdir set to its path (e.g. \"internal/tool\") — each call descends one level. For PDFs and DOCX files a subset of labels (up to %d) is aggregated across pages (no per-page breakdown). Use this to find which area is relevant to a topic before reading anything; use pdf_index for per-page labels of a specific PDF, or docx_index for a DOCX.", docLabelCap)
+	return fmt.Sprintf("Return one level of a labeled map of indexed files — text, code, PDF, and DOCX documents. Every folder is shown as a SINGLE line: how many files it holds, the subfolders directly inside it, and a sample of topic labels drawn from across the whole folder; files sitting directly at that level are listed individually with their own labels. Labels are separated by semicolons. To look inside a folder, call again with subdir set to its path from the project root (e.g. \"internal/tool\") — each call shows one level, and you can jump straight to a subfolder a folder line names. For PDFs and DOCX files a subset of labels (up to %d) is aggregated across pages (no per-page breakdown). Use this to find which area is relevant to a topic before reading anything; use pdf_index for per-page labels of a specific PDF, or docx_index for a DOCX.", docLabelCap)
 }
 
 func (ProjectIndexTool) Parameters() json.RawMessage {
@@ -48,7 +51,7 @@ func (ProjectIndexTool) Parameters() json.RawMessage {
 		"properties": {
 			"subdir": {
 				"type": "string",
-				"description": "Optional subdirectory path relative to the project root (e.g. \"internal/auth\"). Roots the map at that folder: the files directly inside it are listed, and the folders inside it are each summarized on one line. Omit to start at the project root."
+				"description": "Optional subdirectory path relative to the project root, never to the level last shown (e.g. \"internal/auth\"). Roots the map at that folder: the files directly inside it are listed, and the folders inside it are each summarized on one line. A subfolder named on a folder line can be passed directly (\"internal\" lists \"auth\" → subdir \"internal/auth\"). Omit to start at the project root."
 			}
 		}
 	}`)
@@ -238,111 +241,299 @@ const projectMapBudget = 100 * 1024
 // folderLabelCap is the maximum number of topic labels shown on a collapsed
 // folder's summary line.
 //
-// Ranked by how many of the folder's subdirectories carry each label, then by
-// how many of its files do (see dirStatsOf and topLabels), so what survives is
-// the label spread across the branch rather than one confined to a single large
-// subtree — a small but distinctive child folder is not crowded out by a big
-// one. Above textLabelCap on purpose: one folder line stands for a whole branch,
-// so it carries the widest spread the render can afford, while a loose file's
-// own line is read on its own and needs less. The budget still bounds the level:
-// on a wide one, renderProjectMap lowers this rung by rung.
-const folderLabelCap = 40
+// The labels are a sample, not a ranking: sampleFolderLabels draws them evenly
+// from every part of the branch, so twenty is enough to say what a folder
+// covers. It was forty, chosen by how many subfolders and then how many files
+// carried each label — but an index's labels are nearly all unique, so both
+// counts tied at one and the line was really an alphabetical slice: forty
+// labels starting with A, B and C, filling a kilobyte and describing whichever
+// files happened to sort first. The budget still bounds the level: on a wide
+// one, renderProjectMap lowers this rung by rung.
+const folderLabelCap = 20
+
+// subfolderNameCap is the most subfolder names a folder line lists. They are
+// the cheapest navigation the map offers — each is a subdir the agent can jump
+// straight to — so the cap only stops a folder with hundreds of children from
+// filling its line; past it the largest are named and the rest counted.
+const subfolderNameCap = 24
 
 // dirStats holds what folder summarization needs to know about one directory:
-// how many files it contains (all descendants, not just immediate children)
-// and how many of those files carry each topic label.
+// how many files it contains — all descendants, not just immediate children.
 type dirStats struct {
 	files int
-	// labels counts, for each topic label, how many files in the subtree
-	// carry it (once per file, not once per occurrence).
-	labels map[string]int
-	// spread counts, for each topic label, how many directories in the subtree
-	// contain at least one file carrying it — how widely a label is distributed
-	// across the branch, independent of how many files carry it in any one place.
-	spread map[string]int
 }
 
-// dirStatsOf computes the descendant-file count, label frequencies, and label
-// spread of a directory node by walking its leaves. A []string node value is a file (its
-// elements are labels); a map[string]any is a subdirectory. Rendered counts
-// must be identical everywhere they are needed — the collapse decision and the
-// summary line both read this — so nothing downstream can disagree about how
-// many files a folder holds.
-//
-// Labels are counted once per file, not once per occurrence: a file's label
-// array is expected to hold distinct labels, but if a stored index ever
-// repeats one, the folder line must still report how many files carry the
-// label, not how many times it happened to appear. Spread is counted once per
-// directory, for the same reason one layer up: a directory carrying a label in
-// fifty files contributes one, so a label that recurs across many child folders
-// outweighs one that is merely dense in a single subtree.
+// dirStatsOf counts the files beneath a directory node by walking its leaves.
+// A []string node value is a file (its elements are labels); a map[string]any
+// is a subdirectory. Rendered counts must be identical everywhere they are
+// needed — the map's opening total and every folder line both read this — so
+// nothing downstream can disagree about how many files a folder holds.
 func dirStatsOf(node map[string]any) dirStats {
-	st := dirStats{labels: make(map[string]int), spread: make(map[string]int)}
+	var st dirStats
 	var walk func(map[string]any)
 	walk = func(n map[string]any) {
-		// Labels this directory's own files carry, so the directory counts once
-		// per label however many of its files carry it.
-		here := make(map[string]struct{})
 		for _, v := range n {
 			switch t := v.(type) {
 			case []string:
 				st.files++
-				seen := make(map[string]struct{}, len(t))
-				for _, l := range t {
-					if _, dup := seen[l]; dup {
-						continue
-					}
-					seen[l] = struct{}{}
-					st.labels[l]++
-					here[l] = struct{}{}
-				}
 			case map[string]any:
 				walk(t)
 			}
-		}
-		for l := range here {
-			st.spread[l]++
 		}
 	}
 	walk(node)
 	return st
 }
 
-// topLabels picks the n most representative labels, in rank order.
+// labelSource is one child a sampled line draws its labels from — a file or a
+// subfolder on a folder line, a turn on a conversation line.
+type labelSource struct {
+	name   string   // stable order among equal sources
+	order  int      // ahead of name among equal sizes: lower comes first
+	size   int      // how many files (or turns) it stands for
+	labels []string // most important first
+	test   bool     // a test file or folder: counts half
+}
+
+// sampleLabels picks up to n labels for one line, drawn from every source in
+// proportion to its size.
 //
-// spread, when non-nil, ranks ahead of frequency: it is how many directories
-// carry the label (see dirStatsOf), so a label spread across many child folders
-// outranks one confined to a single large subtree. That is what keeps a folder's
-// line a summary of the whole branch rather than of whichever child happens to
-// hold the most files. Frequency breaks spread ties and the label itself breaks
-// frequency ties, so the output is deterministic against map iteration order. A
-// nil spread (memory_map's use) skips straight to frequency.
-func topLabels(labels map[string]int, spread map[string]int, n int) []string {
-	type kv struct {
-		label string
-		count int
+// Slots go one at a time to the source with the strongest claim: its weight
+// over one more than the slots it already has (the D'Hondt rule), the weight
+// being the square root of its size, halved for tests. So a 90-file subfolder
+// gets most of a folder line, but not all of it — six loose config files
+// beside it still get a word in — and no source's last label beats another
+// source's first. Equal claims go to whichever source comes first in
+// spreadOrder, so sixty equal files or turns are summarised by entries from
+// across all sixty, not by the first twenty in name order.
+//
+// A ranking by how many sources carry a label cannot do this: an index's
+// labels are nearly all unique, so every count ties at one and the tie-break
+// decides everything. What does repeat is generic ("Temp File Cleanup",
+// "Graceful Shutdown Handling") — the least useful thing a line can say about
+// what it stands for.
+//
+// Deterministic: sources are ordered by size, then order, then name, never by
+// map order.
+func sampleLabels(sources []labelSource, n int) []string {
+	if n <= 0 || len(sources) == 0 {
+		return nil
 	}
-	entries := make([]kv, 0, len(labels))
-	for l, c := range labels {
-		entries = append(entries, kv{l, c})
+	type claim struct {
+		labelSource
+		weight float64
+		rank   int // position in spreadOrder: the tie-break between equal claims
+		taken  int
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		if si, sj := spread[entries[i].label], spread[entries[j].label]; si != sj {
-			return si > sj
+	claims := make([]*claim, 0, len(sources))
+	for _, src := range sources {
+		if len(src.labels) > 0 {
+			claims = append(claims, &claim{labelSource: src})
 		}
-		if entries[i].count != entries[j].count {
-			return entries[i].count > entries[j].count
+	}
+	sort.Slice(claims, func(i, j int) bool {
+		if claims[i].size != claims[j].size {
+			return claims[i].size > claims[j].size
 		}
-		return entries[i].label < entries[j].label
+		if claims[i].order != claims[j].order {
+			return claims[i].order < claims[j].order
+		}
+		return claims[i].name < claims[j].name
 	})
-	if len(entries) > n {
-		entries = entries[:n]
+	for pos, i := range spreadOrder(len(claims)) {
+		claims[i].rank = pos
 	}
-	out := make([]string, len(entries))
-	for i, e := range entries {
-		out[i] = e.label
+	for _, c := range claims {
+		c.weight = math.Sqrt(float64(c.size))
+		// Tests describe what they check ("Pricing Unit Tests"), which a line
+		// already says through the code they cover, and in a Go package they
+		// are half the files. At half weight they speak after the code.
+		if c.test {
+			c.weight /= 2
+		}
+	}
+
+	out := make([]string, 0, n)
+	seen := make(map[string]struct{}, n)
+	for len(out) < n {
+		var best *claim
+		for _, c := range claims {
+			if c.taken >= len(c.labels) {
+				continue
+			}
+			if best == nil {
+				best = c
+				continue
+			}
+			// c's claim beats best's when weight/(taken+1) is larger; compared
+			// cross-multiplied so equal claims compare exactly equal.
+			mine, theirs := c.weight*float64(best.taken+1), best.weight*float64(c.taken+1)
+			if mine > theirs || (mine == theirs && c.rank < best.rank) {
+				best = c
+			}
+		}
+		if best == nil {
+			break
+		}
+		l := best.labels[best.taken]
+		best.taken++
+		if _, dup := seen[l]; dup {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
 	}
 	return out
+}
+
+// sampleFolderLabels picks up to n labels that describe a folder's whole
+// branch: each child offers its labels — a file its own, a subfolder its own
+// sample, drawn the same way — and sampleLabels shares the line among them.
+// Test files and test folders count half, so the code they cover speaks first.
+func sampleFolderLabels(node map[string]any, n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	sources := make([]labelSource, 0, len(node))
+	for name, v := range node {
+		switch t := v.(type) {
+		case []string:
+			sources = append(sources, labelSource{name: name, size: 1, labels: t, test: isTestPath(name)})
+		case map[string]any:
+			sources = append(sources, labelSource{
+				name: name, size: dirStatsOf(t).files, labels: sampleFolderLabels(t, n), test: isTestPath(name),
+			})
+		}
+	}
+	return sampleLabels(sources, n)
+}
+
+// isTestPath reports whether a file or folder name marks tests, by the
+// conventions of the languages the index covers: Go's _test.go, JS/TS
+// .test./.spec., Python's test_*.py and *_test.py, and the usual test
+// folders.
+func isTestPath(name string) bool {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "test", "tests", "__tests__", "testdata", "spec", "specs":
+		return true
+	}
+	return strings.HasSuffix(lower, "_test.go") ||
+		strings.Contains(lower, ".test.") || strings.Contains(lower, ".spec.") ||
+		(strings.HasPrefix(lower, "test_") && strings.HasSuffix(lower, ".py")) ||
+		strings.HasSuffix(lower, "_test.py")
+}
+
+// spreadOrder returns the indexes 0..m-1 in an order whose every prefix is
+// spread evenly across the range — 0, then the middle, then the quarters, and
+// so on (bit-reversed counting). Taking the first k of them samples a list of
+// m evenly from first to last, rather than taking its head.
+func spreadOrder(m int) []int {
+	bits := 0
+	for 1<<bits < m {
+		bits++
+	}
+	out := make([]int, 0, m)
+	for x := 0; x < 1<<bits; x++ {
+		r := 0
+		for b := 0; b < bits; b++ {
+			if x&(1<<b) != 0 {
+				r |= 1 << (bits - 1 - b)
+			}
+		}
+		if r < m {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// labelSeparator joins labels on a line. A semicolon rather than a comma: a
+// label is a short phrase and some carry commas of their own ("Yamux Tunnel,
+// Reverse Proxy, Subdomains"), which a comma-joined list turns into three
+// labels that were never there.
+const labelSeparator = "; "
+
+// labelCleaner makes a stored label safe for a line: a semicolon inside it
+// becomes a comma and a line break a space, so the label can be neither read
+// as two nor break the one-line-per-entry shape.
+var labelCleaner = strings.NewReplacer(";", ",", "\r\n", " ", "\n", " ", "\r", " ")
+
+// joinLabels renders labels for one line, cleaned and semicolon-separated.
+func joinLabels(labels []string) string {
+	out := make([]string, 0, len(labels))
+	for _, l := range labels {
+		if c := strings.TrimSpace(labelCleaner.Replace(l)); c != "" {
+			out = append(out, c)
+		}
+	}
+	return strings.Join(out, labelSeparator)
+}
+
+// subfolders returns the names of a node's immediate subdirectories for its
+// folder line, alphabetical, and how many were left off. Past subfolderNameCap
+// the largest are kept — they are the likeliest next step.
+func subfolders(node map[string]any) (names []string, more int) {
+	type sub struct {
+		name  string
+		files int
+	}
+	var subs []sub
+	for k, v := range node {
+		if child, isDir := v.(map[string]any); isDir {
+			subs = append(subs, sub{k, dirStatsOf(child).files})
+		}
+	}
+	if len(subs) > subfolderNameCap {
+		sort.Slice(subs, func(i, j int) bool {
+			if subs[i].files != subs[j].files {
+				return subs[i].files > subs[j].files
+			}
+			return subs[i].name < subs[j].name
+		})
+		more = len(subs) - subfolderNameCap
+		subs = subs[:subfolderNameCap]
+	}
+	for _, sb := range subs {
+		names = append(names, sb.name)
+	}
+	sort.Strings(names)
+	return names, more
+}
+
+// subdirExample is a real path the header can offer as the next call: the
+// largest folder at this level, and its largest subfolder when it has one —
+// always from the project root, since subdir never resolves against the level
+// last shown. "" when the level has no folders.
+func subdirExample(tree map[string]any, subdir string) string {
+	largest := func(node map[string]any) (string, map[string]any) {
+		best, bestFiles := "", -1
+		var bestNode map[string]any
+		for k, v := range node {
+			child, isDir := v.(map[string]any)
+			if !isDir {
+				continue
+			}
+			f := dirStatsOf(child).files
+			if f > bestFiles || (f == bestFiles && k < best) {
+				best, bestFiles, bestNode = k, f, child
+			}
+		}
+		return best, bestNode
+	}
+	name, node := largest(tree)
+	if name == "" {
+		return ""
+	}
+	var parts []string
+	if s := strings.Trim(filepath.ToSlash(subdir), "/"); s != "" {
+		parts = append(parts, s)
+	}
+	parts = append(parts, name)
+	if sub, _ := largest(node); sub != "" {
+		parts = append(parts, sub)
+	}
+	return strings.Join(parts, "/")
 }
 
 // renderProjectMap renders the tree, degrading gracefully if the result would
@@ -361,6 +552,15 @@ func renderProjectMap(tree map[string]any, subdir string) string {
 	// disagree with the folder counts printed underneath it — they are computed
 	// by the same walk over the same leaves.
 	total := dirStatsOf(tree).files
+
+	// The way down, with a real path from this level as the example. subdir is
+	// always from the project root: a drill-down lists "tool/", and the call
+	// that opens it names "internal/tool" — the one step a model gets wrong when
+	// the header just says "its path".
+	nextStep := "\n"
+	if ex := subdirExample(tree, subdir); ex != "" {
+		nextStep = fmt.Sprintf("To look inside a folder, call again with subdir set to its path from the project root — a folder listed here, or one of the subfolders it names (e.g. subdir=%q).\n\n", ex)
+	}
 
 	// Full depth first, then progressively shallower — both a loose file's
 	// labels and a folder line's, since either can be the bulk of a wide level.
@@ -382,7 +582,8 @@ func renderProjectMap(tree map[string]any, subdir string) string {
 		} else {
 			fmt.Fprintf(&b, "%s indexed under %q.\n", fileCount(total), subdir)
 		}
-		b.WriteString("Folders end in \"/\" and are shown as ONE line each: the folder's most representative topic labels and the number of files inside it. Files at this level are listed individually with their own labels. To see inside a folder, call again with subdir set to its path.\n\n")
+		b.WriteString("Each folder is ONE line: its name ending in \"/\"; in parentheses, how many files it holds and the subfolders directly inside it; then, after \"—\", a sample of topic labels drawn from across the whole folder. Files at this level are listed with their own labels after \"—\". Labels are separated by \";\".\n")
+		b.WriteString(nextStep)
 		renderProjectLevel(tree, &b, true, rung.fileCap, rung.folderCap)
 		if b.Len() <= projectMapBudget {
 			return b.String()
@@ -390,22 +591,29 @@ func renderProjectMap(tree map[string]any, subdir string) string {
 	}
 
 	scope := "a subdirectory"
-	if subdir == "" {
-		scope = "a subdirectory (e.g. subdir=\"internal/auth\")"
+	if ex := subdirExample(tree, subdir); ex != "" {
+		scope = fmt.Sprintf("a subdirectory (e.g. subdir=%q)", ex)
 	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s indexed here.\n", fileCount(total))
-	b.WriteString("Folders end in \"/\". This level is too wide to show topic labels, so only the names are listed.\n")
+	b.WriteString("Folders end in \"/\", with their file count and subfolders in parentheses. This level is too wide to show topic labels, so only the names are listed.\n")
 	fmt.Fprintf(&b, "Call codebase_map again scoped to %s to get labels for the files there.\n\n", scope)
 	renderProjectLevel(tree, &b, false, 0, 0)
 	return b.String()
 }
 
 // renderProjectLevel writes exactly one level of the tree: every subdirectory
-// as a single summary line carrying its most representative topic labels and the
-// number of files beneath it, and every loose file at this level with its own
-// labels.
+// as a single summary line — its file count and subfolders in parentheses, then
+// a sample of topic labels from across it — and every loose file at this level
+// with its own labels:
+//
+//	internal/ (472 files; subfolders: agent, bus, cli) — Agent Loop; Event Bus
+//	main.go — CLI Entrypoint; Flag Parsing
+//
+// The count and the subfolders lead because they are what a model needs first
+// to choose where to go; the labels trail, where a long list does not bury
+// them.
 //
 // One level, never recursive, and no size threshold: a folder is a folder
 // whether it holds three files or three thousand. That makes the map's cost a
@@ -460,22 +668,31 @@ func renderProjectLevel(node map[string]any, b *strings.Builder, withLabels bool
 	for _, k := range ordered {
 		switch v := node[k].(type) {
 		case map[string]any:
-			st := dirStatsOf(v)
-			summary := "(" + fileCount(st.files) + ")"
-			if withLabels && len(st.labels) > 0 {
-				if top := topLabels(st.labels, st.spread, folderCap); len(top) > 0 {
-					summary = strings.Join(top, ", ") + "  " + summary
+			meta := fileCount(dirStatsOf(v).files)
+			if names, more := subfolders(v); len(names) > 0 {
+				list := strings.Join(names, ", ")
+				if more > 0 {
+					list += fmt.Sprintf(", +%d more", more)
+				}
+				meta += "; subfolders: " + list
+			}
+			line := fmt.Sprintf("%s/ (%s)", k, meta)
+			if withLabels {
+				if labels := joinLabels(sampleFolderLabels(v, folderCap)); labels != "" {
+					line += " — " + labels
 				}
 			}
-			fmt.Fprintf(b, "%s/  %s\n", k, summary)
+			b.WriteString(line + "\n")
 		case []string:
 			labels := v
 			if len(labels) > fileCap {
 				labels = labels[:fileCap]
 			}
-			if withLabels && len(labels) > 0 {
-				fmt.Fprintf(b, "%s  %s\n", k, strings.Join(labels, ", "))
-				continue
+			if withLabels {
+				if joined := joinLabels(labels); joined != "" {
+					fmt.Fprintf(b, "%s — %s\n", k, joined)
+					continue
+				}
 			}
 			fmt.Fprintf(b, "%s\n", k)
 		}

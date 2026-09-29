@@ -296,6 +296,21 @@ func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Announce the guidance as queued BEFORE it becomes drainable. The loop
+	// publishes "delivered" the moment it drains the queue, and it can do that
+	// as soon as PushGuidance returns — before the cancel below, even. Published
+	// any later, "queued" could reach the client after "delivered" and leave
+	// its "Guidance queued" indicator up for the rest of the turn, over guidance
+	// the loop had already applied. A cancel-only request queues nothing, so it
+	// announces nothing: no "delivered" would ever follow to clear it.
+	hasGuidance := strings.TrimSpace(input.Content) != ""
+	if hasGuidance {
+		s.bus.Publish("loop.guidance", map[string]string{
+			"sessionId": string(sessionID),
+			"status":    "queued",
+		})
+	}
+
 	// Push the guidance text FIRST, then cancel. Ordering matters: cancellation
 	// is what wakes the loop and advances it to the next iteration, where it
 	// drains the queue and decides whether to keep running. If we cancelled
@@ -304,7 +319,7 @@ func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
 	// guidance that lands a moment later. PushGuidance and DrainGuidance share
 	// the same mutex, so once PushGuidance returns the guidance is guaranteed
 	// visible before any cancellation can propagate.
-	if strings.TrimSpace(input.Content) != "" {
+	if hasGuidance {
 		lc.PushGuidance(input.Content)
 		// Record it in the transcript as well. The loop consumes guidance from
 		// the side-channel above and never writes it down, so without this the
@@ -330,10 +345,6 @@ func (s *Server) handleGuidance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("mid-loop guidance received", "session", sessionID, "len", len(input.Content), "cancelTool", input.CancelTool, "streamCancelled", streamCancelled, "toolCancelled", toolCancelled)
-	s.bus.Publish("loop.guidance", map[string]string{
-		"sessionId": string(sessionID),
-		"status":    "queued",
-	})
 
 	w.WriteHeader(http.StatusNoContent)
 }

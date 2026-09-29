@@ -59,12 +59,14 @@ func Target() error {
 func TestFileMapTool_ReportsUnmappableFilesAsOutput(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "blob.bin"), "abc\x00def")
+	mustWriteFile(t, filepath.Join(dir, "pkg", "a.go"), "package pkg\n")
 
 	cases := []struct {
 		name, rel, want string
 	}{
 		{"missing", "nope.go", "does not exist"},
 		{"binary", "blob.bin", "binary file"},
+		{"directory", "pkg", "is a directory"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -99,5 +101,46 @@ func TestFileMapDescription_StatesWhatIsNotListed(t *testing.T) {
 		if !strings.Contains(desc, want) {
 			t.Errorf("file_map description does not say %q are omitted", want)
 		}
+	}
+}
+
+// start_line/end_line map one region: the declarations reaching into it, with
+// the ones enclosing it, and nothing else.
+func TestFileMapTool_RangeMapsOneRegion(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "demo.go"), `package demo
+
+func First() {}
+
+type Server struct{}
+
+func (s *Server) Handle() {
+	println("handle")
+}
+
+func Last() {}
+`)
+	args, _ := json.Marshal(map[string]any{"path": "demo.go", "start_line": 7, "end_line": 8})
+	res, err := FileMapTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(res.Output, "map of lines 7-8") || !strings.Contains(res.Output, "Handle()") {
+		t.Fatalf("region map missing its header or its declaration:\n%s", res.Output)
+	}
+	for _, outside := range []string{"First", "Last", "type Server"} {
+		if strings.Contains(res.Output, outside) {
+			t.Errorf("region map lists %q, which lies outside lines 7-8:\n%s", outside, res.Output)
+		}
+	}
+}
+
+// An inverted range is a caller slip, refused the way read refuses one.
+func TestFileMapTool_InvertedRangeIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "demo.go"), "package demo\n")
+	args, _ := json.Marshal(map[string]any{"path": "demo.go", "start_line": 9, "end_line": 3})
+	if _, err := (FileMapTool{}).Execute(context.Background(), args, Context{SessionDir: dir}); err == nil {
+		t.Fatal("an inverted range was accepted")
 	}
 }

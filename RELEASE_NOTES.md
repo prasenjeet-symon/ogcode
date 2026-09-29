@@ -146,6 +146,166 @@ ledger existed is folded in once, and a row outlives the session it came from.
 
 ---
 
+# Release Notes — v0.41.0
+
+## Minor: Syntax checks that catch what they missed, and stop crying wolf
+
+The syntax check that runs on every `write` and `edit`, and in `check_syntax`,
+was reviewed and fixed.
+
+- **Python indentation is checked.** The grammar accepted every indentation
+  error CPython rejects (unexpected indent, a block header with no body, a
+  dedent to a level never opened, tabs traded for spaces), so the most common
+  way an edit breaks a Python file came back "OK". A new pass applies
+  CPython's own rules. Against CPython's compiler, over its whole standard
+  library and about 5,000 injected mistakes, it raised no false alarms and
+  caught every indentation error.
+- **No more "OK" for some broken Go.** A typo such as `funcHandler(w, r) {` or
+  `pa;ckage main` left an error the parser only marks invisibly, and the check
+  passed the file.
+- **Fewer false alarms on valid code.** Valid syntax newer than a grammar —
+  CSS nesting and named `@container` queries, `22.5%` keyframes, TypeScript's
+  `export type *`, Rust's `safe fn`, Java's `import module` — no longer reads
+  as an error. The site's own homepage had fifteen. When something newer still
+  trips the parser, the report now says to confirm with the compiler rather
+  than rewrite the code.
+- **More files are checked.** JSON (with comments where tools allow them),
+  JSON Lines, YAML, TOML, and the `<script>` and `<style>` blocks inside HTML.
+- **Clearer reports.** Columns count characters, not bytes; a capped list says
+  "20+"; the hint to see the full list names the file's real path; pointing the
+  tool at a directory says so instead of failing.
+- **You can see it too.** A file-edit row in the session view now shows a red
+  chip when the change left syntax errors (amber when the file was already
+  broken), and the note appears under the diff.
+
+## Minor: C and C++ joins the code map
+
+The code map now reads C and C++ — the files the languages are most often
+inherited by, from kernels and drivers to embedded and game code — so `file_map`,
+`codebase_map` and the project index can outline them instead of falling back to
+a line scanner.
+
+- **Outline only, deliberately.** C and C++ are mapped, not syntax-checked.
+  Macros let tree-sitter parse code a compiler would reject — a `#define` that
+  opens a brace, a body only some configurations build — so a check tuned to
+  accept real headers would have to miss real errors, and one that did not would
+  cry wolf on working code. The map is where the grammar earns its keep.
+- **`.h` reads as C++.** A header is far more likely to use C++ than C, and the
+  C++ grammar parses the C subset, so the two do not meaningfully differ for an
+  outline.
+- **A region, not the whole file.** `file_map` gained `start_line` and
+  `end_line`, so a very large header can be mapped one range at a time rather
+  than paging through it.
+
+## Minor: The map's labels are a sample of everything, not the top of a ranking
+
+A folder line used to rank its labels by frequency and show the top forty — which
+is the wrong signal for orientation, since the fortieth most frequent topic says
+nothing about what a folder is for. Labels are now drawn as a sample spread
+across the folder: up to twenty, taking the first from each distinct source, so a
+line names the range of what is inside rather than repeating its most common
+word.
+
+- **Folders name their subfolders.** A folder line lists the names of the
+  subfolders directly inside it (up to twenty-four), so you can jump to one with
+  `subdir` instead of guessing its name or reading the parent again.
+- **Memory tags are unique now.** A conversation's file-name tag was a fixed
+  eight characters — the session-id prefix and the first five characters of a
+  timestamp — which is identical for conversations created in the same second,
+  so two could share a tag. Tags now grow as long as they need to be unique, and
+  `memory_map` accepts any unambiguous prefix of the session id, refusing one
+  that could mean either of two conversations instead of silently picking one.
+
+## Minor: Your turn's requests go first
+
+A shared in-flight budget already kept the agent from opening more provider
+requests than a provider would serve at once. The indexer shared it on equal
+terms, so a large re-index could fill it and leave an interactive turn waiting
+behind work the user never asked to run.
+
+- **Index requests yield to interactive ones.** A turn's requests wait only on
+  other turn requests; the indexer starts work only into the room the user
+  leaves — at most one request while a turn is running, and nothing for thirty
+  seconds after the last turn went quiet. The budget still bounds the total, so
+  a provider is never overloaded.
+- **Measured.** With five index sessions running, interactive requests returned
+  a median of twelve seconds (down from a fifty-second tail); on an idle install,
+  2.6 seconds.
+
+## Minor: Same-file tool calls run in the order they were written
+
+When the model issued several calls at one file in a single batch — an edit, then
+a `check_syntax`, or two edits to different parts of the same file — they ran
+concurrently, so a read could return pre-edit lines, a check could parse bytes an
+edit had not yet written, and two edits could race for the file lock. They now
+run in the order the model wrote them.
+
+- **A change waits for every earlier call on the file.** A look — `read`,
+  `file_map`, `check_syntax` — waits only for the changes ahead of it, so reads
+  stay fast. Independent files are still worked in parallel; only the calls that
+  touch one file are serialised, and only against each other.
+
+## Minor: The OGX plan is re-read from the gateway
+
+The OGX tab showed the plan it last saw, so a plan that changed on the OGLAB side
+— an upgrade, a lapse, a revocation — only showed up after a restart or a
+reconnect. Settings → Models now asks the gateway directly.
+
+- **Checked on open, and on focus.** Opening the models screen re-reads the
+  plan, and returning to the tab re-checks it at most once every thirty seconds,
+  so a change on OGLAB appears without a restart. A refresh button asks again on
+  demand.
+- **Revoked is its own state.** When the gateway refuses the install's token it
+  is told so plainly — the link is gone and reconnecting is the fix — rather than
+  being left to read as "connected but no models". A gateway that cannot be
+  reached is reported as unreachable, not as a plan that grants nothing.
+
+## Minor: The models screen, rebuilt around the plan
+
+The Settings → Models screen was reorganised and the plan's product name settled
+to **OGLAB** throughout.
+
+- **The plan leads.** OGX — the OGX subscription plan by OGLAB — is the first
+  tab the screen opens on, since for most people it is the reason to be there.
+  Its panel shows the plan, its models, a link to usage and billing, and a
+  disconnect that unlinks the install only.
+- **Disconnect is a red button**, not a link buried beside a helper line, so an
+  action that removes the account cannot be taken by accident.
+
+## Patch: Guidance, from queued to applied
+
+Mid-turn guidance used to show a single "sent" state that could not tell a
+message still waiting for the loop from one the agent had picked up — so a
+suggestion could look delivered while the model had not yet seen it. The
+composer now tracks the two: *queued* until the running loop drains it, then
+**Guidance applied — the agent is acting on it** once it has. The server
+publishes the queued state the moment it accepts the text, before the loop can
+drain it, so the two are never confused.
+
+## Patch: Smaller things
+
+- **Kotlin outlines.** A Kotlin file mapped its classes and none of its
+  functions, because the modifiers stack ahead of `fun` (`override suspend fun`,
+  `data class`). The fallback scanner now skips them, and an extension
+  function's receiver, so the entry is named for the function.
+- **Markdown headings stop eating trailing `#`s.** A heading like `# Using C#`
+  came back as "Using C". A heading now follows CommonMark: a closing run of `#`s
+  only counts when it is set off by a space. Fenced blocks (``` and ~~~, and YAML
+  front matter) are no longer read as headings, and a final newline no longer
+  appends an empty line to every map.
+- **MCP image files are swept up.** Every image an MCP tool returned was written
+  to a temp directory and left there for the lifetime of the process; the
+  directories are now removed when the MCP manager closes.
+- **Mermaid diagrams render under `antiscript`.** The renderer no longer sets
+  `strict` — which stripped the click handlers and link targets people put in
+  diagrams — but still refuses raw HTML and scripts.
+- **Rough diagrams draw their arrows and text again** after the renderer
+  update left them unfilled.
+- **The token ledger's "By model" section** dropped a description that restated
+  its own heading.
+
+---
+
 # Release Notes — v0.39.1
 
 ## Minor: First-party identity for the OGX gateway

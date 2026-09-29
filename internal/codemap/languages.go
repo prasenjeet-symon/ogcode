@@ -11,6 +11,8 @@ import (
 	tsdart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
 	ts "github.com/tree-sitter/go-tree-sitter"
 	tscs "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
+	tsc "github.com/tree-sitter/tree-sitter-c/bindings/go"
+	tscpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
 	tscss "github.com/tree-sitter/tree-sitter-css/bindings/go"
 	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
 	tshtml "github.com/tree-sitter/tree-sitter-html/bindings/go"
@@ -77,9 +79,17 @@ type language struct {
 	// with a string literal at the top of its body, rather than with a comment
 	// above it. docStart finds nothing in such a language; docstringOf does.
 	docstrings bool
+	// localScopeKind names the node that holds a function's body — C's
+	// compound_statement. A capture inside one is dropped. C's file-scope
+	// patterns have to reach into preprocessor conditionals, and a conditional
+	// can also sit inside a function, where the same patterns would list the
+	// function's locals.
+	localScopeKind string
+
+	langOnce sync.Once
+	lang     *ts.Language
 
 	once  sync.Once
-	lang  *ts.Language
 	query *ts.Query
 	err   error
 }
@@ -178,14 +188,56 @@ var registry = map[string]*language{
 	".css": css(),
 }
 
+// outlineOnly holds the grammars file_map parses and check_syntax does not.
+//
+// C and C++ reach their compiler through a preprocessor, and tree-sitter parses
+// the source without running it. Code that leans on macros — one that expands
+// to a declaration, a block opened in one #ifdef and closed in another —
+// parses with errors no compiler ever reports. An outline recovers around them
+// and is still right about everything else; a syntax check would hand them to
+// the agent as mistakes to fix. So these languages get a real outline and stay
+// unchecked.
+//
+// .h is read as C++: C++ parses nearly every C header as well, and a C parser
+// fails outright on the classes, namespaces and templates of a C++ one.
+var outlineOnly = map[string]*language{
+	".c": cLang(),
+
+	".h":   cpp(),
+	".cc":  cpp(),
+	".cpp": cpp(),
+	".cxx": cpp(),
+	".c++": cpp(),
+	".hh":  cpp(),
+	".hpp": cpp(),
+	".hxx": cpp(),
+	".h++": cpp(),
+	".ipp": cpp(),
+	".inl": cpp(),
+	".tpp": cpp(),
+}
+
+// lookupForOutline returns the language file_map parses path with: any
+// language check_syntax covers, and the outline-only ones besides.
+func lookupForOutline(path string) *language {
+	ext := strings.ToLower(filepath.Ext(path))
+	if l := registry[ext]; l != nil {
+		return l
+	}
+	return outlineOnly[ext]
+}
+
 // LanguageNames returns the name of every language a real grammar covers, sorted
 // and de-duplicated. It exists so callers that describe that coverage to a model
 // — FileMapTool.Description — can be pinned against the registry instead of
 // against a list someone remembered to update. Adding a grammar without saying
 // so leaves the agent treating an approximate scan as exact, and vice versa.
 func LanguageNames() []string {
-	seen := make(map[string]bool, len(registry))
+	seen := make(map[string]bool, len(registry)+len(outlineOnly))
 	for _, l := range registry {
+		seen[l.name] = true
+	}
+	for _, l := range outlineOnly {
 		seen[l.name] = true
 	}
 	names := make([]string, 0, len(seen))
@@ -365,6 +417,35 @@ func css() *language {
 	}
 }
 
+// cLang builds the C entry, for the same once-per-entry reason as typescript
+// and tsx above. (Named cLang because c alone is too short to find.)
+func cLang() *language {
+	return &language{
+		name:           "c",
+		newLang:        func() *ts.Language { return ts.NewLanguage(tsc.Language()) },
+		queryFile:      "queries/c.scm",
+		commentKinds:   []string{"comment"},
+		localScopeKind: "compound_statement",
+	}
+}
+
+// cpp builds a C++ entry, for the same once-per-entry reason as typescript and
+// tsx above.
+//
+// A template is a wrapper, the way Python's decorated_definition is: the
+// queries capture the function or class inside it, which holds the name, and
+// wrapperKind carries the range up over the `template <typename T>` line.
+func cpp() *language {
+	return &language{
+		name:           "c++",
+		newLang:        func() *ts.Language { return ts.NewLanguage(tscpp.Language()) },
+		queryFile:      "queries/cpp.scm",
+		commentKinds:   []string{"comment"},
+		wrapperKind:    "template_declaration",
+		localScopeKind: "compound_statement",
+	}
+}
+
 // isComment reports whether kind is one of the comment kinds this grammar uses.
 func (l *language) isComment(kind string) bool {
 	for _, k := range l.commentKinds {
@@ -380,6 +461,14 @@ func lookup(path string) *language {
 	return registry[strings.ToLower(filepath.Ext(path))]
 }
 
+// grammar returns the shared grammar, built on first use. A syntax check needs
+// only this; the outline query is compiled separately by load, so a check
+// neither waits on nor depends on it.
+func (l *language) grammar() *ts.Language {
+	l.langOnce.Do(func() { l.lang = l.newLang() })
+	return l.lang
+}
+
 // load compiles the grammar and query on first use and returns the shared pair.
 func (l *language) load() (*ts.Language, *ts.Query, error) {
 	l.once.Do(func() {
@@ -388,8 +477,7 @@ func (l *language) load() (*ts.Language, *ts.Query, error) {
 			l.err = fmt.Errorf("read %s: %w", l.queryFile, err)
 			return
 		}
-		l.lang = l.newLang()
-		q, qErr := ts.NewQuery(l.lang, string(src))
+		q, qErr := ts.NewQuery(l.grammar(), string(src))
 		if qErr != nil {
 			// A query that fails to compile is a bug in a file we ship, not
 			// anything the caller did — say which pattern so it is findable.
@@ -399,5 +487,5 @@ func (l *language) load() (*ts.Language, *ts.Query, error) {
 		}
 		l.query = q
 	})
-	return l.lang, l.query, l.err
+	return l.grammar(), l.query, l.err
 }

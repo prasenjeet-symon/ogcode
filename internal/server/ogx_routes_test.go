@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
@@ -173,5 +174,111 @@ func TestOGXCallbackRejectsBadState(t *testing.T) {
 	}
 	if st := ogxStatus(t, s); st["connected"] != false {
 		t.Fatalf("missing token stored a connection: %v", st)
+	}
+}
+
+// ogxRefresh drives POST /api/ogx/refresh and returns the parsed payload.
+func ogxRefresh(t *testing.T, s *Server) map[string]any {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.handleOGXRefresh(rec, httptest.NewRequest(http.MethodPost, "/api/ogx/refresh", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("refresh: bad body: %v", err)
+	}
+	return out
+}
+
+// TestOGXRefreshFollowsTheGateway pins the live plan check: the gateway's
+// catalogue is the plan, so a plan bought after connecting is picked up — and
+// one that has lapsed dropped — by asking again, without a reconnect. A token
+// the gateway no longer accepts, or a gateway that cannot be reached, changes
+// nothing and says which it was.
+func TestOGXRefreshFollowsTheGateway(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		models   []string
+		refusing string
+	)
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if refusing != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": refusing})
+			return
+		}
+		data := []map[string]string{}
+		for _, id := range models {
+			data = append(data, map[string]string{"id": id, "object": "model", "owned_by": "oglab"})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	}))
+	defer gateway.Close()
+	t.Setenv("OGX_GATEWAY_URL", gateway.URL+"/v1")
+	set := func(ids []string, refuse string) {
+		mu.Lock()
+		models, refusing = ids, refuse
+		mu.Unlock()
+	}
+
+	// Connected before buying: stored planless, no provider.
+	s := ogxTestServer(t)
+	state := ogxConnect(t, s).Query().Get("state")
+	s.handleOGXCallback(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet,
+		"/api/ogx/callback?state="+url.QueryEscape(state)+"&token=ogx-tok-later&email=p%40oz.dev&plan=none", nil))
+	if p := s.registry.Get(provider.OGXProviderID); p != nil {
+		t.Fatal("a planless link registered a provider")
+	}
+
+	// The plan is bought on the web side: a refresh finds it and registers it.
+	set([]string{"deepseek-v4.1-flash", "glm-5.3-flash"}, "")
+	st := ogxRefresh(t, s)
+	if st["check"] != "ok" || st["models"] != float64(2) || st["plan"] != provider.OGXProviderID {
+		t.Fatalf("after buying = %v, want an ok check that found the plan's 2 models", st)
+	}
+	if p := s.registry.Get(provider.OGXProviderID); p == nil {
+		t.Fatal("refresh found a plan but did not register the provider")
+	}
+
+	// The plan lapses: the next refresh records it and drops the provider.
+	set(nil, "")
+	if st := ogxRefresh(t, s); st["check"] != "ok" || st["plan"] != "none" {
+		t.Fatalf("after lapsing = %v, want the link recorded planless", st)
+	}
+	if p := s.registry.Get(provider.OGXProviderID); p != nil {
+		t.Fatal("a lapsed plan's provider is still registered")
+	}
+
+	// A revoked token and an unreachable gateway say which, and change nothing.
+	set([]string{"glm-5.3-flash"}, "a valid install token is required")
+	if st := ogxRefresh(t, s); st["check"] != "revoked" || st["plan"] != "none" {
+		t.Fatalf("revoked = %v, want check revoked and the plan untouched", st)
+	}
+	set([]string{"glm-5.3-flash"}, "a valid client signature is required")
+	if st := ogxRefresh(t, s); st["check"] != "unreachable" {
+		t.Fatalf("unsigned client = %v, want unreachable rather than revoked", st)
+	}
+	gateway.Close()
+	if st := ogxRefresh(t, s); st["check"] != "unreachable" || st["plan"] != "none" {
+		t.Fatalf("gateway down = %v, want unreachable and the plan untouched", st)
+	}
+	// The token never appears in the payload.
+	if b, _ := json.Marshal(ogxRefresh(t, s)); strings.Contains(string(b), "ogx-tok-later") {
+		t.Fatalf("refresh leaks the token: %s", b)
+	}
+}
+
+func TestOGXRefreshWithoutALink(t *testing.T) {
+	s := ogxTestServer(t)
+	if st := ogxRefresh(t, s); st["connected"] != false || st["check"] != nil {
+		t.Fatalf("refresh with no link = %v, want plain disconnected", st)
 	}
 }

@@ -113,7 +113,13 @@ func (s *Server) Guidance(id session.SessionID, content string, cancelTool bool)
 		return errNoRunningLoop
 	}
 
+	// "queued" goes out before the guidance is drainable, for the reason
+	// handleGuidance gives: the loop's "delivered" must never overtake it.
 	if content != "" {
+		s.bus.Publish("loop.guidance", map[string]string{
+			"sessionId": string(id),
+			"status":    "queued",
+		})
 		lc.PushGuidance(content)
 	}
 	if cancelTool {
@@ -122,10 +128,6 @@ func (s *Server) Guidance(id session.SessionID, content string, cancelTool bool)
 	}
 
 	slog.Info("mid-loop guidance received", "session", id, "len", len(content), "cancelTool", cancelTool)
-	s.bus.Publish("loop.guidance", map[string]string{
-		"sessionId": string(id),
-		"status":    "queued",
-	})
 	return nil
 }
 

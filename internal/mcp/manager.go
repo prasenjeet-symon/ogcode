@@ -370,6 +370,7 @@ func (m *Manager) Close() error {
 			}
 		}
 		receiver.close()
+		sweepTempImages()
 		if len(errs) > 0 {
 			m.closeErr = fmt.Errorf("%s", strings.Join(errs, "; "))
 		}

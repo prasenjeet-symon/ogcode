@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/prasenjeet-symon/ogcode/internal/codemap"
@@ -17,9 +18,12 @@ import (
 //
 // The failure it catches is both common and quiet: a replaced block that drops
 // a brace, an indentation slip in Python, a merge of two fragments that leaves
-// a stray token. None of those announce themselves — the file writes fine, and
-// the damage surfaces later, in a build the agent may not run for several
-// turns, by which point it has stacked more edits on a broken parse.
+// a stray token, a JSON config missing a comma. None of those announce
+// themselves — the file writes fine, and the damage surfaces later, in a build
+// the agent may not run for several turns, by which point it has stacked more
+// edits on a broken parse. (Python's indentation rules are enforced by
+// codemap's own pass: the tree-sitter grammar accepts indentation CPython
+// rejects.)
 //
 // write and edit call syntaxNote for exactly that reason, which leaves this
 // tool the cases they cannot cover: a file changed by a shell command, a
@@ -34,7 +38,7 @@ type CheckSyntaxTool struct{}
 func (CheckSyntaxTool) ID() string { return "check_syntax" }
 
 func (CheckSyntaxTool) Description() string {
-	return "Parse a source file and report any syntax errors, with the line and column of each. The write and edit tools already run this check on what they change, so use it for a file changed some other way — by a shell command, a formatter, a patch, a generator — and to confirm a file is clean after you fix a reported error. Returns OK when the file parses, the error locations when it does not, and NOT CHECKED when no grammar covers the file type. Checks grammar only: it does not find undefined names, type errors, or logic bugs, so a clean result is not a substitute for running the build or the tests."
+	return "Parse a source file and report any syntax errors, with the line and column of each. The write and edit tools already run this check on what they change, so use it for a file changed some other way — by a shell command, a formatter, a patch, a generator — and to confirm a file is clean after you fix a reported error. Covers Go, Python (indentation included), JavaScript, TypeScript, Rust, Java, C#, PHP, Swift, Dart, HTML (with its inline scripts and styles), CSS, JSON, YAML and TOML. Returns OK when the file parses, the error locations when it does not, and NOT CHECKED when no parser covers the file. Checks grammar only: it does not find undefined names, type errors, or logic bugs, so a clean result is not a substitute for running the build or the tests."
 }
 
 func (CheckSyntaxTool) Parameters() json.RawMessage {
@@ -76,6 +80,8 @@ func (CheckSyntaxTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 			return Result{Title: "Check Syntax", Output: fmt.Sprintf("%s does not exist", params.Path)}, nil
+		case errors.Is(err, codemap.ErrDirectory):
+			return Result{Title: "Check Syntax", Output: fmt.Sprintf("%s is a directory — check_syntax takes a file; list the directory with glob", params.Path)}, nil
 		case errors.Is(err, codemap.ErrBinary):
 			return Result{Title: "Check Syntax", Output: fmt.Sprintf("%s is a binary file — it has no syntax to check", params.Path)}, nil
 		case errors.As(err, &tooLarge):
@@ -92,7 +98,7 @@ func (CheckSyntaxTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 	case !res.Checked:
 		title = fmt.Sprintf("Check Syntax / %s — not checked", base)
 	case len(res.Diagnostics) > 0:
-		title = fmt.Sprintf("Check Syntax / %s — %d error(s)", base, len(res.Diagnostics))
+		title = fmt.Sprintf("Check Syntax / %s — %s", base, errorCount(res))
 	}
 
 	return Result{
@@ -101,10 +107,25 @@ func (CheckSyntaxTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 			"ok":      res.OK(),
 			"checked": res.Checked,
 			"errors":  len(res.Diagnostics),
+			// errors stops at codemap.MaxDiagnostics; this says the file has more.
+			"errorsTruncated": res.Truncated,
 		},
 		Output: codemap.RenderCheck(res),
 	}, nil
 }
+
+// errorCount renders a result's error count with its noun: "1 syntax error",
+// "3 syntax errors", "20+ syntax errors" when the cap cut the list short.
+func errorCount(res *codemap.CheckResult) string {
+	if len(res.Diagnostics) == 1 && !res.Truncated {
+		return "1 syntax error"
+	}
+	return res.CountLabel() + " syntax errors"
+}
+
+// preexistingNote heads the note for a file that was already broken before the
+// change, as opposed to "SYNTAX ERROR" for damage the change caused.
+const preexistingNote = "SYNTAX NOTE"
 
 // noteDiagnostics caps how many errors a write or edit lists inline. The note
 // is a signal to go look, not the report — check_syntax gives the full list,
@@ -113,8 +134,13 @@ const noteDiagnostics = 5
 
 // syntaxNote parses a file's content before and after a mutation and returns
 // the note the mutating tool should append to its output. It returns "" when
-// there is nothing worth saying: the file still parses, no grammar covers it,
+// there is nothing worth saying: the file still parses, no parser covers it,
 // or it is too large or too binary to be worth the parse.
+//
+// hintPath is the path as the caller named it. The note's pointer to
+// check_syntax uses it, because the tool resolves a relative path against the
+// session directory: a bare file name would send the agent to the wrong file,
+// or to none, for anything outside the project root.
 //
 // The before/after comparison is the whole point. Checking only the result
 // would blame every edit for damage that was already in the file, and an agent
@@ -125,7 +151,7 @@ const noteDiagnostics = 5
 // The baseline parse only runs once the result is known to be broken, so the
 // overwhelmingly common case — a change that leaves the file fine — costs one
 // parse, not two.
-func syntaxNote(path string, before, after []byte) (string, *codemap.CheckResult) {
+func syntaxNote(path, hintPath string, before, after []byte) (string, *codemap.CheckResult) {
 	if len(after) > codemap.MaxFileSize || bytes.IndexByte(after, 0) >= 0 {
 		return "", nil
 	}
@@ -152,20 +178,29 @@ func syntaxNote(path string, before, after []byte) (string, *codemap.CheckResult
 
 	var b strings.Builder
 	if brokenBefore {
-		fmt.Fprintf(&b, "\n\nSYNTAX NOTE: the file has %d syntax error(s). It also had errors before\nthis change, so some may not be yours.\n\n", len(res.Diagnostics))
+		fmt.Fprintf(&b, "\n\n%s: the file has %s. It also had errors before\nthis change, so some may not be yours.\n\n", preexistingNote, errorCount(res))
 	} else {
-		fmt.Fprintf(&b, "\n\nSYNTAX ERROR: this change left %d syntax error(s) in the file.\nIt parsed cleanly before, so the damage is in what you just wrote.\n\n", len(res.Diagnostics))
+		fmt.Fprintf(&b, "\n\nSYNTAX ERROR: this change left %s in the file.\nIt parsed cleanly before, so the damage is most likely in what you just wrote.\n\n", errorCount(res))
 	}
 	b.WriteString(codemap.FormatDiagnostics(shown))
-	if len(res.Diagnostics) > len(shown) {
-		fmt.Fprintf(&b, "  ... and %d more — run check_syntax(%q) for the full list.\n", len(res.Diagnostics)-len(shown), filepath.Base(path))
+	if more := len(res.Diagnostics) - len(shown); more > 0 {
+		label := strconv.Itoa(more)
+		if res.Truncated {
+			label += "+"
+		}
+		fmt.Fprintf(&b, "  ... and %s more — run check_syntax(%q) for the full list.\n", label, hintPath)
 	}
 	b.WriteString("\nFix this before making further changes to the file. The parser recovers after\nan error, so the position shown is where it gave up, not always where the\nmistake is — start at the first one.\n")
+	b.WriteString(codemap.NewerSyntaxCaveat)
 	return b.String(), res
 }
 
 // applySyntaxNote appends the note to a result and records the verdict in its
-// metadata, so the UI can flag a damaging write without parsing the output text.
+// metadata, so the UI can flag a damaging write without parsing the output text:
+// syntaxOK, the error count (capped, with syntaxErrorsTruncated when the file
+// has more), and syntaxPreexisting when the file was already broken before
+// this change — the difference between "this edit broke it" and "it was like
+// that".
 func applySyntaxNote(res Result, note string, check *codemap.CheckResult) Result {
 	if check != nil && check.Checked {
 		if res.Metadata == nil {
@@ -173,6 +208,12 @@ func applySyntaxNote(res Result, note string, check *codemap.CheckResult) Result
 		}
 		res.Metadata["syntaxOK"] = len(check.Diagnostics) == 0
 		res.Metadata["syntaxErrors"] = len(check.Diagnostics)
+		if check.Truncated {
+			res.Metadata["syntaxErrorsTruncated"] = true
+		}
+		if strings.Contains(note, preexistingNote) {
+			res.Metadata["syntaxPreexisting"] = true
+		}
 	}
 	res.Output += note
 	return res

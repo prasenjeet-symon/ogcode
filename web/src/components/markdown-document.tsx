@@ -159,7 +159,7 @@ md.use({
   },
 });
 
-mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'antiscript' });
 
 // ---------------------------------------------------------------------------
 // Front matter

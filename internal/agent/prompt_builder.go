@@ -86,13 +86,32 @@ Use the shell to inspect, never to change: running tests, "git status"/"log"/"di
 **Rule:** Pull file contents with "read". "cat", "head", "tail" and "sed -n" walk straight past both rules above — no map, no range, and the whole file lands in context in one call, to be re-sent on every step for the rest of the turn. The interception that turns an oversized read into a map lives in "read"; the shell has no equivalent.` + shellUse
 	}
 
+	// The agents that change files end the workflow on verification. write and
+	// edit report syntax errors themselves, so the diagram says to act on that,
+	// keeps check_syntax for files changed some other way, and ends on the build
+	// and the tests — a clean parse is grammar only. The read-only roles end on
+	// their own product and are never shown a tool they do not hold.
+	workflowEnd := "  → " + finalStep
+	if canWrite {
+		workflowEnd = `  → Then make changes                     ← write and edit report any SYNTAX ERROR they introduce: fix it before anything else
+  → check_syntax(path)                    ← for a file changed another way (shell, formatter, generator), or to confirm a fix
+  → build, then run the tests             ← a clean parse is grammar only; the build and the tests are the proof`
+	}
+
+	// Re-mapping after an edit is advice for the agents that edit; the rest are
+	// only told the map is never stale.
+	remap := ""
+	if canWrite {
+		remap = `**Before you read a range from a file you have edited, call "file_map" on it again.** An edit shifts every line below it, silently invalidating any range you were given earlier, and "edit" does not report the new line numbers. A file you are finished with needs no second map. `
+	}
+
 	return `## Mandatory: Use Project Index Before Exploration
 
 **Rule:** When the project has been indexed, you **MUST** call "codebase_map" first — before reading any file or guessing at project structure.
 
-It shows **one directory level per call**. Every folder on that level is a single line carrying its most common topic labels and how many files it holds; files sitting directly on that level are listed with their own labels. Nothing deeper is shown — a folder line is a door, not a listing.
+It shows **one directory level per call**. Every folder on that level is a single line: how many files it holds and the subfolders directly inside it, then a sample of topic labels drawn from across the whole folder; files sitting directly on that level are listed with their own labels. Nothing deeper is shown — a folder line is a door, not a listing.
 
-**Navigate by the labels.** Pick the folder whose labels match your task, call "codebase_map" again with "subdir" set to that folder's path, and repeat until the files you want are listed — usually one to three calls. This is the point of the tool: a folder whose labels have nothing to do with your task is an entire branch you never open. Do not stop at the top level and conclude the index is unhelpful because it only named folders; descending is how you use it.
+**Navigate by the labels.** Pick the folder whose labels or subfolder names match your task, call "codebase_map" again with "subdir" set to its path from the project root — the folder itself, or straight to one of the subfolders its line names — and repeat until the files you want are listed — usually one to three calls. This is the point of the tool: a folder whose labels have nothing to do with your task is an entire branch you never open. Do not stop at the top level and conclude the index is unhelpful because it only named folders; descending is how you use it.
 
 If it comes back empty, the project has not been indexed: stop calling it this session and use glob and grep instead. Use those too when the index does not cover what you need — unindexed files, binary patterns. codebase_map is your **first** exploration step whenever an index exists, never a blocker on getting the work done.
 
@@ -102,11 +121,11 @@ If it comes back empty, the project has not been indexed: stop calling it this s
 
 Task received
   → codebase_map()                        ← MANDATORY FIRST STEP: top level, every folder one labeled line
-  → codebase_map(subdir="internal")       ← descend into the folder whose labels match the task
-  → codebase_map(subdir="internal/tool")  ← repeat until the files you want are listed
+  → codebase_map(subdir="<folder>")       ← descend into the folder whose labels match the task
+  → codebase_map(subdir="<folder>/<sub>") ← repeat until the files you want are listed
   → file_map(path)                        ← MANDATORY before reading an unfamiliar file: where things are inside it
   → read(path, start_line, end_line)      ← only the region you need
-  → ` + finalStep + `
+` + workflowEnd + `
 
 ## Mandatory: Map a File Before Reading It
 
@@ -123,7 +142,7 @@ This is enforced, not advisory: "read" on a file longer than 200 lines with no r
 
 "start_line" and "end_line" are inclusive and use exactly the numbering "file_map" prints, so copy a range across as-is — never convert it to "offset". A range already covers the declaration's doc comment. Indented entries are nested inside the entry above them, so you can jump to one method or handler instead of reading its whole container.
 
-**After you edit a file, call "file_map" on it again.** An edit shifts every line below it, silently invalidating any range you were given earlier. The tool itself is never stale — it parses the file on each call and consults no index, so it works in any project, indexed or not.` + shellRule
+` + remap + `"file_map" itself is never stale — it parses the file on each call and consults no index, so it works in any project, indexed or not.` + shellRule
 }
 
 // deepSearchPrompt returns the external-knowledge section, scoped to the agent's
@@ -723,6 +742,7 @@ func parallelToolCallsPrompt(canWriteFiles, codeFacing bool) string {
 Batch aggressively:
 
 - Exploring several files → all the "file_map" calls together, then all the "read" calls together
+- Reading several parts of one file → every range in the same block; reads of one file run together
 - Checking a hypothesis → "glob" and "grep" in the same block, not one then the other
 - Confirming a name exists in several places → one "grep" per place, all at once
 
@@ -742,7 +762,13 @@ Batch aggressively:
 	if canWriteFiles {
 		prompt += `
 
-**Several changes to one file belong in one "edit" call.** Every change goes in its "edits" array — a single change is an array of one, and the tool takes no other form. They apply in order against each other's results, and all-or-nothing — if any anchor is missing or ambiguous, nothing is written and the error names which entry failed. That is one round trip and cannot half-apply a refactor. Separate same-file "edit" calls remain safe (the runtime serializes mutations to the same path, so each re-reads after the last applied) but they commit independently, and an overlapping anchor still fails cleanly — "old_string not found" when the winner consumed it, or an ambiguity error if the winner's replacement duplicated it — so re-issue that one after seeing the result. **Never batch a "write" with an "edit" to the same file** — order is unspecified, so the edit can anchor against content the write replaces. Verification batches freely — "check_syntax" on every file you touched belongs in a single block.`
+**Calls on the same file run in the order you write them; calls on different files run at the same time.** A "read", "file_map" or "check_syntax" written after an "edit" of that file sees the edit, so changing a file and checking it can share one block, and edits to different files batch freely.
+
+**Several changes to one file belong in one "edit" call.** Every change goes in its "edits" array — a single change is an array of one, and the tool takes no other form. They apply in order against each other's results, and all-or-nothing — if any anchor is missing or ambiguous, nothing is written and the error names which entry failed. That is one round trip and cannot half-apply a refactor. Separate same-file "edit" calls in one block remain safe — the runtime serializes mutations to the same path, in the order you wrote them, so each re-reads after the last applied — but they commit independently, and an anchor an earlier one changed fails cleanly — "old_string not found" when it was consumed, or an ambiguity error if its replacement duplicated it — so re-issue that one after seeing the result. **Never batch a "write" with an "edit" to the same file** — the edit would anchor on content the write replaces, which you have not seen.
+
+**The shell is the one thing the runtime cannot order.** It cannot tell which files a "bash" command touches, so a command that changes files — a formatter, a code generator, a "git checkout" — runs alongside everything else in its block. Give such a command a block of its own, and read, edit or check what it changed in the next. Commands that depend on each other — install then test, add then commit — belong in one command joined with "&&", not in parallel calls.
+
+"write" and "edit" already report syntax errors in what they change, so "check_syntax" is only for files changed another way (a shell command, a formatter, a generator) or to confirm a fix.`
 	}
 
 	return prompt

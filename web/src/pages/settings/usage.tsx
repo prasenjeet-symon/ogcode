@@ -201,20 +201,7 @@ export default function UsageSettings() {
               <Overview summary={s()} />
               <DailySpend summary={s()} range={range()} />
 
-              <Group
-                id="usage-models"
-                title="By model"
-                description={
-                  <>
-                    Priced at each model's current price: the provider's own listing, or the model catalogue.
-                    OGX and Ollama Cloud are flat plans and local models are free, so for those the figure is
-                    what the same tokens would cost on the vendor's own API. Cache reads are priced at their
-                    discounted rate. Sessions from before ogcode recorded a provider are priced as the provider
-                    that serves the model today, marked inferred; where none does, the provider shows as not
-                    recorded and the usage is never counted as billed.
-                  </>
-                }
-              >
+              <Group id="usage-models" title="By model">
                 <For each={visibleModels()}>{(v) => <ModelRow m={v.m} hidden={v.hidden} />}</For>
               </Group>
 

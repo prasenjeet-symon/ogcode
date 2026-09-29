@@ -38,15 +38,27 @@ var fallbackPatterns = []fallbackPattern{
 	// Rust.
 	{"func", regexp.MustCompile(`^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)`), 1},
 	{"type", regexp.MustCompile(`^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait|impl)\s+([A-Za-z_][\w]*)`), 1},
+	// Kotlin, whose modifiers stack ahead of the keyword: `override suspend fun`,
+	// `data class`, `sealed interface`. A bare `class` is already caught above,
+	// but without these a Kotlin file mapped its classes and none of its
+	// functions. The receiver of an extension function (`fun String.slug()`) is
+	// skipped so the entry is named for the function.
+	{"func", regexp.MustCompile(`^\s*(?:(?:public|private|protected|internal|open|override|abstract|final|suspend|inline|operator|infix|tailrec|external|actual|expect)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.<>?, ]+\.)?([A-Za-z_]\w*)\s*\(`), 1},
+	{"type", regexp.MustCompile(`^\s*(?:(?:public|private|protected|internal|open|abstract|final|sealed|data|enum|annotation|inner|value|inline|companion|expect|actual)\s+)*(?:class|interface|object)\s+([A-Za-z_]\w*)`), 1},
 	// Shell.
 	{"func", regexp.MustCompile(`^\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{`), 1},
 }
 
-var markdownHeading = regexp.MustCompile(`^(#{1,6})\s+(.+?)\s*#*\s*$`)
+// markdownHeading matches an ATX heading as CommonMark defines one: up to three
+// spaces of indent, one to six #s, and an optional closing run of #s that has
+// to be set off by a space. That last condition is what keeps the text intact —
+// "# Using C#" is a heading about C#, and a pattern that stripped any trailing
+// #s turned it into "Using C".
+var markdownHeading = regexp.MustCompile(`^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t\r]*$`)
 
 // fallbackSymbols scans src line by line for declaration-shaped lines.
 func fallbackSymbols(path string, src []byte) []*Symbol {
-	lines := strings.Split(string(src), "\n")
+	lines := sourceLines(src)
 
 	if isMarkdown(path) {
 		return markdownSymbols(lines)
@@ -78,21 +90,48 @@ func fallbackSymbols(path string, src []byte) []*Symbol {
 	return symbols
 }
 
+// sourceLines splits src into lines numbered the way read and countLines
+// number them.
+//
+// A final newline ends the last line rather than opening an empty one after
+// it: split naively, a file of N lines came back as N+1, and the last entry in
+// every heuristic or markdown map ran to a line past the end of the file. A
+// byte-order mark is dropped too, since it is not part of the first line's
+// text and would keep a heading on line 1 from matching.
+func sourceLines(src []byte) []string {
+	lines := strings.Split(strings.TrimPrefix(string(src), "\ufeff"), "\n")
+	if len(lines) > 1 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
 // markdownSymbols outlines a document by its headings, which is the closest
 // thing prose has to a declaration.
+//
+// Lines inside a fenced code block are code, not headings — a shell comment
+// "# install" in a ``` block is not a section — and so is YAML front matter,
+// whose comments start with # as well. A fence opens with three or more
+// backticks or tildes and closes with at least as many of the same character;
+// tracking only ``` let a ~~~ block's comments through as headings.
 func markdownSymbols(lines []string) []*Symbol {
 	var symbols []*Symbol
-	inFence := false
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			inFence = !inFence
+	fence := ""
+	for i := frontMatterEnd(lines); i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if fence != "" {
+			if closesFence(trimmed, fence) {
+				fence = ""
+			}
 			continue
 		}
-		if inFence {
+		if f := openingFence(trimmed); f != "" {
+			fence = f
 			continue
 		}
 		m := markdownHeading.FindStringSubmatch(line)
-		if m == nil {
+		if m == nil || strings.TrimSpace(m[2]) == "" {
 			continue
 		}
 		symbols = append(symbols, &Symbol{
@@ -104,6 +143,46 @@ func markdownSymbols(lines []string) []*Symbol {
 	}
 	closeRanges(symbols, len(lines))
 	return symbols
+}
+
+// frontMatterEnd returns the index of the first line after a YAML front matter
+// block — the --- delimited header static-site tools put at the top of a page —
+// or 0 when the file has none.
+func frontMatterEnd(lines []string) int {
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return 0
+	}
+	for i := 1; i < len(lines); i++ {
+		if t := strings.TrimSpace(lines[i]); t == "---" || t == "..." {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// openingFence returns the run of backticks or tildes that opens a fenced code
+// block on this line, or "" when the line opens none.
+func openingFence(line string) string {
+	for _, c := range []byte{'`', '~'} {
+		n := 0
+		for n < len(line) && line[n] == c {
+			n++
+		}
+		if n >= 3 {
+			return line[:n]
+		}
+	}
+	return ""
+}
+
+// closesFence reports whether line closes the block fence opened: a run of the
+// same character at least as long, with nothing after it.
+func closesFence(line, fence string) bool {
+	n := 0
+	for n < len(line) && line[n] == fence[0] {
+		n++
+	}
+	return n >= len(fence) && strings.TrimSpace(line[n:]) == ""
 }
 
 // closeRanges ends each symbol where the next one begins. Without real spans

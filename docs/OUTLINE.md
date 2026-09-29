@@ -1,7 +1,7 @@
 # Ogcode — Documentation Outline
 
 > Architecture and configuration reference for the ogcode codebase.
-> Regenerated from codebase analysis at **v0.40.0**.
+> Regenerated from codebase analysis at **v0.41.0**.
 
 ---
 
@@ -471,6 +471,18 @@ type ToolDef interface {
 | `MemoryRecallTool` | `memory_recall` | server |
 | `ProjectMemoryRecallTool` | `project_memory_recall` | server |
 
+
+#### Syntax checking (`check_syntax`, and every `write`/`edit`)
+
+`codemap.CheckSource` decides what a file is checked with:
+
+- **tree-sitter grammars** for Go, Python, TypeScript/TSX (and JavaScript through TSX), Rust, Java, C#, PHP, Swift, Dart, HTML and CSS — the same grammars `file_map` outlines with. A tree that reports an error only a hidden MISSING token carries (Go's statement terminator) is still an error, located from the node's S-expression; the one exception is a terminator missing at end of file, which Go allows.
+- **Python indentation** is checked by `pyindent.go`, a tokenizer-level pass with CPython's rules (unexpected indent, missing block, unmatched dedent, tabs vs spaces); the grammar accepts all of them. Validated against `compile()` over the CPython stdlib: no false alarms, every one of ~5,000 injected indentation errors caught.
+- **HTML** also checks each `<script>` (as JS, or JSON for JSON-LD and import maps) and `<style>` body; bodies holding server-template syntax are skipped.
+- **Data formats** go to Go parsers (`validators.go`): JSON (comments and trailing commas allowed, except in `package.json`, `package-lock.json`, `composer.json`), JSON Lines, YAML (yaml.v3; a file with template syntax that fails to parse is reported unchecked), TOML (BurntSushi/toml).
+- **Grammar shims** (`shims.go`) rewrite valid syntax a grammar predates — CSS nesting, `@container`, decimal keyframes, `url(#id)`, TS `export type *`, Rust `safe fn`, Java `import module` — into same-length forms it parses, so positions still point into the file. Anything else newer than a grammar is covered by the caveat every error report carries: confirm with the compiler, do not rewrite.
+
+`write` and `edit` report errors their change introduced (`SYNTAX ERROR`) apart from ones already there (`SYNTAX NOTE`), and record `syntaxOK`, `syntaxErrors`, `syntaxErrorsTruncated` and `syntaxPreexisting` in metadata; the session view shows them as a chip on the file-edit row.
 ### 7.4 Permission System (`internal/permission/`)
 
 Default ruleset (evaluated against tool name + path):
@@ -878,7 +890,7 @@ Port selection runs through `internal/portmap`, which remembers the port each pr
 
 ## 15. Version & Update Checking (`internal/version/`)
 
-- Current version: **v0.40.0** (set via ldflags)
+- Current version: **v0.41.0** (set via ldflags)
 - `CheckUpdate()`: fetches the latest release from the GitHub API (`prasenjeet-symon/ogcode`), cached for 1 hour
 - Detects the install method: Homebrew, winget, scoop, cargo, or the curl script
 - Compares semantic versions and returns update info with the install command

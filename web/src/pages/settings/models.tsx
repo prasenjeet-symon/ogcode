@@ -5,6 +5,7 @@ import {
   getProviderConfigs,
   setProviderConfig,
   getOGXStatus,
+  refreshOGX,
   startOGXConnect,
   disconnectOGX,
 } from '../../api/client';
@@ -34,6 +35,7 @@ import {
   type ProviderDef,
 } from '../../lib/providers';
 import { useFeatureFlag } from '../../lib/feature-flags';
+import Logo from '../../components/logo';
 
 // ---------------------------------------------------------------------------
 // Models — one tab per provider.
@@ -49,7 +51,7 @@ import { useFeatureFlag } from '../../lib/feature-flags';
 // models or credential rows match, so typing a model name finds it wherever it
 // lives; the found tab then stays open.
 //
-// One tab is not a protocol: OGX is the subscription plan sold by OG Lab.
+// One tab is not a protocol: OGX is the subscription plan sold by OGLAB.
 // Its panel holds an account connection (browser hand-off, token stored
 // server-side) rather than credentials — see OGXSection.
 // ---------------------------------------------------------------------------
@@ -57,10 +59,10 @@ import { useFeatureFlag } from '../../lib/feature-flags';
 const CHIP_ICON =
   'M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z';
 
-/** The OG Lab plan tab — an account connection, not a provider protocol. */
+/** The OGLAB plan tab — an account connection, not a provider protocol. */
 const OGX_SLOT = 'ogx';
 
-/** The OG Lab dashboard. Plan state, billing and token usage live there. */
+/** The OGLAB dashboard. Plan state, billing and token usage live there. */
 const OGX_WEB_URL = 'https://oglab.ogcode.xyz';
 
 /**
@@ -108,7 +110,7 @@ export default function ModelsSettings() {
       // The plan tab leads rather than rides after the four protocols: it is
       // the one tab that is not a protocol, and the subscription is what a
       // fresh install with no keys reaches for first. readOnly: it has no
-      // credential rows — its panel manages the OG Lab account link instead.
+      // credential rows — its panel manages the OGLAB account link instead.
       //
       // Held behind a PostHog flag while the plan feature is unreleased, and
       // off is the fail-safe: an install that cannot reach PostHog keeps the
@@ -284,22 +286,52 @@ export default function ModelsSettings() {
 }
 
 // ---------------------------------------------------------------------------
-// OGX — the subscription plan by OG Lab.
+// OGX — the subscription plan by OGLAB.
 //
-// The panel manages one thing: whether this install is linked to an OG Lab
-// account. Connect opens the web side in a new tab (sign-up, sign-in and
-// payment all happen there), the browser is redirected back to the server
-// with a token, and the panel — polling status while the tab is away — flips
-// to active the moment the token lands. The token stays server-side.
+// The panel manages one thing: whether this install is linked to an OGLAB
+// account, and what that account's plan is right now. Connect opens the web
+// side in a new tab (sign-up, sign-in and payment all happen there), the
+// browser is redirected back to the server with a token, and the panel —
+// polling status while the tab is away — flips to the account the moment the
+// token lands. The token stays server-side.
 //
-// Once linked, the plan's models are a provider like any other, so the panel
-// also renders their list. Two things there behave differently from a
-// credential tab: the catalogue comes and goes with the account link (so both
-// transitions re-fetch it rather than waiting for a restart), and nothing in it
-// is the user's to add or delete — the plan decides. The slot is readOnly,
-// which hides the add row; the remove path cannot fire because none of these
-// models is custom.
+// The plan is re-read from the gateway whenever the panel opens and whenever
+// the window comes back into focus, so a plan bought, lapsed or cancelled on
+// the web side shows up here on its own — there is no disconnect-and-reconnect
+// dance. The header says where the account stands and holds the one action that
+// changes it; the rows below are the account, the plan's models and the way
+// out.
+//
+// Once linked, the plan's models are a provider like any other. Two things
+// behave differently from a credential tab: the catalogue comes and goes with
+// the plan (so every change re-fetches it rather than waiting for a restart),
+// and nothing in it is the user's to add or delete — the plan decides. The slot
+// is readOnly, which hides the add row; the remove path cannot fire because
+// none of these models is custom.
 // ---------------------------------------------------------------------------
+
+/** OGLAB's own tile colour. The plan wears it in both themes — the same mark
+ *  on the same tile as the OGLAB dashboard — so the two read as one product. */
+const OGLAB_TILE = '#5e6ad2';
+
+const EXTERNAL_ICON = 'M7 17L17 7M9 7h8v8';
+const REFRESH_ICON =
+  'M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99';
+
+/** Where the linked account stands, as the panel draws it. */
+type OGXState = 'loading' | 'disconnected' | 'active' | 'noplan' | 'revoked';
+
+/** A plan value the gateway would serve. Mirrors session.OGXAccount.HasPlan on
+ *  the server: "none", or nothing at all, is a link without a plan. */
+function hasPlan(st: OGXStatus | null): boolean {
+  const p = (st?.plan || '').trim().toLowerCase();
+  return p !== '' && p !== 'none';
+}
+
+/** Re-reading the plan on focus is throttled to this, so flicking between
+ *  windows does not ask the gateway each time. */
+const RECHECK_MS = 30_000;
+
 function OGXSection(props: {
   slot: Slot;
   models: ModelInfo[];
@@ -309,17 +341,80 @@ function OGXSection(props: {
   const shell = useShell();
   const [status, setStatus] = createSignal<OGXStatus | null>(null);
   const [connecting, setConnecting] = createSignal(false);
+  const [checking, setChecking] = createSignal(false);
+  const [revoked, setRevoked] = createSignal(false);
+  // What a check the user asked for came to, said once beside the header:
+  // "up to date", or why it could not tell.
+  const [note, setNote] = createSignal<{ tone: 'ok' | 'danger'; text: string } | null>(null);
   const [error, setError] = createSignal('');
   let pollTimer: number | undefined;
+  let noteTimer: number | undefined;
+  let lastCheck = 0;
 
-  const refresh = async () => {
+  const state = (): OGXState => {
+    const st = status();
+    if (!st) return 'loading';
+    if (!st.connected) return 'disconnected';
+    if (revoked()) return 'revoked';
+    return hasPlan(st) ? 'active' : 'noplan';
+  };
+
+  const say = (next: { tone: 'ok' | 'danger'; text: string } | null) => {
+    clearTimeout(noteTimer);
+    setNote(next);
+    if (next) noteTimer = window.setTimeout(() => setNote(null), 5000);
+  };
+
+  // check asks the gateway what the plan is now. A plan that came or went
+  // changed the provider registry server-side, so the catalogue is re-fetched
+  // to match. Background checks (opening the tab, coming back to the window)
+  // stay silent unless they change something; a check the user asked for
+  // always says how it went.
+  const check = async (manual: boolean) => {
+    if (checking() || !status()?.connected) return;
+    setChecking(true);
+    lastCheck = Date.now();
+    const before = hasPlan(status());
+    try {
+      const st = await refreshOGX();
+      setStatus(st);
+      setRevoked(st.check === 'revoked');
+      const changed = st.check === 'ok' && hasPlan(st) !== before;
+      if (changed) session.reloadModels().catch(() => {});
+      if (changed && hasPlan(st)) {
+        say({ tone: 'ok', text: 'Your plan is active. Its models are in the picker now.' });
+      } else if (manual) {
+        say(
+          st.check === 'unreachable'
+            ? { tone: 'danger', text: "Couldn't reach OGLAB. Try again in a moment." }
+            : st.check === 'ok'
+              ? { tone: 'ok', text: 'Up to date.' }
+              : null,
+        );
+      }
+    } catch {
+      if (manual) say({ tone: 'danger', text: "Couldn't reach the ogcode server." });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  onMount(async () => {
     try {
       setStatus(await getOGXStatus());
     } catch {
-      /* leave the last known state on screen */
+      setError('Could not read the OGX connection — is the ogcode server running?');
+      return;
     }
+    check(false);
+  });
+
+  // Coming back to the window is when a plan bought in the browser should
+  // appear, so the plan is re-read then — at most every RECHECK_MS.
+  const onFocus = () => {
+    if (!connecting() && Date.now() - lastCheck > RECHECK_MS) check(false);
   };
-  onMount(refresh);
+  window.addEventListener('focus', onFocus);
 
   const stopPolling = () => {
     if (pollTimer !== undefined) {
@@ -328,19 +423,18 @@ function OGXSection(props: {
     }
     setConnecting(false);
   };
-  onCleanup(stopPolling);
-
-  // Mirrors session.OGXAccount.HasPlan on the server: a plan value of "none"
-  // (or nothing at all) means the account is linked but holds no plan, so the
-  // gateway grants no models. Both sides must agree, or the chip would read
-  // "Active" over an empty list.
-  const planLabel = () => {
-    const p = (status()?.plan || '').trim();
-    return p && p.toLowerCase() !== 'none' ? p : '';
-  };
+  onCleanup(() => {
+    stopPolling();
+    clearTimeout(noteTimer);
+    window.removeEventListener('focus', onFocus);
+  });
 
   const connect = async () => {
     setError('');
+    say(null);
+    // A reconnect starts from a link that is already stored, so "connected"
+    // alone cannot mean the new one landed: the link's timestamp changing can.
+    const before = status()?.connectedAt;
     try {
       const { url } = await startOGXConnect();
       window.open(url, '_blank', 'noopener');
@@ -351,27 +445,30 @@ function OGXSection(props: {
       const startedAt = Date.now();
       pollTimer = window.setInterval(async () => {
         const st = await getOGXStatus().catch(() => null);
-        if (st?.connected) {
+        if (st?.connected && st.connectedAt !== before) {
           setStatus(st);
+          setRevoked(false);
           stopPolling();
           // The link just landed, so the plan's models exist server-side now.
-          // Fetch them without holding the panel open on a spinner: a failure
-          // leaves the tab showing the connection and an empty list, which the
-          // list itself explains.
+          // Fetch them without holding the panel on a spinner: a failure
+          // leaves the tab showing the account, which a refresh corrects.
           session.reloadModels().catch(() => {});
+          lastCheck = Date.now();
         } else if (Date.now() - startedAt > 15 * 60_000) {
           stopPolling();
         }
       }, 2000);
     } catch {
-      setError('Could not start the connect flow — is the server reachable?');
+      setError('Could not start the connect flow — is the ogcode server reachable?');
     }
   };
 
   const disconnect = async () => {
-    if (!confirm('Disconnect OGX? Your plan stays on your OG Lab account — this only unlinks ogcode.')) return;
+    if (!confirm('Disconnect OGX? Your plan stays on your OGLAB account — this only unlinks ogcode.')) return;
     try {
       setStatus(await disconnectOGX());
+      setRevoked(false);
+      say(null);
       // Mirror the connect path: the provider is gone, so the catalogue has to
       // follow it out of the page.
       session.reloadModels().catch(() => {});
@@ -380,9 +477,16 @@ function OGXSection(props: {
     }
   };
 
-  const connectedSince = () => {
+  const linkedOn = () => {
     const at = status()?.connectedAt;
-    return at ? new Date(at).toLocaleDateString() : '';
+    return at ? new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  };
+
+  const initials = () => {
+    const local = (status()?.email || '').split('@')[0];
+    const parts = local.split(/[._\-+]+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    return (parts.length > 1 ? parts[0][0] + parts[1][0] : local.slice(0, 2)).toUpperCase();
   };
 
   // Same two-way split ProviderSection uses: the page-wide search narrows what
@@ -395,129 +499,216 @@ function OGXSection(props: {
     !matches(shell.query(), 'models', 'catalogue', 'available') &&
     visibleModels().length === 0;
 
+  const chip = () => {
+    switch (state()) {
+      case 'disconnected':
+        return <StatusChip tone="muted">Not connected</StatusChip>;
+      case 'active':
+        return <StatusChip tone="ok">Active</StatusChip>;
+      case 'noplan':
+        return <StatusChip tone="warn">No plan</StatusChip>;
+      case 'revoked':
+        return <StatusChip tone="danger">Reconnect needed</StatusChip>;
+      default:
+        return null;
+    }
+  };
+
+  const waiting = () => (
+    <span class="inline-flex items-center gap-2 text-meta text-[color:var(--text-secondary)]">
+      <Spinner class="w-3.5 h-3.5" />
+      Waiting for your browser…
+      <Button variant="text" onClick={stopPolling}>
+        Cancel
+      </Button>
+    </span>
+  );
+
   return (
     <div class="page-enter">
       <Group
         id={OGX_SLOT}
         title="OGX"
         icon={CHIP_ICON}
-        description="The ogcode plan, by OG Lab."
-        action={
-          <Show when={status()?.connected} fallback={<StatusChip tone="muted">Not connected</StatusChip>}>
-            <Show when={planLabel()} fallback={<StatusChip tone="warn">No plan</StatusChip>}>
-              <StatusChip tone="ok">Active · {planLabel()}</StatusChip>
-            </Show>
-          </Show>
+        action={chip()}
+        description={
+          <>
+            OGX is the ogcode plan by OGLAB. Your plan, usage and billing are managed on{' '}
+            <LinkAction href={OGX_WEB_URL}>your OGLAB dashboard</LinkAction>.
+          </>
         }
       >
         <Show when={error()}>
-          <Banner tone="danger">{error()}</Banner>
+          <div class="px-3 pt-3">
+            <Banner tone="danger">{error()}</Banner>
+          </div>
         </Show>
 
-        {/* Not linked yet. One short, centred invitation rather than a lone
-            settings row: an unconfigured provider tab is mostly whitespace, and
-            a single label/button pair in the middle of it reads as unfinished.
-            The paragraph that used to sit here explained the mechanism
-            (sign-up, payment, where the token lives) instead of offering the
-            action, so it is gone — the button is the whole story.
+        <Show when={state() === 'loading' && !error()}>
+          <div data-setting class="flex items-center gap-3 px-4 py-4">
+            <span class="w-10 h-10 rounded-[10px] bg-[color:var(--bg-hover)] animate-pulse" />
+            <span class="flex-1 space-y-2">
+              <span class="block h-3 w-24 rounded bg-[color:var(--bg-hover)] animate-pulse" />
+              <span class="block h-2.5 w-56 max-w-full rounded bg-[color:var(--bg-hover)] animate-pulse" />
+            </span>
+          </div>
+        </Show>
 
-            data-setting matters: the shell hides any section whose rows all
-            filtered out (the :has() rule in index.css keys on that attribute),
-            and this branch has no <Row> left to carry it. */}
-        <Show
-          when={status()?.connected}
-          fallback={
-            <div data-setting class="px-4 py-8 text-center">
+        {/* Not linked yet: one short, centred invitation — what the plan is
+            for, and the one button — rather than a lone settings row in the
+            middle of an empty tab. data-setting matters: the shell hides any
+            section whose rows all filtered out (the :has() rule in index.css
+            keys on that attribute), and this branch has no <Row> to carry it. */}
+        <Show when={state() === 'disconnected'}>
+          <div data-setting class="px-6 pt-9 pb-8 text-center">
+            <OGXMark class="mx-auto w-11 h-11 rounded-[12px]" />
+            <p class="mt-3.5 text-ui font-semibold text-[color:var(--text-primary)]">Connect your ogcode plan</p>
+            <p class="mx-auto mt-1.5 max-w-[26rem] text-meta leading-[1.6] text-[color:var(--text-tertiary)]">
+              Two fast models and $2 of tokens every day, for one flat monthly price. Sign in with OGLAB in
+              your browser to link this install.
+            </p>
+            <div class="mt-4 flex justify-center">
+              <Show when={!connecting()} fallback={waiting()}>
+                <Button onClick={connect}>Connect OGX</Button>
+              </Show>
+            </div>
+            <ul class="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-micro text-[color:var(--text-muted)]">
+              <For each={['No API keys to manage', 'Refills every day at 00:00 UTC', 'Cancel anytime']}>
+                {(perk) => (
+                  <li class="inline-flex items-center gap-1.5">
+                    <svg class="w-3 h-3" style={{ color: 'var(--success)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    {perk}
+                  </li>
+                )}
+              </For>
+            </ul>
+          </div>
+        </Show>
+
+        <Show when={state() === 'active' || state() === 'noplan' || state() === 'revoked'}>
+          {/* The header: the plan's mark, where the account stands in a line,
+              and the one action that changes it — the dashboard on a live
+              plan, subscribing without one, reconnecting a revoked link. */}
+          <div data-setting class="flex items-start gap-3.5 px-4 py-4 border-b border-[color:var(--border-subtle)] max-sm:flex-wrap">
+            <OGXMark class="w-10 h-10 rounded-[10px]" />
+            <div class="min-w-0 flex-1 self-center">
+              <p class="text-ui font-semibold text-[color:var(--text-primary)] leading-snug">
+                {{ active: 'OGX', noplan: 'No active plan', revoked: 'Connection expired' }[state() as 'active' | 'noplan' | 'revoked']}
+              </p>
+              <p class="mt-0.5 text-meta leading-[1.5] text-[color:var(--text-tertiary)] max-w-[34rem]">
+                {
+                  {
+                    active: '$2 of tokens every day, refilled at 00:00 UTC. Usage and billing live on your OGLAB dashboard.',
+                    noplan:
+                      'Subscribe to OGX on OGLAB for two fast models and $2 of tokens every day. This tab picks the plan up on its own — no need to reconnect.',
+                    revoked: "OGLAB no longer accepts this install's link. Reconnect to keep using your plan.",
+                  }[state() as 'active' | 'noplan' | 'revoked']
+                }
+              </p>
+              <Show when={note()}>
+                {(n) => (
+                  <p class="mt-1 text-micro" style={{ color: n().tone === 'ok' ? 'var(--success)' : 'var(--danger)' }}>
+                    {n().text}
+                  </p>
+                )}
+              </Show>
+            </div>
+            <div class="shrink-0 self-center flex items-center gap-1.5 max-sm:w-full max-sm:pl-[3.375rem]">
+              <Show when={state() === 'revoked'}>
+                <Show when={!connecting()} fallback={waiting()}>
+                  <Button onClick={connect}>Reconnect</Button>
+                </Show>
+              </Show>
+              <Show when={state() !== 'revoked'}>
+                <Button variant={state() === 'noplan' ? 'filled' : 'outlined'} href={OGX_WEB_URL}>
+                  {state() === 'noplan' ? 'Get OGX' : 'Dashboard'}
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d={EXTERNAL_ICON} />
+                  </svg>
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => check(true)}
+                  disabled={checking()}
+                  title="Check the plan again"
+                  aria-label="Check the plan again"
+                  class="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center transition-colors
+                         text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]
+                         hover:bg-[color:var(--bg-hover)] disabled:cursor-default"
+                >
+                  <svg class={`w-4 h-4 ${checking() ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d={REFRESH_ICON} />
+                  </svg>
+                </button>
+              </Show>
+            </div>
+          </div>
+
+          <Row label="Account" helper={linkedOn() ? `Linked to this install on ${linkedOn()}.` : undefined}>
+            <span class="flex items-center gap-2 min-w-0">
               <span
-                class="mx-auto mb-3 w-10 h-10 rounded-full flex items-center justify-center"
+                class="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-semibold tracking-[0.02em]"
                 style={{
-                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                  background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
                   color: 'var(--accent)',
                 }}
               >
-                <svg class="w-[19px] h-[19px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757M6.81 15.312a4.5 4.5 0 011.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757"
-                  />
-                </svg>
+                {initials()}
               </span>
-              <p class="text-ui font-medium text-[color:var(--text-primary)]">Connect your ogcode plan</p>
-              <Show
-                when={!connecting()}
-                fallback={
-                  <p class="mt-2 flex items-center justify-center gap-2 text-meta text-[color:var(--text-secondary)]">
-                    <Spinner class="w-3.5 h-3.5" />
-                    Waiting for the browser…
-                    <Button variant="text" onClick={stopPolling}>
-                      Cancel
-                    </Button>
-                  </p>
-                }
-              >
-                <p class="mx-auto mt-1.5 max-w-[24rem] text-meta leading-[1.6] text-[color:var(--text-tertiary)]">
-                  Opens the OG Lab sign-in in a new tab.
-                </p>
-                <div class="mt-4">
-                  <Button onClick={connect} disabled={status() === null}>
-                    Connect OGX
-                  </Button>
-                </div>
-              </Show>
-            </div>
-          }
-        >
-          <Show when={!planLabel()}>
-            <Banner tone="warn">
-              This account is linked but holds no plan, so the gateway grants no models. Choose a
-              plan on the OG Lab side, then disconnect and reconnect here to pick it up.
-            </Banner>
-          </Show>
-          <Row label="Account" helper="The OG Lab account this install is linked to.">
-            <span class="flex items-center gap-2 text-meta">
-              <Mono>{status()?.email || 'connected'}</Mono>
-              <Show when={connectedSince()}>
-                <span class="text-[color:var(--text-muted)]">since {connectedSince()}</span>
-              </Show>
+              <span class="text-meta text-[color:var(--text-secondary)] truncate max-w-[16rem]">
+                {status()?.email || 'Connected'}
+              </span>
             </span>
           </Row>
-          <Row label="Usage" helper="Token spend and plan details live on the OG Lab side.">
-            <Button variant="outlined" href={OGX_WEB_URL}>
-              Check usage
-            </Button>
-          </Row>
-          <Row
-            label="Disconnect"
-            helper="Unlinks ogcode from the account. The plan itself is managed on the web side."
-          >
-            <Button variant="outlined" onClick={disconnect}>
+
+          <Show when={state() === 'active'}>
+            <Row
+              label="Models"
+              helper="Included with your plan. Untick any you don't want in the model picker."
+              stacked
+              hidden={modelsHidden()}
+            >
+              <ModelList
+                all={props.models}
+                visible={visibleModels()}
+                slot={props.slot}
+                configured={true}
+                filtering={!!shell.query().trim()}
+                onToggle={props.onToggle}
+                // Never called: the slot is readOnly, so the add row is hidden,
+                // and no plan model is custom, so no row offers a remove button.
+                onRemove={() => {}}
+                onAdd={async () => {}}
+                suggestedCollection=""
+                bulk={false}
+                included="Included"
+              />
+            </Row>
+          </Show>
+
+          <Row label="Disconnect" helper="Unlinks this install. Your plan, usage and billing stay on your OGLAB account.">
+            <Button variant="danger" onClick={disconnect}>
               Disconnect
             </Button>
-          </Row>
-          <Row
-            label="Models"
-            helper="Every model your plan grants. Managed on the OG Lab side — none of them is removable here."
-            stacked
-            hidden={modelsHidden()}
-          >
-            <ModelList
-              all={props.models}
-              visible={visibleModels()}
-              slot={props.slot}
-              configured={true}
-              filtering={!!shell.query().trim()}
-              onToggle={props.onToggle}
-              // Never called: the slot is readOnly, so the add row is hidden,
-              // and no plan model is custom, so no row offers a remove button.
-              onRemove={() => {}}
-              onAdd={async () => {}}
-              suggestedCollection=""
-            />
           </Row>
         </Show>
       </Group>
     </div>
+  );
+}
+
+/** The plan's mark: ogcode's loop on OGLAB's tile, white in both themes. */
+function OGXMark(props: { class?: string }) {
+  return (
+    <span
+      class={`shrink-0 flex items-center justify-center text-white ${props.class ?? ''}`}
+      style={{ background: OGLAB_TILE }}
+      aria-hidden="true"
+    >
+      <Logo class="w-[58%] h-[58%]" />
+    </span>
   );
 }
 
@@ -939,6 +1130,12 @@ function ModelList(props: {
   onRemove: (m: ModelInfo) => void;
   onAdd: (id: string, name: string, collection: string) => Promise<void>;
   suggestedCollection: string;
+  /** Hide the enable/disable-all chips — for a short list they only add
+   *  noise. On by default. */
+  bulk?: boolean;
+  /** What the price column says for a model with no per-token price, when
+   *  the plan covers it ("Included") rather than the price being unknown. */
+  included?: string;
 }) {
   const [enabledOnly, setEnabledOnly] = createSignal(false);
   const [bulkBusy, setBulkBusy] = createSignal(false);
@@ -1032,7 +1229,7 @@ function ModelList(props: {
         </div>
       </Show>
 
-      <Show when={props.all.length > 0}>
+      <Show when={props.all.length > 0 && props.bulk !== false}>
         <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
           <Chip active={enabledOnly()} onClick={() => setEnabledOnly(!enabledOnly())}>
             Enabled only
@@ -1071,7 +1268,12 @@ function ModelList(props: {
                   </Show>
                   <For each={models()}>
                     {(m) => (
-                      <ModelItem model={m} onToggle={() => props.onToggle(m)} onRemove={() => props.onRemove(m)} />
+                      <ModelItem
+                        model={m}
+                        included={props.included}
+                        onToggle={() => props.onToggle(m)}
+                        onRemove={() => props.onRemove(m)}
+                      />
                     )}
                   </For>
                 </>
@@ -1103,7 +1305,7 @@ function ModelList(props: {
             ? props.slot.id === 'ollama'
               ? 'Connected, but the catalogue is empty. Pull a model with `ollama pull qwen2.5-coder`, then Save the endpoint again to refresh.'
               : props.slot.id === OGX_SLOT
-              ? 'Connected, but your plan grants no models. Pick a plan on the OG Lab side, then disconnect and reconnect to pick it up.'
+              ? 'No models yet. Use the refresh button above to check your plan again.'
               : 'Connected, but the catalogue is empty. Save again to re-fetch, or add a model ID by hand below.'
             : props.slot.id === 'ollama'
             ? 'Not connected. Install Ollama, pull a model, and point Base URL at it — no API key needed.'
@@ -1123,7 +1325,7 @@ function ModelList(props: {
   );
 }
 
-function ModelItem(props: { model: ModelInfo; onToggle: () => void; onRemove: () => void }) {
+function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () => void; onRemove: () => void }) {
   const hasPrice = () => props.model.inputPricePerM > 0 || props.model.outputPricePerM > 0;
   return (
     <div
@@ -1175,9 +1377,9 @@ function ModelItem(props: { model: ModelInfo; onToggle: () => void; onRemove: ()
 
       <span
         class="shrink-0 w-[7rem] whitespace-nowrap text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]"
-        title="Input / output price per 1M tokens"
+        title={props.included && !hasPrice() ? 'Covered by your plan' : 'Input / output price per 1M tokens'}
       >
-        <Show when={hasPrice()} fallback={<span class="text-[color:var(--text-muted)]">—</span>}>
+        <Show when={hasPrice()} fallback={<span class="text-[color:var(--text-muted)]">{props.included || '—'}</span>}>
           ${fmtPrice(props.model.inputPricePerM)} / ${fmtPrice(props.model.outputPricePerM)}
         </Show>
       </span>

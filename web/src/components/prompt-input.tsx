@@ -473,11 +473,24 @@ export default function PromptInput() {
             <div class="px-4 pt-2 text-micro text-amber-400/80">{imageError()}</div>
           </Show>
 
-          {/* Guidance-in-flight indicator */}
-          <Show when={session.guidanceActive()}>
+          {/* Guidance-in-flight indicator: queued until the loop picks the
+              guidance up, then a brief "applied" before it clears. */}
+          <Show when={session.guidanceStatus() !== 'idle'}>
             <div class="px-4 pt-2 flex items-center gap-1.5 text-micro text-[color:var(--accent)]">
-              <span class="inline-block w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse" />
-              Guidance queued — will be applied on the next loop iteration
+              <Show
+                when={session.guidanceStatus() === 'delivered'}
+                fallback={
+                  <>
+                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse" />
+                    Guidance queued — will be applied on the next loop iteration
+                  </>
+                }
+              >
+                <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Guidance applied — the agent is acting on it
+              </Show>
             </div>
           </Show>
 

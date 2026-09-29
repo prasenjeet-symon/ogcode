@@ -1131,3 +1131,15 @@ func TestCompactContextPrompt_CarriesTheUserAnswersVerbatim(t *testing.T) {
 		t.Error("the ask_user clause is not stated conditionally")
 	}
 }
+
+// The prompt must not send the agent to re-check files write and edit already
+// checked: that is a round trip per touched file that finds nothing new.
+func TestPromptDoesNotAskToRecheckEveryTouchedFile(t *testing.T) {
+	prompt := parallelToolCallsPrompt(true, true)
+	if strings.Contains(prompt, "on every file you touched") {
+		t.Error("prompt still asks for check_syntax on every touched file")
+	}
+	if !strings.Contains(prompt, `already report syntax errors`) {
+		t.Error("prompt does not say write and edit already check syntax")
+	}
+}

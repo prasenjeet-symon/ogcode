@@ -53,11 +53,11 @@ func MemoryDir(projectDir string) string {
 }
 
 // Filename builds a turn summary's filename. The UTC timestamp leads so a
-// lexical sort of the folder is chronological; a short session tag groups a
+// lexical sort of the folder is chronological; a session tag groups a
 // conversation's turns and lets session-scoped recall filter by name; the slug
 // makes the file recognisable at a glance. Example:
 //
-//	2026-09-09T143005Z--a1b2c3d4--wire-the-recall-agent.md
+//	2026-09-09T143005Z--ses01M269J8TM53--wire-the-recall-agent.md
 func Filename(createdAt time.Time, sessionID, title string) string {
 	ts := createdAt.UTC().Format("2006-01-02T150405Z")
 	tag := sessionTag(sessionID)
@@ -68,15 +68,35 @@ func Filename(createdAt time.Time, sessionID, title string) string {
 	return ts + "--" + tag + "--" + slug + ".md"
 }
 
-// sessionTag reduces a session id to a short, filename-safe grouping token.
+// tagLen is how many characters of a session key a file name's tag keeps. For
+// ogcode's "ses_" + ULID ids that is the prefix, the whole millisecond
+// timestamp and two characters of randomness, so two conversations share a tag
+// only if they began in the same millisecond and drew the same ten random bits.
+// It was 8 — the prefix and the first five timestamp characters, which change
+// only every 2.3 hours — so every conversation started in the same afternoon
+// shared one.
+const tagLen = 15
+
+// sessionTag reduces a session id to a filename-safe grouping token: the first
+// tagLen characters of its key.
 func sessionTag(sessionID string) string {
+	key := SessionKey(sessionID)
+	if len(key) > tagLen {
+		key = key[:tagLen]
+	}
+	return key
+}
+
+// SessionKey is a session id reduced to its ASCII letters and digits:
+// "ses_01M269J8TM53…" becomes "ses01M269J8TM53…". Every tag for a session — the
+// one in a summary's file name, the shorter one memory_map shows — is a prefix
+// of its key, which is what lets a tag be resolved back to the one
+// conversation it names. "session" for an id with no such characters.
+func SessionKey(sessionID string) string {
 	var b strings.Builder
 	for _, r := range sessionID {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			b.WriteRune(r)
-		}
-		if b.Len() >= 8 {
-			break
 		}
 	}
 	if b.Len() == 0 {
@@ -86,8 +106,9 @@ func sessionTag(sessionID string) string {
 }
 
 // SessionTag is the exported form of the grouping token Filename embeds in a
-// summary's name: the short tag one conversation's turns share and memory_map
-// groups by when it collapses a conversation to one line.
+// summary's name: the tag one conversation's turns share. memory_map groups by
+// the full SessionKey instead, and shows the shortest prefix of it that is
+// unique among the conversations it lists.
 func SessionTag(sessionID string) string {
 	return sessionTag(sessionID)
 }

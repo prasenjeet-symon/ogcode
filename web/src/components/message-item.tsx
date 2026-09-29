@@ -85,11 +85,13 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   // File-editing tools render a GitHub-style before/after diff instead of raw input.
   const isFileEdit = () => tool() === 'edit' || tool() === 'write';
 
-  // Agent navigation aids (codebase_map, file_map): their dense labeled
-  // tree/outline output is how the agent orients itself in the codebase, not
-  // something the user reads. Keep the collapsed status row, but never offer
-  // disclosure into input/output.
-  const isAgentNavTool = () => tool() === 'codebase_map' || tool() === 'file_map';
+  // Agent housekeeping tools (codebase_map, file_map, compact_context): the
+  // maps' dense labeled tree/outline output is how the agent orients itself in
+  // the codebase, and compact_context's is the agent's note to itself about
+  // what it condensed — neither is something the user reads. Keep the
+  // collapsed status row, but never offer disclosure into input/output.
+  const isAgentNavTool = () =>
+    tool() === 'codebase_map' || tool() === 'file_map' || tool() === 'compact_context';
   const fileDiff = createMemo((): { oldText: string; newText: string; mode: 'create' | 'edit' | 'overwrite'; omitted: boolean } | null => {
     if (!isFileEdit()) return null;
     const input = state().input || {};
@@ -125,6 +127,25 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     const d = fileDiff();
     if (!d || d.omitted) return null;
     return diffStat(d.oldText, d.newText);
+  });
+
+  // write and edit parse what they wrote and tell the agent when the file no
+  // longer parses. The diff replaces their output in this row, so without this
+  // the user never learns the agent broke a file — or that it was already
+  // broken, which is not the agent's doing and reads amber, not red.
+  const syntaxIssue = createMemo(() => {
+    if (!isFileEdit()) return null;
+    const meta = state().metadata || {};
+    if (meta.syntaxOK !== false) return null;
+    const count = Number(meta.syntaxErrors) || 0;
+    const label = `${count}${meta.syntaxErrorsTruncated ? '+' : ''} syntax error${count === 1 && !meta.syntaxErrorsTruncated ? '' : 's'}`;
+    const output = state().output || '';
+    const at = output.indexOf('SYNTAX ');
+    return {
+      label,
+      preexisting: !!meta.syntaxPreexisting,
+      note: at >= 0 ? output.slice(at).trim() : '',
+    };
   });
 
   // Auto-collapse when tool finishes (running/completed -> completed/error/denied)
@@ -254,6 +275,20 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
             <span style={{ color: 'var(--danger)' }}>−{diffStats()!.dels}</span>
           </span>
         </Show>
+        <Show when={syntaxIssue()}>
+          {(issue) => (
+            <span
+              class={`shrink-0 text-micro font-medium px-1.5 py-px rounded tabular-nums ${
+                issue().preexisting ? 'text-amber-400 bg-amber-500/10' : 'text-red-400 bg-red-500/10'
+              }`}
+              title={issue().preexisting
+                ? 'The file already had syntax errors before this change'
+                : 'This change left the file with syntax errors; the agent was told to fix them'}
+            >
+              {issue().label}
+            </span>
+          )}
+        </Show>
         <Show when={isDeepSearch() && durationLabel()}>
           <span
             class={`flex items-center gap-1 shrink-0 text-micro font-mono tabular-nums ${
@@ -282,6 +317,9 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
             <div class="mt-1.5 ml-[1.15rem] space-y-1.5 min-w-0 overflow-hidden">
               <Show when={isFileEdit() && fileDiff()}>
                 <FileDiff oldText={fileDiff()!.oldText} newText={fileDiff()!.newText} mode={fileDiff()!.mode} omitted={fileDiff()!.omitted} />
+              </Show>
+              <Show when={syntaxIssue()?.note}>
+                <CodeBlock label="syntax" maxHeight={200} text={syntaxIssue()!.note} />
               </Show>
               <Show when={!isFileEdit() && state().input && Object.keys(state().input).length > 0 && !(isDeepSearch() && status() === 'completed')}>
                 <CodeBlock label="input" maxHeight={160} text={safeStringify(state().input)} />

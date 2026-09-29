@@ -57,3 +57,25 @@
 (statement_block (function_declaration) @def.func)
 (statement_block (lexical_declaration (variable_declarator value: (arrow_function))) @def.func)
 (statement_block (lexical_declaration (variable_declarator value: (function_expression))) @def.func)
+
+; --- anonymous default exports -----------------------------------------------
+; `export default function () {}`, `export default () => {}` and
+; `export default {…}` declare nothing a pattern above can bind: the value sits
+; in the export's `value` field, where the named forms use `declaration`. They
+; are captured whole, as the export itself — without it such a module mapped to
+; nothing but its imports, and the handlers inside a default-exported component
+; surfaced at file scope with nothing to show they belonged to it.
+(program (export_statement value: (_)) @def.default)
+
+; --- object-literal modules --------------------------------------------------
+; `export const api = { get() {…}, post: async () => {…} }` is a module of
+; functions written as one object, and `export default {…}` is the same shape
+; for Vue's options API. Their function-valued members are where the code
+; lives, so they earn a line each, as a class's methods do. Only function
+; values qualify: a plain property is data, and the object's range covers it.
+(program (lexical_declaration (variable_declarator value: (object (method_definition) @def.method))))
+(program (export_statement (lexical_declaration (variable_declarator value: (object (method_definition) @def.method)))))
+(program (lexical_declaration (variable_declarator value: (object (pair value: [(arrow_function) (function_expression)]) @def.method))))
+(program (export_statement (lexical_declaration (variable_declarator value: (object (pair value: [(arrow_function) (function_expression)]) @def.method)))))
+(program (export_statement value: (object (method_definition) @def.method)))
+(program (export_statement value: (object (pair value: [(arrow_function) (function_expression)]) @def.method)))

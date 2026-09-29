@@ -957,9 +957,8 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 
 	// Take a place in the process-wide in-flight budget before the first send,
 	// and hold it for the whole request. A request made by a background index
-	// session draws the index's share of that budget, so its waves can never
-	// fill every slot ahead of the user's own turn; everything else draws the
-	// shared pool.
+	// session waits for room the user's own work leaves; everything else goes
+	// ahead of it and never queues behind indexing.
 	releaseSlot, err := acquireRequest(reqCtx)
 	if err != nil {
 		return nil, fmt.Errorf("wait for request slot: %w", err)

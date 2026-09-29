@@ -77,6 +77,10 @@ export type LoopFailure = {
   message: string;
 };
 
+/** Where mid-loop guidance stands: waiting for the loop's next iteration,
+ *  just picked up by it, or nothing in flight. */
+export type GuidanceStatus = 'idle' | 'queued' | 'delivered';
+
 interface SessionContextValue {
   sessions: () => Session[];
   activeSession: () => Session | null;
@@ -87,7 +91,9 @@ interface SessionContextValue {
   loading: () => boolean;
   hasRunningTools: () => boolean;
   compacted: () => boolean;
-  guidanceActive: () => boolean;
+  /** Where mid-loop guidance stands for the active session: waiting for the
+   *  loop's next iteration, just picked up by it, or nothing in flight. */
+  guidanceStatus: () => GuidanceStatus;
   /** Set when the agent loop ended in a way nothing in the transcript explains. */
   loopError: () => LoopFailure | null;
   dismissLoopError: () => void;
@@ -275,10 +281,18 @@ export const SessionProvider: ParentComponent = (props) => {
   const [compacted, setCompacted] = createSignal(false);
   let compactedTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Transient flag: true while mid-loop guidance is queued/delivered to the
-  // running loop. Cleared when the loop picks it up (loop.guidance: delivered)
-  // or when the loop exits.
-  const [guidanceActive, setGuidanceActive] = createSignal(false);
+  // Where mid-loop guidance stands for the active session. "queued" from the
+  // moment the server accepts it until the loop drains it (loop.guidance:
+  // delivered); then "delivered" for a moment, so the composer can say it was
+  // applied; then idle — and idle at once when the loop exits.
+  const [guidanceStatus, setGuidanceStatus] = createSignal<GuidanceStatus>('idle');
+  // loop.guidance "delivered" events seen per session this page-load. guidance()
+  // compares the count across its own request: the server wakes the loop while
+  // handling that request, so the loop can drain the guidance and say so before
+  // the response gets back here. A delivery that landed in flight means nothing
+  // is waiting any more, and the resolved request must not raise "queued" again
+  // — it would stay up, over guidance already applied, until the turn ended.
+  const guidanceDeliveries = new Map<string, number>();
   // How many times guidance has been sent per session this page-load, so the
   // analytics event can tell a single course-correction from repeated steering.
   // In-memory only and never persisted — it is a counter for one metric.
@@ -627,7 +641,7 @@ export const SessionProvider: ParentComponent = (props) => {
       // Clear any lingering guidance indicator — guidance is per-session and
       // must not leak into the destination session's UI.
       if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
-      setGuidanceActive(false);
+      setGuidanceStatus('idle');
       setMessages([]);
       // Drop unconfirmed bubbles too: a failed send in a session the user has
       // left would otherwise sit in memory for the life of the page.
@@ -1028,6 +1042,7 @@ export const SessionProvider: ParentComponent = (props) => {
       length: content.length,
       nth_in_session: n,
     });
+    const deliveriesBefore = guidanceDeliveries.get(session.id) ?? 0;
     try {
       await sendGuidance(session.id, content, cancelTool);
       // Accepted by the server, whether or not the user has since navigated away.
@@ -1036,10 +1051,13 @@ export const SessionProvider: ParentComponent = (props) => {
       // session while the request was in flight, don't set the guidance indicator
       // on the destination session — guidance is per-session and must not leak.
       if (activeSession()?.id !== session.id) return true;
+      // The loop already drained it while the request was in flight: the
+      // "delivered" event is showing, and nothing is left to wait for.
+      if ((guidanceDeliveries.get(session.id) ?? 0) !== deliveriesBefore) return true;
       // The server accepted the guidance — show the indicator until the loop
       // picks it up (loop.guidance: delivered) or the loop exits (loop.done).
       if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
-      setGuidanceActive(true);
+      setGuidanceStatus('queued');
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1094,7 +1112,7 @@ export const SessionProvider: ParentComponent = (props) => {
       if (evtSessionId && evtSessionId === sess.id) {
         // Clear any lingering guidance indicator — the loop is done.
         if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
-        setGuidanceActive(false);
+        setGuidanceStatus('idle');
         const reason = last.properties?.reason || '';
         const errText = last.properties?.error || '';
         // Fetch final messages then clear loading
@@ -1166,19 +1184,25 @@ export const SessionProvider: ParentComponent = (props) => {
 
     // Handle loop.guidance: mid-loop guidance was queued or delivered.
     // "queued" = guidance received by the server, waiting for the loop's next
-    // iteration; "delivered" = the loop has picked it up and injected it.
+    // iteration; "delivered" = the loop has picked it up and injected it. The
+    // server publishes "queued" before the guidance can be drained, so the two
+    // always arrive in that order.
     if (last.type === 'loop.guidance') {
       const evtSessionId = last.properties?.sessionId;
+      const status = last.properties?.status;
+      if (evtSessionId && status === 'delivered') {
+        guidanceDeliveries.set(evtSessionId, (guidanceDeliveries.get(evtSessionId) ?? 0) + 1);
+      }
       if (evtSessionId && evtSessionId === sess.id) {
-        const status = last.properties?.status;
         if (status === 'delivered') {
-          // Loop picked up the guidance — clear the indicator shortly.
+          // Loop picked up the guidance: say it was applied, then clear.
           if (guidanceTimer) clearTimeout(guidanceTimer);
-          guidanceTimer = setTimeout(() => setGuidanceActive(false), 3000);
+          setGuidanceStatus('delivered');
+          guidanceTimer = setTimeout(() => setGuidanceStatus('idle'), 2500);
         } else if (status === 'queued') {
           // Server received guidance, waiting for the loop's next iteration.
           if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
-          setGuidanceActive(true);
+          setGuidanceStatus('queued');
         }
       }
       return;
@@ -1374,7 +1398,7 @@ export const SessionProvider: ParentComponent = (props) => {
     loading,
     hasRunningTools,
     compacted,
-    guidanceActive,
+    guidanceStatus,
     loopError,
     dismissLoopError: () => setLoopError(null),
     pendingPermissions,

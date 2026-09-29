@@ -12,7 +12,7 @@ import { renderRoughDiagram, type RoughSpec } from './rough-renderer';
 mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
-  securityLevel: 'strict',
+  securityLevel: 'antiscript',
 });
 
 marked.use({
