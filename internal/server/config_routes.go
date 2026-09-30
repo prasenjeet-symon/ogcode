@@ -205,14 +205,16 @@ func (s *Server) handleGetSearchConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read search config", http.StatusInternalServerError)
 		return
 	}
-	// Report whether the Tavily key is supplied by the environment so the UI can
-	// show a "configured via TAVILY_API_KEY" state, mirroring the provider keys.
+	// Report whether the provider keys are supplied by the environment so the
+	// UI can show a "configured via env" state, mirroring the provider keys.
 	resp := struct {
 		*session.SearchConfig
 		TavilyEnvKeySet bool `json:"tavilyEnvKeySet"`
+		YoucomEnvKeySet bool `json:"youcomEnvKeySet"`
 	}{
 		SearchConfig:    session.MaskedSearchConfig(cfg),
 		TavilyEnvKeySet: os.Getenv("TAVILY_API_KEY") != "",
+		YoucomEnvKeySet: os.Getenv("YDC_API_KEY") != "",
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -237,6 +239,9 @@ func (s *Server) handleSetSearchConfig(w http.ResponseWriter, r *http.Request) {
 	if incoming.TavilyAPIKey == session.MaskedAPIKey {
 		incoming.TavilyAPIKey = existing.TavilyAPIKey
 	}
+	if incoming.YoucomAPIKey == session.MaskedAPIKey {
+		incoming.YoucomAPIKey = existing.YoucomAPIKey
+	}
 	if err := session.SetSearchConfig(s.globalDB, &incoming); err != nil {
 		http.Error(w, "failed to save search config", http.StatusInternalServerError)
 		return
@@ -247,7 +252,7 @@ func (s *Server) handleSetSearchConfig(w http.ResponseWriter, r *http.Request) {
 	// are registered, so it still needs a restart; searchSwitch is nil when
 	// search was off at startup, which is exactly that case. SetSearchConfig has
 	// normalised incoming (normaliseProvider), so the comparison uses canonical values.
-	if s.searchSwitch != nil && (incoming.Provider != existing.Provider || incoming.TavilyAPIKey != existing.TavilyAPIKey) {
+	if s.searchSwitch != nil && (incoming.Provider != existing.Provider || incoming.TavilyAPIKey != existing.TavilyAPIKey || incoming.YoucomAPIKey != existing.YoucomAPIKey) {
 		s.searchSwitch.Set(buildSearchBackend(&incoming))
 		logSearchProvider("web search: provider switched live", &incoming)
 	}
@@ -266,24 +271,49 @@ func (s *Server) handleValidateSearchKey(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	apiKey := incoming.TavilyAPIKey
-	if apiKey == session.MaskedAPIKey || apiKey == "" {
-		existing, err := session.GetSearchConfig(s.globalDB)
-		if err != nil {
-			http.Error(w, "failed to read search config", http.StatusInternalServerError)
-			return
-		}
-		apiKey = existing.TavilyAPIKey
-	}
-	if env := os.Getenv("TAVILY_API_KEY"); apiKey == "" && env != "" {
-		apiKey = env
+	// An omitted provider keeps the request valid for callers that only know
+	// about Tavily: they get the same behaviour they always had.
+	provider := incoming.Provider
+	if provider == "" {
+		provider = session.SearchProviderTavily
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	if err := search.ValidateTavilyKey(ctx, apiKey); err != nil {
+	var err error
+	switch provider {
+	case session.SearchProviderYoucom:
+		apiKey := incoming.YoucomAPIKey
+		if apiKey == session.MaskedAPIKey || apiKey == "" {
+			existing, readErr := session.GetSearchConfig(s.globalDB)
+			if readErr != nil {
+				http.Error(w, "failed to read search config", http.StatusInternalServerError)
+				return
+			}
+			apiKey = existing.YoucomAPIKey
+		}
+		if env := os.Getenv("YDC_API_KEY"); apiKey == "" && env != "" {
+			apiKey = env
+		}
+		err = search.ValidateYoucomKey(ctx, apiKey)
+	default:
+		apiKey := incoming.TavilyAPIKey
+		if apiKey == session.MaskedAPIKey || apiKey == "" {
+			existing, readErr := session.GetSearchConfig(s.globalDB)
+			if readErr != nil {
+				http.Error(w, "failed to read search config", http.StatusInternalServerError)
+				return
+			}
+			apiKey = existing.TavilyAPIKey
+		}
+		if env := os.Getenv("TAVILY_API_KEY"); apiKey == "" && env != "" {
+			apiKey = env
+		}
+		err = search.ValidateTavilyKey(ctx, apiKey)
+	}
+
+	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}

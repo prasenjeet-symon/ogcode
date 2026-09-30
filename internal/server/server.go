@@ -898,10 +898,10 @@ func fileExists(path string) bool {
 // by different engines. Called both at startup and on a live provider change.
 //
 // The chain itself is documented on search.BuildBackend; the short version is
-// that the native engines are always the last link, so a Tavily failure falls
-// through rather than losing an answerable query.
+// that the native engines are always the last link, so a Tavily or You.com
+// failure falls through rather than losing an answerable query.
 func buildSearchBackend(cfg *session.SearchConfig) search.Backend {
-	return search.BuildBackend(cfg.Provider, cfg.TavilyAPIKey)
+	return search.BuildBackend(cfg.Provider, cfg.TavilyAPIKey, cfg.YoucomAPIKey)
 }
 
 // tavilyKeyFor returns the Tavily key in effect: the environment overrides the
@@ -913,16 +913,34 @@ func tavilyKeyFor(cfg *session.SearchConfig) string {
 	return strings.TrimSpace(cfg.TavilyAPIKey)
 }
 
+// youcomKeyFor returns the You.com key in effect: the environment overrides the
+// stored value, mirroring the provider-key env overlay. YDC_API_KEY is the name
+// You.com documents for its SDKs.
+func youcomKeyFor(cfg *session.SearchConfig) string {
+	if env := strings.TrimSpace(os.Getenv("YDC_API_KEY")); env != "" {
+		return env
+	}
+	return strings.TrimSpace(cfg.YoucomAPIKey)
+}
+
 // logSearchProvider records which backend cfg resolves to, with a warning when
-// Tavily is selected but unusable (so it silently runs on native).
+// a third-party provider is selected but unusable (so it silently runs on
+// native).
 func logSearchProvider(prefix string, cfg *session.SearchConfig) {
-	if cfg.Provider == session.SearchProviderTavily {
+	switch cfg.Provider {
+	case session.SearchProviderTavily:
 		if tavilyKeyFor(cfg) != "" {
 			slog.Info(prefix + "; provider=tavily (native fallback)")
 			return
 		}
 		slog.Warn(prefix + "; provider=tavily but no API key is configured — using the native engine")
-		return
+	case session.SearchProviderYoucom:
+		if youcomKeyFor(cfg) != "" {
+			slog.Info(prefix + "; provider=youcom (native fallback)")
+			return
+		}
+		slog.Warn(prefix + "; provider=youcom but no API key is configured — using the native engine")
+	default:
+		slog.Info(prefix + "; provider=native")
 	}
-	slog.Info(prefix + "; provider=native")
 }

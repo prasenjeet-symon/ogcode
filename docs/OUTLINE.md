@@ -88,6 +88,7 @@ Persistent flags on the root command: `--ollama-url` (overrides `OLLAMA_BASE_URL
 | `OGCODE_SEARCH_FETCH_TOP_K` | Pages fetched per search result (default `4`, clamped `[1, 10]`) |
 | `OGCODE_SEARCH_PAGE_CHARS` | Characters extracted per fetched page (default `6000`, clamped `[1000, 20000]`) |
 | `TAVILY_API_KEY` | Tavily API key; overrides the key stored in the search config |
+| `YDC_API_KEY` | You.com API key; overrides the key stored in the search config |
 
 **Providers**
 
@@ -541,8 +542,8 @@ Each message has multiple parts, each with a type:
 
 ### 9.1 Web Search (`internal/search/`)
 
-- **Backends**: **Tavily** (API key), **Native** (an HTTP search chain that can query a SearxNG instance then built-in engines under a browser persona), and **Safari** (drives a real browser)
-- **`BuildBackend(provider, tavilyAPIKey)`** composes a fallback chain. `OGCODE_SEARCH_BROWSER` selects which native engine leads (`native` = HTTP path alone, `safari` = browser first); Tavily, when configured, is tried first and falls back to the native chain
+- **Backends**: **Tavily** (API key), **You.com** (API key), **Native** (an HTTP search chain that can query a SearxNG instance then built-in engines under a browser persona), and **Safari** (drives a real browser)
+- **`BuildBackend(provider, tavilyAPIKey, youcomAPIKey)`** composes a fallback chain. `OGCODE_SEARCH_BROWSER` selects which native engine leads (`native` = HTTP path alone, `safari` = browser first); Tavily and You.com, when configured, are tried first and fall back to the native chain
 - A `SwitchableBackend` holds the live backend and reports the one that actually answered, so "did Tavily answer, or did the native chain rescue it?" is visible
 - Tools: `web_search`, `fetch_page`, and `deep_search` (which runs a SearchAgent sub-loop)
 
@@ -784,6 +785,10 @@ The workspace DB lives at `<project>/.ogcode/ogcode.db`; the global config DB at
 | 051 | `model_catalog` table |
 | 052 | `session.utility_*` (5 columns: input/output/reasoning/cache read/cache write) |
 | 053 | **Drop** `project_settings` |
+| 054 | `announced_preview_port` table |
+| 055 | `usage_ledger` table |
+| 056 | `usage_event.host` |
+| 057 | `search_config.youcom_api_key` |
 
 **Migration 053 note**: the per-project "Compact context mid-turn" setting was removed from the UI; mid-turn compaction is now controlled process-wide by `OGCODE_COMPACT_CONTEXT`.
 
