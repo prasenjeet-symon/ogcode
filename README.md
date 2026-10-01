@@ -418,7 +418,9 @@ Recommended boundaries:
 ssh -L 9595:localhost:9595 user@your-server
 ```
 
-For a hosted deployment, review the control-plane documentation and configure account authentication, workspace allowlists, TLS, and worker isolation before inviting other users.
+See the [remote deployment guide](docs/DEPLOY.md) for working setups — SSH tunnel, reverse proxy with HTTPS and authentication, and Docker.
+
+For a hosted deployment for several people, review the [control-plane documentation](controlplane/docs/deploy.md) and configure account authentication, workspace allowlists, TLS, and worker isolation before inviting other users.
 
 ---
 

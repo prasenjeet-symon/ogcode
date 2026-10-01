@@ -3,3 +3,4 @@ Allow: /
 
 Sitemap: https://ogcode.xyz/sitemap.xml
 Sitemap: https://ogcode.xyz/blog/sitemap-index.xml
+Sitemap: https://ogcode.xyz/docs/sitemap-index.xml

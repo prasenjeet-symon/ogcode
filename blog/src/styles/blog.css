@@ -43,6 +43,10 @@
   --brand-ink: #ff7038;
   --brand-soft: rgba(255,94,31,.16);
   --brand-line: rgba(255,112,56,.5);
+  /* The brand orange as a solid button FILL: #ff5e1f with white text is only
+     3.06:1, so filled brand buttons use a darker orange that clears 4.5:1. */
+  --brand-btn: #d1440c;
+  --brand-btn-hi: #c9410c;
   --ok: #3ecf8e; --bad: #ef5b5b; --warn: #f2a53a; --amber: #f5b547;
   --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -197,8 +201,8 @@ button { cursor: pointer; }
   transition: background .2s, border-color .2s, color .2s, transform .2s, box-shadow .25s;
 }
 .btn svg { width: 16px; height: 16px; }
-.btn-brand { background: var(--brand); color: #fff; }
-.btn-brand:hover { background: var(--brand-hi); }
+.btn-brand { background: var(--brand-btn); color: #fff; }
+.btn-brand:hover { background: var(--brand-btn-hi); }
 .btn-light { background: #fffbf5; color: #1f1f1f; }
 .btn-light:hover { background: #fff; transform: translateY(-1px); }
 /* A lighter fill than the spec's .14: keeps the pill close to the slab's own tone. */
@@ -251,7 +255,7 @@ button { cursor: pointer; }
   transition: background .2s, color .2s;
 }
 .pill-tab:hover { color: var(--text); }
-.pill-tab[aria-selected="true"] { background: var(--brand); color: #fff; }
+.pill-tab[aria-selected="true"] { background: var(--brand-btn); color: #fff; }
 .pill-tab svg { width: 15px; height: 15px; }
 
 /* App-window chrome */

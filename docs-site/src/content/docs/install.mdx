@@ -1,0 +1,121 @@
+---
+title: Install
+description: One binary on macOS, Linux or Windows — or Docker, or Ollama.
+---
+
+Ogcode ships as a single static binary. Pick your platform below; every path ends with the same thing — an `ogcode` command on your `PATH`.
+
+<div class="pill-tabs" role="tablist" aria-label="Install by platform">
+  <button class="pill-tab" type="button" role="tab" id="os-mac" data-install-tab aria-selected="true" aria-controls="pane-mac" tabindex="0">macOS</button>
+  <button class="pill-tab" type="button" role="tab" id="os-linux" data-install-tab aria-selected="false" aria-controls="pane-linux" tabindex="-1">Linux</button>
+  <button class="pill-tab" type="button" role="tab" id="os-win" data-install-tab aria-selected="false" aria-controls="pane-win" tabindex="-1">Windows</button>
+  <button class="pill-tab" type="button" role="tab" id="os-docker" data-install-tab aria-selected="false" aria-controls="pane-docker" tabindex="-1">Docker</button>
+</div>
+
+<div class="install-pane" id="pane-mac" role="tabpanel" aria-labelledby="os-mac">
+
+The install script downloads the latest release for your architecture and drops the binary in `/usr/local/bin`:
+
+```bash
+curl -fsSL https://ogcode.xyz/install.sh | sh
+```
+
+Or use Homebrew:
+
+```bash
+brew tap prasenjeet-symon/tap
+brew install ogcode
+```
+
+</div>
+
+<div class="install-pane" id="pane-linux" role="tabpanel" aria-labelledby="os-linux" hidden>
+
+The same script handles Linux — it detects `amd64` or `arm64` and installs to `/usr/local/bin`:
+
+```bash
+curl -fsSL https://ogcode.xyz/install.sh | sh
+```
+
+Homebrew on Linux works too if you already have it. If `/usr/local/bin` needs root, the script will say so; run it with the privileges it asks for rather than piping `sudo` into `sh`.
+
+</div>
+
+<div class="install-pane" id="pane-win" role="tabpanel" aria-labelledby="os-win" hidden>
+
+In PowerShell:
+
+```powershell
+irm https://ogcode.xyz/install.ps1 | iex
+```
+
+Or with winget:
+
+```powershell
+winget install prasenjeet-symon.ogcode
+```
+
+Both put `ogcode.exe` on your `PATH`. Open a new terminal afterwards so the updated `PATH` is picked up.
+
+</div>
+
+<div class="install-pane" id="pane-docker" role="tabpanel" aria-labelledby="os-docker" hidden>
+
+The image mounts two volumes: your global config and the workspace the agent works in.
+
+```bash
+docker run -p 9595:9595 \
+  -v ~/.ogcode:/root/.ogcode \
+  -v "$(pwd):/workspace" -w /workspace \
+  ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+The image is also on Docker Hub as `prasenjeetsimon/ogcode:latest`. The container binds all interfaces, so `-p 9595:9595` publishes it on your host — keep that port off the public internet. See [Remote deployment](/docs/deployment/) before exposing it.
+
+</div>
+
+## Point it at a model
+
+Ogcode needs one LLM credential. It reads these from the environment, and you need at least one:
+
+| Variable | Provider |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Anthropic / Claude |
+| `OPENAI_API_KEY` | OpenAI / GPT |
+| `OPENROUTER_API_KEY` | OpenRouter |
+| `OLLAMA_BASE_URL` | Ollama or any OpenAI-compatible local endpoint |
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+You can also keep keys in `~/.config/ogcode/config.json` for global settings, or `ogcode.json` at a project root for project settings. Environment variables win over both.
+
+For a local model with no API key at all:
+
+```bash
+ollama serve
+ogcode
+```
+
+## Verify it
+
+```bash
+ogcode version      # prints the version and commit
+ogcode check-updates
+```
+
+`check-updates` exits with a non-zero status when a newer release is available, which makes it usable in a script.
+
+## Building from source
+
+If you would rather build it yourself, a source build needs the web UI compiled first. The `Makefile` does both:
+
+```bash
+make build          # builds web/dist, then the Go binary with CGO_ENABLED=1
+make install        # copies to ~/.local/bin and re-signs on macOS
+```
+
+`CGO_ENABLED=1` is required: PDF rendering and the tree-sitter grammars link native libraries.
+
+Next: [Quick start](/docs/quick-start/).
