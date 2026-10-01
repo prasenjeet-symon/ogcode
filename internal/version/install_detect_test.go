@@ -269,6 +269,41 @@ func TestDetectInstallCommand_KnownChannelsShape(t *testing.T) {
 	t.Errorf("detectInstallCommand = %q, not a recognized channel command", got)
 }
 
+// The install channel is a low-cardinality PostHog property, so each detection
+// command must fold onto a stable label and nothing else.
+func TestDetectInstallChannel(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{"scoop update ogcode", "scoop"},
+		{"brew upgrade ogcode", "homebrew"},
+		{"cargo install ogcode --force", "cargo"},
+		{"irm https://ogcode.xyz/install.ps1 | iex", "install-ps1"},
+		{"winget upgrade ogcode", "winget"},
+		{"curl -fsSL https://ogcode.xyz/install.sh | sh", "install-sh"},
+		{"", "unknown"},
+		{"something else entirely", "unknown"},
+	}
+	for _, tc := range tests {
+		if got := installChannelFor(tc.command); got != tc.want {
+			t.Errorf("installChannelFor(%q) = %q, want %q", tc.command, got, tc.want)
+		}
+	}
+}
+
+// DetectInstallChannel must agree with the command the UI is shown, so a
+// channel label can never describe a command the build does not produce.
+func TestDetectInstallChannelAgreesWithCommand(t *testing.T) {
+	got := DetectInstallChannel()
+	if got == "unknown" {
+		t.Fatalf("DetectInstallChannel() = %q for command %q", got, detectInstallCommand())
+	}
+	if want := installChannelFor(detectInstallCommand()); got != want {
+		t.Errorf("DetectInstallChannel() = %q, want %q", got, want)
+	}
+}
+
 func TestCurrentExecPath_NonEmptyClean(t *testing.T) {
 	got := currentExecPath()
 	if got == "" {

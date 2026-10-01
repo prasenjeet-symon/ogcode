@@ -3,6 +3,21 @@
 
 $ErrorActionPreference = "Stop"
 
+# Record the website's PostHog id (handed over as $env:OGCODE_IID) so that the
+# first run of the binary can report the install against the same person who
+# clicked download. Best-effort: any failure here must never fail the install,
+# and an absent or malformed id is simply ignored.
+try {
+    $iid = $env:OGCODE_IID
+    if ($iid -and $iid -match '^[A-Za-z0-9_-]{1,64}$') {
+        $ogcodeDir = Join-Path $env:USERPROFILE ".ogcode"
+        New-Item -ItemType Directory -Path $ogcodeDir -Force | Out-Null
+        Set-Content -Path (Join-Path $ogcodeDir "install-id") -Value $iid -NoNewline -Encoding ASCII
+    }
+} catch {
+    # Never let analytics bookkeeping break an install.
+}
+
 # Ensure TLS 1.2 for the GitHub API on older Windows PowerShell (5.1), where the
 # default SecurityProtocol may not include it and the API call would fail.
 [Net.ServicePointManager]::SecurityProtocol = `

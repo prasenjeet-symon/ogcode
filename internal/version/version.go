@@ -247,6 +247,36 @@ func detectInstallCommand() string {
 	return detectInstallCommandFor(runtime.GOOS, currentExecPath(), os.Getenv)
 }
 
+// DetectInstallChannel labels how the running binary was installed, as one of a
+// small fixed set of values. It is meant for analytics: the label is deliberately
+// low-cardinality and never carries a machine-specific path.
+func DetectInstallChannel() string {
+	return installChannelFor(detectInstallCommand())
+}
+
+// installChannelFor maps an update command (one of the exact strings
+// detectInstallCommandFor returns) to its install-channel label. An unrecognized
+// command yields "unknown" rather than an empty string, so the property is always
+// present on the event.
+func installChannelFor(command string) string {
+	switch command {
+	case "scoop update ogcode":
+		return "scoop"
+	case "brew upgrade ogcode":
+		return "homebrew"
+	case "cargo install ogcode --force":
+		return "cargo"
+	case "irm https://ogcode.xyz/install.ps1 | iex":
+		return "install-ps1"
+	case "winget upgrade ogcode":
+		return "winget"
+	case "curl -fsSL https://ogcode.xyz/install.sh | sh":
+		return "install-sh"
+	default:
+		return "unknown"
+	}
+}
+
 // currentExecPath returns the running binary's path with symlinks resolved, or
 // "" when the path cannot be determined. The resolved path is what carries the
 // install-channel fingerprint: package managers symlink the binary into a

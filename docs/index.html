@@ -5409,6 +5409,31 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       } catch (err) { /* analytics must never break the page */ }
     }
 
+    /* The visitor's PostHog id, so a copied install command can carry it all the
+       way to the machine. The installer writes it to ~/.ogcode/install-id and the
+       binary's first run reports with it — that is what stitches a download to a
+       real first session. Empty when analytics has no identity yet. */
+    function phId() {
+      try {
+        if (window.posthog && typeof window.posthog.get_distinct_id === 'function') {
+          var id = window.posthog.get_distinct_id();
+          if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id)) return id;
+        }
+      } catch (err) { /* analytics must never break the page */ }
+      return '';
+    }
+
+    /* Stamp the visitor's id onto the command being copied. Only the shell and
+       PowerShell one-liners can take it (Homebrew has nowhere to put it), and an
+       blank id leaves the command exactly as shown on screen. */
+    function stampedCmd(os, cmd) {
+      var id = phId();
+      if (!id) return cmd;
+      if (os === 'win') return "$env:OGCODE_IID='" + id + "'; " + cmd;
+      if (os === 'linux') return "export OGCODE_IID='" + id + "'; " + cmd;
+      return cmd;
+    }
+
     // Shared hooks for the section scripts that run after this one.
     window.og = { reduced: reduced, ph: phEvent, openInstall: openInstall };
 
@@ -5585,8 +5610,9 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       if (dlCopy && dlCopyLabel && dlCmd) {
         dlCopy.addEventListener('click', function () {
           var sel = dlPanel.querySelector('.dl-tab[aria-selected="true"]');
-          phEvent('install_command_copy', { platform: sel ? sel.dataset.os : HOST_OS });
-          copy(dlCopy, dlCopyLabel, dlCmd.textContent);
+          var os = sel ? sel.dataset.os : HOST_OS;
+          phEvent('install_command_copy', { platform: os });
+          copy(dlCopy, dlCopyLabel, stampedCmd(os, dlCmd.textContent));
         });
       }
     }

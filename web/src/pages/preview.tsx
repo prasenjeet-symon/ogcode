@@ -11,6 +11,7 @@ import {
 import SessionSidebar from '../components/session-sidebar';
 import PlanSidebar from '../components/plan-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
+import { trackPreviewOpened } from '../lib/analytics';
 
 function Sidebar() {
   const server = useServer();
@@ -281,6 +282,7 @@ export default function PreviewPage() {
     try {
       await publishPreviewPort(n, server.directory() || undefined);
       setExpanded(n);
+      trackPreviewOpened({ port: n, source: 'publish' });
       remount();
       await refresh(Array.from(new Set([...requested(), n])));
     } catch (e) {
@@ -326,6 +328,8 @@ export default function PreviewPage() {
   };
 
   const toggle = (n: number) => {
+    // Fire only when opening, not when collapsing the same tile.
+    if (expanded() !== n) trackPreviewOpened({ port: n, source: 'tile' });
     setExpanded((cur) => (cur === n ? 0 : n));
     // Remount the iframes so re-opening a tile shows the service's current state.
     remount();
@@ -520,6 +524,7 @@ export default function PreviewPage() {
                                 href={svc.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                onClick={() => trackPreviewOpened({ port: svc.port, source: 'new_tab' })}
                                 class={iconBtn}
                                 title="Open in a new tab"
                               >

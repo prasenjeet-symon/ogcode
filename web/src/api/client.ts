@@ -351,6 +351,8 @@ export function sendGuidance(sessionId: string, content: string, cancelTool?: bo
 export interface ConfigInfo {
   directory: string;
   port: number;
+  /** PostHog id the website stamped into the install command, when there is one. */
+  installId?: string;
 }
 
 export function getConfig(): Promise<ConfigInfo> {
