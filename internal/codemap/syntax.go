@@ -192,9 +192,17 @@ func parseFindings(lang *language, src []byte, visit func(*ts.Node)) ([]finding,
 	if tree == nil {
 		return nil, fmt.Errorf("parse produced no tree")
 	}
-	defer tree.Close()
+	defer func() { tree.Close() }()
 
 	root := tree.RootNode()
+	if repair := grammarRepairs[lang.name]; repair != nil && root.HasError() {
+		if repaired, ok := repair(root, parsed); ok {
+			if again := parser.Parse(repaired, nil); again != nil {
+				tree.Close()
+				tree, root = again, again.RootNode()
+			}
+		}
+	}
 	if visit != nil {
 		visit(root)
 	}
