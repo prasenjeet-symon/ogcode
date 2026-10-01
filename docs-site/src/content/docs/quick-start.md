@@ -88,4 +88,4 @@ This walks the tree (honouring `.gitignore` and your exclude rules) and indexes 
 
 ## Next
 
-Read [Core concepts](/docs/core-concepts/) for the mental model — modes, tools, memory and permissions — or jump into the full [architecture reference](/docs/architecture/).
+Read [Core concepts](/docs/core-concepts/) for the mental model, then browse the guides by capability — [Sessions & modes](/docs/sessions-and-modes/), [Permissions](/docs/permissions/), [Memory & context](/docs/memory-and-context/), [Plan mode & tasks](/docs/plan-mode/), [Search, skills & MCP](/docs/search-and-skills/), [Rich results & preview](/docs/rich-results/), and [Remote deployment](/docs/deployment/).

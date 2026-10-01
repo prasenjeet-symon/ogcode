@@ -1,15 +1,16 @@
 ---
 title: "Remote deployment"
-description: "Reach a remote server safely — SSH tunnel, reverse proxy with HTTPS, or Docker."
+description: "Reach a remote server safely — run it directly, an SSH tunnel, a reverse proxy with HTTPS, or Docker."
 ---
 
 ogcode runs as a normal web server: one Go binary with the UI embedded, listening on a port (9595 by default). Running it on the machine where your code lives and reaching it from a browser elsewhere is a supported setup — but the agent can read and modify files and execute shell commands, so the way you expose it matters.
 
-This guide covers the three most common ways to reach a remote ogcode safely:
+This guide covers the four most common ways to reach a remote ogcode safely:
 
-1. [SSH tunnel](#1-ssh-tunnel) — nothing exposed; reach it as if it were local.
-2. [Reverse proxy with HTTPS and authentication](#2-reverse-proxy-with-https-and-authentication) — a public URL, gated by a password.
-3. [Docker](#3-docker) — run it in a container, compose with either of the above.
+1. [Run it directly on a remote machine](#1-run-it-directly-on-a-remote-machine) — reach it at the host's address; only behind a firewall or on a private network, since there is no authentication.
+2. [SSH tunnel](#2-ssh-tunnel) — nothing exposed; reach it as if it were local.
+3. [Reverse proxy with HTTPS and authentication](#3-reverse-proxy-with-https-and-authentication) — a public URL, gated by a password.
+4. [Docker](#4-docker) — run it in a container, compose with either of the above.
 
 It is about the **standalone server only**. If you are hosting ogcode for several people, with per-user accounts, workspace allowlists, and isolated workers, that is the control plane — see [controlplane/docs/deploy.md](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md). The two are different things: the control plane authenticates and scopes users itself; the standalone server does not.
 
@@ -29,7 +30,20 @@ If the port is busy the server tries the next one, up to 50 times, and prints `p
 The startup banner prints `ogcode is running at http://localhost:<port>`; on a headless host the attempt to open a browser fails harmlessly.
 
 
-## 1. SSH tunnel
+## 1. Run it directly on a remote machine
+
+Install ogcode on the host and start the server there. The agent works on the files on that machine, and you reach the UI at the host's address:
+
+```bash
+ogcode serve --port 9595
+```
+
+Then browse to `http://your-server:9595` from a machine that can reach that port.
+
+**This is only safe on a private network.** As above, the standalone server has no authentication, so anyone who can reach the port has full control of the agent — the files it can read, the shell it can run, and the settings it can change. Use this when the host is on a private LAN, or when a cloud firewall or security group restricts the port to your own IP. **Never open the port to the public internet** — for that, use an SSH tunnel or a reverse proxy with a password.
+
+
+## 2. SSH tunnel
 
 The simplest and safest option: ogcode listens on the remote host's loopback only, and you forward the port over SSH. Nothing is exposed to the network.
 
@@ -57,7 +71,7 @@ Host ogcode-server
 The one limitation is reach: it works from the machine you run `ssh` on. For a browser on a different machine, use a reverse proxy.
 
 
-## 2. Reverse proxy with HTTPS and authentication
+## 3. Reverse proxy with HTTPS and authentication
 
 Put nginx or Caddy in front: it terminates TLS and asks for a password before anything reaches ogcode. ogcode keeps listening on localhost.
 
@@ -67,7 +81,7 @@ Put nginx or Caddy in front: it terminates TLS and asks for a password before an
 ogcode serve --port 9595
 ```
 
-Keep it reachable only from the proxy. Since the server binds all interfaces, use the host firewall / security group to allow only the proxy and SSH ports, or run it in Docker with a loopback-only publish (see [Docker](#3-docker)).
+Keep it reachable only from the proxy. Since the server binds all interfaces, use the host firewall / security group to allow only the proxy and SSH ports, or run it in Docker with a loopback-only publish (see [Docker](#4-docker)).
 
 ### nginx
 
@@ -143,7 +157,7 @@ Basic auth over HTTPS is the minimum. Because the agent can execute commands, co
 - **An identity-aware proxy** — [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/), [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/), or Tailscale Serve — so access is tied to your SSO rather than a shared password.
 
 
-## 3. Docker
+## 4. Docker
 
 The published image runs the server with the UI and git baked in. Reach it directly by publishing a port, or combine it with a tunnel or proxy.
 
@@ -196,7 +210,7 @@ OGCODE_PREVIEW_DOMAIN=preview.example.com ogcode serve --port 9595
 
 Use a **wildcard DNS record** `*.preview.example.com` pointing at the host, and a wildcard TLS certificate for `*.preview.example.com` if the proxy serves HTTPS. Your reverse proxy must forward the original `Host` header to ogcode so it can route `3000.preview.example.com` to the service on port 3000, and it must pass WebSocket upgrades for apps that use them.
 
-Pick a **dedicated** domain for this — everything under it is treated as preview-only and never routes to the ogcode UI. Keeping it off the UI's own domain (not `ogcode.example.com`'s subtree) also keeps a previewed app from reading or setting cookies on the UI's origin. See the live-preview section of [OUTLINE.md](/docs/architecture/) for the routing details.
+Pick a **dedicated** domain for this — everything under it is treated as preview-only and never routes to the ogcode UI. Keeping it off the UI's own domain (not `ogcode.example.com`'s subtree) also keeps a previewed app from reading or setting cookies on the UI's origin.
 
 
 ## Logs and diagnostics
@@ -236,4 +250,3 @@ To watch what the server is doing, run with `OGCODE_LOG_CONSOLE=info` (or set th
 
 - [README — Remote deployment and security](https://github.com/prasenjeet-symon/ogcode/blob/main/README.md#remote-deployment-and-security) — the short version.
 - [controlplane/docs/deploy.md](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md) — the hosted, multi-user control plane.
-- [OUTLINE.md](/docs/architecture/) — architecture, configuration, and every environment variable.
