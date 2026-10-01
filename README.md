@@ -303,7 +303,7 @@ docker run -p 9595:9595 \
   ghcr.io/prasenjeet-symon/ogcode:latest
 ```
 
-Then open `http://localhost:9595`.
+Then open `http://localhost:9595`. The image is also mirrored to Docker Hub as `prasenjeetsimon/ogcode:latest` — either reference works.
 
 ### Use a local model with Ollama
 
