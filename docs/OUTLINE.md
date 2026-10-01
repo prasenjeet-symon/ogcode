@@ -109,10 +109,18 @@ Persistent flags on the root command: `--ollama-url` (overrides `OLLAMA_BASE_URL
 
 **Logging**
 
+Logs go to a size-rotated file under `~/.ogcode/logs`, never inside the project and never to the terminal. Each project gets its own folder there, named after the project plus a short hash of its path: `~/.ogcode/logs/<project>-<hash>/ogcode.log` for `ogcode`/`serve`/`plan` (`run.log`, `index.log` for those commands). The worker logs to `~/.ogcode/logs/worker.log`. The terminal shows the server URL, the log path and errors only. Directories are created `0700`, files `0600`, and secrets (API keys, bearer tokens, `?key=`/`?code=` parameters, URL credentials, secret-named attributes) are redacted before they are written. Rotated files are named `ogcode-<UTC stamp>.log` and gzipped. ogcode's own API requests log at `debug` (the UI polls several endpoints every few seconds), server errors at `warn`; the preview proxy logs every request at `info`.
+
 | Variable | Purpose |
 |----------|---------|
-| `OGCODE_LOG_LEVEL` | `debug`, `info` (default), `warn`, `error` |
-| `OGCODE_LOG_FORMAT` | `text` (default) or `json`; all logs go to stderr |
+| `OGCODE_LOG_LEVEL` | File threshold: `debug`, `info` (default), `warn`, `error` |
+| `OGCODE_LOG_FORMAT` | File format: `text` (default, logfmt) or `json` |
+| `OGCODE_LOG_CONSOLE` | Terminal threshold: `off`, `error` (default), `warn`, `info`, `debug`. Always stderr, never stdout |
+| `OGCODE_LOG_DIR` | Log root to use instead of `~/.ogcode/logs`; each project still gets its own folder inside |
+| `OGCODE_LOG_MAX_SIZE_MB` | Rotate the file once it would pass this size (default `10`) |
+| `OGCODE_LOG_MAX_FILES` | Rotated files kept per log (default `5`, `0` keeps all) |
+| `OGCODE_LOG_MAX_AGE_DAYS` | Delete rotated files older than this (default `14`, `0` keeps them) |
+| `OGCODE_LOG_COMPRESS` | Gzip rotated files (default on; `off` to disable) |
 
 **MCP, device & preview**
 

@@ -15,6 +15,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
+	"github.com/prasenjeet-symon/ogcode/internal/logging"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
@@ -51,9 +52,6 @@ func init() {
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
-	// Redirect slog to stderr so stdout stays clean for agent output
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
-
 	// Collect prompt: positional args + piped stdin
 	var parts []string
 	if len(args) > 0 {
@@ -558,6 +556,31 @@ func printResult(text *strings.Builder, store *session.Store, sessionID session.
 		}
 		fmt.Fprintf(os.Stderr, "turns=%d finish=%s in=%d out=%d cache_read=%d cache_write=%d utility=%d effective=%d total=%d cost=%s\n",
 			turns, finish, tokens.Input, tokens.Output, tokens.CacheRead, tokens.CacheWrite, tokens.Utility, tokens.Effective, tokens.Total, costStr)
+		// The loop records a failed turn on the message rather than returning
+		// it, and the retries that led there went to the log file, so name the
+		// failure here and point at the file for the rest.
+		if finish == "error" {
+			if msg := runError(store, sessionID); msg != "" {
+				fmt.Fprintf(os.Stderr, "error: %s\n", logging.Scrub(msg))
+			}
+			if p := logPath(); p != "" {
+				fmt.Fprintf(os.Stderr, "Logs: %s\n", p)
+			}
+		}
 		return nil
 	}
+}
+
+// runError is the error the run's last failed assistant message recorded.
+func runError(store *session.Store, sessionID session.SessionID) string {
+	msgs, err := store.GetMessages(sessionID, "", allTurnsLimit)
+	if err != nil {
+		return ""
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if m := msgs[i].Info; m.Role == session.RoleAssistant && m.Error != nil && *m.Error != "" {
+			return *m.Error
+		}
+	}
+	return ""
 }

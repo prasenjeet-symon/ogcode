@@ -46,6 +46,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
 
 WORKDIR /root/
 COPY --from=go-builder /app/ogcode /usr/local/bin/ogcode
+# A container's logs belong on its output, where `docker logs` and the log
+# driver collect them; the rotated file under ~/.ogcode/logs is kept as well.
+ENV OGCODE_LOG_CONSOLE=info
 EXPOSE 9595
 ENTRYPOINT ["ogcode"]
 CMD ["serve"]

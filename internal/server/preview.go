@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-chi/chi/v5/middleware"
-
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 )
 
@@ -289,7 +287,7 @@ func (s *Server) previewRefusal(port int) string {
 // path is forwarded verbatim: the service is at its own origin root, so "/"
 // stays "/".
 func (s *Server) previewHostDispatch(next http.Handler) http.Handler {
-	preview := middleware.Logger(http.HandlerFunc(s.servePreviewHost))
+	preview := accessLog(slog.LevelInfo)(http.HandlerFunc(s.servePreviewHost))
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if _, _, inDomain := parsePreviewHost(req.Host, agent.PreviewDomain()); !inDomain {
 			next.ServeHTTP(w, req)
