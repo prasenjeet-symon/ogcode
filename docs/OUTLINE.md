@@ -1,7 +1,7 @@
 # Ogcode — Documentation Outline
 
 > Architecture and configuration reference for the ogcode codebase.
-> Regenerated from codebase analysis at **v0.41.1**.
+> Regenerated from codebase analysis at **v0.42.0**.
 
 ---
 
@@ -898,7 +898,7 @@ Port selection runs through `internal/portmap`, which remembers the port each pr
 
 ## 15. Version & Update Checking (`internal/version/`)
 
-- Current version: **v0.41.1** (set via ldflags)
+- Current version: **v0.42.0** (set via ldflags)
 - `CheckUpdate()`: fetches the latest release from the GitHub API (`prasenjeet-symon/ogcode`), cached for 1 hour
 - Detects the install method: Homebrew, winget, scoop, cargo, or the curl script
 - Compares semantic versions and returns update info with the install command
