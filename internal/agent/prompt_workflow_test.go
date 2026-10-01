@@ -7,9 +7,11 @@ import (
 
 // The agents that change files end the workflow diagram on verification: act
 // on the syntax report write and edit already give, check_syntax only for
-// files changed another way, then the build and the tests. The diagram is the
-// part a model follows most literally, so a workflow that stopped at "make
-// changes" taught it to stop there too.
+// files changed another way, then the build and the tests, then running the
+// change the way it is used. The diagram is the part a model follows most
+// literally, so a workflow that stopped at "make changes" taught it to stop
+// there too — and one that stops at the tests never checks that the parts work
+// together.
 func TestWorkflowEndsOnVerificationForAgentsThatWrite(t *testing.T) {
 	build := projectIndexPrompt("build", true, true)
 	for _, want := range []string{
@@ -17,6 +19,7 @@ func TestWorkflowEndsOnVerificationForAgentsThatWrite(t *testing.T) {
 		"SYNTAX ERROR",
 		"→ check_syntax(path)",
 		"→ build, then run the tests",
+		"→ run it the way it is used",
 	} {
 		if !strings.Contains(build, want) {
 			t.Errorf("build workflow missing %q", want)
@@ -32,7 +35,7 @@ func TestWorkflowEndsOnVerificationForAgentsThatWrite(t *testing.T) {
 	// tool they do not hold.
 	for _, role := range []string{"plan", "note", "breakdown", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
-		for _, unwanted := range []string{"check_syntax", "run the tests", "Then make changes"} {
+		for _, unwanted := range []string{"check_syntax", "run the tests", "Then make changes", "the way it is used"} {
 			if strings.Contains(p, unwanted) {
 				t.Errorf("%s workflow names %q, which it cannot do", role, unwanted)
 			}

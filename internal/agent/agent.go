@@ -74,6 +74,7 @@ func codingAgentSystem(mode string) string {
    - Build the project if a build command exists (e.g. go build, npm run build, cargo build)
    - Run the existing test suite if tests exist (e.g. go test ./..., npm test)
    - Run the linter if one is configured
+   - Where the change can be run the way it is used — a program, a service, a page, a command — run it end to end and confirm the behavior you changed. Tests check the parts in isolation; running it checks that they work together.
    Fix any errors before considering the work done. Do not leave the codebase in a broken state.
 
 ` + step6 + `
@@ -87,6 +88,13 @@ When a build, test, or lint step fails, do not immediately retry the same comman
 2. **Diagnose before acting.** Read the relevant source file around the error line. Check whether the error is in your new code or in existing code you didn't modify.
 3. **Try a different approach.** If your first fix doesn't work, consider alternative solutions — a different API, a different data structure, or restructuring the code differently.
 4. **Narrow the blast radius.** If you cannot fix the full failure, isolate the issue. Comment out or simplify the failing part, get the rest passing, then address the isolated problem.
+
+## Reviewing work
+
+When asked to review work — your own included — hold every conclusion to the same standard of evidence, "no issues found" included:
+- Look beyond the lines that changed: trace what depends on the change and what it depends on — callers, configuration, other components — and check that each still behaves correctly with it.
+- Run what you can rather than judging by reading alone.
+- Report what you verified and how, and list what you could not check as unverified rather than as fine.
 
 ## Hard rules
 
