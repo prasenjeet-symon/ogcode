@@ -32,10 +32,10 @@ type PageContent struct {
 
 // Backend is the web-search capability behind the web_search and fetch_page
 // tools and the deep-research pipeline. Implementations are NativeBackend (the
-// HTTP engine chain), TavilyBackend, and SafariBackend, composed into chains
-// with SwitchableBackend and NewFallbackBackend; the interface is what the
-// tools and the pipeline depend on, and what a test substitutes a fake for to
-// stay off the network.
+// HTTP engine chain), TavilyBackend, YoucomBackend, and SafariBackend, composed
+// into chains with SwitchableBackend and NewFallbackBackend; the interface is
+// what the tools and the pipeline depend on, and what a test substitutes a
+// fake for to stay off the network.
 type Backend interface {
 	// Name reports the provider name this backend stamps on its answers. A
 	// fallback chain reports its primary's name: which backend answered a given
@@ -54,6 +54,7 @@ var _ Backend = (*NativeBackend)(nil)
 // leave on results and pages.
 const (
 	ProviderTavily = "tavily"
+	ProviderYoucom = "youcom"
 	ProviderNative = "native"
 	ProviderSafari = "safari"
 )

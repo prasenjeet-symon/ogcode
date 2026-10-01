@@ -264,6 +264,7 @@ function ThemeGroup(props: { hide: Hide }) {
 const SEARCH_PROVIDERS: Array<{ value: SearchProvider; label: string }> = [
   { value: 'native', label: 'Native (built-in)' },
   { value: 'tavily', label: 'Tavily' },
+  { value: 'youcom', label: 'You.com' },
 ];
 
 function SearchGroups(props: { hide: Hide }) {
@@ -274,12 +275,16 @@ function SearchGroups(props: { hide: Hide }) {
   const [saving, setSaving] = createSignal(false);
   const [restartNeeded, setRestartNeeded] = createSignal(false);
 
-  // Tavily credential state. dbKeySet mirrors the server's masked response
-  // ('__SET__' means a key is stored); apiKey holds an unsaved edit; envKeySet
-  // reports a TAVILY_API_KEY set in the server environment.
-  const [dbKeySet, setDbKeySet] = createSignal(false);
-  const [envKeySet, setEnvKeySet] = createSignal(false);
-  const [apiKey, setApiKey] = createSignal('');
+  // Third-party credential state, one set per keyed provider. dbKeySet mirrors
+  // the server's masked response ('__SET__' means a key is stored); apiKey
+  // holds an unsaved edit; envKeySet reports the provider's key variable set
+  // in the server environment (TAVILY_API_KEY / YDC_API_KEY).
+  const [dbTavilyKeySet, setDbTavilyKeySet] = createSignal(false);
+  const [envTavilyKeySet, setEnvTavilyKeySet] = createSignal(false);
+  const [tavilyKey, setTavilyKey] = createSignal('');
+  const [dbYoucomKeySet, setDbYoucomKeySet] = createSignal(false);
+  const [envYoucomKeySet, setEnvYoucomKeySet] = createSignal(false);
+  const [youcomKey, setYoucomKey] = createSignal('');
   const [testing, setTesting] = createSignal(false);
   const [keyStatus, setKeyStatus] = createSignal<{ ok: boolean; msg: string } | null>(null);
   // Flashed briefly after a provider/key change is applied live (no restart).
@@ -294,8 +299,10 @@ function SearchGroups(props: { hide: Hide }) {
       const cfg = await getSearchConfig();
       setEnabled(cfg.enabled);
       setProvider(cfg.provider ?? 'native');
-      setDbKeySet(cfg.tavilyApiKey === '__SET__');
-      setEnvKeySet(!!cfg.tavilyEnvKeySet);
+      setDbTavilyKeySet(cfg.tavilyApiKey === '__SET__');
+      setEnvTavilyKeySet(!!cfg.tavilyEnvKeySet);
+      setDbYoucomKeySet(cfg.youcomApiKey === '__SET__');
+      setEnvYoucomKeySet(!!cfg.youcomEnvKeySet);
     } catch {
       // defaults stay in place
     } finally {
@@ -305,25 +312,35 @@ function SearchGroups(props: { hide: Hide }) {
 
   // The key value to send: a freshly typed key wins; otherwise the '__SET__'
   // sentinel preserves the stored one, and '' when none is stored. So a
-  // provider change (which also calls save) never wipes a saved key.
-  const resolveKey = () => {
-    const typed = apiKey().trim();
+  // provider change (which also calls save) never wipes a saved key — for
+  // either provider.
+  const resolveTavilyKey = () => {
+    const typed = tavilyKey().trim();
     if (typed !== '') return typed;
-    return dbKeySet() ? '__SET__' : '';
+    return dbTavilyKeySet() ? '__SET__' : '';
+  };
+  const resolveYoucomKey = () => {
+    const typed = youcomKey().trim();
+    if (typed !== '') return typed;
+    return dbYoucomKeySet() ? '__SET__' : '';
   };
 
   // save persists the full config and signals how the change took effect:
   //   restart — the enable toggle; it changes which tools exist, so it needs one
   //   live    — a provider/key change; the backend is swapped in place, applied now
-  const save = async (opts: { restart?: boolean; live?: boolean; key?: string }) => {
+  // keys overrides the resolved value for the providers it names, so one
+  // provider's key can be cleared without touching the other's.
+  const save = async (opts: { restart?: boolean; live?: boolean; keys?: { tavily?: string; youcom?: string } }) => {
     setSaving(true);
     try {
       const result = await setSearchConfig({
         enabled: enabled(),
         provider: provider(),
-        tavilyApiKey: opts.key ?? resolveKey(),
+        tavilyApiKey: opts.keys?.tavily ?? resolveTavilyKey(),
+        youcomApiKey: opts.keys?.youcom ?? resolveYoucomKey(),
       });
-      setDbKeySet(result.tavilyApiKey === '__SET__');
+      setDbTavilyKeySet(result.tavilyApiKey === '__SET__');
+      setDbYoucomKeySet(result.youcomApiKey === '__SET__');
       if (opts.restart) setRestartNeeded(true);
       if (opts.live) flashApplied();
     } finally {
@@ -351,34 +368,77 @@ function SearchGroups(props: { hide: Hide }) {
     }
   };
 
-  const saveKey = async () => {
+  const saveTavilyKey = async () => {
     setKeyStatus(null);
     try {
       await save({ live: true });
-      setApiKey('');
+      setTavilyKey('');
       setKeyStatus({ ok: true, msg: 'Saved — applied now.' });
     } catch {
       setKeyStatus({ ok: false, msg: 'Could not save. Is the ogcode server still running?' });
     }
   };
 
-  const removeKey = async () => {
+  const saveYoucomKey = async () => {
+    setKeyStatus(null);
+    try {
+      await save({ live: true });
+      setYoucomKey('');
+      setKeyStatus({ ok: true, msg: 'Saved — applied now.' });
+    } catch {
+      setKeyStatus({ ok: false, msg: 'Could not save. Is the ogcode server still running?' });
+    }
+  };
+
+  const removeTavilyKey = async () => {
     if (!confirm('Remove the stored Tavily API key from ogcode?')) return;
     setKeyStatus(null);
-    setApiKey('');
+    setTavilyKey('');
     try {
-      await save({ live: true, key: '' });
+      await save({ live: true, keys: { tavily: '' } });
     } catch {
       setKeyStatus({ ok: false, msg: 'Could not remove the key.' });
     }
   };
 
-  const testKey = async () => {
+  const removeYoucomKey = async () => {
+    if (!confirm('Remove the stored You.com API key from ogcode?')) return;
+    setKeyStatus(null);
+    setYoucomKey('');
+    try {
+      await save({ live: true, keys: { youcom: '' } });
+    } catch {
+      setKeyStatus({ ok: false, msg: 'Could not remove the key.' });
+    }
+  };
+
+  const testTavilyKey = async () => {
     setTesting(true);
     setKeyStatus(null);
     try {
-      const r = await validateSearchKey(resolveKey());
+      const r = await validateSearchKey({
+        provider: 'tavily',
+        tavilyApiKey: resolveTavilyKey(),
+        youcomApiKey: resolveYoucomKey(),
+      });
       setKeyStatus(r.ok ? { ok: true, msg: 'Key works — Tavily accepted it.' } : { ok: false, msg: r.error || 'Tavily rejected the key.' });
+    } catch {
+      setKeyStatus({ ok: false, msg: 'Could not reach the server.' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const testYoucomKey = async () => {
+    setTesting(true);
+    setKeyStatus(null);
+    try {
+      const r = await validateSearchKey({
+        provider: 'youcom',
+        tavilyApiKey: resolveTavilyKey(),
+        youcomApiKey: resolveYoucomKey(),
+      });
+      setKeyStatus(r.ok ? { ok: true, msg: 'Key works — You.com accepted it.' } : { ok: false, msg: r.error || 'You.com rejected the key.' });
     } catch {
       setKeyStatus({ ok: false, msg: 'Could not reach the server.' });
     } finally {
@@ -419,12 +479,12 @@ function SearchGroups(props: { hide: Hide }) {
             label="Search provider"
             helper={
               <>
-                Native runs inside ogcode with nothing to install. Tavily routes{' '}
-                <Mono>web_search</Mono> and <Mono>fetch_page</Mono> through your Tavily account,
-                and falls back to native if a call fails. Applies immediately — no restart needed.
+                Native runs inside ogcode with nothing to install. Tavily and You.com route{' '}
+                <Mono>web_search</Mono> and <Mono>fetch_page</Mono> through your account with that
+                provider, and fall back to native if a call fails. Applies immediately — no restart needed.
               </>
             }
-            hidden={props.hide('Search provider', 'tavily native third party engine')}
+            hidden={props.hide('Search provider', 'tavily you.com native third party engine')}
           >
             <Select
               value={provider()}
@@ -440,7 +500,7 @@ function SearchGroups(props: { hide: Hide }) {
               label="Tavily API key"
               helper={
                 <Show
-                  when={dbKeySet()}
+                  when={dbTavilyKeySet()}
                   fallback={
                     <>
                       Paste your <Mono>tvly-…</Mono> key — Tavily uses a static API key, so there
@@ -460,34 +520,34 @@ function SearchGroups(props: { hide: Hide }) {
                   <TextField
                     password
                     mono
-                    value={apiKey()}
-                    onInput={setApiKey}
-                    onEnter={saveKey}
+                    value={tavilyKey()}
+                    onInput={setTavilyKey}
+                    onEnter={saveTavilyKey}
                     disabled={saving()}
                     ariaLabel="Tavily API key"
                     placeholder={
-                      dbKeySet()
+                      dbTavilyKeySet()
                         ? 'leave blank to keep the saved key'
-                        : envKeySet()
+                        : envTavilyKeySet()
                           ? 'leave blank to use TAVILY_API_KEY'
                           : 'tvly-…'
                     }
                   />
                 </div>
-                <Button onClick={saveKey} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
+                <Button onClick={saveTavilyKey} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
                 <Button
                   variant="outlined"
-                  onClick={testKey}
-                  disabled={testing() || saving() || (!apiKey().trim() && !dbKeySet() && !envKeySet())}
+                  onClick={testTavilyKey}
+                  disabled={testing() || saving() || (!tavilyKey().trim() && !dbTavilyKeySet() && !envTavilyKeySet())}
                 >
                   {testing() ? 'Testing…' : 'Test key'}
                 </Button>
               </div>
               <div class="mt-2 flex items-center gap-3 flex-wrap">
-                <Show when={envKeySet()}>
+                <Show when={envTavilyKeySet()}>
                   <StatusChip tone="ok">Key set via TAVILY_API_KEY</StatusChip>
                 </Show>
-                <Show when={dbKeySet()}>
+                <Show when={dbTavilyKeySet()}>
                   <StatusChip tone="ok">Key stored in ogcode</StatusChip>
                 </Show>
                 <Show when={keyStatus()}>
@@ -498,10 +558,81 @@ function SearchGroups(props: { hide: Hide }) {
                     {keyStatus()!.msg}
                   </span>
                 </Show>
-                <Show when={dbKeySet()}>
-                  <LinkAction onClick={removeKey}>Remove stored key</LinkAction>
+                <Show when={dbTavilyKeySet()}>
+                  <LinkAction onClick={removeTavilyKey}>Remove stored key</LinkAction>
                 </Show>
                 <LinkAction href="https://app.tavily.com">Get a key at tavily.com</LinkAction>
+              </div>
+            </Row>
+          </Show>
+
+          <Show when={provider() === 'youcom'}>
+            <Row
+              label="You.com API key"
+              helper={
+                <Show
+                  when={dbYoucomKeySet()}
+                  fallback={
+                    <>
+                      Paste your You.com API key — You.com uses a static API key, so there is no
+                      sign-in to complete. <Mono>YDC_API_KEY</Mono> is used when that variable is
+                      set. Applies immediately — no restart needed.
+                    </>
+                  }
+                >
+                  <>Leave blank to keep the stored key. Applies immediately — no restart needed.</>
+                </Show>
+              }
+              stacked
+              hidden={props.hide('You.com API key', 'credentials token ydc you.com search provider')}
+            >
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex-1 min-w-[14rem]">
+                  <TextField
+                    password
+                    mono
+                    value={youcomKey()}
+                    onInput={setYoucomKey}
+                    onEnter={saveYoucomKey}
+                    disabled={saving()}
+                    ariaLabel="You.com API key"
+                    placeholder={
+                      dbYoucomKeySet()
+                        ? 'leave blank to keep the saved key'
+                        : envYoucomKeySet()
+                          ? 'leave blank to use YDC_API_KEY'
+                          : 'ydc-…'
+                    }
+                  />
+                </div>
+                <Button onClick={saveYoucomKey} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
+                <Button
+                  variant="outlined"
+                  onClick={testYoucomKey}
+                  disabled={testing() || saving() || (!youcomKey().trim() && !dbYoucomKeySet() && !envYoucomKeySet())}
+                >
+                  {testing() ? 'Testing…' : 'Test key'}
+                </Button>
+              </div>
+              <div class="mt-2 flex items-center gap-3 flex-wrap">
+                <Show when={envYoucomKeySet()}>
+                  <StatusChip tone="ok">Key set via YDC_API_KEY</StatusChip>
+                </Show>
+                <Show when={dbYoucomKeySet()}>
+                  <StatusChip tone="ok">Key stored in ogcode</StatusChip>
+                </Show>
+                <Show when={keyStatus()}>
+                  <span
+                    class="text-micro"
+                    style={{ color: keyStatus()!.ok ? 'var(--success)' : 'var(--danger)' }}
+                  >
+                    {keyStatus()!.msg}
+                  </span>
+                </Show>
+                <Show when={dbYoucomKeySet()}>
+                  <LinkAction onClick={removeYoucomKey}>Remove stored key</LinkAction>
+                </Show>
+                <LinkAction href="https://you.com/platform/api-keys">Get a key at you.com</LinkAction>
               </div>
             </Row>
           </Show>

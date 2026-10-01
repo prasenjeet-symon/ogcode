@@ -8,11 +8,15 @@ import (
 )
 
 // Search providers. Native is the built-in engine compiled into the binary;
-// Tavily is a third-party API keyed by the user's own token. The value is
-// stored as a string so future providers slot in without a schema change.
+// Tavily and You.com are third-party APIs keyed by the user's own token. The
+// value is stored as a string so future providers slot in without a schema
+// change.
 const (
 	SearchProviderNative = "native"
 	SearchProviderTavily = "tavily"
+	// SearchProviderYoucom routes web_search and fetch_page through the You.com
+	// Web Search and Contents APIs using the stored key.
+	SearchProviderYoucom = "youcom"
 )
 
 // MaskedAPIKey is the sentinel the UI receives in place of a stored secret, and
@@ -24,11 +28,14 @@ const MaskedAPIKey = "__SET__"
 // and its credential.
 type SearchConfig struct {
 	Enabled bool `json:"enabled"`
-	// Provider selects the search backend: "native" (default) or "tavily".
+	// Provider selects the search backend: "native" (default), "tavily", or
+	// "youcom".
 	Provider string `json:"provider"`
 	// TavilyAPIKey is the token for the Tavily provider. Masked to MaskedAPIKey
 	// on read so it never reaches the UI in the clear.
 	TavilyAPIKey string `json:"tavilyApiKey"`
+	// YoucomAPIKey is the token for the You.com provider, masked the same way.
+	YoucomAPIKey string `json:"youcomApiKey"`
 	UpdatedAt    int64  `json:"updatedAt"`
 }
 
@@ -36,7 +43,7 @@ type SearchConfig struct {
 // write so consumers always see a usable value regardless of how the row was
 // populated.
 func (c *SearchConfig) normaliseProvider() {
-	if c.Provider != SearchProviderTavily {
+	if c.Provider != SearchProviderTavily && c.Provider != SearchProviderYoucom {
 		c.Provider = SearchProviderNative
 	}
 }
@@ -48,11 +55,11 @@ func (c *SearchConfig) normaliseProvider() {
 // stored choice is honoured on every later read.
 func GetSearchConfig(database *db.DB) (*SearchConfig, error) {
 	var enabled int
-	var provider, tavilyKey string
+	var provider, tavilyKey, youcomKey string
 	var updatedAt int64
 	err := database.QueryRow(
-		`SELECT enabled, provider, tavily_api_key, time_updated FROM search_config WHERE id = 1`,
-	).Scan(&enabled, &provider, &tavilyKey, &updatedAt)
+		`SELECT enabled, provider, tavily_api_key, youcom_api_key, time_updated FROM search_config WHERE id = 1`,
+	).Scan(&enabled, &provider, &tavilyKey, &youcomKey, &updatedAt)
 	if err == sql.ErrNoRows {
 		def := &SearchConfig{Enabled: true, Provider: SearchProviderNative}
 		def.normaliseProvider()
@@ -65,6 +72,7 @@ func GetSearchConfig(database *db.DB) (*SearchConfig, error) {
 		Enabled:      enabled != 0,
 		Provider:     provider,
 		TavilyAPIKey: tavilyKey,
+		YoucomAPIKey: youcomKey,
 		UpdatedAt:    updatedAt,
 	}
 	cfg.normaliseProvider()
@@ -83,27 +91,31 @@ func SetSearchConfig(database *db.DB, c *SearchConfig) error {
 	// it is NOT NULL DEFAULT 0, so omitting it here is safe, and keeping it
 	// means an older binary can still read this database.
 	_, err := database.Exec(`
-		INSERT INTO search_config (id, enabled, provider, tavily_api_key, time_updated)
-		VALUES (1, ?, ?, ?, ?)
+		INSERT INTO search_config (id, enabled, provider, tavily_api_key, youcom_api_key, time_updated)
+		VALUES (1, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			enabled        = excluded.enabled,
 			provider       = excluded.provider,
 			tavily_api_key = excluded.tavily_api_key,
+			youcom_api_key = excluded.youcom_api_key,
 			time_updated   = excluded.time_updated
-	`, enabled, c.Provider, c.TavilyAPIKey, Now())
+	`, enabled, c.Provider, c.TavilyAPIKey, c.YoucomAPIKey, Now())
 	if err != nil {
 		return fmt.Errorf("set search config: %w", err)
 	}
 	return nil
 }
 
-// MaskedSearchConfig returns a copy with the Tavily key replaced by the mask
-// sentinel so the config can be sent to the UI without leaking the real value.
+// MaskedSearchConfig returns a copy with the provider keys replaced by the mask
+// sentinel so the config can be sent to the UI without leaking the real values.
 // Mirrors MaskedProviderConfig.
 func MaskedSearchConfig(c *SearchConfig) *SearchConfig {
 	mc := *c
 	if mc.TavilyAPIKey != "" {
 		mc.TavilyAPIKey = MaskedAPIKey
+	}
+	if mc.YoucomAPIKey != "" {
+		mc.YoucomAPIKey = MaskedAPIKey
 	}
 	return &mc
 }
