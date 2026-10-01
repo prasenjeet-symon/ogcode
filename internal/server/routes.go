@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -20,8 +21,8 @@ func (s *Server) routes() http.Handler {
 	// previewHostDispatch.
 	r.Use(s.previewHostDispatch)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(accessLog(slog.LevelDebug))
+	r.Use(recoverer)
 	r.Use(corsMiddleware)
 
 	r.Route("/api", func(r chi.Router) {

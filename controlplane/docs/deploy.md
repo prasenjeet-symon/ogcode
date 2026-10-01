@@ -106,6 +106,11 @@ Generate strong secrets: `openssl rand -base64 32` (pairing) and
 }
 ```
 
+The master also accepts `dbPath` (its bbolt registry + accounts; default
+`~/.ogcode-control-plane/controlplane.db`), `sessionTtlSeconds`,
+`tokenTtlSeconds` and `workerTimeoutSeconds`. See `control-plane.example.json`
+for the full set.
+
 ### 7. systemd unit
 
 `/etc/systemd/system/ogcode-control-plane.service`:
@@ -152,13 +157,13 @@ corporate firewalls are fine), and no inbound ports.
 
 ### 1. Get the `ogcode` binary onto the worker
 
-ogcode requires **cgo** and currently builds against this repo via a local
-`replace`, so build on a machine of the worker's OS/arch with both repos side by
-side:
+ogcode requires **cgo** (a tree-sitter grammar) and builds against the control-
+plane module through a local `replace`, which lives in the same repository as
+`controlplane/` — so clone the one repo and build from it:
 
 ```sh
 sudo apt-get install -y golang gcc git
-git clone <ogcode-remote> ogcode && git clone <this-repo-remote> ogcode-control-plane
+git clone <ogcode-remote> ogcode
 cd ogcode && go build -o /usr/local/bin/ogcode .
 ```
 
@@ -167,65 +172,57 @@ cd ogcode && go build -o /usr/local/bin/ogcode .
 The worker runs sessions locally, so model keys live on that machine — env vars
 or `~/.config/ogcode/config.json`. e.g. `export ANTHROPIC_API_KEY=sk-…`.
 
-### 3. Run serve + worker
+### 3. Run the worker
 
-The tunnel proxies a real local `ogcode serve`, so run two processes per project:
+The worker hosts a full ogcode server itself — one per workspace — and reaches
+the panel through its outbound tunnel. There is no separate `ogcode serve` to
+run, and the worker listens on no inbound port:
 
 ```sh
-cd ~/code/app && ogcode serve --port 9595 &
-OGCODE_PAIRING_SECRET='PAIRING_SECRET' ogcode worker \
-  --master https://panel.example.com --serve-addr 127.0.0.1:9595 --workspace ~/code/app &
+cd ~/code/app && OGCODE_PAIRING_SECRET='PAIRING_SECRET' ogcode worker \
+  --master https://panel.example.com --workspace ~/code/app &
 ```
 
-No `--master-ca` is needed — the master's Let's Encrypt cert is publicly trusted.
-The worker logs `registered with master workerID=…`.
+`--workspace` is repeatable; each directory you list (default: the current one)
+gets its own in-process server and its own subdomain. No `--master-ca` is needed
+— the master's Let's Encrypt cert is publicly trusted. The worker logs
+`registered with master workerID=…`.
 
 ### 4. Open it
 
+The base host is the operator console, which lists the connected workers and,
+for each, links into its worktree UIs:
+
 ```
-https://<workerId>.panel.example.com/
+https://panel.example.com/                          # operator console (workers + links)
+https://<workerId>-<worktree>.panel.example.com/    # a worktree UI on that worker
 ```
 
-Operator login → the worker's real ogcode UI.
+After the operator login you get that worker's real ogcode UI. (A worker also
+answers on the legacy bare `https://<workerId>.panel.example.com/` form.)
 
 ### Durable (systemd on the worker)
 
-Put secrets in `/etc/ogcode/worker.env` (`chmod 600`):
+Put the pairing secret (and any model keys) in `/etc/ogcode/worker.env`
+(`chmod 600`):
 
 ```ini
 OGCODE_PAIRING_SECRET=PAIRING_SECRET
 ANTHROPIC_API_KEY=sk-…
 ```
 
-`ogcode-serve.service`:
+`ogcode-worker.service` is the only unit — the worker runs its own servers:
 
 ```ini
 [Unit]
-Description=ogcode serve (worker UI)
+Description=ogcode worker
 After=network-online.target
 Wants=network-online.target
 [Service]
 User=youruser
 WorkingDirectory=/home/youruser/code/app
 EnvironmentFile=/etc/ogcode/worker.env
-ExecStart=/usr/local/bin/ogcode serve --port 9595
-Restart=always
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-```
-
-`ogcode-worker.service`:
-
-```ini
-[Unit]
-Description=ogcode worker
-After=ogcode-serve.service
-Requires=ogcode-serve.service
-[Service]
-User=youruser
-EnvironmentFile=/etc/ogcode/worker.env
-ExecStart=/usr/local/bin/ogcode worker --master https://panel.example.com --serve-addr 127.0.0.1:9595 --workspace /home/youruser/code/app
+ExecStart=/usr/local/bin/ogcode worker --master https://panel.example.com --workspace /home/youruser/code/app
 Restart=always
 RestartSec=3
 [Install]
@@ -233,17 +230,19 @@ WantedBy=multi-user.target
 ```
 
 ```sh
-sudo systemctl daemon-reload && sudo systemctl enable --now ogcode-serve ogcode-worker
+sudo systemctl daemon-reload && sudo systemctl enable --now ogcode-worker
 ```
 
 It runs as `youruser` (not a locked-down account) because the agent reads/writes
 that user's code.
 
-### Multiple workers on one machine
+### Multiple workers / projects on one machine
 
-Run one `serve`+`worker` pair per project, each `serve` on a **distinct port** in
-a **distinct directory** — each registers as its own worker id / subdomain. The
-worker processes bind no ports; only the `serve` instances need distinct ports.
+A single worker hosts every directory you give it via `--workspace`
+(repeatable) — one in-process server and one subdomain each. You only need a
+second `ogcode worker` to register a **separate worker id** (e.g. a different
+`--name`). Workers bind no inbound ports, so there are no ports to keep
+distinct.
 
 ## Security reminders
 

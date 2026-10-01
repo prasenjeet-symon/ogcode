@@ -303,7 +303,7 @@ docker run -p 9595:9595 \
   ghcr.io/prasenjeet-symon/ogcode:latest
 ```
 
-Then open `http://localhost:9595`.
+Then open `http://localhost:9595`. The image is also mirrored to Docker Hub as `prasenjeetsimon/ogcode:latest` — either reference works.
 
 ### Use a local model with Ollama
 
@@ -376,7 +376,7 @@ Agentic memory is enabled with:
 export OGCODE_AGENTIC_MEMORY_MODE=true
 ```
 
-Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. The deep-research pipeline reads four pages of 6000 characters by default; tune it with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and `OGCODE_SEARCH_PAGE_CHARS` (1000–20000). The agent is reminded to compact once about 40000 tokens of file, search, and page content have been read in one turn; tune that with `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`. Because every step re-sends the whole context, a second trigger reminds the agent once the accumulated re-send cost crosses the model's context window; tune that multiple with `OGCODE_RESEND_COST_WINDOW_MULTIPLE`. Mid-turn compaction is on by default; disable it with `OGCODE_COMPACT_CONTEXT=false`. A project index runs many turns at once, and a wave of them can trip the endpoint's rate limiter; cap how many provider requests may be in flight process-wide with `OGCODE_PROVIDER_MAX_CONCURRENT` (default 8), which reserves two slots for interactive turns so indexing cannot starve the turn you are watching. `AGENT.md` and `MEMORY.md` are loaded whole with no size cap by default — cap them with `OGCODE_AGENT_MD_MAX_BYTES` and `OGCODE_MEMORY_MD_MAX_BYTES` if you need to. See the [documentation](docs/OUTLINE.md) for provider, skill, search, remote deployment, and control-plane configuration.
+Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. The deep-research pipeline reads four pages of 6000 characters by default; tune it with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and `OGCODE_SEARCH_PAGE_CHARS` (1000–20000). The agent is reminded to compact once about 40000 tokens of file, search, and page content have been read in one turn; tune that with `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`. Because every step re-sends the whole context, a second trigger reminds the agent once the accumulated re-send cost crosses the model's context window; tune that multiple with `OGCODE_RESEND_COST_WINDOW_MULTIPLE`. Mid-turn compaction is on by default; disable it with `OGCODE_COMPACT_CONTEXT=false`. A project index runs many turns at once, and a wave of them can trip the endpoint's rate limiter; cap how many provider requests may be in flight process-wide with `OGCODE_PROVIDER_MAX_CONCURRENT` (default 8), which reserves two slots for interactive turns so indexing cannot starve the turn you are watching. `AGENT.md` and `MEMORY.md` are loaded whole with no size cap by default — cap them with `OGCODE_AGENT_MD_MAX_BYTES` and `OGCODE_MEMORY_MD_MAX_BYTES` if you need to. See the [documentation](https://ogcode.xyz/docs/) for provider, skill, search, remote deployment, and control-plane configuration.
 
 ---
 
@@ -418,7 +418,9 @@ Recommended boundaries:
 ssh -L 9595:localhost:9595 user@your-server
 ```
 
-For a hosted deployment, review the control-plane documentation and configure account authentication, workspace allowlists, TLS, and worker isolation before inviting other users.
+See the [remote deployment guide](docs/DEPLOY.md) for working setups — SSH tunnel, reverse proxy with HTTPS and authentication, and Docker.
+
+For a hosted deployment for several people, review the [control-plane documentation](controlplane/docs/deploy.md) and configure account authentication, workspace allowlists, TLS, and worker isolation before inviting other users.
 
 ---
 
@@ -449,7 +451,7 @@ Ogcode is actively developed. The coding-agent foundation is implemented; the br
 - More capable local-model routing and offline operation.
 - Agent-assisted deployment, monitoring, and incident response.
 
-See [RELEASE_NOTES.md](RELEASE_NOTES.md), [docs/OUTLINE.md](docs/OUTLINE.md), and the project plans for implementation details.
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) and the project plans for implementation details.
 
 ---
 
@@ -496,6 +498,6 @@ Releases up to and including **v0.36.1** remain MIT. **v0.37.0 onward is AGPL-3.
 
 **Build the open-source AI teammate.**
 
-[Star on GitHub](https://github.com/prasenjeet-symon/ogcode) · [Discord](https://discord.gg/JQP9t8y2Zv) · [Documentation](docs/OUTLINE.md)
+[Star on GitHub](https://github.com/prasenjeet-symon/ogcode) · [Discord](https://discord.gg/JQP9t8y2Zv) · [Documentation](https://ogcode.xyz/docs/)
 
 </div>

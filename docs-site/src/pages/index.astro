@@ -1,0 +1,74 @@
+---
+// The docs landing page: a short hero over groups of page links, then the
+// shared CTA. Zero content collection here — the groups come straight from
+// src/lib/nav.ts, so the page a link points at is always a real page.
+import Base from '../layouts/Base.astro';
+import CtaSlab from '../components/CtaSlab.astro';
+import { navGroups, pageUrl } from '../lib/nav';
+
+const groups = navGroups();
+
+// One inline icon per group key (nav.ts carries the key).
+const icons: Record<string, string> = {
+  rocket: '<path d="M5 13l-2 6 6-2"/><path d="M14 4.5a7.5 7.5 0 0 1 5.5 5.5M9 15l-3-3c1-5 4.5-8 9.5-9 .5 5-2.5 8.5-7.5 9.5Z"/><circle cx="14.5" cy="9.5" r="1.2"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5Z"/><path d="M4 19a2 2 0 0 1 2-2h13"/>',
+  layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
+};
+---
+<Base
+  title="Ogcode Docs"
+  description="Guides for Ogcode — the open-source, self-hostable coding agent that remembers."
+  canonical="https://ogcode.xyz/docs/"
+  guides
+>
+  <section class="docs-home">
+    <div class="frame">
+      <div class="docs-hero">
+        <span class="eyebrow rise r1">Documentation</span>
+        <h1 class="docs-hero-title rise r2">Everything Ogcode,<br />from first install to daily use.</h1>
+        <p class="docs-hero-lede rise r3">
+          Ogcode is a coding agent you run yourself: one Go binary, any model, your
+          keys. Start with the Getting-started track, then browse the guides by
+          capability.
+        </p>
+        <div class="docs-hero-actions rise r4">
+          <a class="btn btn-brand" href="/docs/intro/">
+            Start reading
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+          </a>
+          <a class="btn btn-line" href="/docs/install/">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+            Install Ogcode
+          </a>
+        </div>
+      </div>
+
+      <div class="docs-groups">
+        {groups.map((g) => (
+          <section class="docs-group">
+            <div class="docs-group-h">
+              <span class="ico" aria-hidden="true" set:html={`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icons[g.icon] ?? icons.layers}</svg>`} />
+              <h2>{g.group}</h2>
+              <span class="n">{g.items.length} {g.items.length === 1 ? 'page' : 'pages'}</span>
+            </div>
+            <ul role="list">
+              {g.items.map((p) => (
+                <li>
+                  <a href={pageUrl(p.slug)}>
+                    <span>
+                      <span class="t">{p.title}</span>
+                      <span class="d">{p.description}</span>
+                    </span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <CtaSlab />
+</Base>

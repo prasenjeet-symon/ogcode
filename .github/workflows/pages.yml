@@ -6,6 +6,7 @@ on:
     paths:
       - 'docs/**'
       - 'blog/**'
+      - 'docs-site/**'
   workflow_dispatch:
 
 permissions:
@@ -32,12 +33,22 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: blog/package-lock.json
+          cache-dependency-path: |
+            blog/package-lock.json
+            docs-site/package-lock.json
 
       # The blog is an Astro static site that builds into docs/blog (gitignored),
       # so it must be generated before docs/ is uploaded.
       - name: Build blog
         working-directory: blog
+        run: |
+          npm ci
+          npm run build
+
+      # The docs site is an Astro static site that builds into docs/docs
+      # (gitignored), so it too must be generated before docs/ is uploaded.
+      - name: Build docs
+        working-directory: docs-site
         run: |
           npm ci
           npm run build

@@ -29,6 +29,14 @@ import {
 } from '../api/client';
 import { useServer } from './server';
 import { capture } from '../lib/posthog';
+import {
+  trackSessionStarted,
+  trackMessageSent,
+  trackModelSelected,
+  trackPermissionPromptAnswered,
+  trackCompactTriggered,
+  trackErrorShown,
+} from '../lib/analytics';
 
 function shallowEqualPart(a: any, b: any): boolean {
   if (a === b) return true;
@@ -458,6 +466,7 @@ export const SessionProvider: ParentComponent = (props) => {
     // the user sends a prompt quickly after changing the model.
     setPendingModel(modelId);
     if (providerId) setPendingProvider(providerId);
+    trackModelSelected({ model: modelId, provider: providerId || '', context: 'session' });
     // Persist the selection so it survives app restarts — this is the default model
     // for the home page and new sessions.
     try {
@@ -764,6 +773,7 @@ export const SessionProvider: ParentComponent = (props) => {
     setLoopError(null);
     if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
     const session = await createSession(server.directory(), model || selectedModel(), provider || selectedProvider());
+    trackSessionStarted({ model: session.model || '', provider: session.provider || '' });
     setSessions((prev) => [session, ...prev]);
     setActiveSession(session);
     setMessages([]);
@@ -969,6 +979,12 @@ export const SessionProvider: ParentComponent = (props) => {
     setOptimistic((prev) => [...prev, tempUserMsg]);
 
     try {
+      trackMessageSent({
+        model: selectedModel(),
+        provider: selectedProvider(),
+        images: (images || []).length,
+        length: content.length,
+      });
       await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider());
       // Immediately fetch to get the real user message + start seeing assistant
       const msgs = await getMessages(session.id);
@@ -989,6 +1005,7 @@ export const SessionProvider: ParentComponent = (props) => {
       // happened to it — the server never took it.
       setFailedSends((prev) => new Set(prev).add(tempId));
       setLoadingSessionId('');
+      trackErrorShown({ reason: e instanceof Error ? e.name : 'send_failed', surface: 'send' });
     }
   }
 
@@ -1152,7 +1169,10 @@ export const SessionProvider: ParentComponent = (props) => {
               explained = !!(info.error || info.interrupted || info.finish === 'aborted');
               break;
             }
-            if (!explained) setLoopError({ reason: reason || 'error', message: errText });
+            if (!explained) {
+              setLoopError({ reason: reason || 'error', message: errText });
+              trackErrorShown({ reason: reason || 'error', surface: 'loop' });
+            }
           }
         }).catch((e) => {
           console.error('loop.done refresh failed:', e);
@@ -1165,6 +1185,7 @@ export const SessionProvider: ParentComponent = (props) => {
           // path that cannot check whether a message already explains it.
           if (errText && activeSession()?.id === sess.id) {
             setLoopError({ reason: reason || 'error', message: errText });
+            trackErrorShown({ reason: reason || 'error', surface: 'loop' });
           }
         });
       }
@@ -1177,6 +1198,7 @@ export const SessionProvider: ParentComponent = (props) => {
       if (evtSessionId && evtSessionId === sess.id) {
         if (compactedTimer) clearTimeout(compactedTimer);
         setCompacted(true);
+        trackCompactTriggered({ origin: 'auto' });
         compactedTimer = setTimeout(() => setCompacted(false), 5000);
       }
       return;
@@ -1332,10 +1354,12 @@ export const SessionProvider: ParentComponent = (props) => {
 
   async function respondPermission(permissionId: string, response: PermissionResponse) {
     const sess = activeSession();
+    const tool = sess ? (permQueues()[sess.id] || []).find((x) => x.permissionId === permissionId)?.tool : undefined;
     // Optimistically dismiss so the UI feels instant; the backend also emits
     // permission.replied which reconciles any other client.
     if (sess) setPermQueue(sess.id, (prev) => prev.filter((x) => x.permissionId !== permissionId));
     if (!sess) return;
+    trackPermissionPromptAnswered({ tool: tool || 'unknown', response });
     try {
       await replyPermission(sess.id, permissionId, response);
     } catch (e) {

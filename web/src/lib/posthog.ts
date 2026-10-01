@@ -14,6 +14,11 @@ const POSTHOG_API_HOST = 'https://app.posthog.com';
 
 let initialised = false;
 
+// The distinct id the website handed to the installer, returned by /api/config.
+// When set it replaces the locally-generated id so the binary's first-run
+// ogcode_installed event and this browser session are the same person.
+let installId: string | null = null;
+
 // Bumped every time PostHog hands us a fresh set of flags — on the first load
 // and again after identify() or an explicit reload. Anything rendering a flag
 // watches this so it re-evaluates when the answer arrives: the SDK fetches
@@ -27,6 +32,14 @@ const [flagsVersion, setFlagsVersion] = createSignal(0);
 // itself with a real ID on load.
 function currentDistinctId(): string {
   try {
+    // A stitched install carries the website's own PostHog id (written by the
+    // installer, surfaced through /api/config). Identifying with it keeps the
+    // download, the first-run ogcode_installed event, and this session on one
+    // person — which is what makes the acquisition funnel real.
+    if (installId) {
+      localStorage.setItem('ph_ogcode_distinct_id', installId);
+      return installId;
+    }
     let id = localStorage.getItem('ph_ogcode_distinct_id');
     if (!id) {
       id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -40,8 +53,9 @@ function currentDistinctId(): string {
 }
 
 /** Initialise PostHog. Safe to call once. */
-export async function initPostHog(): Promise<void> {
+export async function initPostHog(installIdFromServer?: string): Promise<void> {
   if (initialised) return;
+  if (installIdFromServer) installId = installIdFromServer;
   if (!POSTHOG_API_KEY) return;
   try {
     posthog.init(POSTHOG_API_KEY, {
@@ -64,6 +78,28 @@ export async function initPostHog(): Promise<void> {
   } catch {
     // analytics should never break the app
   }
+}
+
+/**
+ * Initialise analytics, adopting the install id the server reports (the one the
+ * website stamped into the install command) when there is one. Called once at
+ * startup in place of initPostHog: the id must be known before the identity is
+ * set, so the fetch comes first. A missing id or a failed fetch is a plain
+ * anonymous install.
+ */
+export async function bootstrapAnalytics(): Promise<void> {
+  let id: string | undefined;
+  try {
+    const base = import.meta.env.VITE_API_URL || '';
+    const res = await fetch(`${base}/api/config`);
+    if (res.ok) {
+      const cfg = await res.json();
+      if (cfg && typeof cfg.installId === 'string' && cfg.installId) id = cfg.installId;
+    }
+  } catch {
+    // No config (server error, offline) — fall through to an anonymous id.
+  }
+  await initPostHog(id);
 }
 
 /** Capture a custom event with optional properties. No-op if not initialised. */

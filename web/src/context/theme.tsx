@@ -14,14 +14,14 @@ const ThemeContext = createContext<ThemeContextValue>();
 
 const DEFAULT_THEME: Theme = {
   directory: '',
-  primaryColor: '#5e6ad2',
-  accent: '#5e6ad2',
-  accentHover: '#4f5bc4',
-  accentSoft: 'rgba(94, 106, 210, 0.12)',
-  accentRing: 'rgba(94, 106, 210, 0.35)',
+  primaryColor: '#ff5e1f',
+  accent: '#ff5e1f',
+  accentHover: '#f54500',
+  accentSoft: 'rgba(255, 94, 31, 0.12)',
+  accentRing: 'rgba(255, 94, 31, 0.35)',
   onPrimary: '#ffffff',
-  glow: 'rgba(94, 106, 210, 0.08)',
-  tint: 'rgba(94, 106, 210, 0.04)',
+  glow: 'rgba(255, 94, 31, 0.12)',
+  tint: 'rgba(255, 94, 31, 0.05)',
 };
 
 function applyThemeCSS(t: Theme) {

@@ -161,7 +161,7 @@ function HomeContent() {
           class="pointer-events-none absolute inset-0 opacity-60"
           style={{
             background:
-              'radial-gradient(ellipse 70% 50% at 50% -8%, rgba(94,106,210,0.10), transparent 70%)',
+              'radial-gradient(ellipse 70% 50% at 50% -8%, rgba(255,94,31,0.10), transparent 70%)',
           }}
         />
         {/* Dot grid texture */}
@@ -215,7 +215,7 @@ function HomeContent() {
             <h1 class="text-center text-[32px] sm:text-[42px] md:text-[54px] font-bold tracking-tight text-zinc-50 leading-[1.05]
                        animate-fade-in-up max-w-3xl" style={{ 'animation-delay': '40ms' }}>
               Where everyone is a
-              <span class="block mt-1 bg-gradient-to-r from-[color:var(--accent)] via-[#8b9cf7] to-[color:var(--accent)]
+              <span class="block mt-1 bg-gradient-to-r from-[color:var(--accent)] via-[#ffb38a] to-[color:var(--accent)]
                            bg-clip-text text-transparent">
                 software developer.
               </span>
@@ -335,7 +335,7 @@ function HomeContent() {
                               bg-[color:var(--bg-surface)]/50 p-5 transition-all var(--spring-md)
                               hover:border-[color:var(--accent)]/30 hover:bg-[color:var(--bg-surface)]">
                     <div class="absolute top-5 right-5 text-right">
-                      <div class="text-[28px] font-bold leading-none bg-gradient-to-br from-[color:var(--accent)] to-[#8b9cf7] bg-clip-text text-transparent">
+                      <div class="text-[28px] font-bold leading-none bg-gradient-to-br from-[color:var(--accent)] to-[#ffb38a] bg-clip-text text-transparent">
                         {p.stat}
                       </div>
                       <div class="text-[9.5px] text-zinc-600 mt-1 max-w-[90px] leading-tight">{p.statLabel}</div>

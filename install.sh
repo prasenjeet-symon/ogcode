@@ -4,6 +4,23 @@
 
 set -e
 
+# Record the website's PostHog id (handed over as $OGCODE_IID) so that the first
+# run of the binary can report the install against the same person who clicked
+# download. Best-effort: any failure here must never fail the install, and an
+# absent or malformed id is simply ignored.
+OGCODE_IID_VALUE="${OGCODE_IID:-}"
+case "$OGCODE_IID_VALUE" in
+    ""|*[!A-Za-z0-9_-]*)
+        ;;
+    *)
+        if [ "${#OGCODE_IID_VALUE}" -le 64 ]; then
+            mkdir -p "$HOME/.ogcode" 2>/dev/null || true
+            printf '%s\n' "$OGCODE_IID_VALUE" > "$HOME/.ogcode/install-id" 2>/dev/null || true
+            chmod 600 "$HOME/.ogcode/install-id" 2>/dev/null || true
+        fi
+        ;;
+esac
+
 REPO="prasenjeet-symon/ogcode"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 BINARY="ogcode"

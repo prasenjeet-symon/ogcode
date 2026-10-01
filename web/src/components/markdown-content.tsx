@@ -1,4 +1,5 @@
-import { createMemo, createEffect } from 'solid-js';
+import { createMemo, createEffect, createSignal, Show } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js';
@@ -8,6 +9,7 @@ import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import Plotly from 'plotly.js-dist-min';
 import { renderRoughDiagram, type RoughSpec } from './rough-renderer';
+import DiagramZoomDialog, { DIAGRAM_ZOOM_ICON, type DiagramZoomState } from './diagram-zoom';
 
 mermaid.initialize({
   startOnLoad: false,
@@ -86,6 +88,36 @@ export default function MarkdownContent(props: { text: string; class?: string })
   // current by the time the effect reads it.
   let currentHtmlBlocks: string[] = [];
 
+  // A diagram can be wider than the chat column; the magnifier under each one
+  // opens the same diagram redrawn at the width of a large dialog. The dialog
+  // holds no state of its own — it is handed a `render` callback the owning
+  // branch below already knows how to draw with.
+  const [zoom, setZoom] = createSignal<DiagramZoomState | null>(null);
+  let zoomSeq = 0;
+
+  const attachZoom = (
+    target: HTMLElement,
+    title: string,
+    render: (host: HTMLElement) => void | Promise<void>,
+  ) => {
+    let frame = target.parentElement;
+    if (!frame || !frame.classList.contains('diagram-frame')) {
+      frame = document.createElement('div');
+      frame.className = 'diagram-frame';
+      target.replaceWith(frame);
+      frame.appendChild(target);
+    }
+    if (frame.querySelector(':scope > .diagram-zoom')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'diagram-zoom';
+    btn.title = 'Zoom diagram';
+    btn.setAttribute('aria-label', 'Zoom diagram');
+    btn.innerHTML = DIAGRAM_ZOOM_ICON;
+    btn.addEventListener('click', () => setZoom({ title, render }));
+    frame.appendChild(btn);
+  };
+
   const html = createMemo(() => {
     const raw = marked.parse(props.text, { async: false }) as string;
 
@@ -161,11 +193,27 @@ export default function MarkdownContent(props: { text: string; class?: string })
 
     const blocksData = currentHtmlBlocks;
 
-    // Render mermaid diagrams
+    // Render mermaid diagrams. The source is read off each node before run(),
+    // because run() replaces the node's children with the rendered <svg> and
+    // the definition would otherwise be gone by the time the zoom opens.
     const mermaidNodes = containerRef.querySelectorAll('.mermaid');
     if (mermaidNodes.length > 0) {
       requestAnimationFrame(() => {
-        mermaid.run({ nodes: mermaidNodes }).catch(() => {});
+        const sources = new Map<Element, string>();
+        mermaidNodes.forEach((node) => sources.set(node, node.textContent || ''));
+        mermaid
+          .run({ nodes: mermaidNodes })
+          .then(() => {
+            mermaidNodes.forEach((node) => {
+              const src = sources.get(node) ?? '';
+              if (!src.trim()) return;
+              attachZoom(node as HTMLElement, 'Mermaid diagram', async (host) => {
+                const { svg } = await mermaid.render(`diagram-zoom-${++zoomSeq}`, src);
+                host.innerHTML = svg;
+              });
+            });
+          })
+          .catch(() => {});
       });
     }
 
@@ -176,6 +224,9 @@ export default function MarkdownContent(props: { text: string; class?: string })
         const spec = JSON.parse(el.textContent || '{}');
         el.textContent = '';
         Plotly.newPlot(el, spec.data ?? [], spec.layout ?? {}, { responsive: true, displayModeBar: false, ...spec.config });
+        attachZoom(el, 'Plotly chart', (host) => {
+          void Plotly.newPlot(host, spec.data ?? [], spec.layout ?? {}, { responsive: true, displayModeBar: false, ...spec.config });
+        });
       } catch {
         el.textContent = 'Invalid Plotly spec';
       }
@@ -188,6 +239,9 @@ export default function MarkdownContent(props: { text: string; class?: string })
         const spec = JSON.parse(el.textContent || '{}') as RoughSpec;
         el.textContent = '';
         renderRoughDiagram(el, spec);
+        // The dialog is wider, so the SVG simply scales up to it — no need to
+        // rewrite the spec's viewBox.
+        attachZoom(el, 'Rough diagram', (host) => renderRoughDiagram(host, spec));
       } catch {
         el.textContent = 'Invalid Rough diagram spec';
       }
@@ -267,7 +321,7 @@ export default function MarkdownContent(props: { text: string; class?: string })
       // should appear as part of the conversation, not as a separate widget.
       const darkWrap = `<!DOCTYPE html><html style="color-scheme:dark;"><head><meta charset="utf-8"><style>
 body { margin: 0; padding: 0; background: transparent; color: #ededef; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color-scheme: dark; }
-a { color: #8b9cf7; }
+a { color: #ffb38a; }
 table { border-collapse: collapse; margin: 0.75em 0; }
 th, td { border: 1px solid #2a2a30; padding: 6px 12px; text-align: left; }
 th { background: rgba(255, 255, 255, 0.05); }
@@ -339,6 +393,15 @@ img { max-width: 100%; height: auto; }
           ${docTitle ? `<span class="latex-render-title">— ${docTitle}</span>` : ''}
         </div>
         <div class="latex-render-actions">
+          <button class="latex-zoom-btn" title="Zoom document">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              <line x1="11" y1="7.5" x2="11" y2="14.5"/>
+              <line x1="7.5" y1="11" x2="14.5" y2="11"/>
+            </svg>
+            Zoom
+          </button>
           <button class="latex-src-toggle" title="Show/hide source code">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="16 18 22 12 16 6"/>
@@ -479,6 +542,31 @@ img { max-width: 100%; height: auto; }
         }
       };
 
+      // Zoom: the header button shows the compiled page images at full width.
+      const zoomBtn = container.querySelector('.latex-zoom-btn');
+      if (zoomBtn) {
+        zoomBtn.addEventListener('click', () => {
+          const imgs = Array.from(pagesDiv.querySelectorAll<HTMLImageElement>('.latex-page-img')).map((i) => i.src);
+          setZoom({
+            title: docTitle ? `LaTeX document — ${docTitle}` : `LaTeX document (${docClass})`,
+            render: (host) => {
+              if (!imgs.length) {
+                host.innerHTML = '<p class="diagram-zoom-empty">No rendered pages — download the PDF to view.</p>';
+                return;
+              }
+              host.innerHTML = '';
+              imgs.forEach((src, i) => {
+                const img = document.createElement('img');
+                img.src = src;
+                img.alt = `Page ${i + 1}`;
+                img.className = 'latex-page-img';
+                host.appendChild(img);
+              });
+            },
+          });
+        });
+      }
+
       // Auto-compile on render
       compileAndRender();
 
@@ -582,10 +670,17 @@ img { max-width: 100%; height: auto; }
   });
 
   return (
-    <div
-      ref={containerRef}
-      class={`prose-chat break-words min-w-0 ${props.class ?? ''}`}
-      innerHTML={html()}
-    />
+    <>
+      <div
+        ref={containerRef}
+        class={`prose-chat break-words min-w-0 ${props.class ?? ''}`}
+        innerHTML={html()}
+      />
+      <Show when={zoom()}>{(state) => (
+        <Portal>
+          <DiagramZoomDialog state={state()} onClose={() => setZoom(null)} />
+        </Portal>
+      )}</Show>
+    </>
   );
 }

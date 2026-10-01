@@ -3,6 +3,8 @@ package codemap
 import (
 	"bytes"
 	"regexp"
+
+	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
 // A grammar can lag its language, and every construct it predates reads as a
@@ -142,4 +144,50 @@ func shimQueryPrelude(src []byte, at int) int {
 	blank(src, j, end)
 	copy(src[j:], plain)
 	return end - 1
+}
+
+// A repair is a shim that needs the parse to find its target: a construct a
+// regular expression cannot tell from its look-alikes. It runs only when the
+// first parse has errors, and returns the rewritten bytes (the same length,
+// like a shim's) and whether it changed anything; the file is then parsed
+// again, and only that second parse's errors are reported.
+var grammarRepairs = map[string]func(root *ts.Node, src []byte) ([]byte, bool){
+	"swift": swiftRepair,
+}
+
+// swiftRepair rewrites the empty tuple expression — `.success(())`,
+// `send(())`, `return ()` — which the grammar cannot read: it parses `()` as a
+// tuple_expression whose only element is a zero-width `bang` node around a
+// MISSING `!`. The same two
+// characters are a call's argument list in `f()` and a type in `() -> Void`,
+// both of which parse, so only the tree can say which `()` to touch. Each one
+// becomes `0 `: an expression wherever an empty tuple is one.
+func swiftRepair(root *ts.Node, src []byte) ([]byte, bool) {
+	var out []byte
+	var walk func(n *ts.Node)
+	walk = func(n *ts.Node) {
+		if !n.HasError() {
+			return
+		}
+		if n.Kind() == "tuple_expression" && n.ChildCount() == 3 &&
+			n.Child(0).Kind() == "(" && n.Child(2).Kind() == ")" &&
+			n.Child(1).StartByte() == n.Child(1).EndByte() && n.Child(1).HasError() {
+			if out == nil {
+				out = bytes.Clone(src)
+			}
+			start, end := int(n.StartByte()), int(n.EndByte())
+			out[start] = '0'
+			for i := start + 1; i < end; i++ {
+				if out[i] != '\n' {
+					out[i] = ' '
+				}
+			}
+			return
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return out, out != nil
 }

@@ -91,6 +91,10 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	slog.Info("ogcode worker starting", "master", workerMaster, "workspaces", workspaces)
+	fmt.Fprintf(os.Stderr, "ogcode worker starting for %s\n", workerMaster)
+	if p := logPath(); p != "" {
+		fmt.Fprintf(os.Stderr, "Logs: %s\n", p)
+	}
 	if err := w.Run(ctx); err != nil {
 		return err
 	}

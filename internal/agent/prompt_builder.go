@@ -88,14 +88,16 @@ Use the shell to inspect, never to change: running tests, "git status"/"log"/"di
 
 	// The agents that change files end the workflow on verification. write and
 	// edit report syntax errors themselves, so the diagram says to act on that,
-	// keeps check_syntax for files changed some other way, and ends on the build
-	// and the tests — a clean parse is grammar only. The read-only roles end on
+	// keeps check_syntax for files changed some other way, then the build and the
+	// tests, then running the change the way it is used — a clean parse is grammar
+	// only, and tests check the parts in isolation. The read-only roles end on
 	// their own product and are never shown a tool they do not hold.
 	workflowEnd := "  → " + finalStep
 	if canWrite {
 		workflowEnd = `  → Then make changes                     ← write and edit report any SYNTAX ERROR they introduce: fix it before anything else
   → check_syntax(path)                    ← for a file changed another way (shell, formatter, generator), or to confirm a fix
-  → build, then run the tests             ← a clean parse is grammar only; the build and the tests are the proof`
+  → build, then run the tests             ← a clean parse is grammar only; the build and the tests are the proof
+  → run it the way it is used             ← end to end, as a user or caller reaches it: the tests check the parts, this checks the whole`
 	}
 
 	// Re-mapping after an edit is advice for the agents that edit; the rest are
@@ -260,13 +262,17 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 
 	base += "It holds durable, project-specific knowledge — decisions and why, conventions, architecture, gotchas, and facts like config values, versions, and build/test commands. It is re-read at the start of every turn. Keep it concise; it is not for behavioral rules (those belong in AGENT.md) or anything obvious from the code."
 
+	// MEMORY.md is re-read at the start of every turn, so an unchecked inference
+	// written here reads as established fact to every later session. The update
+	// also belongs before the final answer, which should report on the task.
 	if canWriteFiles {
 		base += `
 
 ### How to maintain MEMORY.md
 - Use the edit tool for targeted updates; use write only to restructure or first create the file.
 - Record a fact the moment it proves out — a project-specific build/test failure and its fix, an assumption about the code that turned out wrong, an approach you tried and backed out — as one line ("tried X → got Y → do Z instead"). Skip anything a future session could read straight from the code.
-- Before adding, check it isn't already recorded and update in place. Do this on your own initiative — it is part of finishing the work.`
+- Write down only what you have seen hold, and say how you know it when that is not obvious — the command or file that showed it. An inference you have not checked is marked "(unverified)" or left out: later sessions read this file as ground truth.
+- Before adding, check it isn't already recorded and update in place. Do this on your own initiative, before your final answer; that answer reports on the task, and mentions the memory update in one line at most.`
 		if !hasContent {
 			base += "\n- There is no MEMORY.md yet — create one in the project root with the write tool once there is knowledge worth recording."
 		}

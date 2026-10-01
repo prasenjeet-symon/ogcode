@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
@@ -15,6 +14,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
+	"github.com/prasenjeet-symon/ogcode/internal/logging"
 	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
 	"github.com/prasenjeet-symon/ogcode/internal/portmap"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
@@ -22,6 +22,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 	"github.com/prasenjeet-symon/ogcode/internal/usage"
+	"github.com/prasenjeet-symon/ogcode/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +44,7 @@ var rootCmd = &cobra.Command{
 		if ollamaKeyFlag != "" {
 			os.Setenv("OLLAMA_API_KEY", ollamaKeyFlag)
 		}
+		startLogging(cmd)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return serve(cmd, args)
@@ -218,36 +220,72 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func setupLogging() {
-	level := slog.LevelInfo
-	levelStr := strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_LOG_LEVEL")))
-	switch levelStr {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	}
+// logger is the process logger startLogging installed; Execute closes it.
+var logger *logging.Logger
 
-	format := strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_LOG_FORMAT")))
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{Level: level, AddSource: level <= slog.LevelDebug}
-
-	// Logs go to stderr, never stdout. PersistentPreRun calls this before any
-	// command runs, so a log line on stdout would land ahead of the command's
-	// real output — which silently corrupted `run --output-format json`, whose
-	// stdout is a single JSON document a caller parses.
-	switch format {
-	case "json":
-		handler = slog.NewJSONHandler(os.Stderr, opts)
+// logTarget is where a command keeps its log file. Every log lives under the
+// global log root (~/.ogcode/logs, see logging.Root), never inside the project.
+// Commands that work on the current directory log into that project's own
+// folder there, so concurrent projects never share a file; the worker, which
+// hosts many workspaces, logs at the root. Anything else (version, help,
+// check-updates) keeps no file. An unknown home directory means no file
+// either: the terminal takes the logs rather than the project.
+func logTarget(cmd *cobra.Command) (dir, name string) {
+	var file string
+	switch cmd.CommandPath() {
+	case "ogcode", "ogcode serve", "ogcode plan":
+		file = "ogcode.log"
+	case "ogcode run":
+		file = "run.log"
+	case "ogcode index":
+		file = "index.log"
+	case "ogcode worker":
+		file = "worker.log"
 	default:
-		handler = slog.NewTextHandler(os.Stderr, opts)
+		return "", ""
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", ""
+	}
+	root := logging.Root(home)
+	if file == "worker.log" {
+		return root, file
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", ""
+	}
+	return logging.ProjectDir(root, cwd), file
+}
 
-	slog.SetDefault(slog.New(handler))
+// startLogging replaces the bootstrap logger with the command's own. Logs go
+// to a rotated file; the terminal shows errors only (OGCODE_LOG_CONSOLE), never
+// stdout — `run --output-format json` writes one JSON document there that a
+// caller parses. See package logging for the knobs.
+func startLogging(cmd *cobra.Command) {
+	dir, name := logTarget(cmd)
+	opts := logging.FromEnv(dir, name)
+	if name == "" {
+		// No file: the terminal is the only sink, so it shows warnings too.
+		opts.Console = min(opts.Console, slog.LevelWarn)
+	}
+	if logger != nil {
+		logger.Close()
+	}
+	logger = logging.Setup(opts)
+	if logger.Path() != "" {
+		cwd, _ := os.Getwd()
+		logger.Started(context.Background(), cmd.CommandPath(), cwd, version.Version, opts)
+	}
+}
 
-	slog.Info("logging initialized", "level", level, "format", format)
+// logPath is the active log file, for the startup banner; "" when none.
+func logPath() string {
+	if logger == nil {
+		return ""
+	}
+	return logger.Path()
 }
 
 func serve(cmd *cobra.Command, args []string) error {
@@ -272,7 +310,7 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 	// clash makes the server walk for this run without overwriting the remembered
 	// port, so "already running elsewhere" never reassigns the project's home.
 	startPort := port
-	var onListen func(int)
+	rememberPort := false
 	switch {
 	case cmd.Flags().Changed("port"):
 		if err := portmap.Save(dir, port); err != nil {
@@ -283,15 +321,25 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 			startPort = remembered
 		} else {
 			startPort = portmap.SuggestStart(dir, port)
-			onListen = func(bound int) {
-				if err := portmap.Save(dir, bound); err != nil {
-					slog.Warn("could not record project port", "dir", dir, "err", err)
-				}
-			}
+			rememberPort = true
 		}
 	}
 	if startPort != port {
 		slog.Info("using this project's port", "dir", dir, "port", startPort)
+	}
+
+	// The terminal's whole view of a healthy server: where to open it and
+	// where its logs are. Everything else goes to the log file.
+	onListen := func(bound int) {
+		if rememberPort {
+			if err := portmap.Save(dir, bound); err != nil {
+				slog.Warn("could not record project port", "dir", dir, "err", err)
+			}
+		}
+		fmt.Printf("ogcode is running at http://localhost:%d\n", bound)
+		if p := logPath(); p != "" {
+			fmt.Printf("Logs: %s\n", p)
+		}
 	}
 
 	srv := server.NewWithOptions(startPort, dir, mode, server.Options{OnListen: onListen})
@@ -300,9 +348,15 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 
 func Execute() error {
 	_ = godotenv.Load()
-	setupLogging()
+	// Until the command is known (and with it, where its log file goes),
+	// warnings — a malformed ogcode.json, say — go to the terminal.
+	slog.SetDefault(logging.New(logging.Options{Console: slog.LevelWarn}).Logger)
 	if dir, err := os.Getwd(); err == nil {
 		config.Load(dir).ApplyEnv()
 	}
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	if logger != nil {
+		logger.Close()
+	}
+	return err
 }

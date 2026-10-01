@@ -57,6 +57,28 @@ func TestMemoryMDPrompt_CommonSections(t *testing.T) {
 	}
 }
 
+// MEMORY.md is re-read every turn, so what goes into it must have been seen to
+// hold, with its source when that is not obvious; an unchecked inference is
+// marked as such or left out. The update comes before the final answer, which
+// reports on the task rather than on the bookkeeping.
+func TestMemoryMDPrompt_RecordsOnlyVerifiedFacts(t *testing.T) {
+	w := memoryMDPrompt(true, true)
+	for _, want := range []string{
+		"Write down only what you have seen hold",
+		"the command or file that showed it",
+		`marked "(unverified)" or left out`,
+		"before your final answer",
+	} {
+		if !strings.Contains(w, want) {
+			t.Errorf("writable MEMORY.md section missing %q", want)
+		}
+	}
+	// A read-only agent writes nothing, so it is not told how to write.
+	if r := memoryMDPrompt(false, true); strings.Contains(r, "(unverified)") {
+		t.Error("read-only MEMORY.md section carries the writing rule")
+	}
+}
+
 func TestMarkdownCapabilitiesPrompt(t *testing.T) {
 	prompt := markdownCapabilitiesPrompt(true, false)
 	if !strings.Contains(prompt, "Mermaid diagrams") {
@@ -461,6 +483,33 @@ func TestBuildAgent_SystemPrompt_ContainsSharedSections(t *testing.T) {
 	}
 	if !strings.Contains(BuildAgent.System, "Do not create, modify, or delete any files in .ogcode/notes/") {
 		t.Error("BuildAgent system prompt should include read-only restriction for notes directory")
+	}
+}
+
+// Both coding agents verify a change by running it the way it is used, not only
+// through its tests, and review work — their own included — to one standard of
+// evidence: a clean result needs support as much as a finding does, the review
+// reaches past the changed lines to what depends on them, and what could not be
+// checked is reported as such. The read-only agents cannot run anything, so
+// neither rule reaches them.
+func TestCodingAgents_ReviewAndEndToEndVerification(t *testing.T) {
+	for _, a := range []Agent{BuildAgent, TaskAgent} {
+		for _, want := range []string{
+			"## Reviewing work",
+			"hold every conclusion to the same standard of evidence",
+			"trace what depends on the change and what it depends on",
+			"list what you could not check as unverified",
+			"run it end to end and confirm the behavior you changed",
+		} {
+			if !strings.Contains(a.System, want) {
+				t.Errorf("%s system prompt missing %q", a.ID, want)
+			}
+		}
+	}
+	for _, a := range []Agent{PlanAgent, NoteAgent, BreakdownAgent, SubagentAgent} {
+		if strings.Contains(a.System, "## Reviewing work") {
+			t.Errorf("%s system prompt tells a read-only agent how to run a review", a.ID)
+		}
 	}
 }
 

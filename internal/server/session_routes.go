@@ -584,16 +584,24 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 		return
 	}
 
-	// Use a fast model for title generation to minimize latency and cost.
-	// Falls back to the session model if no fast alternative is available.
+	// Title generation runs on the session's own model, the way the risk check,
+	// compaction and the memory summary do. A substring "fast model" heuristic
+	// (haiku/mini/flash) picked the first model whose id contained "mini" —
+	// minimax-m3 for every ollama session — instead of the model the user chose.
+	// Fall back to the provider's default only when the session names no model,
+	// and to its first model when even that is empty.
 	titleModel := model
-	for _, m := range p.Models() {
-		// Prefer haiku-class models for title generation
-		if strings.Contains(strings.ToLower(m.ID), "haiku") ||
-			strings.Contains(strings.ToLower(m.ID), "mini") ||
-			strings.Contains(strings.ToLower(m.ID), "flash") {
-			titleModel = m.ID
-			break
+	if titleModel == "" {
+		for _, m := range p.Models() {
+			if m.Default {
+				titleModel = m.ID
+				break
+			}
+		}
+		if titleModel == "" {
+			if models := p.Models(); len(models) > 0 {
+				titleModel = models[0].ID
+			}
 		}
 	}
 

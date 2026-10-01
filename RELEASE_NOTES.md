@@ -1,3 +1,84 @@
+# Release Notes — v0.42.0
+
+## Minor: Your logs are kept, rotated, and redacted
+
+ogcode now writes what it was doing to a log file, so a crash, a failed call,
+or a slow start can be looked at after the fact instead of being re-run to be
+seen.
+
+- **Where.** One file per project under `~/.ogcode/logs/<project>-<hash>/`,
+  owner-only, alongside the terminal output you already get.
+- **Rotated and bounded.** A file is rolled over past 10 MB, the last 5 rollovers
+  are kept (compressed), and anything older than 14 days is deleted — so the log
+  cannot quietly grow without limit.
+- **Redacted.** Credentials, tokens, and keys that would otherwise land in a
+  request are stripped before they are written.
+- **Tunable, or silent.** `OGCODE_LOG_LEVEL` (the file, default `info`),
+  `OGCODE_LOG_FORMAT` (`text` or `json`), and `OGCODE_LOG_CONSOLE` (the terminal,
+  default `error` — only what you need to act on) set the thresholds;
+  `OGCODE_LOG_DIR`, `OGCODE_LOG_MAX_SIZE_MB`, `OGCODE_LOG_MAX_FILES`,
+  `OGCODE_LOG_MAX_AGE_DAYS`, and `OGCODE_LOG_COMPRESS` control where and how
+  much is kept.
+
+## Minor: The download, the install and your first session are one person
+
+Until now the three hops could not be joined: the website recorded the click
+under one id, the installed binary minted its own, and the editor a third — so
+"someone downloaded, installed, and started a session" was unmeasurable.
+
+- **One id, carried the whole way.** Copying an install command stamps your id
+  onto it; the installer saves it to `~/.ogcode/install-id`; the binary reports
+  the install once (`ogcode_installed`, with the channel it detected — scoop,
+  Homebrew, cargo, the install script, winget); and the editor reads it back from
+  the server, so the session it starts carries the same id.
+- **The kinds of projects ogcode is used on.** Once per project, the editor
+  reports a single dominant label derived from the files present — a low-
+  cardinality `go`, `typescript`, `python`, and so on — honouring `.gitignore`
+  and the index excludes. A checkout with no recognisable source reports nothing
+  rather than stamping the project done.
+- **What is sent, and what is not.** Only counts, lengths, and labels — never
+  content. `docs/index.html` keeps the copy button's command clean on screen;
+  only the copied text is stamped, and brew (which cannot carry the variable) is
+  left untouched.
+
+## Minor: Titles run on the model you chose
+
+A "fast model" heuristic picked the first model whose id contained `haiku`,
+`mini`, or `flash`. On a machine whose catalogue lists `minimax-m3:cloud` first,
+every title was generated on it — even in a session using a different model.
+
+The title now runs on the session's own model, like the risk check, the
+compaction summary, and the memory summary. There is no more substring matching
+of model ids to guess at a small one.
+
+## Minor: The Swift grammar reads what it should
+
+Two Swift constructs misparsed, and both had workarounds users should not need:
+an empty tuple `()` and a cast followed by a newline and `??`. The grammar now
+parses them — regenerated from a newer upstream revision, with a repair that
+rewrites an empty tuple only where the tree says it is one, and re-parses after
+the first error.
+
+## Minor: Diagrams zoom, the accent is the brand orange, and the tool rows settle
+
+- **Zoom any diagram.** Mermaid, Plotly, Rough, and LaTeX diagrams gain a
+  magnifier at their corner that opens a larger view in a dialog.
+- **The default accent is the brand orange** `#ff5e1f`, with a warm tint for
+  links and highlights. The violet preset stays available, and the logo and
+  favicon are unchanged.
+- **Smaller fixes.** The "time to first token" label now sits flush on the text
+  column instead of a few pixels left of it, and the housekeeping tool rows
+  (`codebase_map`, `file_map`, `compact_context`) show a quiet magic-wand glyph
+  rather than a checkmark.
+
+## Minor: The agent reviews its own work
+
+The agent's instructions now ask it to trace what a change reaches before
+calling it done — to run what it can, read past the lines it changed, and mark
+what it could not check as unverified rather than reporting it as fine. It also
+runs the change the way it is used, not only through its tests, and writes down
+a fact only once it has been seen to hold.
+
 # Release Notes — v0.41.1
 
 ## Patch: The Linux build ships again

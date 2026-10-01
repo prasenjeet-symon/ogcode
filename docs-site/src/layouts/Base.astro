@@ -1,0 +1,90 @@
+---
+// Shared shell for every docs page: head metadata, fonts, nav, footer.
+//
+// Mirrors blog/layouts/Base.astro with two differences the docs need:
+//   · a pre-paint theme script — it reads the saved choice (or the OS) and sets
+//     data-theme on <html> before the first paint, so a light-theme reader
+//     never sees a dark flash;
+//   · no RSS <link> (the docs have no feed), and a `guides` prop so the
+//     landing page keeps the dashed verticals while the three-column reading
+//     pages drop them.
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/docs.css';
+
+interface Props {
+  title: string;
+  description: string;
+  /** Absolute canonical URL for this page. */
+  canonical: string;
+  ogType?: 'website' | 'article';
+  ogImage?: string;
+  /** Render the dashed page guides behind the content (landing page only). */
+  guides?: boolean;
+}
+
+const {
+  title,
+  description,
+  canonical,
+  ogType = 'website',
+  ogImage = 'https://ogcode.xyz/media/og.png',
+  guides = false,
+} = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <link rel="canonical" href={canonical} />
+  <meta name="theme-color" content="#151414" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="generator" content={Astro.generator} />
+
+  <meta property="og:type" content={ogType} />
+  <meta property="og:site_name" content="Ogcode" />
+  <meta property="og:url" content={canonical} />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:image" content={ogImage} />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content={title} />
+  <meta name="twitter:description" content={description} />
+  <meta name="twitter:image" content={ogImage} />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23FF5E1F'/><path d='M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33' transform='translate(9 9) scale(0.72)' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round'/></svg>" />
+  <link rel="apple-touch-icon" href="/media/logo.png" />
+
+  <link rel="preload" href="/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/jetbrains-mono-var.woff2" as="font" type="font/woff2" crossorigin />
+
+  <!-- Theme before first paint: no flash of the wrong theme. -->
+  <script is:inline>
+    (() => {
+      try {
+        const saved = localStorage.getItem('ogcode-docs-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      } catch {}
+    })();
+  </script>
+
+  <slot name="head" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <Nav />
+
+  <main id="main">
+    {guides && <div class="guides" aria-hidden="true"></div>}
+    <slot />
+  </main>
+
+  <Footer />
+</body>
+</html>

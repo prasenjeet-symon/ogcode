@@ -19,6 +19,16 @@ Every other grammar arrives through `go.mod`. Swift cannot:
 Vendoring the generated parser is the only way to depend on this grammar from
 Go. It is ~20 MB of C, which compresses to about 1 MB in git.
 
+## Vendored version
+
+Generated from upstream commit `35245fb` (2026-09-26, `0.7.3-24-g35245fb`),
+which carries the `as? T ?? value` fix (upstream #597, #610). Record the commit
+here whenever you regenerate: the generated files do not say which grammar
+they came from, and without it the next update cannot tell what it pulls in.
+
+The grammar still cannot read an empty tuple expression, `()`; `swiftRepair`
+in `internal/codemap/shims.go` covers it.
+
 ## Regenerating
 
 Requires Node. From a scratch directory:
@@ -27,6 +37,9 @@ Requires Node. From a scratch directory:
 git clone https://github.com/alex-pinkus/tree-sitter-swift
 cd tree-sitter-swift && npx --yes tree-sitter-cli@0.25.10 generate
 ```
+
+Read `git diff <recorded commit>..HEAD -- grammar.js src/scanner.c` first:
+`generate` executes `grammar.js`, and `scanner.c` is compiled into ogcode.
 
 Then copy `src/parser.c`, `src/scanner.c` and `src/tree_sitter/*.h` over the
 copies here, keep `binding.go` and this file, and run `go test ./internal/codemap/`.

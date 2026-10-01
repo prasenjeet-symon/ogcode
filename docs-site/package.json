@@ -1,0 +1,22 @@
+{
+  "name": "ogcode-docs",
+  "description": "The Ogcode documentation — fully pre-rendered static pages served at ogcode.xyz/docs",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && node postbuild.mjs",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^4.3.0",
+    "@astrojs/sitemap": "^3.4.0",
+    "astro": "^5.13.0"
+  },
+  "devDependencies": {
+    "@pagefind/default-ui": "^1.5.2",
+    "pagefind": "^1.5.2"
+  }
+}

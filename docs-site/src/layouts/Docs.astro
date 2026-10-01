@@ -1,0 +1,185 @@
+---
+// The three-column reading shell: sticky sidebar, article, on-this-page rail.
+// The page supplies the content through the default slot and passes the
+// `headings` Astro returns from render() for the rail.
+import Base from './Base.astro';
+import Search from '../components/Search.astro';
+import CtaSlab from '../components/CtaSlab.astro';
+import { navGroups, flatPages, groupFor, pageUrl, type DocPage } from '../lib/nav';
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  /** Slug (leading slash) of the page being rendered. */
+  slug: string;
+  /** Optional lede; falls back to `description`. */
+  lede?: string;
+  /** Headings from render(), for the on-this-page rail. */
+  headings?: Heading[];
+}
+
+const { title, description, slug, lede = description, headings = [] } = Astro.props;
+
+const canonical = `https://ogcode.xyz${pageUrl(slug)}`;
+const group = groupFor(slug);
+const pages = flatPages();
+const idx = pages.findIndex((p) => p.slug === slug);
+const prev: DocPage | undefined = idx > 0 ? pages[idx - 1] : undefined;
+const next: DocPage | undefined = idx >= 0 && idx < pages.length - 1 ? pages[idx + 1] : undefined;
+
+const groups = navGroups();
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const isActive = (p: DocPage) => p.slug === slug;
+---
+<Base title={`${title} — Ogcode Docs`} description={description} canonical={canonical} ogType="article">
+  <Fragment slot="head"><slot name="head" /></Fragment>
+  <div class="frame">
+    <div class="ds-frame">
+      <aside class="ds-side">
+        <div class="ds-side-in">
+          <div class="ds-side-top">
+            <span class="ds-side-label">Documentation</span>
+            <a class="ds-side-back" href="/docs/">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg>
+              All docs
+            </a>
+          </div>
+          <Search />
+          <nav class="ds-nav-desktop" aria-label="Docs">
+            {groups.map((g) => (
+              <div class="ds-nav-group">
+                <p class="ds-nav-h">{g.group}</p>
+                <div class="ds-nav-list">
+                  {g.items.map((p) => (
+                    <a class="ds-nav-link" href={pageUrl(p.slug)} aria-current={isActive(p) ? 'page' : undefined}>{p.title}</a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </nav>
+        </div>
+      </aside>
+
+      <div class="ds-article">
+        <details class="ds-mobile">
+          <summary>
+            <span class="ds-mobile-k">Menu</span>
+            Documentation
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </summary>
+          <div class="ds-mobile-body">
+            <nav aria-label="Docs (mobile)">
+              {groups.map((g) => (
+                <div class="ds-nav-group">
+                  <p class="ds-nav-h">{g.group}</p>
+                  <div class="ds-nav-list">
+                    {g.items.map((p) => (
+                      <a class="ds-nav-link" href={pageUrl(p.slug)} aria-current={isActive(p) ? 'page' : undefined}>{p.title}</a>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </nav>
+          </div>
+        </details>
+
+        <header class="ds-head">
+          <nav class="ds-crumbs" aria-label="Breadcrumb">
+            <a href="/docs/">Docs</a>
+            {group && <span class="sep" aria-hidden="true">/</span>}
+            {group && <span>{group.group}</span>}
+            <span class="sep" aria-hidden="true">/</span>
+            <span aria-current="page">{title}</span>
+          </nav>
+          <h1 class="ds-title">{title}</h1>
+          {lede && <p class="ds-lede">{lede}</p>}
+        </header>
+
+        <div class="ds-prose">
+          <slot />
+        </div>
+
+        <nav class="ds-pager" aria-label="Previous and next page">
+          {prev
+            ? <a class="prev" href={pageUrl(prev.slug)}>
+                <span class="ds-pager-dir">Previous</span>
+                <span class="ds-pager-t">{prev.title}</span>
+              </a>
+            : <span class="empty" aria-hidden="true"></span>}
+          {next
+            ? <a class="next" href={pageUrl(next.slug)}>
+                <span class="ds-pager-dir">Next</span>
+                <span class="ds-pager-t">{next.title}</span>
+              </a>
+            : <span class="empty" aria-hidden="true"></span>}
+        </nav>
+      </div>
+
+      {toc.length > 0 && (
+        <aside class="ds-toc" aria-label="On this page">
+          <p class="ds-toc-h">On this page</p>
+          <nav>
+            {toc.map((h) => (
+              <a href={`#${h.slug}`} class={h.depth === 3 ? 'lvl-3' : ''}>{h.text}</a>
+            ))}
+          </nav>
+        </aside>
+      )}
+    </div>
+  </div>
+
+  <CtaSlab />
+</Base>
+
+<script>
+  // Scrollspy for the on-this-page rail: light the entry for the heading that
+  // is currently nearest the top of the viewport.
+  const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('.ds-toc a'));
+  if (links.length) {
+    const targets = links
+      .map((a) => document.getElementById(decodeURIComponent(a.hash.slice(1))))
+      .filter((el): el is HTMLElement => !!el);
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const id = e.target.id;
+          for (const a of links) a.classList.toggle('is-active', a.hash === `#${id}`);
+        }
+      },
+      { rootMargin: '-88px 0px -70% 0px', threshold: 0 },
+    );
+    targets.forEach((t) => io.observe(t));
+  }
+
+  // Install-page platform tabs (a pill tablist). No-op on every other page.
+  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-install-tab]'));
+  if (tabs.length) {
+    const select = (tab: HTMLButtonElement) => {
+      for (const t of tabs) {
+        const on = t === tab;
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+        const pane = document.getElementById(t.getAttribute('aria-controls') ?? '');
+        if (pane) pane.hidden = !on;
+      }
+    };
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        const dir = e.key === 'ArrowRight' ? 1 : -1;
+        const nextTab = tabs[(tabs.indexOf(tab) + dir + tabs.length) % tabs.length];
+        select(nextTab);
+        nextTab.focus();
+      });
+    });
+  }
+</script>

@@ -100,8 +100,14 @@ type Server struct {
 	// are registered.)
 	searchSwitch *search.SwitchableBackend
 
-	// PostHog analytics client (optional — enabled via the settings UI)
+	// PostHog analytics client (always on at startup with hardcoded credentials;
+	// no user toggle — the only gate is a non-empty API key constant).
 	posthogClient *PostHogClient
+
+	// installID is the PostHog distinct id the install script recorded on the
+	// website, empty when the binary was installed some other way. Exposed via
+	// /api/config so the web UI can report against the same person.
+	installID string
 
 	// Track running agent loops so they can be cancelled on abort
 	mu           sync.Mutex
@@ -542,6 +548,10 @@ func (s *Server) serve(ctx context.Context) error {
 	// Initialize version manager
 	s.versionManager = version.New()
 
+	// The install script records the website's PostHog id here so the first run
+	// can be joined to the download that led to it. Surfaced via /api/config.
+	s.installID = readInstallID(home)
+
 	// Initialize PostHog analytics client from hardcoded credentials baked
 	// into the binary. Analytics is always on; there is no user-facing
 	// toggle. Events are sent server-side via the PostHog /capture REST endpoint.
@@ -551,6 +561,12 @@ func (s *Server) serve(ctx context.Context) error {
 			s.posthogClient.Capture("ogcode_server_started", posthogDistinctID(), map[string]any{
 				"mode": string(s.mode),
 			})
+			reportInstallOnce(home, s.installID, s.posthogClient.Capture)
+			// Report this workspace's project type once, so the analytics can say
+			// which kinds of project ogcode is used on. Detection walks the tree,
+			// so it runs in the background and never delays serving.
+			dir, capture := s.dir, s.posthogClient.Capture
+			go reportProjectTypeOnce(dir, capture)
 			slog.Info("posthog analytics enabled", "host", PostHogAPIHost)
 		}
 	}

@@ -1,0 +1,78 @@
+---
+// The homepage nav (docs/index.html), made script-free, matching the blog's
+// copy with the section label switched to "Docs". Same fixed 72px transparent
+// bar, mark + wordmark, centre menu and actions. Small screens: the burger is
+// a <details> whose body is the menu sheet.
+import ThemeToggle from './ThemeToggle.astro';
+
+const REPO = 'https://github.com/prasenjeet-symon/ogcode';
+const DISCORD = 'https://discord.gg/JQP9t8y2Zv';
+
+const path = Astro.url.pathname.replace(/\/?$/, '/');
+// Every page under /docs/ keeps "Docs" lit.
+const docsCurrent = path.startsWith('/docs/') ? 'true' : undefined;
+
+const menu = [
+  { label: 'Product', href: '/#product' },
+  { label: 'Models', href: '/#models' },
+  { label: 'Cost', href: '/#cost' },
+  { label: 'OGX', href: '/ogx/' },
+  { label: 'FAQ', href: '/#faq' },
+  { label: 'Blog', href: '/blog/' },
+  { label: 'Docs', href: '/docs/', current: docsCurrent },
+];
+
+const githubPath = 'M12 .5A11.5 11.5 0 00.5 12a11.5 11.5 0 007.86 10.94c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.3-5.24-1.28-5.24-5.67 0-1.25.45-2.27 1.18-3.07-.12-.3-.51-1.46.11-3.05 0 0 .96-.3 3.15 1.17a10.9 10.9 0 015.74 0c2.19-1.47 3.15-1.17 3.15-1.17.62 1.59.23 2.75.11 3.05.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.37-5.25 5.66.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12 11.5 11.5 0 0012 .5z';
+const discordPath = 'M20.3 4.4A19.8 19.8 0 0015.4 3l-.3.5c1.5.4 2.7.9 4 1.7a13.6 13.6 0 00-11.9 0c1.2-.8 2.6-1.3 4-1.7L10.6 3a19.8 19.8 0 00-4.9 1.4C2.5 9.1 1.7 13.7 2.1 18.3a20 20 0 006 3l.5-.7c-1-.4-2-1-2.8-1.6l.7-.5a14.2 14.2 0 0012.7 0l.7.5c-.9.6-1.8 1.2-2.8 1.6l.5.7a20 20 0 006-3c.5-5.3-.8-9.9-3.3-14zM8.5 15c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2zm7 0c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2z';
+---
+<header class="nav" id="nav">
+  <div class="nav-start">
+    <a class="brand" href="/" aria-label="Ogcode home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none"><path d="M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33" stroke="#fff" stroke-width="8" stroke-linecap="round"/></svg>
+      </span>
+      <span class="brand-name">ogcode</span>
+    </a>
+    <span class="brand-div" aria-hidden="true"></span>
+    <a class="brand-sec" href="/docs/">Docs</a>
+  </div>
+
+  <nav class="nav-menu" aria-label="Primary">
+    {menu.map((item) => (
+      <a href={item.href} aria-current={item.current}>{item.label}</a>
+    ))}
+  </nav>
+
+  <div class="nav-actions">
+    <a class="nav-link nav-hide" href={DISCORD} target="_blank" rel="noopener">
+      <svg fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d={discordPath}/></svg>
+      Discord
+    </a>
+    <a class="btn btn-line btn-sm nav-hide" href={REPO} target="_blank" rel="noopener">
+      <svg fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d={githubPath}/></svg>
+      GitHub
+    </a>
+    <ThemeToggle />
+    <details class="nav-burger">
+      <summary class="btn btn-line" aria-label="Menu">
+        <svg class="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </summary>
+      <div class="nav-sheet">
+        <nav aria-label="Menu">
+          {menu.map((item) => (
+            <a class="sheet-link" href={item.href} aria-current={item.current}>
+              {item.label}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+            </a>
+          ))}
+        </nav>
+        <div class="sheet-foot">
+          <a class="btn btn-line" href={REPO} target="_blank" rel="noopener"><svg fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d={githubPath}/></svg> GitHub</a>
+          <a class="btn btn-line" href={DISCORD} target="_blank" rel="noopener"><svg fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d={discordPath}/></svg> Discord</a>
+        </div>
+      </div>
+    </details>
+    <a class="btn btn-brand btn-sm nav-install" href="/#install">Install</a>
+  </div>
+</header>

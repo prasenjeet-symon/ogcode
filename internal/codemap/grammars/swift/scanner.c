@@ -1,8 +1,10 @@
 #include "tree_sitter/parser.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wctype.h>
 
-#define TOKEN_COUNT 33
+#define TOKEN_COUNT 34
 
 enum TokenType {
     BLOCK_COMMENT,
@@ -16,6 +18,7 @@ enum TokenType {
     CONJUNCTION_OPERATOR,
     DISJUNCTION_OPERATOR,
     NIL_COALESCING_OPERATOR,
+    DOUBLE_OPTIONAL,
     EQUAL_SIGN,
     EQ_EQ,
     PLUS_THEN_WS,
@@ -225,9 +228,6 @@ static bool is_cross_semi_token(enum TokenType op) {
     switch(op) {
     case ARROW_OPERATOR:
     case DOT_OPERATOR:
-    case CONJUNCTION_OPERATOR:
-    case DISJUNCTION_OPERATOR:
-    case NIL_COALESCING_OPERATOR:
     case EQUAL_SIGN:
     case EQ_EQ:
     case PLUS_THEN_WS:
@@ -250,8 +250,10 @@ static bool is_cross_semi_token(enum TokenType op) {
     }
 }
 
-#define NON_CONSUMING_CROSS_SEMI_CHAR_COUNT 3
-const uint32_t NON_CONSUMING_CROSS_SEMI_CHARS[NON_CONSUMING_CROSS_SEMI_CHAR_COUNT] = { '?', ':', '{' };
+#define NON_CONSUMING_CROSS_SEMI_CHAR_COUNT 8
+const uint32_t NON_CONSUMING_CROSS_SEMI_CHARS[NON_CONSUMING_CROSS_SEMI_CHAR_COUNT] = {
+    '?', ':', '{', '&', '|', '^', '<', '>'
+};
 
 /**
  * All possible results of having performed some sort of parsing.
@@ -278,7 +280,12 @@ struct ScannerState {
 };
 
 void *tree_sitter_swift_external_scanner_create() {
-    return calloc(1, sizeof(struct ScannerState));
+    void *payload = calloc(1, sizeof(struct ScannerState));
+    if (!payload) {
+        fprintf(stderr, "tree-sitter-swift: out of memory allocating scanner state\n");
+        exit(1);
+    }
+    return payload;
 }
 
 void tree_sitter_swift_external_scanner_destroy(void *payload) {
@@ -438,7 +445,10 @@ static uint32_t collect_fixed_operator_candidates(
         }
         break;
     case '?':
-        if (valid_symbols[NIL_COALESCING_OPERATOR]) {
+        if (
+            valid_symbols[NIL_COALESCING_OPERATOR] ||
+            valid_symbols[DOUBLE_OPTIONAL]
+        ) {
             candidates[count++] = OPERATOR_INDEX_NIL_COALESCING;
         }
         break;
@@ -514,6 +524,7 @@ static bool eat_operators(
     TSLexer *lexer,
     const bool *valid_symbols,
     bool mark_end,
+    bool token_is_immediate,
     const int32_t prior_char,
     enum TokenType *symbol_result
 ) {
@@ -672,7 +683,19 @@ static bool eat_operators(
                 }
             }
         }
-        *symbol_result = OP_SYMBOLS[full_match];
+        enum TokenType matched_symbol = OP_SYMBOLS[full_match];
+        if (
+            matched_symbol == NIL_COALESCING_OPERATOR &&
+            valid_symbols[DOUBLE_OPTIONAL]
+        ) {
+            if (!token_is_immediate && !valid_symbols[NIL_COALESCING_OPERATOR]) {
+                return false;
+            }
+            matched_symbol = token_is_immediate
+                             ? DOUBLE_OPTIONAL
+                             : NIL_COALESCING_OPERATOR;
+        }
+        *symbol_result = matched_symbol;
         return true;
     }
 
@@ -822,6 +845,7 @@ static enum ParseDirective eat_whitespace(
                                 lexer,
                                 valid_symbols,
                                 /* mark_end */ false,
+                                /* token_is_immediate */ false,
                                 '\0',
                                 &operator_result
                             );
@@ -1033,6 +1057,7 @@ bool tree_sitter_swift_external_scanner_scan(
     struct ScannerState *state = (struct ScannerState *)payload;
 
     // Consume any whitespace at the start.
+    bool token_is_immediate = !should_treat_as_wspace(lexer->lookahead);
     enum TokenType ws_result;
     enum ParseDirective ws_directive = eat_whitespace(lexer, valid_symbols, &ws_result);
     if (ws_directive == STOP_PARSING_TOKEN_FOUND) {
@@ -1064,6 +1089,7 @@ bool tree_sitter_swift_external_scanner_scan(
                             lexer,
                             valid_symbols,
                             /* mark_end */ !has_ws_result,
+                            token_is_immediate,
                             comment == CONTINUE_PARSING_SLASH_CONSUMED ? '/' : '\0',
                             &operator_result
                         );

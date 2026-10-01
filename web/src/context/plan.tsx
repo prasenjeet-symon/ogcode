@@ -27,6 +27,7 @@ import {
 } from '../api/client';
 import { useServer } from './server';
 import { useSession } from './session';
+import { trackModelSelected } from '../lib/analytics';
 
 interface PlanContextValue {
   plans: () => Plan[];
@@ -134,6 +135,7 @@ export const PlanProvider: ParentComponent = (props) => {
   async function selectModel(modelId: string, providerId?: string) {
     setPendingModel(modelId);
     if (providerId) setPendingProvider(providerId);
+    trackModelSelected({ model: modelId, provider: providerId || '', context: 'plan' });
     // Persist so the selection survives app restarts.
     try {
       localStorage.setItem(STORAGE_KEY, modelId);

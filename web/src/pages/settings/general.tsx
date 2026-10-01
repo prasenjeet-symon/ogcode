@@ -37,7 +37,7 @@ const ICONS = {
 };
 
 // Defaults, matching session.SearchConfig in Go.
-const DEFAULTS = { primaryColor: '#5e6ad2' };
+const DEFAULTS = { primaryColor: '#ff5e1f' };
 
 export default function GeneralSettings() {
   const server = useServer();
@@ -131,6 +131,7 @@ type Hide = (...text: (string | undefined)[]) => boolean;
 // ---------------------------------------------------------------------------
 
 const PRESETS = [
+  { label: 'Orange', hex: '#ff5e1f' },
   { label: 'Violet', hex: '#5e6ad2' },
   { label: 'Blue', hex: '#3b82f6' },
   { label: 'Indigo', hex: '#6366f1' },
@@ -155,7 +156,7 @@ function ThemeGroup(props: { hide: Hide }) {
     setDraft(hex);
     setError('');
     if (!isValidHex(hex)) {
-      setError('Use a six-digit hex colour, for example #5e6ad2.');
+      setError('Use a six-digit hex colour, for example #ff5e1f.');
       return;
     }
     setSaving(true);

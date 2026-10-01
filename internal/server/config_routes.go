@@ -192,6 +192,10 @@ func (s *Server) configPayload() map[string]any {
 		"port":          s.port.Load(),
 		"searchEnabled": s.searchBackend != nil,
 		"searchRunning": s.searchBackend != nil,
+		// installId is the PostHog distinct id the install script recorded on
+		// the website, empty when there is none. The web UI adopts it so that
+		// download, install and first session share one person.
+		"installId": s.installID,
 	}
 }
 
