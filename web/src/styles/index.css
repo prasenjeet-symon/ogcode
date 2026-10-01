@@ -99,14 +99,14 @@
   --text-tertiary:  #6b6b76;
   --text-muted:     #4a4a55;
 
-  /* Accent: Linear violet (#5E6AD2) — the single saturated color */
-  --accent:         #5e6ad2;
-  --accent-hover:   #4f5bc4;
-  --accent-soft:    rgba(94, 106, 210, 0.12);
-  --accent-ring:    rgba(94, 106, 210, 0.35);
+  /* Accent: ogcode brand orange (#FF5E1F) — the single saturated color */
+  --accent:         #ff5e1f;
+  --accent-hover:   #f54500;
+  --accent-soft:    rgba(255, 94, 31, 0.12);
+  --accent-ring:    rgba(255, 94, 31, 0.35);
   --on-primary:     #ffffff;
-  --glow:           rgba(94, 106, 210, 0.08);
-  --tint:           rgba(94, 106, 210, 0.04);
+  --glow:           rgba(255, 94, 31, 0.12);
+  --tint:           rgba(255, 94, 31, 0.05);
 
   --success:        #17c284;
   --warning:        #f5a623;
@@ -116,11 +116,11 @@
   /* Status palette — Linear-aligned, desaturated for scanability */
   --status-pending:    #8a8f98;
   --status-progress:   #f2c94c;
-  --status-completed:  #5e6ad2;
+  --status-completed:  #ff5e1f;
   --status-failed:     #eb5757;
   --status-pending-soft:    rgba(138, 143, 152, 0.12);
   --status-progress-soft:   rgba(242, 201, 76, 0.14);
-  --status-completed-soft:  rgba(94, 106, 210, 0.16);
+  --status-completed-soft:  rgba(255, 94, 31, 0.16);
   --status-failed-soft:     rgba(235, 87, 87, 0.14);
 
   --radius-sm: 6px;
@@ -132,7 +132,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.15);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
-  --shadow-glow: 0 0 16px -4px rgba(94, 106, 210, 0.25);
+  --shadow-glow: 0 0 16px -4px rgba(255, 94, 31, 0.25);
 
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -329,9 +329,9 @@ input:focus-visible {
   100% { background-position: 400px 0; }
 }
 @keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0 rgba(94, 106, 210, 0.4); }
-  70%  { box-shadow: 0 0 0 6px rgba(94, 106, 210, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(94, 106, 210, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(255, 94, 31, 0.4); }
+  70%  { box-shadow: 0 0 0 6px rgba(255, 94, 31, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 94, 31, 0); }
 }
 @keyframes popIn {
   0%   { opacity: 0; transform: scale(0.9); }
@@ -717,14 +717,14 @@ textarea.auto-resize {
 }
 
 .prose-chat a {
-  color: #8b9cf7;
+  color: #ffb38a;
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
   transition: color var(--spring-sm);
 }
 .prose-chat a:hover {
-  color: #aab4f8;
+  color: #ffc9a8;
 }
 
 .prose-chat table {
@@ -799,6 +799,83 @@ textarea.auto-resize {
 }
 
 /* ============================================================
+   Diagram zoom
+   Every diagram the agent draws gets a magnifier pinned to its
+   top-right corner; it stays visible (unlike the code-block bar)
+   because a diagram that cannot be zoomed is worth knowing about
+   up front, not only on hover. The zoomed view is a wide dialog.
+   ============================================================ */
+.diagram-frame {
+  position: relative;
+}
+.diagram-zoom {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 150ms cubic-bezier(0.16, 1, 0.3, 1), color 150ms, background 150ms, border-color 150ms;
+}
+.diagram-zoom:hover,
+.diagram-zoom:focus-visible {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  outline: none;
+}
+/* The chat column is often narrow; give a plotly chart a floor so it does not
+   collapse, and let it scroll sideways rather than squash. */
+.prose-chat .plotly-chart {
+  min-width: 260px;
+  overflow-x: auto;
+}
+/* Zoomed diagram body: roomy, centred, and scrollable when the diagram is
+   wider or taller than the dialog. */
+.diagram-zoom-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.25rem;
+  background: var(--bg-base);
+  display: flex;
+  justify-content: center;
+}
+.diagram-zoom-host {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.diagram-zoom-host .mermaid,
+.diagram-zoom-host svg {
+  max-width: 100%;
+  height: auto;
+}
+.diagram-zoom-host .latex-page-img {
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 12px;
+}
+.diagram-zoom-empty {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+  text-align: center;
+  padding: 2rem 0;
+}
+
+/* ============================================================
    LaTeX document rendering (inline pages)
    ============================================================ */
 .latex-render-container {
@@ -855,6 +932,25 @@ textarea.auto-resize {
   cursor: pointer;
   transition: all var(--spring-sm);
 }
+.latex-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--spring-sm);
+  white-space: nowrap;
+}
+.latex-zoom-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 .latex-src-toggle:hover {
   background: var(--bg-hover);
   color: var(--text-secondary);
@@ -862,7 +958,7 @@ textarea.auto-resize {
 .latex-src-toggle.active {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: rgba(94, 106, 210, 0.3);
+  border-color: rgba(255, 94, 31, 0.3);
 }
 .latex-download-btn {
   display: inline-flex;
@@ -872,7 +968,7 @@ textarea.auto-resize {
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid rgba(94, 106, 210, 0.25);
+  border: 1px solid rgba(255, 94, 31, 0.25);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
@@ -880,8 +976,8 @@ textarea.auto-resize {
   white-space: nowrap;
 }
 .latex-download-btn:hover:not(:disabled) {
-  background: rgba(94, 106, 210, 0.2);
-  border-color: rgba(94, 106, 210, 0.4);
+  background: rgba(255, 94, 31, 0.2);
+  border-color: rgba(255, 94, 31, 0.4);
 }
 .latex-download-btn:disabled {
   opacity: 0.6;
@@ -1157,7 +1253,7 @@ textarea.auto-resize {
 /* Grid background pattern (subtle) — Linear-inspired dot grid */
 .bg-grid {
   background-image:
-    radial-gradient(circle at 1px 1px, rgba(94, 106, 210, 0.04) 1px, transparent 0);
+    radial-gradient(circle at 1px 1px, rgba(255, 94, 31, 0.04) 1px, transparent 0);
   background-size: 24px 24px;
 }
 
@@ -1808,11 +1904,11 @@ body.drawer-open {
 }
 .md-doc strong { color: var(--text-primary); font-weight: 620; }
 .md-doc a {
-  color: #8b9cf7;
+  color: #ffb38a;
   text-decoration: none;
 }
 .md-doc a:hover {
-  color: #aab4f8;
+  color: #ffc9a8;
   text-decoration: underline;
   text-underline-offset: 2px;
 }

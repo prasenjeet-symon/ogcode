@@ -89,7 +89,9 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   // maps' dense labeled tree/outline output is how the agent orients itself in
   // the codebase, and compact_context's is the agent's note to itself about
   // what it condensed — neither is something the user reads. Keep the
-  // collapsed status row, but never offer disclosure into input/output.
+  // collapsed status row, but never offer disclosure into input/output. These
+  // rows show a magic-wand glyph rather than the usual checkmark: what the tool
+  // did was quietly optimise the agent's own context, not hand back a result.
   const isAgentNavTool = () =>
     tool() === 'codebase_map' || tool() === 'file_map' || tool() === 'compact_context';
   const fileDiff = createMemo((): { oldText: string; newText: string; mode: 'create' | 'edit' | 'overwrite'; omitted: boolean } | null => {
@@ -229,9 +231,22 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
             <div class="w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
           </Show>
           <Show when={status() === 'completed'}>
-            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+            <Show
+              when={isAgentNavTool()}
+              fallback={
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              }
+            >
+              {/* A magic wand with sparkles: the tools that quietly tidy the
+                  agent's context rather than hand back something to read. */}
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.5 20.5 15 9" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18 2.5v4.5M15.75 4.75h4.5" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.5 2.5v2M8.5 3.5h2" />
+              </svg>
+            </Show>
           </Show>
           <Show when={status() === 'error' && isCancelled()}>
             <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
@@ -817,11 +832,14 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
                 measured from when the request left for the provider. Rendered
                 only once the turn has finished, so the figure never ticks.
                 Leads the row so it never sits behind the hover-only copy
-                button's reserved width. */}
+                button's reserved width. The row's -ml-1.5 aligns the copy
+                button's glyph, which carries the icon-btn's own inline padding;
+                the reading is bare text, so it compensates with a matching
+                ml-1.5 to sit on the message's text edge like every paragraph. */}
             <Show when={props.msg.info.delivery?.ttftMs}>
               {(ttft) => (
                 <span
-                  class="text-micro text-[color:var(--text-tertiary)] tabular-nums -ml-1.5"
+                  class="text-micro text-[color:var(--text-tertiary)] tabular-nums ml-1.5"
                   title={ttftTitle()}
                 >
                   {formatLatency(ttft())} to first token

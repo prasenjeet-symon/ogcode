@@ -211,7 +211,7 @@ func (s *Server) handleGetTheme(w http.ResponseWriter, r *http.Request) {
 	).Scan(&t.Directory, &t.PrimaryColor, &t.Accent, &t.AccentHover, &t.AccentSoft, &t.AccentRing, &t.OnPrimary, &t.Glow, &t.Tint)
 	if err != nil {
 		// No theme saved yet — return defaults
-		t = deriveTheme("#5e6ad2", directory)
+		t = deriveTheme("#ff5e1f", directory)
 	}
 	writeJSON(w, http.StatusOK, t)
 }
