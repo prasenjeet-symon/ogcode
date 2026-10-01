@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -389,20 +390,112 @@ func (s *Server) recordGuidanceMessage(sessionID session.SessionID, content stri
 	s.bus.Publish("message.updated", msg)
 }
 
+// transcriptPageSize is how many messages one transcript fetch returns. The web
+// client pages backwards from the newest with ?before=<oldest id it holds>.
+const transcriptPageSize = 300
+
+// transcriptLimit is how many messages a transcript fetch asked for with
+// ?limit=. A refresh needs only the newest few — polls and live updates merge
+// them into what the client already holds — where a first load and every page
+// of history take the full page, which is also the default and the cap.
+func transcriptLimit(r *http.Request) int {
+	n, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || n <= 0 || n > transcriptPageSize {
+		return transcriptPageSize
+	}
+	return n
+}
+
+// hasOlderHeader tells a paginating client whether messages older than the
+// page exist, so it never has to guess from the page's length — a guess that
+// costs an extra, empty request whenever a history is an exact multiple of the
+// page size. The body stays a bare array for every existing caller.
+const hasOlderHeader = "X-Has-Older"
+
+// writeTranscriptPage answers one page of a transcript, oldest first.
+func writeTranscriptPage(w http.ResponseWriter, messages []*session.MessageWithParts, hasOlder bool) {
+	if messages == nil {
+		messages = []*session.MessageWithParts{}
+	}
+	w.Header().Set(hasOlderHeader, strconv.FormatBool(hasOlder))
+	writeJSON(w, http.StatusOK, messages)
+}
+
 func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	sessionID := session.SessionID(chi.URLParam(r, "sessionID"))
 	before := session.MessageID(r.URL.Query().Get("before"))
-	limit := 300
 
-	messages, err := s.store.GetMessages(sessionID, before, limit)
+	messages, hasOlder, err := s.store.GetMessagesPage(sessionID, before, transcriptLimit(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if messages == nil {
-		messages = []*session.MessageWithParts{}
+	writeTranscriptPage(w, messages, hasOlder)
+}
+
+// sessionTokens is a session's whole-transcript token totals: every assistant
+// step's counts plus the session row's utility work. It is the figure the token
+// pill shows for a session, so it is the session's own and does not change with
+// how much of the transcript a client happens to hold.
+type sessionTokens struct {
+	Input      int `json:"input"`
+	Output     int `json:"output"`
+	Reasoning  int `json:"reasoning"`
+	CacheRead  int `json:"cacheRead"`
+	CacheWrite int `json:"cacheWrite"`
+	Utility    int `json:"utility"`
+	Effective  int `json:"effective"`
+	Total      int `json:"total"`
+}
+
+// handleSessionTokens totals a session's tokens over its whole transcript,
+// reading every step without loading it — so a long, paged session reports the
+// same figure as when it was new. The token pill calls this in place of summing
+// the messages it holds, which on a session past one transcript page is only the
+// newest page.
+func (s *Server) handleSessionTokens(w http.ResponseWriter, r *http.Request) {
+	id := session.SessionID(chi.URLParam(r, "sessionID"))
+	sess, err := s.store.Get(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	writeJSON(w, http.StatusOK, messages)
+	if sess == nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	steps, err := s.store.ListStepUsage(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var counts session.TokenCounts
+	for _, st := range steps {
+		counts.Input += st.Tokens.Input
+		counts.Output += st.Tokens.Output
+		counts.Reasoning += st.Tokens.Reasoning
+		counts.CacheRead += st.Tokens.CacheRead
+		counts.CacheWrite += st.Tokens.CacheWrite
+	}
+	var utility int
+	if u := sess.UtilityTokens; u != nil {
+		counts.Input += u.Input
+		counts.Output += u.Output
+		counts.Reasoning += u.Reasoning
+		counts.CacheRead += u.CacheRead
+		counts.CacheWrite += u.CacheWrite
+		utility = u.Effective()
+	}
+	writeJSON(w, http.StatusOK, sessionTokens{
+		Input:      counts.Input,
+		Output:     counts.Output,
+		Reasoning:  counts.Reasoning,
+		CacheRead:  counts.CacheRead,
+		CacheWrite: counts.CacheWrite,
+		Utility:    utility,
+		Effective:  counts.Effective(),
+		Total:      counts.Consumed(),
+	})
 }
 
 func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {

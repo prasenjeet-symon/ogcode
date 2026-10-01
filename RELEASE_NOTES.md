@@ -1,4 +1,40 @@
-# Release Notes — v0.42.0
+# Release Notes — v0.43.0
+
+## Minor: Long transcripts arrive in pages, and hold their place
+
+Opening a session with hundreds of messages used to mean rendering every one of
+them, and scrolling back re-read the lot. The editor now fetches the transcript
+a page at a time, renders only what is on screen, and remembers where you were.
+
+- **Paged, newest first.** `GET /api/session/{id}/message` and
+  `GET /api/plans/{id}/message` return 300 messages at a time and answer an
+  `X-Has-Older` header, so the editor knows whether more history exists;
+  `?limit=` fetches only the newest few on a refresh. The header is exposed
+  cross-origin, so a client on another origin can read it too.
+- **Only what you can see is rendered.** Rows outside the viewport are
+  unmounted and two padding elements hold their height, so the scrollbar stays
+  honest and an older page joins without a jump. A "Loading earlier messages"
+  pill sits over the transcript while a page is on its way, positioned so it
+  never shifts the text.
+- **It picks up where you left off.** A session's place is remembered by the
+  message you were reading rather than a pixel offset, so a long transcript
+  reopens on the same row it was left on. Per-session caches, kept for the last
+  eight sessions, make switching back instant.
+- **The jitter is gone.** Scrolling upward no longer shudders, because a single
+  component writes the scroll position each frame instead of two correcting
+  each other.
+- **A page loads in one query.** The tool results for a page of messages are
+  read in a single batched query instead of one query per message, and a page
+  always carries a `parts` array — never `null` — so a message written before
+  parts existed can no longer crash the view.
+
+## Minor: The token pill counts the whole session
+
+The totals shown under a session summed only the messages the editor happened to
+be holding — the newest page — so a long session under-reported every row.
+`GET /api/session/{id}/token` now totals the whole transcript on the server,
+every assistant step plus the utility calls (risk checks, compaction summaries,
+titles), and the pill reads it. The plan view keeps its own totals.
 
 ## Minor: Your logs are kept, rotated, and redacted
 

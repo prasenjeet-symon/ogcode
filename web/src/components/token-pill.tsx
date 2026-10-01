@@ -1,6 +1,6 @@
 import { For, createMemo, createResource, createSignal, Show } from 'solid-js';
 import { useSession } from '../context/session';
-import { getSessionUsage, type MessageWithParts, type ModelUsage } from '../api/client';
+import { getSessionTokens, getSessionUsage, type MessageWithParts, type ModelUsage } from '../api/client';
 import { formatUSD, includedNote } from '../lib/money';
 
 interface Totals {
@@ -49,7 +49,10 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
   const [pinned, setPinned] = createSignal(false);
   const showBreakdown = () => pinned() || (!isCoarse() && hovered());
 
-  const totals = createMemo<Totals>(() => {
+  // The local sum of the messages this view holds. It is what the plan view
+  // always uses, and the session view's stand-in — until the server total
+  // arrives, or when it cannot be read.
+  const localTotals = createMemo<Totals>(() => {
     const out: Totals = {
       input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, utility: 0, effective: 0, total: 0,
     };
@@ -83,6 +86,30 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
     out.effective = effective(out.input, out.cacheWrite, out.output);
     out.total = consumed(out.input, out.cacheRead, out.cacheWrite, out.output);
     return out;
+  });
+
+  // The session view's authoritative totals, summed by the server over the
+  // WHOLE transcript. The client only ever holds the newest transcript page, so
+  // on a session longer than one page its own sum is short; the server reads
+  // every step without loading the transcript. Keyed on the session id and
+  // refetched on every token total move, so it tracks the session as it runs.
+  // The plan view passes its own message list and has no session row to read.
+  const [server] = createResource(
+    () => {
+      const id = session.activeSession()?.id;
+      return props.messages || !id ? false : `${id}|${localTotals().total}`;
+    },
+    (key: string) => getSessionTokens(key.slice(0, key.indexOf('|'))).catch(() => undefined),
+  );
+
+  const totals = createMemo<Totals>(() => {
+    const st = server();
+    if (!st) return localTotals();
+    return {
+      input: st.input, output: st.output, reasoning: st.reasoning,
+      cacheRead: st.cacheRead, cacheWrite: st.cacheWrite, utility: st.utility,
+      effective: st.effective, total: st.total,
+    };
   });
 
   const hasData = () => totals().total > 0;

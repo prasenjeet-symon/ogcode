@@ -208,8 +208,58 @@ export interface MessageWithParts {
   parts: Part[];
 }
 
-export function getMessages(sessionId: string): Promise<MessageWithParts[]> {
-  return fetchAPI(`/session/${sessionId}/message`);
+/** Messages per transcript page — transcriptPageSize on the server. */
+export const TRANSCRIPT_PAGE_SIZE = 300;
+
+/**
+ * Messages a refresh asks for: a poll, a live update, the fetch after a prompt.
+ * Those only need the newest few — the merge keeps everything older that is
+ * held — where the full page of a long session is megabytes, fetched every few
+ * seconds while a turn streams.
+ */
+export const REFRESH_SIZE = 50;
+
+/** One page of a transcript, oldest first. */
+export interface MessagesPage {
+  messages: MessageWithParts[];
+  /** Whether messages older than this page exist. */
+  hasOlder: boolean;
+}
+
+// The server says whether anything older remains in the X-Has-Older header,
+// so the body stays the bare array every other caller reads. Only a response
+// without it — a cross-origin server that does not expose it — falls back to
+// guessing from the page's length against the size asked for.
+async function fetchMessagesPage(path: string, size: number): Promise<MessagesPage> {
+  const res = await fetch(`${API}${path}`, { headers: { 'Content-Type': 'application/json' } });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(res.status, `API error ${res.status}: ${text}`);
+  }
+  const messages: MessageWithParts[] = await res.json();
+  const header = res.headers.get('X-Has-Older');
+  return {
+    messages,
+    hasOlder: header === null ? messages.length >= size : header === 'true',
+  };
+}
+
+// The query for one page: the page just older than `before`, or the newest
+// one; `limit` messages at most, a full page when unset.
+function pageQuery(before?: string, limit?: number): string {
+  const q = new URLSearchParams();
+  if (before) q.set('before', before);
+  if (limit) q.set('limit', String(limit));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+/**
+ * The newest page of a session's transcript, or the page just older than
+ * `before`; `limit` messages at most (a full page by default).
+ */
+export function getMessagesPage(sessionId: string, before?: string, limit?: number): Promise<MessagesPage> {
+  return fetchMessagesPage(`/session/${sessionId}/message${pageQuery(before, limit)}`, limit || TRANSCRIPT_PAGE_SIZE);
 }
 
 export function sendPrompt(sessionId: string, content: string, images?: ImagePartData[], model?: string, viewportWidth?: number, viewportHeight?: number, provider?: string): Promise<void> {
@@ -575,6 +625,27 @@ export function getSessionUsage(sessionId: string): Promise<SessionUsage> {
 }
 
 /**
+ * A session's whole-transcript token totals — every assistant step plus the
+ * session's utility work. Read from the server rather than summed from the
+ * messages the client holds, whose window is only the newest transcript page
+ * on a long session.
+ */
+export interface SessionTokens {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  utility: number;
+  effective: number;
+  total: number;
+}
+
+export function getSessionTokens(sessionId: string): Promise<SessionTokens> {
+  return fetchAPI(`/session/${sessionId}/token`);
+}
+
+/**
  * Spend since `from` (unix ms; 0 = all of it) in one project — the workspace
  * directory, its task worktrees included — or, with no project, across every
  * project on this machine.
@@ -867,9 +938,12 @@ export function sendPlanPrompt(id: string, content: string, model?: string, view
   });
 }
 
-export function getPlanMessages(id: string, before?: string): Promise<MessageWithParts[]> {
-  const params = before ? `?before=${encodeURIComponent(before)}` : '';
-  return fetchAPI(`/plans/${id}/message${params}`);
+/**
+ * The newest page of a plan's transcript, or the page just older than
+ * `before`; `limit` messages at most (a full page by default).
+ */
+export function getPlanMessagesPage(id: string, before?: string, limit?: number): Promise<MessagesPage> {
+  return fetchMessagesPage(`/plans/${id}/message${pageQuery(before, limit)}`, limit || TRANSCRIPT_PAGE_SIZE);
 }
 
 export function abortPlan(id: string): Promise<void> {

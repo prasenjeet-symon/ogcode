@@ -1077,13 +1077,29 @@ textarea.auto-resize {
    Transcript rhythm
    A single space-y value spaces every message the same, which makes a
    run of six tool calls look as significant as a change of speaker.
-   These rules key off the role of each row instead: a wide break before
-   a new user prompt, a medium one under it, and tight packing inside
-   the agent's own run of tool calls and replies.
+   The rows key their gap off the role of each message instead: a wide
+   break before a new user prompt, a medium one under it, and tight
+   packing inside the agent's own run of tool calls and replies. The
+   transcript is virtualized, so the row above may not be mounted and a
+   sibling selector cannot see it — message-list.tsx applies those gaps
+   inline. This rule spaces what follows the rows (the working indicator,
+   the loop-error notice); the pads are exempt, because their height IS
+   the spacing of the rows they stand in for.
    ------------------------------------------------------------ */
-.chat-flow > * + * { margin-top: 0.625rem; }
-.chat-flow > * + [data-role="user"] { margin-top: 1.875rem; }
-.chat-flow > [data-role="user"] + * { margin-top: 1.125rem; }
+.chat-flow > * + *:not(.chat-pad) { margin-top: 0.625rem; }
+
+/* A stand-in for the message rows outside the mounted window, so the total
+   height — and therefore the scrollbar and the reading position — stays the
+   transcript's, not the window's. */
+.chat-pad {
+  width: 100%;
+}
+
+/* A row mounted because the reader scrolled to it is history, not news: it
+   appears as it is rather than rising in. Only rows message-list.tsx marks
+   fresh — the opening render and messages that arrive while the session is
+   open — keep the entrance animation. */
+.chat-flow > [data-vrow]:not([data-fresh]) .animate-msg-in { animation: none; }
 
 /* The transcript's scrollport.
 

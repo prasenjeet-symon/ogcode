@@ -1,5 +1,5 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
-import { createSignal, createEffect, on, onMount, onCleanup } from 'solid-js';
+import { batch, createSignal, createEffect, on, onMount, onCleanup } from 'solid-js';
 import {
   type Plan,
   type Task,
@@ -10,7 +10,9 @@ import {
   updatePlan,
   lockPlan as lockPlanAPI,
   sendPlanPrompt,
-  getPlanMessages,
+  getPlanMessagesPage,
+  REFRESH_SIZE,
+  type MessagesPage,
   abortPlan as abortPlanAPI,
   listTasks,
   createTasks,
@@ -28,6 +30,7 @@ import {
 import { useServer } from './server';
 import { useSession } from './session';
 import { trackModelSelected } from '../lib/analytics';
+import { joinsHeld, mergeTranscript } from '../lib/transcript';
 
 interface PlanContextValue {
   plans: () => Plan[];
@@ -39,6 +42,16 @@ interface PlanContextValue {
   tasks: () => Task[];
   messages: () => MessageWithParts[];
   loading: () => boolean;
+  /** True while an older page of the plan transcript is being fetched. */
+  loadingOlder: () => boolean;
+  /** Whether the server may hold messages above the top of the transcript. */
+  hasOlder: () => boolean;
+  /**
+   * Fetch and merge the page of messages immediately older than the top;
+   * resolves whether a page was merged. `around`, when given, receives the
+   * merge to run inside the same batch as its own writes (see SessionContext).
+   */
+  loadOlder: (around?: (merge: () => void) => void) => Promise<boolean>;
   models: () => any[];
   selectedModel: () => string;
   /** The provider chosen with the model; '' means resolve it from the model id. */
@@ -87,6 +100,110 @@ export const PlanProvider: ParentComponent = (props) => {
       setMessagesRaw(next);
     }
   };
+
+  // Every server page lands through the merge (polls, SSE, select, abort), so a
+  // poll's newest window never drops the older pages loaded above it, and a
+  // page written for another plan's session is discarded. Optimistic inserts
+  // and clears still write raw so they are not diffed.
+  const applyServerMessages = (incoming: MessageWithParts[]) => {
+    setMessagesRaw((prev) => mergeTranscript(prev, incoming, activePlan()?.sessionId));
+  };
+
+  // Whether older messages exist above the plan transcript, as the server
+  // reported for the oldest page held. Reset per plan.
+  const [hasOlder, setHasOlder] = createSignal(false);
+  const [loadingOlder, setLoadingOlder] = createSignal(false);
+
+  // The newest message held that the server wrote. An optimistic prompt sits
+  // at the end of the transcript under a temp- id until the server's copy
+  // replaces it, and says nothing about what the server has.
+  const newestServerId = (): string => {
+    const held = messagesRaw();
+    for (let i = held.length - 1; i >= 0; i--) {
+      if (!held[i].info.id.startsWith('temp-')) return held[i].info.id;
+    }
+    return '';
+  };
+
+  // Apply the newest page of the active plan's transcript. Whether anything
+  // older exists is the page's answer — unless older pages are already held.
+  // A page that does not join up with what is held (see joinsHeld) replaces
+  // it instead, as opening the plan afresh would.
+  const applyNewestPage = (page: MessagesPage) => {
+    if (!joinsHeld(newestServerId(), page)) {
+      // Merged into nothing, a page written for another plan's session comes
+      // back empty; it is dropped like any other.
+      const fresh = mergeTranscript([], page.messages, activePlan()?.sessionId);
+      if (fresh.length === 0) return;
+      setMessagesRaw(fresh);
+      setHasOlder(page.hasOlder);
+      return;
+    }
+    const oldestHeld = messagesRaw()[0]?.info.id;
+    const holdsOlder = !!oldestHeld && page.messages.length > 0 && oldestHeld < page.messages[0].info.id;
+    applyServerMessages(page.messages);
+    if (!holdsOlder) setHasOlder(page.hasOlder);
+  };
+
+  // The newest messages of a plan's transcript, for a refresh: a short window
+  // (REFRESH_SIZE), or the full newest page when that window does not reach
+  // back to the newest message held, or nothing is held yet (see the session
+  // context's fetchNewest). Resolves null once the user has moved to another
+  // plan; the caller must then leave the one on screen alone.
+  async function fetchNewest(planId: string): Promise<MessagesPage | null> {
+    const refreshing = newestServerId() !== '';
+    const page = await getPlanMessagesPage(planId, undefined, refreshing ? REFRESH_SIZE : undefined);
+    if (activePlan()?.id !== planId) return null;
+    if (!refreshing) return page;
+    const newest = newestServerId();
+    if (newest && joinsHeld(newest, page)) return page;
+    const full = await getPlanMessagesPage(planId);
+    return activePlan()?.id === planId ? full : null;
+  }
+
+  async function loadOlder(around?: (merge: () => void) => void): Promise<boolean> {
+    const plan = activePlan();
+    if (!plan || loadingOlder() || !hasOlder()) return false;
+    const oldest = messagesRaw()[0];
+    if (!oldest) return false;
+    const planId = plan.id;
+    setLoadingOlder(true);
+    try {
+      const page = await getPlanMessagesPage(planId, oldest.info.id);
+      if (activePlan()?.id !== planId) return false;
+      // Dropped if the top of the transcript moved meanwhile — see the session
+      // context's loadOlder.
+      if (messagesRaw()[0]?.info.id !== oldest.info.id) return false;
+      const merge = () => {
+        applyServerMessages(page.messages);
+        setHasOlder(page.hasOlder);
+      };
+      batch(() => (around ? around(merge) : merge()));
+      return page.messages.length > 0;
+    } catch (e) {
+      console.error('load older plan messages failed:', e);
+      return false;
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
+
+  // Cache the active plan's transcript window so switching back does not
+  // refetch before the user's scroll position can be restored — same shape as
+  // the session cache. Keyed by plan id, LRU-capped at 8.
+  const transcriptCache = new Map<string, { messages: MessageWithParts[]; hasOlder: boolean }>();
+  createEffect(() => {
+    const id = activePlan()?.id;
+    if (!id) return;
+    const msgs = messagesRaw();
+    if (msgs.length === 0) return;
+    transcriptCache.delete(id);
+    transcriptCache.set(id, { messages: msgs, hasOlder: hasOlder() });
+    if (transcriptCache.size > 8) {
+      const oldest = transcriptCache.keys().next().value;
+      if (oldest !== undefined && oldest !== id) transcriptCache.delete(oldest);
+    }
+  });
 
   const [loadingPlanId, setLoadingPlanId] = createSignal<string>('');
   const loading = () => loadingPlanId() === activePlan()?.id && loadingPlanId() !== '';
@@ -230,9 +347,8 @@ export const PlanProvider: ParentComponent = (props) => {
         return;
       }
       try {
-        const msgs = await getPlanMessages(planId);
-        if (activePlan()?.id !== planId) return;
-        setMessages(msgs);
+        const page = await fetchNewest(planId);
+        if (page) applyNewestPage(page);
       } catch (_e) {
         // background — ignore
       }
@@ -268,10 +384,13 @@ export const PlanProvider: ParentComponent = (props) => {
         }
         if (Date.now() - lastSSEUpdate < 2000) return;
 
-        const msgs = await getPlanMessages(planId);
-        setMessages(msgs);
+        const page = await fetchNewest(planId);
+        // Null when the user moved to another plan meanwhile: its loading
+        // state is not this poll's to change.
+        if (!page) return;
+        applyNewestPage(page);
 
-        if (!isAgentLoopActive(msgs)) {
+        if (!isAgentLoopActive(page.messages)) {
           setLoadingPlanId('');
           stopFastPoll();
         } else {
@@ -316,19 +435,34 @@ export const PlanProvider: ParentComponent = (props) => {
     if (!plan) {
       plan = activePlan()?.id === id ? activePlan()! : undefined;
     }
+    // Restore the destination plan's cached transcript BEFORE the active plan
+    // flips, so the list's layout and the scroll restore run against the right
+    // transcript in the same frame. setMessages is raw here (no merge), so the
+    // restore is direct. Falls back to a clear for an uncached plan.
+    const cached = transcriptCache.get(id);
+    if (cached) {
+      setMessages(cached.messages);
+      setHasOlder(cached.hasOlder);
+    } else {
+      setMessages([]);
+      setHasOlder(false);
+    }
+    setLoadingOlder(false);
+
     if (plan) setActivePlan(plan);
 
     setPendingModel('');
     setArchivePath('');
     stopPolling();
     stopTitlePoll();
-    setMessages([]);
 
     try {
       const p = await getPlan(id);
       setActivePlan(p);
-      const msgs = await getPlanMessages(id);
-      setMessages(msgs);
+      const page = await getPlanMessagesPage(id);
+      // A switch to another plan while this was in flight must not take this
+      // plan's answer about older messages.
+      if (activePlan()?.id === id) applyNewestPage(page);
 
       // Load tasks for the plan
       const t = await listTasks(id);
@@ -338,7 +472,7 @@ export const PlanProvider: ParentComponent = (props) => {
       if (p.status === 'locked') {
         startTaskPoll(id);
       }
-      if (isAgentLoopActive(msgs)) {
+      if (isAgentLoopActive(page.messages)) {
         setLoadingPlanId(id);
         startPolling(id);
       }
@@ -359,6 +493,8 @@ export const PlanProvider: ParentComponent = (props) => {
     setPlans((prev) => prev.find((p) => p.id === plan.id) ? prev : [plan, ...prev]);
     setActivePlan(plan);
     setMessages([]);
+    setHasOlder(false);
+    setLoadingOlder(false);
     setTasks([]);
     return plan;
   }
@@ -388,8 +524,8 @@ export const PlanProvider: ParentComponent = (props) => {
     }
 
     try {
-      const msgs = await getPlanMessages(plan.id);
-      setMessages(msgs);
+      const page = await fetchNewest(plan.id);
+      if (page) applyNewestPage(page);
     } catch (e) {
       console.error('refresh after abort failed:', e);
     }
@@ -559,9 +695,9 @@ export const PlanProvider: ParentComponent = (props) => {
     if (last.type === 'loop.done') {
       const evtSessionId = last.properties?.sessionId;
       if (evtSessionId && evtSessionId === plan.sessionId) {
-        getPlanMessages(plan.id).then((msgs) => {
-          if (activePlan()?.id !== plan.id) return;
-          setMessages(msgs);
+        fetchNewest(plan.id).then((page) => {
+          if (!page) return;
+          applyNewestPage(page);
           lastSSEUpdate = Date.now();
           setLoadingPlanId('');
           stopFastPoll();
@@ -690,9 +826,9 @@ export const PlanProvider: ParentComponent = (props) => {
     sseRefreshDebounce = setTimeout(async () => {
       if (activePlan()?.id !== targetPlanId) return;
       try {
-        const msgs = await getPlanMessages(targetPlanId);
-        if (activePlan()?.id !== targetPlanId) return;
-        setMessages(msgs);
+        const page = await fetchNewest(targetPlanId);
+        if (!page) return;
+        applyNewestPage(page);
         lastSSEUpdate = Date.now();
       } catch (e) {
         console.error('SSE-triggered plan refresh failed:', e);
@@ -764,24 +900,25 @@ export const PlanProvider: ParentComponent = (props) => {
     }));
   }));
 
-  // On SSE reconnect, refresh active plan (messages + plan metadata + tasks)
-  createEffect(on(server.connected, (isConnected) => {
-    if (!isConnected) return;
+  // On SSE reconnect, refresh active plan (messages + plan metadata + tasks).
+  // Only on a reconnect, not the first connection, which selectPlan's own
+  // fetches already cover — see the session context's reconnect effect.
+  createEffect(on(server.reconnectTick, () => {
     const plan = activePlan();
     if (!plan) return;
     Promise.all([
-      getPlanMessages(plan.id),
+      fetchNewest(plan.id),
       getPlan(plan.id),
       listTasks(plan.id),
-    ]).then(([msgs, updatedPlan, updatedTasks]) => {
+    ]).then(([page, updatedPlan, updatedTasks]) => {
       if (activePlan()?.id !== plan.id) return;
-      setMessages(msgs);
+      if (page) applyNewestPage(page);
       setActivePlan((prev) => prev ? { ...prev, ...updatedPlan } : prev);
       setPlans((prev) => prev.map((p) => (p.id === updatedPlan.id ? { ...p, ...updatedPlan } : p)));
       setTasks(updatedTasks || []);
       lastSSEUpdate = Date.now();
     }).catch(() => {});
-  }));
+  }, { defer: true }));
 
   // ── Model switch hotkey (Alt+1–4) ──
   // The session context owns the slot assignments, so we reuse its modelSlots
@@ -817,6 +954,9 @@ export const PlanProvider: ParentComponent = (props) => {
     tasks,
     messages,
     loading,
+    loadingOlder,
+    hasOlder,
+    loadOlder,
     models,
     selectedModel,
     selectedProvider,
@@ -853,8 +993,8 @@ export const PlanProvider: ParentComponent = (props) => {
 
       try {
         await sendPlanPrompt(plan.id, content, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider());
-        const msgs = await getPlanMessages(plan.id);
-        setMessages(msgs);
+        const page = await fetchNewest(plan.id);
+        if (page) applyNewestPage(page);
         startBgPoll(plan.id);
         startPolling(plan.id);
         // autoNamePlan runs async on the backend — poll until a title appears.

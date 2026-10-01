@@ -114,6 +114,7 @@ func (s *Server) routes() http.Handler {
 				r.Post("/guidance", s.handleGuidance)
 				r.Get("/message", s.handleGetMessages)
 				r.Get("/usage", s.handleSessionUsage)
+				r.Get("/token", s.handleSessionTokens)
 				r.Get("/permission", s.handleListPermissions)
 				r.Post("/permission/{permissionID}", s.handlePermissionReply)
 				r.Get("/question", s.handleListQuestions)
@@ -210,6 +211,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Headers", "Content-Type, x-ogcode-directory")
+		// A cross-origin client (the web app on a dev server) can read only the
+		// response headers listed here; the transcript pager needs this one.
+		w.Header().Set("Access-Control-Expose-Headers", hasOlderHeader)
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return

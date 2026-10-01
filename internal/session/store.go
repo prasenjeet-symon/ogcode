@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 )
@@ -269,9 +270,16 @@ func (s *Store) GetMessages(sessionID SessionID, before MessageID, limit int) ([
 	var rows *sql.Rows
 	var err error
 	if before != "" {
+		// Backward pagination: return the most recent `limit` messages
+		// strictly older than the cursor, ascending. Like the first-page
+		// branch, fetch DESC then re-sort ASC in a subquery — selecting
+		// ASC LIMIT directly would return the OLDEST `limit` below the
+		// cursor and leave a gap between pages.
 		rows, err = s.db.Query(
-			`SELECT id, session_id, data, time_created FROM message
-			 WHERE session_id = ? AND id < ? ORDER BY id ASC LIMIT ?`,
+			`SELECT id, session_id, data, time_created FROM (
+			   SELECT id, session_id, data, time_created FROM message
+			   WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?
+			 ) ORDER BY id ASC`,
 			sessionID, before, limit,
 		)
 	} else {
@@ -292,6 +300,7 @@ func (s *Store) GetMessages(sessionID SessionID, before MessageID, limit int) ([
 	defer rows.Close()
 
 	var result []*MessageWithParts
+	var ids []MessageID
 	for rows.Next() {
 		var id, sessionID, data string
 		var timeCreated int64
@@ -302,13 +311,47 @@ func (s *Store) GetMessages(sessionID SessionID, before MessageID, limit int) ([
 		if err := json.Unmarshal([]byte(data), &msg); err != nil {
 			return nil, fmt.Errorf("unmarshal message: %w", err)
 		}
-		parts, err := s.GetParts(MessageID(id))
-		if err != nil {
-			return nil, err
+		result = append(result, &MessageWithParts{Info: msg})
+		ids = append(ids, MessageID(id))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Parts for the whole page in one query. The per-message loop this replaced
+	// issued one SELECT per message — 300 round trips for a full transcript.
+	partsByMessage, err := s.GetPartsForMessages(ids)
+	if err != nil {
+		return nil, err
+	}
+	for i, m := range result {
+		// A message with no parts (an errored or aborted turn) is sent as
+		// "parts": [] rather than null, so no client has to guard every read.
+		if parts := partsByMessage[ids[i]]; parts != nil {
+			m.Parts = parts
+		} else {
+			m.Parts = []Part{}
 		}
-		result = append(result, &MessageWithParts{Info: msg, Parts: parts})
 	}
 	return result, nil
+}
+
+// GetMessagesPage is GetMessages for a paginating reader: the newest `limit`
+// messages older than `before` (or overall, when before is empty), oldest
+// first, plus whether anything older remains. It reads one row past the page
+// rather than issuing a second query — the extra row's presence is the answer,
+// and it is dropped before returning — so a page that happens to end exactly
+// at the first message still reports that nothing is left.
+func (s *Store) GetMessagesPage(sessionID SessionID, before MessageID, limit int) ([]*MessageWithParts, bool, error) {
+	msgs, err := s.GetMessages(sessionID, before, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(msgs) > limit {
+		// Ascending order, so the surplus row is the oldest one.
+		return msgs[len(msgs)-limit:], true, nil
+	}
+	return msgs, false, nil
 }
 
 func (s *Store) GetMessage(messageID MessageID) (*MessageWithParts, error) {
@@ -359,6 +402,57 @@ func (s *Store) UpdatePart(part *Part) error {
 		string(data), part.UpdatedAt, part.ID,
 	)
 	return err
+}
+
+// GetPartsForMessages loads the parts of many messages in a single query,
+// grouped by message id and preserving each message's creation order. The ids
+// are chunked so a long page never exceeds SQLite's bound-parameter limit
+// (SQLITE_MAX_VARIABLE_NUMBER, 999 on older builds).
+func (s *Store) GetPartsForMessages(ids []MessageID) (map[MessageID][]Part, error) {
+	out := make(map[MessageID][]Part, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	const chunkSize = 500
+	for start := 0; start < len(ids); start += chunkSize {
+		end := start + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = string(id)
+		}
+		rows, err := s.db.Query(
+			`SELECT message_id, data FROM part WHERE message_id IN (`+placeholders+`) ORDER BY message_id ASC, id ASC`,
+			args...,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var messageID, data string
+			if err := rows.Scan(&messageID, &data); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			var p Part
+			if err := json.Unmarshal([]byte(data), &p); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("unmarshal part: %w", err)
+			}
+			id := MessageID(messageID)
+			out[id] = append(out[id], p)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
 }
 
 func (s *Store) GetParts(messageID MessageID) ([]Part, error) {

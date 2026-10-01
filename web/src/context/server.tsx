@@ -12,6 +12,8 @@ interface ServerContextValue {
   hasRemote: () => boolean;
   ghInstalled: () => boolean;
   mode: () => 'build' | 'plan';
+  // Whether the event stream is up: true from the server's server.connected
+  // until the stream next drops.
   connected: () => boolean;
   searchRunning: () => boolean;
   // Rolling window of this process's own CPU/memory samples, oldest first, and
@@ -25,6 +27,10 @@ interface ServerContextValue {
   // Ticks whenever a gap in the server's event sequence is detected (events were
   // dropped to a full buffer). Consumers should force a full state re-fetch.
   resyncTick: () => number;
+  // Ticks each time the event stream comes back after dropping — never on the
+  // first connection. Whatever was published while it was down never arrived,
+  // so consumers re-fetch what they show.
+  reconnectTick: () => number;
 }
 
 export interface ResourceMeta {
@@ -51,6 +57,10 @@ export const ServerProvider: ParentComponent = (props) => {
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
   const [resyncTick, setResyncTick] = createSignal(0);
+  const [reconnectTick, setReconnectTick] = createSignal(0);
+  // Set when the stream errors, so the server.connected that follows is known
+  // to be a reconnect rather than the first connection.
+  let dropped = false;
   const [resources, setResources] = createSignal<ResourceSample[]>([]);
   const [resourceMeta, setResourceMeta] = createSignal<ResourceMeta>({
     interval: 2000,
@@ -120,6 +130,10 @@ export const ServerProvider: ParentComponent = (props) => {
 
     if (event.type === 'server.connected') {
       setConnected(true);
+      if (dropped) {
+        dropped = false;
+        setReconnectTick((n) => n + 1);
+      }
     } else if (event.type === 'server.resources') {
       appendResourceSample(event.properties);
       // Deliberately does NOT bump eventTick: that counter is a re-fetch signal
@@ -131,6 +145,11 @@ export const ServerProvider: ParentComponent = (props) => {
       setLastEvent(event);
       setEventTick((n) => n + 1);
     }
+  }, () => {
+    // The stream is down until the server's next server.connected — the
+    // browser retries on its own — and that one will be a reconnect.
+    dropped = true;
+    setConnected(false);
   });
 
   function appendResourceSample(props: any) {
@@ -177,6 +196,7 @@ export const ServerProvider: ParentComponent = (props) => {
     eventTick,
     lastEvent,
     resyncTick,
+    reconnectTick,
   };
 
   return (

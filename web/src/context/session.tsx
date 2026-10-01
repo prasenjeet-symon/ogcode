@@ -8,7 +8,9 @@ import {
   listSessions,
   createSession,
   getSession,
-  getMessages,
+  getMessagesPage,
+  REFRESH_SIZE,
+  type MessagesPage,
   sendPrompt,
   sendGuidance,
   replyPermission,
@@ -37,30 +39,7 @@ import {
   trackCompactTriggered,
   trackErrorShown,
 } from '../lib/analytics';
-
-function shallowEqualPart(a: any, b: any): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  if (a.type !== b.type) return false;
-  if (a.updatedAt !== b.updatedAt) return false;
-  // When timestamps match, the server hasn't modified the part — skip deep
-  // data comparison to avoid JSON.stringify stack overflow on large tool output.
-  return true;
-}
-
-function shallowEqualMessage(a: MessageWithParts, b: MessageWithParts): boolean {
-  if (a === b) return true;
-  if (a.info.id !== b.info.id) return false;
-  if (a.info.finish !== b.info.finish) return false;
-  if (a.info.error !== b.info.error) return false;
-  const ap = a.parts || [];
-  const bp = b.parts || [];
-  if (ap.length !== bp.length) return false;
-  for (let i = 0; i < ap.length; i++) {
-    if (!shallowEqualPart(ap[i], bp[i])) return false;
-  }
-  return true;
-}
+import { joinsHeld, mergeTranscript } from '../lib/transcript';
 
 export interface PendingPermission {
   permissionId: string;
@@ -97,6 +76,18 @@ interface SessionContextValue {
   sessionMissing: () => boolean;
   messages: () => MessageWithParts[];
   loading: () => boolean;
+  /** True while a fetch for the page of older messages is in flight. */
+  loadingOlder: () => boolean;
+  /** Whether older messages exist beyond the top of the transcript. */
+  hasOlder: () => boolean;
+  /**
+   * Fetch and merge the page of messages older than the current top; resolves
+   * whether a page was merged. `around`, when given, receives the merge to run
+   * inside the same batch as its own writes — the transcript view uses it to
+   * move its scroll position in the very update that grows the content above
+   * it, so the reader's place is never drawn anywhere else.
+   */
+  loadOlder: (around?: (merge: () => void) => void) => Promise<boolean>;
   hasRunningTools: () => boolean;
   compacted: () => boolean;
   /** Where mid-loop guidance stands for the active session: waiting for the
@@ -179,47 +170,10 @@ export const SessionProvider: ParentComponent = (props) => {
     ];
   });
 
-  // Merge incoming messages with the existing array, keeping object references
-  // for unchanged entries so SolidJS's <For> doesn't re-render the whole list
-  // on every poll tick.
-  //
-  // A write for a session other than the one on screen is DISCARDED. Several
-  // callers fetch by a session id captured before an await, so a slow response
-  // can arrive after the user has moved on; applying it would paint the old
-  // conversation into the new session's view. Returning prev drops it, and the
-  // destination's own next refresh is already on its way.
-  const mergeMessages = (prev: MessageWithParts[], incoming: MessageWithParts[]): MessageWithParts[] => {
-    const currentSessionId = activeSession()?.id;
-
-    if (currentSessionId) {
-      for (const msg of incoming) {
-        if (msg.info.sessionId !== currentSessionId) return prev;
-      }
-    }
-
-    // Nothing to merge against — take the incoming list as the new state. This
-    // is the path after a session switch clears the list, which is why the
-    // cross-session check above has to come first rather than after it.
-    if (!prev || prev.length === 0) {
-      return incoming.map((m) => ({ info: m.info, parts: m.parts || [] }));
-    }
-
-    // Safe to merge now — all messages are for current session
-    const prevById = new Map(prev.map((m) => [m.info.id, m]));
-    return incoming.map((m) => {
-      const normalized = { info: m.info, parts: m.parts || [] };
-      const existing = prevById.get(m.info.id);
-      if (!existing) return normalized;
-      if (shallowEqualMessage(existing, normalized)) return existing;
-      // Preserve part references for parts that didn't change
-      const newParts = normalized.parts.map((p) => {
-        const prevPart = (existing.parts || []).find((pp) => pp.id === p.id);
-        if (prevPart && shallowEqualPart(prevPart, p)) return prevPart;
-        return p;
-      });
-      return { info: m.info, parts: newParts };
-    });
-  };
+  // Merge a server page into the transcript on screen — see mergeTranscript.
+  // A page for a session other than the one on screen is dropped.
+  const mergeMessages = (prev: MessageWithParts[], incoming: MessageWithParts[]): MessageWithParts[] =>
+    mergeTranscript(prev, incoming, activeSession()?.id);
 
   const setMessages = (next: MessageWithParts[] | ((prev: MessageWithParts[]) => MessageWithParts[])) => {
     if (typeof next === 'function') {
@@ -229,6 +183,103 @@ export const SessionProvider: ParentComponent = (props) => {
       setMessagesRaw((prev) => mergeMessages(prev, next));
     }
   };
+
+  // Whether older messages exist above the top of the transcript, as the server
+  // reported for the oldest page held. Reset per session on switch.
+  const [hasOlder, setHasOlder] = createSignal(false);
+  const [loadingOlder, setLoadingOlder] = createSignal(false);
+
+  // Apply the newest page of the active session's transcript. Whether anything
+  // older exists is the page's answer — unless older pages are already held,
+  // in which case their answer still stands. A page that does not join up with
+  // what is held (see joinsHeld) replaces it instead, as opening the session
+  // afresh would: the pages above go, and are paged back in on demand.
+  const applyNewestPage = (page: MessagesPage) => {
+    const held = messagesRaw();
+    if (!joinsHeld(held[held.length - 1]?.info.id ?? '', page)) {
+      // Merged into nothing, a page written for another session comes back
+      // empty; it is dropped like any other.
+      const fresh = mergeTranscript([], page.messages, activeSession()?.id);
+      if (fresh.length === 0) return;
+      setMessagesRaw(fresh);
+      setHasOlder(page.hasOlder);
+      return;
+    }
+    const oldestHeld = held[0]?.info.id;
+    const holdsOlder = !!oldestHeld && page.messages.length > 0 && oldestHeld < page.messages[0].info.id;
+    setMessages(page.messages);
+    if (!holdsOlder) setHasOlder(page.hasOlder);
+  };
+
+  // The newest messages of a session's transcript, for a refresh: a poll, a
+  // live update, the fetch after a prompt. A short window is all that takes
+  // (REFRESH_SIZE). When it does not reach back to the newest message held,
+  // more landed in between than it covers, and the full newest page is fetched
+  // instead. With nothing held this is a first load, not a refresh, and takes
+  // the full page too: a window would leave the transcript a few messages long
+  // and send the view paging back for the rest it is about to receive.
+  // Resolves null once the user has moved to another session; the caller must
+  // then leave the one on screen alone.
+  async function fetchNewest(sessionId: string): Promise<MessagesPage | null> {
+    const refreshing = messagesRaw().length > 0;
+    const page = await getMessagesPage(sessionId, undefined, refreshing ? REFRESH_SIZE : undefined);
+    if (activeSession()?.id !== sessionId) return null;
+    if (!refreshing) return page;
+    const held = messagesRaw();
+    if (held.length > 0 && joinsHeld(held[held.length - 1].info.id, page)) return page;
+    const full = await getMessagesPage(sessionId);
+    return activeSession()?.id === sessionId ? full : null;
+  }
+
+  async function loadOlder(around?: (merge: () => void) => void): Promise<boolean> {
+    const sess = activeSession();
+    if (!sess || loadingOlder() || !hasOlder()) return false;
+    const oldest = messagesRaw()[0];
+    if (!oldest) return false;
+    const sessionId = sess.id;
+    setLoadingOlder(true);
+    try {
+      const page = await getMessagesPage(sessionId, oldest.info.id);
+      if (activeSession()?.id !== sessionId) return false;
+      // The page is the history just above what was the oldest message held.
+      // If the top of the transcript moved meanwhile (a refresh replaced it,
+      // or a first page landed under an early one), the page no longer joins
+      // on there — merged, it could drop newer messages or leave a hole — so
+      // it is dropped, and the next approach to the top asks again.
+      if (messagesRaw()[0]?.info.id !== oldest.info.id) return false;
+      const merge = () => {
+        setMessagesRaw((prev) => mergeMessages(prev, page.messages));
+        setHasOlder(page.hasOlder);
+      };
+      batch(() => (around ? around(merge) : merge()));
+      return page.messages.length > 0;
+    } catch (e) {
+      console.error('load older messages failed:', e);
+      return false;
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
+  // Cache-write effect: the transcript cache must be written whenever the
+  // rendered transcript changes. The whole conversation is a page-backed
+  // window, so what is cached is the window itself — messages plus whether
+  // more exist above it. Restored synchronously on switch-back so the list
+  // does not need to refetch before the user's scroll position can be
+  // restored. LRU-capped: the oldest entry (first key) is evicted at 8.
+  const transcriptCache = new Map<string, { messages: MessageWithParts[]; hasOlder: boolean }>();
+  createEffect(() => {
+    const id = activeSession()?.id;
+    if (!id) return;
+    const msgs = messagesRaw();
+    if (msgs.length === 0) return;
+    transcriptCache.delete(id);
+    transcriptCache.set(id, { messages: msgs, hasOlder: hasOlder() });
+    if (transcriptCache.size > 8) {
+      const oldest = transcriptCache.keys().next().value;
+      if (oldest !== undefined && oldest !== id) transcriptCache.delete(oldest);
+    }
+  });
+
   // Track which session is currently loading (not a global flag)
   const [loadingSessionId, setLoadingSessionId] = createSignal<string>('');
   // Optimistic messages whose POST never landed. Without this an failed send
@@ -242,43 +293,11 @@ export const SessionProvider: ParentComponent = (props) => {
   // Check if any tools are currently running or pending.
   // If the last assistant message has finished (stop/error/aborted), stale tool
   // statuses shouldn't block the UI — the loop is done and won't update them.
-  const hasRunningTools = (): boolean => {
-    const msgs = messagesRaw();
-    // Only treat tools as stale when the loop was explicitly cancelled or errored.
-    // finish="stop" with pending tools means tools are about to execute — not stale.
-    let toolsAreStale = false;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].info.role === 'assistant') {
-        const finish = msgs[i].info.finish;
-        // An interruption record means the server claimed this turn as abandoned:
-        // no loop is running behind it, so a tool left mid-flight is a leftover
-        // rather than work in progress.
-        if (finish === 'error' || finish === 'aborted' || msgs[i].info.interrupted) {
-          toolsAreStale = true;
-        }
-        break;
-      }
-    }
-    for (const msg of msgs) {
-      if (msg.parts) {
-        for (const part of msg.parts) {
-          if (part.type === 'tool') {
-            try {
-              const toolData = JSON.parse(typeof part.data === 'string' ? part.data : JSON.stringify(part.data));
-              const status = toolData?.state?.status;
-              if (status === 'running' || status === 'pending') {
-                if (toolsAreStale) continue;
-                return true;
-              }
-            } catch (e) {
-              // Ignore parse errors
-            }
-          }
-        }
-      }
-    }
-    return false;
-  };
+  //
+  // A memo, not a plain function: half a dozen views read it, and every one of
+  // them re-ran the whole scan on each change to the transcript — every poll,
+  // every page of history loaded — over every tool part held.
+  const hasRunningTools = createMemo(() => messagesHaveRunningTools(messagesRaw()));
 
   // The loop ended abnormally and no message carries the reason. Sticky, not
   // transient: a failure the user never saw is the bug this exists to fix, so
@@ -536,9 +555,8 @@ export const SessionProvider: ParentComponent = (props) => {
 
     // Refresh messages to pick up the "aborted" finish state and cancelled tool calls
     try {
-      const msgs = await getMessages(sess.id);
-      if (activeSession()?.id !== sess.id) return;
-      setMessages(msgs);
+      const page = await fetchNewest(sess.id);
+      if (page) applyNewestPage(page);
     } catch (e) {
       console.error('refresh after abort failed:', e);
     }
@@ -631,17 +649,31 @@ export const SessionProvider: ParentComponent = (props) => {
         ? current
         : { id, projectId: '', directory: server.directory(), title: 'Loading...', createdAt: Date.now(), updatedAt: Date.now() };
     }
-    setActiveSession(session);
-
-    // Clear pendingModel when switching sessions so the destination session's
-    // own persisted model is used, not whatever was selected in the previous session.
+    // Switching sessions: restore the destination's cached transcript and
+    // reset per-session UI state BEFORE the active session flips, so the
+    // message list's row layout and the scroll restore run against the right
+    // transcript in the same frame rather than against a cleared list.
+    // setMessagesRaw is deliberate here: the merge wrapper drops pages that
+    // do not match the session on screen — which is still the previous
+    // session until setActiveSession runs — so it would drop the restore.
     if (!sameSession) {
+      const cached = transcriptCache.get(id);
+      if (cached) {
+        setMessagesRaw(cached.messages);
+        setHasOlder(cached.hasOlder);
+      } else {
+        setMessagesRaw([]);
+        setHasOlder(false);
+      }
+      setLoadingOlder(false);
+      // Drop unconfirmed bubbles too: a failed send in a session the user has
+      // left would otherwise sit in memory for the life of the page.
+      setOptimistic([]);
+      // Clear pendingModel when switching sessions so the destination session's
+      // own persisted model is used, not whatever was selected in the previous session.
       setPendingModel('');
       setPendingProvider('');
-    }
-
-    // Stop any existing polling from previous session when switching
-    if (!sameSession) {
+      // Stop any existing polling from previous session when switching
       stopPolling();
       setLoadingSessionId('');
       setCompacted(false);
@@ -651,33 +683,33 @@ export const SessionProvider: ParentComponent = (props) => {
       // must not leak into the destination session's UI.
       if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
       setGuidanceStatus('idle');
-      setMessages([]);
-      // Drop unconfirmed bubbles too: a failed send in a session the user has
-      // left would otherwise sit in memory for the life of the page.
-      setOptimistic([]);
     }
+    setActiveSession(session);
     // Re-entering the same session keeps cached messages and refreshes in place.
     try {
-      const msgs = await getMessages(id);
+      const page = await getMessagesPage(id);
       // The user may have switched sessions while this was in flight. Everything
       // below belongs to `id`, including the setActiveSession further down that
       // would otherwise drag the view back to the session they just left.
       if (activeSession()?.id !== id) return;
-      setMessages(msgs);
+      applyNewestPage(page);
 
-      // Fetch the authoritative session record. listSessions filters by the main
-      // project directory, so sessions created in task worktrees (which use the
-      // worktree path as their directory) won't appear in that list. Fall back to a
-      // direct getSession fetch — it queries by session ID, not directory — so the
-      // task session's real model is picked up instead of falling back to the default.
-      const sessionsList = await listSessions(server.directory());
-      setSessions(sessionsList);
-      let fresh = sessionsList.find((s) => s.id === id);
+      // Resolve the authoritative session record. The in-memory list is filtered to
+      // the main project directory, so sessions created in task worktrees (which use
+      // the worktree path as their directory) are not in it. Fall back to a direct
+      // getSession fetch — it queries by session ID, not directory — so the task
+      // session's real model is picked up instead of falling back to the default.
+      //
+      // The list is deliberately NOT re-fetched here: selecting a session used to
+      // send a redundant listSessions request on every click. The sidebar is
+      // refreshed elsewhere (refresh(), create, rename, permission-mode change)
+      // and the background poll keeps it current.
+      let fresh = sessions().find((s) => s.id === id);
       if (!fresh) {
         try {
           fresh = await getSession(id);
         } catch (e) {
-          // getMessages returns an empty list rather than 404 for an unknown id,
+          // The message fetch returns an empty list rather than 404 for an unknown id,
           // so this direct fetch is where a genuinely missing session surfaces.
           // Without it the UI sits on the "Loading..." stub forever with a live
           // composer pointed at a session that doesn't exist.
@@ -746,7 +778,7 @@ export const SessionProvider: ParentComponent = (props) => {
       startBgPoll(id);
 
       // Upgrade to fast poll if the agent loop is still running
-      if (isAgentLoopActive(msgs)) {
+      if (isAgentLoopActive(page.messages)) {
         setLoadingSessionId(id);
         startPolling(id);
       }
@@ -775,9 +807,19 @@ export const SessionProvider: ParentComponent = (props) => {
     const session = await createSession(server.directory(), model || selectedModel(), provider || selectedProvider());
     trackSessionStarted({ model: session.model || '', provider: session.provider || '' });
     setSessions((prev) => [session, ...prev]);
-    setActiveSession(session);
-    setMessages([]);
-    setOptimistic([]);
+    // The transcript is cleared raw, in the same update that puts the new
+    // session on screen. setMessages merges, and a merge never takes an empty
+    // list as a reason to clear (see mergeTranscript), so it kept the last
+    // session's messages: hidden from the transcript, but read by everything
+    // else — the context meter opened every new session on the old one's
+    // context — and cached under the new session's id.
+    batch(() => {
+      setMessagesRaw([]);
+      setOptimistic([]);
+      setHasOlder(false);
+      setLoadingOlder(false);
+      setActiveSession(session);
+    });
     return session;
   }
 
@@ -810,9 +852,8 @@ export const SessionProvider: ParentComponent = (props) => {
         return;
       }
       try {
-        const msgs = await getMessages(sessionId);
-        if (activeSession()?.id !== sessionId) return;
-        setMessages(msgs);
+        const page = await fetchNewest(sessionId);
+        if (page) applyNewestPage(page);
       } catch (_e) {
         // background — non-critical, ignore errors
       }
@@ -880,21 +921,31 @@ export const SessionProvider: ParentComponent = (props) => {
       if (msg.parts) {
         for (const part of msg.parts) {
           if (part.type === 'tool') {
-            try {
-              const toolData = JSON.parse(typeof part.data === 'string' ? part.data : JSON.stringify(part.data));
-              const status = toolData?.state?.status;
-              if (status === 'running' || status === 'pending') {
-                if (toolsAreStale) continue;
-                return true;
-              }
-            } catch (e) {
-              // Ignore parse errors
+            const status = toolStatus(part);
+            if (status === 'running' || status === 'pending') {
+              if (toolsAreStale) continue;
+              return true;
             }
           }
         }
       }
     }
     return false;
+  }
+
+  // A tool part's status. The server sends part data as an object, so it is
+  // read in place: serializing and re-parsing it — tool output and all — just
+  // to look at one field cost more than everything else a poll does.
+  function toolStatus(part: { data: unknown }): string | undefined {
+    let data: any = part.data;
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        return undefined;
+      }
+    }
+    return data?.state?.status;
   }
 
   // Fast poll: 3 s, runs only while the agent loop is active.
@@ -911,14 +962,14 @@ export const SessionProvider: ParentComponent = (props) => {
         if (Date.now() - lastSSEUpdate < 2000) {
           return;
         }
-        const msgs = await getMessages(sessionId);
-        if (activeSession()?.id !== sessionId) {
+        const page = await fetchNewest(sessionId);
+        if (!page) {
           stopFastPoll();
           return;
         }
-        setMessages(msgs);
+        applyNewestPage(page);
 
-        const loopActive = isAgentLoopActive(msgs);
+        const loopActive = isAgentLoopActive(page.messages);
 
         if (!loopActive) {
           setLoadingSessionId('');
@@ -987,13 +1038,13 @@ export const SessionProvider: ParentComponent = (props) => {
       });
       await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider());
       // Immediately fetch to get the real user message + start seeing assistant
-      const msgs = await getMessages(session.id);
-      if (activeSession()?.id !== session.id) return;
+      const page = await fetchNewest(session.id);
+      if (!page) return;
       // Swap the bubble for the server's own copy in one update. Batched because
       // separately they would render an intermediate frame — the message twice
       // if the list lands first, or missing if the bubble is dropped first.
       batch(() => {
-        setMessages(msgs);
+        applyNewestPage(page);
         setOptimistic((prev) => prev.filter((m) => m.info.id !== tempId));
       });
       // Ensure background poll is running, then start the fast poll for the loop
@@ -1024,9 +1075,9 @@ export const SessionProvider: ParentComponent = (props) => {
         setLoadingSessionId('');
         return result ?? { resumed: false };
       }
-      const msgs = await getMessages(session.id);
-      if (activeSession()?.id !== session.id) return { resumed: true };
-      setMessages(msgs);
+      const page = await fetchNewest(session.id);
+      if (!page) return { resumed: true };
+      applyNewestPage(page);
       startBgPoll(session.id);
       startPolling(session.id);
       return result;
@@ -1096,17 +1147,19 @@ export const SessionProvider: ParentComponent = (props) => {
   }));
 
   // On SSE reconnect, immediately re-fetch the active session so any messages
-  // that arrived while the connection was down are not missed.
-  createEffect(on(server.connected, (isConnected) => {
-    if (!isConnected) return;
+  // that arrived while the connection was down are not missed. Only on a
+  // reconnect: keyed off `connected` this also ran on the first connection,
+  // fetching the page selectSession was already fetching a second time on
+  // every open.
+  createEffect(on(server.reconnectTick, () => {
     const sess = activeSession();
     if (!sess) return;
-    getMessages(sess.id).then((msgs) => {
-      if (activeSession()?.id !== sess.id) return;
-      setMessages(msgs);
+    fetchNewest(sess.id).then((page) => {
+      if (!page) return;
+      applyNewestPage(page);
       lastSSEUpdate = Date.now();
     }).catch(() => {});
-  }));
+  }, { defer: true }));
 
   // SSE-driven real-time updates: when the backend publishes message.updated
   // or message.part.updated events for the active session, fetch fresh messages
@@ -1133,9 +1186,10 @@ export const SessionProvider: ParentComponent = (props) => {
         const reason = last.properties?.reason || '';
         const errText = last.properties?.error || '';
         // Fetch final messages then clear loading
-        getMessages(sess.id).then((msgs) => {
-          if (activeSession()?.id !== sess.id) return;
-          setMessages(msgs);
+        fetchNewest(sess.id).then((page) => {
+          if (!page) return;
+          applyNewestPage(page);
+          const msgs = page.messages;
           lastSSEUpdate = Date.now();
           setLoadingSessionId('');
           stopFastPoll(); // background poll keeps running
@@ -1241,10 +1295,10 @@ export const SessionProvider: ParentComponent = (props) => {
       // Guard: if the user switched sessions while the timer was pending, discard
       if (activeSession()?.id !== targetSessionId) return;
       try {
-        const msgs = await getMessages(targetSessionId);
-        // Double-check session is still active before writing
-        if (activeSession()?.id !== targetSessionId) return;
-        setMessages(msgs);
+        const page = await fetchNewest(targetSessionId);
+        // Null when the session changed while it was in flight.
+        if (!page) return;
+        applyNewestPage(page);
         lastSSEUpdate = Date.now();
         // Don't clear loading here — loop.done is the authoritative completion signal.
         // Clearing on message.updated causes premature unblocking when the server
@@ -1345,9 +1399,9 @@ export const SessionProvider: ParentComponent = (props) => {
     if (!tick) return;
     const sess = activeSession();
     if (!sess) return;
-    getMessages(sess.id).then((msgs) => {
-      if (activeSession()?.id !== sess.id) return;
-      setMessages(msgs);
+    fetchNewest(sess.id).then((page) => {
+      if (!page) return;
+      applyNewestPage(page);
       lastSSEUpdate = Date.now();
     }).catch(() => {});
   }));
@@ -1420,6 +1474,9 @@ export const SessionProvider: ParentComponent = (props) => {
     sessionMissing,
     messages,
     loading,
+    loadingOlder,
+    hasOlder,
+    loadOlder,
     hasRunningTools,
     compacted,
     guidanceStatus,

@@ -930,17 +930,13 @@ func (s *Server) handleGetPlanMessages(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := session.SessionID(p.SessionID)
 	before := session.MessageID(r.URL.Query().Get("before"))
-	limit := 300
 
-	messages, err := s.store.GetMessages(sessionID, before, limit)
+	messages, hasOlder, err := s.store.GetMessagesPage(sessionID, before, transcriptLimit(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if messages == nil {
-		messages = []*session.MessageWithParts{}
-	}
-	writeJSON(w, http.StatusOK, messages)
+	writeTranscriptPage(w, messages, hasOlder)
 }
 
 // generatePlanMarkdown renders a plan archive: title, dates, the final plan
