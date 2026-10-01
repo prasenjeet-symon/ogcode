@@ -75,11 +75,10 @@ on hyphens, so worker ids containing hyphens are unambiguous):
 | `https://panel.example.com/` | base host — **operator console** (list of workers + links), worker connections, `/healthz` |
 | `https://panel.example.com` (worker `--master`) | endpoint workers dial |
 
-A worker registers one tunnel per worktree as it starts hosting sessions there
-(tunnels are lazy — a worktree's UI is reachable once the worker has something
-running in it; see Status for the pre-hosting gap). The console renders one
-"Open `<worktree>` UI" link per live worktree tunnel; a worker with no tunnels
-keeps the bare `<workerId>` link.
+A worker opens one tunnel per worktree at connect time, before any session has
+started there, so each worktree is visible and reachable from the console right
+away. The console renders one "Open `<worktree>` UI" link per live worktree
+tunnel; a worker with no tunnels keeps the bare `<workerId>` link.
 
 `<workerId>` is adopted from the worker at registration (stable across
 restarts) and is half of the routing key. You
@@ -361,6 +360,9 @@ Done:
 - [x] **Base-host console**: list connected workers with links (apex landing page)
 - [x] **Per-worktree subdomains** (`<workerId>-<worktree>.<host>`): one tunnel per
       worktree, console links each live worktree UI; exact whole-label host routing
+- [x] **Eager worktree tunnels** (Phase F): the worker brings up a per-dir
+      server + tunnel for every discovered workspace at connect time, so a
+      worktree is reachable before any session starts there
 - [x] **TLS** with wildcard support + cert hot-reload (SIGHUP + timer)
 - [x] **Per-user accounts** in accounts mode (CLI `users` + browser Users page on
       the console) and the **per-user workspace allowlist** enforced by the UI proxy
@@ -390,7 +392,5 @@ Next:
 - [ ] Login rate-limiting/lockout
 - [ ] Built-in ACME DNS-01 auto-issue/renew (currently bring-your-own cert)
 - [ ] Optional friendly subdomains (worker `--name` instead of id)
-- [ ] Eager worktree tunnels: today a worktree UI is reachable only once the
-      worker starts hosting a session in it (Phase F)
 - [ ] Container-mode orphan reconciliation + multi-host drivers (Phase C of
       `INCUS_WORKERS_PLAN.md`)
