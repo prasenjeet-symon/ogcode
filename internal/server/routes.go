@@ -150,6 +150,9 @@ func (s *Server) routes() http.Handler {
 			})
 		})
 
+		// The notes routes are always registered; every handler answers as a plain
+		// 404 while the notes feature flag is off (see notesUnavailable), so a
+		// request to them looks like any other unknown endpoint.
 		r.Route("/notes", func(r chi.Router) {
 			r.Get("/", s.handleListNotes)
 			r.Post("/", s.handleCreateNote)

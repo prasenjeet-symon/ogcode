@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
@@ -20,6 +21,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
+	"github.com/prasenjeet-symon/ogcode/internal/server"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
@@ -99,6 +101,12 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open global config database: %w", err)
 	}
+
+	// Match the server: notes off means no notes text reaches an agent prompt.
+	// The decision is read once at startup — the whole life of a one-shot run —
+	// with a short timeout so a slow PostHog cannot stall the run.
+	installID, _ := server.EnsureInstallID(home)
+	notesEnabled := server.NotesEnabled(installID, server.NotesFlagCLITimeout)
 
 	// Build provider registry — env vars take precedence over DB-stored keys
 	dbProviderCfgs, _ := session.GetAllProviderConfigs(globalDatabase)
@@ -326,6 +334,8 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 			return len(paths)
 		},
 	}
+	lr.NotesEnabled = new(atomic.Bool)
+	lr.NotesEnabled.Store(notesEnabled)
 
 	// Register the tools that close over the runner now that it exists (the
 	// build agent advertises both, so they must resolve to avoid an "unknown

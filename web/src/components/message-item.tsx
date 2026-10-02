@@ -4,6 +4,7 @@ import MarkdownContent from './markdown-content';
 import FileDiff, { diffStat } from './file-diff';
 import { useNote } from '../context/note';
 import { useSession } from '../context/session';
+import { useServer } from '../context/server';
 import DeliveryTicks, { formatLatency } from './delivery-ticks';
 
 function formatTime(ts: number): string {
@@ -550,6 +551,7 @@ function UserMessage(props: { msg: MessageWithParts }) {
   const [copied, setCopied] = createSignal(false);
   let copyTimer: ReturnType<typeof setTimeout>;
   const noteCtx = useNote();
+  const notesOn = () => useServer().notesEnabled();
   const sessionCtx = useSession();
   let contentRef: HTMLDivElement | undefined;
 
@@ -681,7 +683,7 @@ function UserMessage(props: { msg: MessageWithParts }) {
               </Show>
             </button>
           </Show>
-          <Show when={userText()}>
+          <Show when={userText() && notesOn()}>
             <button
               type="button"
               onClick={handleSendToNotes}

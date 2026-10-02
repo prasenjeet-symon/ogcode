@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/joho/godotenv"
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
@@ -116,6 +117,12 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 	defer globalDatabase.Close()
 
+	// Match the server: notes off means no notes text reaches an agent prompt.
+	// The decision is read once at startup — the whole life of a one-shot run —
+	// with a short timeout so a slow PostHog cannot stall the run.
+	installID, _ := server.EnsureInstallID(home)
+	notesEnabled := server.NotesEnabled(installID, server.NotesFlagCLITimeout)
+
 	b := bus.New(256)
 	sessionStore := session.NewStore(database)
 	docindexStore := docindex.NewStore(database)
@@ -190,6 +197,8 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		Dir:             dir,
 		MaxSteps:        50,
 	}
+	lr.NotesEnabled = new(atomic.Bool)
+	lr.NotesEnabled.Store(notesEnabled)
 
 	// Seed and apply the shipped default excludes, exactly as the server's
 	// index paths do. Without this the same project would index different files

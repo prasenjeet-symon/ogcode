@@ -44,6 +44,16 @@ func codingAgentSystem(mode string) string {
 	step6 := `6. **Do not commit unless asked.** Leave your changes in the working tree so the developer can review them — nothing is lost by staying uncommitted, and this is the developer's own working directory. Commit or push only when the developer explicitly asks. When you do, stage only the files you intentionally changed (git status → git add <specific files> → git commit -m 'verb: what and why'), never git add -A blindly.`
 	scopeRule := `- Stay focused on what the developer asked. Do not refactor unrelated code, rename things that aren't broken, or expand scope — if a correct change requires touching more than was asked, check in with the developer first.`
 
+	// decisionSummary is interactive-only. The per-turn memory summary is
+	// built from the agent's final reply (buildTurnDigest → SummarySystemPrompt),
+	// so asking the interactive agent to state its rationale in that reply is
+	// what carries the "why" into memory. The TaskAgent runs headless in a
+	// disposable worktree with no memory summary, so it gets none of this.
+	decisionSummary := ""
+	if !task {
+		decisionSummary = "\n\n" + decisionSummaryPrompt()
+	}
+
 	if task {
 		opening = `You are a coding agent executing a single implementation task in a dedicated git worktree. You have full read/write access to the codebase.`
 		step1 = `1. **Read the task description carefully.** It is your primary source of truth — it contains the exact files to touch, functions to add or change, patterns to follow, and edge cases to handle. Follow it precisely.`
@@ -104,9 +114,7 @@ When asked to review work — your own included — hold every conclusion to the
 - Never break existing tests — if a test fails because of your change, fix the code or the test (whichever is correct), not both arbitrarily.
 ` + scopeRule + `
 - If you are blocked by something genuinely outside your control (missing credentials, infrastructure not available), stop cleanly and describe the blocker clearly in your final message.
-` + "\n" + noPackageManagerDirsPrompt() + `
-
-` + projectNotesPrompt(true) + `
+` + "\n" + noPackageManagerDirsPrompt() + decisionSummary + `
 
 ` + markdownCapabilitiesPrompt(true, false)
 }
@@ -144,9 +152,8 @@ var PlanAgent = Agent{
 
 ## What you MUST do at the start of every session
 
-1. **Check past plans and notes.** Look for markdown files in .ogcode/archives/ and .ogcode/notes/. Read the ones relevant to the request to understand what was already built and documented. If neither directory exists, skip this step.
+1. **Check past plans.** Look for markdown files in .ogcode/archives/ and read the ones relevant to the request to understand what was already built and documented. If the directory does not exist, skip this step.
    - From archives: what was built, file paths, decisions made, patterns established.
-   - From notes: domain knowledge, architectural context, prior research on the topic.
 
 2. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, then call it again with subdir to descend into the folders whose labels match the request until it lists files. Then use read, glob, and grep to verify assumptions before forming any opinion. Focus your exploration on the areas the request touches — do not explore the entire codebase. Confirm: which files exist, how they are structured, what patterns are already established.
 
@@ -198,15 +205,13 @@ var BreakdownAgent = Agent{
 
 1. **Read the plan carefully.** The plan will be provided as the final agreed-upon summary. Treat it as the sole source of truth for what needs to be built. Do not second-guess the plan's decisions — your job is to decompose it into implementable tasks, not to redesign it.
 
-2. **Read project notes.** Glob .ogcode/notes/*.md and read the ones relevant to the plan. These contain hard-won knowledge about the codebase that may affect how tasks are structured or ordered.
+2. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, descending with subdir into the ones the plan touches, then use read, glob, and grep to verify the files, functions, types, and patterns mentioned in the plan actually exist and understand how they are structured. Do not assume — confirm.
 
-3. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, descending with subdir into the ones the plan touches, then use read, glob, and grep to verify the files, functions, types, and patterns mentioned in the plan actually exist and understand how they are structured. Do not assume — confirm.
+3. **Identify the natural execution order.** Think about what must be built first before other things can build on top of it. Common ordering: schema/migrations → backend logic → API routes → frontend → tests. Let the work's natural dependencies drive the order, not arbitrary sequencing.
 
-4. **Identify the natural execution order.** Think about what must be built first before other things can build on top of it. Common ordering: schema/migrations → backend logic → API routes → frontend → tests. Let the work's natural dependencies drive the order, not arbitrary sequencing.
+4. **Define the tasks.** Each task must be scoped to what one developer can complete in one focused sitting. Merge trivially small steps into their natural parent. Aim for 3–10 tasks total — do not over-split.
 
-5. **Define the tasks.** Each task must be scoped to what one developer can complete in one focused sitting. Merge trivially small steps into their natural parent. Aim for 3–10 tasks total — do not over-split.
-
-6. **Write implementation-ready descriptions.** A build agent will implement each task from its description alone — it will not re-read the plan. Every description must include:
+5. **Write implementation-ready descriptions.** A build agent will implement each task from its description alone — it will not re-read the plan. Every description must include:
    - Exact file paths to create or modify (verified against the actual codebase)
    - Function, type, or interface names to add or change
    - Patterns and conventions to follow, referencing existing code
@@ -226,7 +231,7 @@ var BreakdownAgent = Agent{
    Retry-After header. Verify with:
    go test ./internal/middleware/... ./internal/server/...
 
-7. **Call submit_task_breakdown** with the complete task array. Do not output raw JSON.
+6. **Call submit_task_breakdown** with the complete task array. Do not output raw JSON.
 
 ` + parallelToolCallsPrompt(false, true) + `
 
@@ -253,11 +258,9 @@ var NoteAgent = Agent{
 
 ## Your process
 
-1. **Read existing notes.** Glob .ogcode/notes/*.md and read the ones relevant to the query. Build on what's already documented — avoid redundancy.
+1. **Research the query.** Start with codebase_map to locate relevant files, then use read, glob, and grep to explore the codebase and gather all information relevant to the query. Be thorough — your note is the primary reference a developer will reach for on this topic.
 
-2. **Research the query.** Start with codebase_map to locate relevant files, then use read, glob, and grep to explore the codebase and gather all information relevant to the query. Be thorough — your note is the primary reference a developer will reach for on this topic.
-
-3. **Write the note.** Produce a single well-structured markdown document:
+2. **Write the note.** Produce a single well-structured markdown document:
    - Clear H1 title that captures the topic
    - Sections with H2/H3 headers
    - Code blocks with language tags for all code examples
@@ -265,7 +268,7 @@ var NoteAgent = Agent{
    - Bullet lists for enumerations, tables for comparisons
    - Concrete file paths, function names, and line references (verified against the actual codebase)
 
-4. **Output ONLY the note.** Your final response must be the complete note in markdown format and nothing else — no preamble, no "here is the note:", no trailing commentary. Just the raw markdown starting with the # title.
+3. **Output ONLY the note.** Your final response must be the complete note in markdown format and nothing else — no preamble, no "here is the note:", no trailing commentary. Just the raw markdown starting with the # title.
 
 ` + parallelToolCallsPrompt(false, true) + `
 
@@ -487,6 +490,14 @@ func (a *Agent) promptRole() string {
 // so their prompt omits those sections to stay lean and focused.
 func (a *Agent) projectScoped() bool {
 	return a.HasTool("codebase_map")
+}
+
+// notesScoped reports whether this agent's prompt includes the "## Project
+// notes" section. It is the project-scoped set minus the Subagent: the Subagent
+// investigates from its delegated task alone and has never carried the notes
+// section, so including it would advertise a folder it was not pointed at.
+func (a *Agent) notesScoped() bool {
+	return a.projectScoped() && a.ID != SubagentAgent.ID
 }
 
 // GetAgent returns the agent by name, defaulting to BuildAgent.

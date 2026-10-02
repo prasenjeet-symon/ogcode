@@ -1,7 +1,7 @@
 import { Navigate, Route, Router, useNavigate, useLocation } from '@solidjs/router';
-import { createEffect, onCleanup } from 'solid-js';
+import { createEffect, onCleanup, Show } from 'solid-js';
 import { closeDrawer } from './lib/mobile-drawer';
-import { ServerProvider } from './context/server';
+import { useServer } from './context/server';
 import { OnboardingProvider, useOnboarding } from './context/onboarding';
 import { SessionProvider } from './context/session';
 import { PlanProvider } from './context/plan';
@@ -36,6 +36,7 @@ import Onboarding from './pages/onboarding';
 import NotFound from './pages/not-found';
 
 export default function App() {
+  const notesOn = () => useServer().notesEnabled();
   return (
     <Router root={AppWrapper}>
       <Route path="/onboarding" component={Onboarding} />
@@ -45,8 +46,12 @@ export default function App() {
       <Route path="/plan/:id" component={PlanDetail} />
       <Route path="/plan/:id/tasks" component={PlanTasksPage} />
       <Route path="/task/:id" component={TaskExecution} />
-      <Route path="/notes" component={NotesPage} />
-      <Route path="/notes/:id" component={NoteDetailPage} />
+      {/* Notes routes exist only while the notes flag is on; otherwise the
+          wildcard below renders the 404 page for these paths. */}
+      <Show when={notesOn()}>
+        <Route path="/notes" component={NotesPage} />
+        <Route path="/notes/:id" component={NoteDetailPage} />
+      </Show>
       <Route path="/docindex" component={DocIndexPage} />
       <Route path="/device" component={DevicePage} />
       <Route path="/preview" component={PreviewPage} />
@@ -75,8 +80,7 @@ export default function App() {
 
 function AppWrapper(props: { children?: any }) {
   return (
-    <ServerProvider>
-      <OnboardingProvider>
+    <OnboardingProvider>
         <ThemeProvider>
           <SessionProvider>
             <PlanProvider>
@@ -108,7 +112,6 @@ function AppWrapper(props: { children?: any }) {
           </SessionProvider>
         </ThemeProvider>
       </OnboardingProvider>
-    </ServerProvider>
   );
 }
 

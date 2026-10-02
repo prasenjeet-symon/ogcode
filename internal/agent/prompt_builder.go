@@ -329,6 +329,32 @@ The chat interface natively renders the following — use them when they add gen
 - **HTML/CSS/JS** (triple-backtick html blocks) — full interactive content in a sandboxed iframe (JS has no access to the parent page). Use for rich visualizations, dashboards, widgets, styled tables. The iframe is transparent and borderless — **do NOT add a background color, gradient, or card-like container**; use subtle borders or spacing so it blends into the chat.`
 }
 
+// decisionSummaryPrompt asks the interactive agent to state its rationale in its
+// final reply, so the "why" of a turn survives into memory.
+//
+// The per-turn memory summary is synthesized from the turn digest, and that
+// digest carries the agent's final reply (buildTurnDigest → SummarySystemPrompt).
+// The agent's raw reasoning blocks are deliberately NOT part of the digest, so
+// the only durable path for a decision's rationale is for the agent to write it
+// down in the reply the digest captures.
+//
+// It is interactive-only (see codingAgentSystem): the headless TaskAgent has no
+// memory summary to feed. The conditional framing is what keeps a scripted
+// heading off trivial turns, where it would be noise in the user's reply.
+func decisionSummaryPrompt() string {
+	return `## Decision summary
+
+Your final reply for a completed turn is what a short, durable memory note is written from — a future agent reads that note to understand why the work went the way it did, with no access to this conversation. Your internal reasoning is not part of it, so state the rationale here when it matters.
+
+When a turn involved real decisions — a non-obvious approach, a trade-off, an implementation you tried and rejected — end your reply with a short ` + "`## Decisions & why`" + ` section:
+
+- The choice you made, and the reason for it.
+- Approaches you ruled out and what ruled them out, so a later turn does not retry them.
+- Decisions the developer may want to revisit or reverse.
+
+Keep it to a few lines: what a future reader needs, not a transcript of your thinking. Omit the section entirely when there was nothing to decide — a one-line answer, a pure lookup, or a change with only one sensible way to make it.`
+}
+
 // latexEnv holds information about the detected LaTeX installation.
 type latexEnv struct {
 	Available    bool

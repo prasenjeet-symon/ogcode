@@ -11,6 +11,18 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 )
 
+// SummarySystemPrompt is the scribe's only instruction, and it is what tells the
+// scribe to preserve a `## Decisions & why` section the agent wrote in its reply.
+// Pin that guidance so a future edit cannot quietly drop the rationale path.
+func TestSummarySystemPromptCarriesDecisionGuidance(t *testing.T) {
+	if !strings.Contains(SummarySystemPrompt, "## Decisions & why") {
+		t.Errorf("SummarySystemPrompt should name the %q section", "## Decisions & why")
+	}
+	if !strings.Contains(SummarySystemPrompt, "preserve it rather than paraphrasing it away") {
+		t.Errorf("SummarySystemPrompt should tell the scribe to preserve the agent's decision section")
+	}
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))

@@ -128,7 +128,7 @@ func TestDeepSearchGuidanceTracksAvailability(t *testing.T) {
 			continue
 		}
 
-		with := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", true)
+		with := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", true, true)
 		if !strings.Contains(with, "deep_search") {
 			t.Errorf("%s: search is available but the prompt never names deep_search", a.Name)
 		}
@@ -136,7 +136,7 @@ func TestDeepSearchGuidanceTracksAvailability(t *testing.T) {
 			t.Errorf("%s: search is available but the external-knowledge section is missing", a.Name)
 		}
 
-		without := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false)
+		without := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false, true)
 		if strings.Contains(without, "deep_search") {
 			t.Errorf("%s: no search backend, but the prompt still names deep_search — "+
 				"the model is told to call something it will never be offered", a.Name)
@@ -157,7 +157,7 @@ func TestDeepSearchGuidanceSkipsAgentsWithoutTheTool(t *testing.T) {
 			t.Errorf("%s: unexpectedly holds deep_search", a.Name)
 			continue
 		}
-		if p := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", true); strings.Contains(p, "deep_search") {
+		if p := staticSystemPrompt(a, "/tmp/proj", false, "", "", "", true, true); strings.Contains(p, "deep_search") {
 			t.Errorf("%s: does not hold deep_search but its prompt names it", a.Name)
 		}
 	}
@@ -175,7 +175,7 @@ func TestLivePreviewReachesOnlyTheBuildAgent(t *testing.T) {
 		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
 	}
 	for _, a := range all {
-		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false), heading)
+		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false, true), heading)
 		want := a.ID == "build"
 		if got != want {
 			t.Errorf("%s: preview-hosting section = %v, want %v", a.Name, got, want)
@@ -200,7 +200,7 @@ func TestPublicFileHostingReachesOnlyTheBuildAgent(t *testing.T) {
 		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
 	}
 	for _, a := range all {
-		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false), heading)
+		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", "", false, true), heading)
 		want := a.ID == "build"
 		if got != want {
 			if want {
@@ -358,7 +358,7 @@ func TestMarkdownCapabilitiesPrompt_SavedToFileDropsInlineRendering(t *testing.T
 // cannot both sit in one prompt.
 func TestBuildSystemPrompt_ShellLineOnlyForShellAgents(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0)
+		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0, true)
 		hasShellLine := strings.Contains(prompt, "\nShell: ")
 		wantShellLine := slices.Contains(a.Tools, "bash")
 		if hasShellLine != wantShellLine {
@@ -376,7 +376,7 @@ func TestBuildSystemPrompt_ShellLineOnlyForShellAgents(t *testing.T) {
 // write-capable ones — needs the section to say so.
 func TestBuildSystemPrompt_NoDanglingMemoryMDReference(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0)
+		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0, true)
 		if strings.Contains(prompt, "The content above in the <memory-md> tag") {
 			t.Errorf("%s: points at a <memory-md> tag that is not in the prompt", a.Name)
 		}
@@ -393,7 +393,7 @@ func TestBuildSystemPrompt_NoDanglingMemoryMDReference(t *testing.T) {
 func TestBuildSystemPrompt_InstructionSourceBoundaryReachesEveryAgent(t *testing.T) {
 	all := append(codeFacingAgents(), IndexAgent, SearchAgent)
 	for _, a := range all {
-		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0)
+		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0, true)
 		if !strings.Contains(prompt, "## Where your instructions come from") {
 			t.Errorf("%s: no instruction-source boundary in the prompt", a.Name)
 			continue
@@ -419,7 +419,7 @@ func TestBuildSystemPrompt_InstructionSourceBoundaryReachesEveryAgent(t *testing
 // The boundary is the rule most likely to be tested by the next thing the agent
 // reads, so nothing in the cacheable block may sit after it and dilute it.
 func TestBuildSystemPrompt_BoundaryClosesTheStaticBlock(t *testing.T) {
-	prompt := staticSystemPrompt(BuildAgent, "/tmp/test", true, "", "", "anthropic", true)
+	prompt := staticSystemPrompt(BuildAgent, "/tmp/test", true, "", "", "anthropic", true, true)
 	idx := strings.Index(prompt, "## Where your instructions come from")
 	if idx < 0 {
 		t.Fatal("boundary section missing from the static block")
@@ -551,8 +551,8 @@ func TestIndexStatusPrompt(t *testing.T) {
 // outside it — otherwise indexing mid-session silently invalidates the cached
 // tools+system prefix for every remaining turn.
 func TestBuildSystemPromptEntries_IndexStatusStaysOutOfCachedPrefix(t *testing.T) {
-	unindexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 0, true)
-	indexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true)
+	unindexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 0, true, true)
+	indexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true, true)
 
 	if unindexed[0] != indexed[0] {
 		t.Error("index status leaked into entry [0]; building the index mid-session " +
@@ -567,12 +567,12 @@ func TestBuildSystemPromptEntries_IndexStatusStaysOutOfCachedPrefix(t *testing.T
 // reports on a tool they were never offered.
 func TestBuildSystemPromptEntries_IndexStatusOnlyForIndexAwareAgents(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		joined := strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 0, 0, "", 7, true), "\n")
+		joined := strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 0, 0, "", 7, true, true), "\n")
 		if !strings.Contains(joined, "7 files indexed") {
 			t.Errorf("%s: has codebase_map but never hears the index status", a.Name)
 		}
 	}
-	joined := strings.Join(buildSystemPromptEntries(SearchAgent, "/tmp/proj", false, "", "", 0, 0, "", 7, true), "\n")
+	joined := strings.Join(buildSystemPromptEntries(SearchAgent, "/tmp/proj", false, "", "", 0, 0, "", 7, true, true), "\n")
 	if strings.Contains(joined, "files indexed") {
 		t.Error("SearchAgent has no codebase_map but was told the index status")
 	}
@@ -612,9 +612,9 @@ func TestBuildSystemPromptEntries_LatexInfoIsInCachedPrefix(t *testing.T) {
 	}
 
 	setLatexCache(true)
-	withLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true)
+	withLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true, true)
 	setLatexCache(false)
-	withoutLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true)
+	withoutLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true, true)
 
 	// The LaTeX environment lives in the cached base (entry [0]), not a per-turn
 	// entry: detection is process-cached (getLatexEnv), so the block is
@@ -700,7 +700,7 @@ func TestSkillGuidancePrompt_EscapesSkillText(t *testing.T) {
 // it must never appear in the entries buildSystemPromptEntries produces.
 func TestBuildSystemPromptEntries_SkillGuidanceStaysOutOfTheCachedPrefix(t *testing.T) {
 	for _, a := range []Agent{BuildAgent, TaskAgent, PlanAgent} {
-		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", -1, true)
+		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", -1, true, true)
 		for i, e := range entries {
 			if strings.Contains(e, "<available_skills>") {
 				t.Errorf("%s: skill guidance is in entry [%d]; it changes mid-session and must be appended by the loop", a.Name, i)

@@ -2,11 +2,16 @@
 import { render } from 'solid-js/web';
 import App from './app';
 import './styles/index.css';
+import { ServerProvider } from './context/server';
 import { bootstrapAnalytics } from './lib/posthog';
 
 const root = document.getElementById('root');
 if (root) {
-  render(() => <App />, root);
+  render(() => (
+    <ServerProvider>
+      <App />
+    </ServerProvider>
+  ), root);
 }
 
 // Fire-and-forget: initialise PostHog analytics (always-on, hardcoded credentials),

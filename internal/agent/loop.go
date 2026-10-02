@@ -14,6 +14,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -108,6 +109,20 @@ type LoopRunner struct {
 	// there with the model it ran on, so one view can total spend across
 	// projects and models. nil (tests) records nothing.
 	Usage *usage.Ledger
+	// NotesEnabled points at the notes feature-flag decision. While it reads
+	// true, agents that operate on the project get the "## Project notes"
+	// section in their system prompt. The server points it at the flag its
+	// background refresher keeps current, so it can change while turns run —
+	// hence atomic — and it is a pointer so the runners a sub-agent or task
+	// copies from this one read the same live flag rather than a snapshot
+	// (copying the atomic itself is what go vet's copylocks check rejects).
+	// nil — the default for the worker and tests — reads as off.
+	NotesEnabled *atomic.Bool
+}
+
+// notesOn reports whether this runner's turns include the notes section.
+func (lr *LoopRunner) notesOn() bool {
+	return lr.NotesEnabled != nil && lr.NotesEnabled.Load()
 }
 
 // compactContextEnv names the process-wide switch that withholds compact_context.
@@ -678,7 +693,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// only, so anything that changes mid-session must stay out of it.
 		// Recall guidance appears when turn-memory is active and the agent holds
 		// the recall tools.
-		systemPrompts := buildSystemPromptEntries(agent, workDir, turnMemoryActive, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles, hasDeepSearch)
+		systemPrompts := buildSystemPromptEntries(agent, workDir, turnMemoryActive, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles, hasDeepSearch, lr.notesOn())
 		var modelMessages []provider.ModelMessage
 
 		// Only the current user turn goes on the wire — from the last text-user
@@ -3568,18 +3583,18 @@ func appendSystemEntry(entries []string, a Agent, entry string) []string {
 
 // buildSystemPrompt builds the full system prompt with no model-family tuning
 // (family = generic). Retained for callers/tests that have no model in hand.
-func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int) string {
-	return buildSystemPromptForFamily(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, "")
+func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, notes bool) string {
+	return buildSystemPromptForFamily(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, "", notes)
 }
 
 // buildSystemPromptForFamily returns the assembled entries joined into one
 // string. The provider is given the entries separately (see
 // buildSystemPromptEntries) so the cacheable prefix can be isolated; this
 // convenience form is for callers and tests that just want the whole text.
-func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string) string {
+func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string, notes bool) string {
 	// hasDeepSearch=true: these callers have no registry in hand, and the prompt
 	// they want is the full one.
-	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, family, -1, true), "\n\n")
+	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, family, -1, true, notes), "\n\n")
 }
 
 // buildSystemPromptEntries returns the system-prompt entries in wire order:
@@ -3609,8 +3624,8 @@ func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMD
 // while the session is open.
 //
 // indexedFiles < 0 means no count was reported and the status line is omitted.
-func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string, indexedFiles int, hasDeepSearch bool) []string {
-	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, agentMDContent, memoryMDContent, family, hasDeepSearch)}
+func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string, indexedFiles int, hasDeepSearch bool, notes bool) []string {
+	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, agentMDContent, memoryMDContent, family, hasDeepSearch, notes)}
 
 	// Ordered stable -> volatile, which is a caching decision and not a cosmetic
 	// one. OpenAI, Ollama and OpenRouter join EVERY system entry into a single
@@ -3651,7 +3666,7 @@ func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDCo
 // plus everything that is fixed for the whole session. The model-family
 // working-style block belongs here — the model is fixed per session, so it stays
 // byte-identical across turns.
-func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, family string, hasDeepSearch bool) string {
+func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, family string, hasDeepSearch bool, notes bool) string {
 	// Project context (working dir, host env, AGENT.md, MEMORY.md) is only
 	// relevant to agents that operate on the user's codebase. Utility agents —
 	// the keyword indexer and web-research agent — skip it to keep their prompt
@@ -3680,6 +3695,16 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
 		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
+
+		// Project notes: appended only when the notes feature is on. The agent
+		// definitions themselves carry no notes text, so an off flag leaves not a
+		// trace — there is nothing to strip. Gated on notesScoped, which is
+		// projectScoped minus the Subagent: a utility agent has no .ogcode/notes/,
+		// and the Subagent works from its delegated task alone and never had this
+		// section.
+		if notes && a.notesScoped() {
+			prompt += "\n\n" + projectNotesPrompt(canWriteFiles)
+		}
 
 		// External knowledge. Gated on the registry, not just the toolset: every
 		// agent here lists deep_search, but it is only registered when a search

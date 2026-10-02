@@ -403,6 +403,8 @@ export interface ConfigInfo {
   port: number;
   /** PostHog id the website stamped into the install command, when there is one. */
   installId?: string;
+  /** Whether the server found the notes feature flag on for this install. */
+  notesEnabled?: boolean;
 }
 
 export function getConfig(): Promise<ConfigInfo> {

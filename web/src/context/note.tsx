@@ -80,13 +80,21 @@ export const NoteProvider: ParentComponent = (props) => {
     }
   }
 
-  // Load notes when directory changes
-  createEffect(on(server.directory, (dir) => {
+  // Load notes when the directory changes, and when the notes feature flag
+  // flips — the server decides the flag in the background, so the first load
+  // can race it. The flag turning off clears the list so a stale one is not
+  // left on screen.
+  createEffect(on([server.directory, server.notesEnabled], ([dir, enabled]) => {
+    if (!enabled) {
+      setNotes([]);
+      return;
+    }
     if (dir) refresh();
   }));
 
   // React to SSE note events
   createEffect(on(server.eventTick, () => {
+    if (!server.notesEnabled()) return;
     const last = server.lastEvent();
     if (!last) return;
 
@@ -113,10 +121,14 @@ export const NoteProvider: ParentComponent = (props) => {
     }
   }));
 
-  // Refresh on SSE reconnect
-  createEffect(on(server.connected, (isConnected) => {
-    if (isConnected) refresh();
-  }));
+  // Refresh on SSE reconnect, so notes created or changed while the stream was
+  // down are not missed. Only on a reconnect: keyed off `connected` this also
+  // ran on the first connection, fetching the list the load above had just
+  // fetched a second time.
+  createEffect(on(server.reconnectTick, () => {
+    if (!server.notesEnabled()) return;
+    refresh();
+  }, { defer: true }));
 
   const value: NoteContextValue = {
     notes,

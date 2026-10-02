@@ -99,6 +99,25 @@ func TestTurnMemorableSession(t *testing.T) {
 	}
 }
 
+// The digest is what the memory scribe summarizes, and it carries the agent's
+// final reply verbatim — so a `## Decisions & why` section the agent writes in
+// that reply is what puts the turn's rationale into memory.
+func TestBuildTurnDigestCarriesDecisionSection(t *testing.T) {
+	reply := "Done.\n\n## Decisions & why\n\n- Used an LRU cache rather than a map, so memory stays bounded."
+	messages := []*session.MessageWithParts{
+		{Info: session.MessageInfo{Role: session.RoleUser}, Parts: []session.Part{digestTextPart("cache the results")}},
+		{Info: session.MessageInfo{Role: session.RoleAssistant}, Parts: []session.Part{digestTextPart(reply)}},
+	}
+
+	digest := buildTurnDigest(messages, 0, "cache the results")
+	if !strings.Contains(digest, "## Decisions & why") {
+		t.Errorf("digest dropped the decision section from the reply:\n%s", digest)
+	}
+	if !strings.Contains(digest, "LRU cache rather than a map") {
+		t.Errorf("digest dropped the rationale:\n%s", digest)
+	}
+}
+
 func TestFirstMarkdownH1(t *testing.T) {
 	md := "---\ntitle: x\n---\n\n#Notquite\n\n# Real Title\n\n## Sub\n"
 	if got := firstMarkdownH1(md); got != "Real Title" {

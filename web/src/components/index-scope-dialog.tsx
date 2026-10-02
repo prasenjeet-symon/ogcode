@@ -72,7 +72,7 @@ const ALWAYS: { name: string; why: string }[] = [
   { name: '.git/', why: 'It sits outside the working tree, and no rule can bring it back.' },
   {
     name: '.ogcode/',
-    why: "It holds ogcode's own state — the project database, notes, plan archives, and the worktrees tasks are checked out into. It is not part of your project, so a rule neither hides nor reveals it.",
+    why: "It holds ogcode's own state — the project database, plan archives, and the worktrees tasks are checked out into. It is not part of your project, so a rule neither hides nor reveals it.",
   },
 ];
 

@@ -17,7 +17,7 @@ func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing
 	dir := "/tmp/test"
 
 	// Case 1: No MEMORY.md content — section should still appear
-	prompt := buildSystemPrompt(agent, dir, false, "", "", 0, 0)
+	prompt := buildSystemPrompt(agent, dir, false, "", "", 0, 0, true)
 	if !strings.Contains(prompt, "## MEMORY.md — Project Long-Term Memory") {
 		t.Error("expected MEMORY.md section to appear even when memoryMDContent is empty")
 	}
@@ -30,7 +30,7 @@ func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing
 
 	// Case 2: With MEMORY.md content — section should appear with file content indicator
 	memContent := "\n\n<memory-md path=\"MEMORY.md\">\n# Project Notes\nSome facts.\n</memory-md>"
-	prompt = buildSystemPrompt(agent, dir, false, "", memContent, 0, 0)
+	prompt = buildSystemPrompt(agent, dir, false, "", memContent, 0, 0, true)
 	if !strings.Contains(prompt, "## MEMORY.md — Project Long-Term Memory") {
 		t.Error("expected MEMORY.md section to appear when memoryMDContent is present")
 	}
@@ -49,7 +49,7 @@ func TestBuildSystemPrompt_MemoryMDSection_ContainsPurposeSection(t *testing.T) 
 	agent := BuildAgent
 	dir := "/tmp/test"
 
-	prompt := buildSystemPrompt(agent, dir, false, "", "", 0, 0)
+	prompt := buildSystemPrompt(agent, dir, false, "", "", 0, 0, true)
 
 	// The slimmed section still states what MEMORY.md is, that it is re-read each
 	// turn, how it differs from AGENT.md, and (for a write-capable agent) how to
@@ -70,7 +70,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	dir := "/tmp/test"
 
 	// BuildAgent has write and edit tools — should get read/write instructions
-	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", "", 0, 0)
+	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", "", 0, 0, true)
 	if !strings.Contains(buildPrompt, "### How to maintain MEMORY.md") {
 		t.Error("expected 'How to maintain' heading for BuildAgent (has write tools)")
 	}
@@ -82,7 +82,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	}
 
 	// PlanAgent has no write/edit tools — should get read-only instructions
-	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", "", 0, 0)
+	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", "", 0, 0, true)
 	if !strings.Contains(planPrompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading for PlanAgent (read-only)")
 	}
@@ -94,7 +94,7 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 	}
 
 	// NoteAgent has no write/edit tools — should get read-only instructions
-	notePrompt := buildSystemPrompt(NoteAgent, dir, false, "", "", 0, 0)
+	notePrompt := buildSystemPrompt(NoteAgent, dir, false, "", "", 0, 0, true)
 	if !strings.Contains(notePrompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading for NoteAgent (read-only)")
 	}
@@ -108,7 +108,7 @@ func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
 	memContent := "\n\n<memory-md path=\"MEMORY.md\">\n# Project Notes\nSome facts.\n</memory-md>"
 
 	// BuildAgent with MEMORY.md content — should show content but NOT creation prompt
-	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", memContent, 0, 0)
+	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", memContent, 0, 0, true)
 	if !strings.Contains(buildPrompt, "The content above in the <memory-md> tag") {
 		t.Error("expected content indicator when memoryMDContent is present for BuildAgent")
 	}
@@ -120,7 +120,7 @@ func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
 	}
 
 	// PlanAgent with MEMORY.md content — should show read-only version, no creation prompt
-	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", memContent, 0, 0)
+	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", memContent, 0, 0, true)
 	if !strings.Contains(planPrompt, "The content above in the <memory-md> tag") {
 		t.Error("expected content indicator when memoryMDContent is present for PlanAgent")
 	}
@@ -133,13 +133,13 @@ func TestBuildSystemPrompt_ViewportPrompt(t *testing.T) {
 	dir := "/tmp/test"
 
 	// Without viewport dimensions — should NOT contain viewport section
-	prompt := buildSystemPrompt(BuildAgent, dir, false, "", "", 0, 0)
+	prompt := buildSystemPrompt(BuildAgent, dir, false, "", "", 0, 0, true)
 	if strings.Contains(prompt, "Rendering viewport") {
 		t.Error("did not expect viewport section when dimensions are 0x0")
 	}
 
 	// With viewport dimensions — should contain viewport section
-	prompt = buildSystemPrompt(BuildAgent, dir, false, "", "", 1920, 1080)
+	prompt = buildSystemPrompt(BuildAgent, dir, false, "", "", 1920, 1080, true)
 	if !strings.Contains(prompt, "Rendering viewport") {
 		t.Error("expected viewport section when dimensions are provided")
 	}
@@ -164,7 +164,7 @@ func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
 
 	// Project-scoped agent keeps the context sections and (memory on + has
 	// memory_recall) gets the agentic-memory block.
-	build := buildSystemPrompt(BuildAgent, dir, true, agentMD, "", 0, 0)
+	build := buildSystemPrompt(BuildAgent, dir, true, agentMD, "", 0, 0, true)
 	for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall"} {
 		if !strings.Contains(build, s) {
 			t.Errorf("BuildAgent prompt should contain %q", s)
@@ -174,7 +174,7 @@ func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
 	// Utility agents omit project context — even with memory enabled — because
 	// they don't operate on the codebase and lack memory_recall.
 	for _, a := range []Agent{IndexAgent, SearchAgent} {
-		p := buildSystemPrompt(a, dir, true, agentMD, "some memory content", 0, 0)
+		p := buildSystemPrompt(a, dir, true, agentMD, "some memory content", 0, 0, true)
 		for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall"} {
 			if strings.Contains(p, s) {
 				t.Errorf("%s prompt should NOT contain project-context %q", a.ID, s)
@@ -845,7 +845,7 @@ func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
 		if !a.HasTool("memory_recall") {
 			t.Errorf("%s has project_memory_recall but not memory_recall; the scope guidance is gated on the latter and would never render", a.ID)
 		}
-		p := buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0)
+		p := buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0, true)
 		if !strings.Contains(p, sentinel) {
 			t.Errorf("%s prompt is missing the project scope guidance", a.ID)
 		}
@@ -858,12 +858,12 @@ func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
 	}
 
 	// Memory inactive: no recall guidance at all, whatever tools the agent holds.
-	if strings.Contains(buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0), sentinel) {
+	if strings.Contains(buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0, true), sentinel) {
 		t.Error("scope guidance leaked into the prompt with memory inactive")
 	}
 	// Agents without the tool must not be told to use it.
 	for _, a := range withoutTool {
-		if strings.Contains(buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0), sentinel) {
+		if strings.Contains(buildSystemPrompt(a, "/tmp/proj", true, "", "", 0, 0, true), sentinel) {
 			t.Errorf("%s lacks project_memory_recall but its prompt advertises it", a.ID)
 		}
 	}

@@ -21,7 +21,7 @@ func TestSystemPromptIsByteStableAcrossSteps(t *testing.T) {
 	build := func() string {
 		// The identical arguments a single turn passes on each of its steps.
 		return strings.Join(buildSystemPromptEntries(
-			BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true), "\n\n")
+			BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true, true), "\n\n")
 	}
 
 	first := build()
@@ -85,7 +85,7 @@ func TestFinalInstructionStaysLastAfterPerTurnBlocks(t *testing.T) {
 		if a.FinalInstruction == "" {
 			t.Fatalf("%s: expected a FinalInstruction (the test is about it)", a.Name)
 		}
-		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true)
+		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true, true)
 		if got := entries[len(entries)-1]; got != a.FinalInstruction {
 			t.Fatalf("%s: buildSystemPromptEntries did not end with FinalInstruction", a.Name)
 		}
@@ -141,7 +141,7 @@ func indexOfEntry(entries []string, want string) int {
 // (session.tsx reads window.innerWidth at send time).
 func TestSystemEntriesRunStableToVolatile(t *testing.T) {
 	entries := buildSystemPromptEntries(
-		BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true)
+		BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true, true)
 
 	posOf := func(fragment string) int {
 		for i, e := range entries {
@@ -173,7 +173,7 @@ func TestSystemEntriesRunStableToVolatile(t *testing.T) {
 // least afford it. This pins it last among the per-turn blocks RunLoop appends.
 func TestCompactionSummaryIsTheLastSystemEntry(t *testing.T) {
 	a := BuildAgent // no FinalInstruction, so "last" is literally last
-	entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true)
+	entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true, true)
 
 	// The order RunLoop appends them in.
 	entries = appendSystemEntry(entries, a, compactContextPrompt())
@@ -187,7 +187,7 @@ func TestCompactionSummaryIsTheLastSystemEntry(t *testing.T) {
 	// And with an output-only agent it sits immediately before the pinned
 	// FinalInstruction, which stays last for prompt reasons.
 	n := NoteAgent
-	e2 := buildSystemPromptEntries(n, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true)
+	e2 := buildSystemPromptEntries(n, "/tmp/proj", false, "", "", 1920, 1080, "", 900, true, true)
 	e2 = appendSystemEntry(e2, n, compactContextPrompt())
 	e2 = appendSystemEntry(e2, n, "SKILL-LIST")
 	e2 = appendSystemEntry(e2, n, "COMPACTION-SUMMARY")

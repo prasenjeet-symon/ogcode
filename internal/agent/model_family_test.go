@@ -78,24 +78,24 @@ func TestBuildSystemPromptForFamily_InjectsForCodebaseAgents(t *testing.T) {
 	const marker = "Working style for this model"
 
 	// A non-Claude family injects the style block for a codebase agent.
-	openaiPrompt := buildSystemPromptForFamily(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "openai")
+	openaiPrompt := buildSystemPromptForFamily(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "openai", true)
 	if !strings.Contains(openaiPrompt, marker) || !strings.Contains(openaiPrompt, "Be decisive") {
 		t.Error("expected the openai working-style block in the Build agent prompt")
 	}
 
 	// Claude (the family the base prompt is written for) injects nothing.
-	anthropicPrompt := buildSystemPromptForFamily(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "anthropic")
+	anthropicPrompt := buildSystemPromptForFamily(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "anthropic", true)
 	if strings.Contains(anthropicPrompt, marker) {
 		t.Error("did not expect a working-style block for the anthropic family")
 	}
 
 	// The plain wrapper (no family) matches the anthropic/generic prompt.
-	if got := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0); strings.Contains(got, marker) {
+	if got := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0, true); strings.Contains(got, marker) {
 		t.Error("buildSystemPrompt wrapper should add no style block")
 	}
 
 	// Utility (non-project-scoped) agents never get the block, even for openai.
-	indexPrompt := buildSystemPromptForFamily(IndexAgent, "/tmp/proj", false, "", "", 0, 0, "openai")
+	indexPrompt := buildSystemPromptForFamily(IndexAgent, "/tmp/proj", false, "", "", 0, 0, "openai", true)
 	if strings.Contains(indexPrompt, marker) {
 		t.Error("non-codebase agents must not get the working-style block")
 	}

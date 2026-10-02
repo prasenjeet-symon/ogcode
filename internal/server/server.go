@@ -104,10 +104,18 @@ type Server struct {
 	// no user toggle — the only gate is a non-empty API key constant).
 	posthogClient *PostHogClient
 
-	// installID is the PostHog distinct id the install script recorded on the
-	// website, empty when the binary was installed some other way. Exposed via
-	// /api/config so the web UI can report against the same person.
+	// installID is the machine's PostHog distinct id: the one the install script
+	// recorded on the website when there was one, otherwise a locally minted id
+	// that EnsureInstallID saves. Always non-empty, so the web UI and the
+	// install's own events share one person. Exposed via /api/config.
 	installID string
+
+	// notesEnabled is the notes feature-flag decision for this install. It is
+	// refreshed in the background (startNotesFlagRefresh); the loop runner reads
+	// this same flag through a pointer, so every turn's system prompt reflects
+	// it, and /api/config reports it too. atomic so readers and the refresh
+	// goroutine never race.
+	notesEnabled atomic.Bool
 
 	// Track running agent loops so they can be cancelled on abort
 	mu           sync.Mutex
@@ -475,7 +483,10 @@ func (s *Server) serve(ctx context.Context) error {
 		MemBarrier:     memBarrier,
 		TurnMemory:     memfile.TurnMemoryEnabled(),
 		NoteStore:      s.noteStore,
-		SearchBridge:   searchBackend,
+		// The runner reads the server's own flag, so the refresher's one store
+		// reaches every turn (and every sub-agent runner copied from this one).
+		NotesEnabled: &s.notesEnabled,
+		SearchBridge: searchBackend,
 		// Whether the agent may compact its own context mid-turn is a process-wide
 		// switch (OGCODE_COMPACT_CONTEXT); the loop resolves it once per turn.
 		// Lets the system prompt say up front whether codebase_map has anything
@@ -549,8 +560,13 @@ func (s *Server) serve(ctx context.Context) error {
 	s.versionManager = version.New()
 
 	// The install script records the website's PostHog id here so the first run
-	// can be joined to the download that led to it. Surfaced via /api/config.
-	s.installID = readInstallID(home)
+	// can be joined to the download that led to it. A machine with no recorded id
+	// (an install that did not come through the website's copy button, or a
+	// source build) gets a locally minted one instead, so the browser always has
+	// a stable anonymous identity. A locally minted id must not report an
+	// install, so the ogcode_installed event is gated on stitched.
+	var installStitched bool
+	s.installID, installStitched = EnsureInstallID(home)
 
 	// Initialize PostHog analytics client from hardcoded credentials baked
 	// into the binary. Analytics is always on; there is no user-facing
@@ -561,7 +577,9 @@ func (s *Server) serve(ctx context.Context) error {
 			s.posthogClient.Capture("ogcode_server_started", posthogDistinctID(), map[string]any{
 				"mode": string(s.mode),
 			})
-			reportInstallOnce(home, s.installID, s.posthogClient.Capture)
+			if installStitched {
+				reportInstallOnce(home, s.installID, s.posthogClient.Capture)
+			}
 			// Report this workspace's project type once, so the analytics can say
 			// which kinds of project ogcode is used on. Detection walks the tree,
 			// so it runs in the background and never delays serving.
@@ -633,6 +651,11 @@ func (s *Server) serve(ctx context.Context) error {
 	// listeners are live: the picker already answers from the seeded catalogue,
 	// and this only fills it in with whatever the endpoints report today.
 	s.refreshModelCatalogsInBackground()
+
+	// Keep the notes feature-flag decision current: PostHog can flip it while a
+	// session is open. The decision drives the note routes and every turn's
+	// system prompt.
+	s.startNotesFlagRefresh(ctx)
 
 	// signalCh owns process signals; stopCh is the programmatic Stop() path, so
 	// a ctx-driven caller (the worker hosting N servers) is never torn down by a

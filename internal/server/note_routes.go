@@ -16,7 +16,21 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
+// notesUnavailable writes a 404 and reports true when the notes feature flag is
+// off. Handlers call it as their first statement so a gated route answers as if
+// it did not exist — the same body an unknown endpoint gets.
+func (s *Server) notesUnavailable(w http.ResponseWriter, r *http.Request) bool {
+	if s.notesEnabled.Load() {
+		return false
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such API endpoint: " + r.URL.Path})
+	return true
+}
+
 func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	directory := r.URL.Query().Get("directory")
 	if directory == "" {
 		directory = s.dir
@@ -33,6 +47,9 @@ func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	var input struct {
 		Query          string `json:"query"`
 		Directory      string `json:"directory"`
@@ -188,6 +205,9 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	noteID := chi.URLParam(r, "noteID")
 	var input struct {
 		Title   string `json:"title"`
@@ -233,6 +253,9 @@ func noteTitle(title, content, fallback string) string {
 }
 
 func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	var input struct {
 		Text        string `json:"text"`
 		Instruction string `json:"instruction"`
@@ -429,6 +452,9 @@ func (s *Server) rewriteNoteQuery(sourceSessionID, originalQuery, model, provide
 }
 
 func (s *Server) handleGetNote(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	noteID := chi.URLParam(r, "noteID")
 	n, err := s.noteStore.Get(noteID)
 	if err != nil {
@@ -443,6 +469,9 @@ func (s *Server) handleGetNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListNoteVersions(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	noteID := chi.URLParam(r, "noteID")
 	versions, err := s.noteStore.ListVersions(noteID)
 	if err != nil {
@@ -456,6 +485,9 @@ func (s *Server) handleListNoteVersions(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleExportNote(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	noteID := chi.URLParam(r, "noteID")
 	n, err := s.noteStore.Get(noteID)
 	if err != nil {
@@ -488,6 +520,9 @@ func (s *Server) handleExportNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
+	if s.notesUnavailable(w, r) {
+		return
+	}
 	noteID := chi.URLParam(r, "noteID")
 	if err := s.noteStore.Delete(noteID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

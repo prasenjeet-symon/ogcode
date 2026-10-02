@@ -1,5 +1,5 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
-import { createSignal } from 'solid-js';
+import { createSignal, createEffect, on } from 'solid-js';
 import { getPath, getConfig, getVCS, getMode, getResources } from '../api/client';
 import type { ResourceSample } from '../api/client';
 import { createSSE, type SSEEvent } from '../api/sse';
@@ -16,6 +16,9 @@ interface ServerContextValue {
   // until the stream next drops.
   connected: () => boolean;
   searchRunning: () => boolean;
+  // Whether the server resolved the notes feature flag as on for this install.
+  // The server owns the flag; the browser never queries PostHog for it.
+  notesEnabled: () => boolean;
   // Rolling window of this process's own CPU/memory samples, oldest first, and
   // the context needed to read them (cadence, core count, process uptime).
   resources: () => ResourceSample[];
@@ -54,6 +57,7 @@ export const ServerProvider: ParentComponent = (props) => {
   const [mode, setMode] = createSignal<'build' | 'plan'>('build');
   const [connected, setConnected] = createSignal(false);
   const [searchRunning, setSearchRunning] = createSignal(false);
+  const [notesEnabled, setNotesEnabled] = createSignal(false);
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
   const [resyncTick, setResyncTick] = createSignal(0);
@@ -105,9 +109,16 @@ export const ServerProvider: ParentComponent = (props) => {
     if (snap.samples?.length) setResources(snap.samples.slice(-RESOURCE_RETAIN));
   }).catch(() => { /* ignore */ });
 
-  getConfig().then((config) => {
-    setSearchRunning((config as any).searchRunning ?? false);
-  }).catch(() => { /* ignore */ });
+  // Pulled out of the initial load so both the first fetch and every reconnect
+  // re-read it: the server decides the notes flag in the background, so a
+  // stream that dropped may have missed the notes.changed that announced it.
+  function loadConfig() {
+    getConfig().then((config) => {
+      setSearchRunning((config as any).searchRunning ?? false);
+      setNotesEnabled(config.notesEnabled ?? false);
+    }).catch(() => { /* ignore */ });
+  }
+  loadConfig();
 
   // Connect to SSE
   createSSE('/event', (event) => {
@@ -141,6 +152,11 @@ export const ServerProvider: ParentComponent = (props) => {
       // would have the whole app reloading its state on a timer.
     } else if (event.type === 'server.heartbeat') {
       // keep alive
+    } else if (event.type === 'notes.changed') {
+      // The server flipped the notes feature flag (its background refresher
+      // polls PostHog). Flip the gate immediately; consumers keyed on
+      // notesEnabled load or clear their state in response.
+      setNotesEnabled((event.properties as any)?.enabled ?? false);
     } else {
       setLastEvent(event);
       setEventTick((n) => n + 1);
@@ -151,6 +167,12 @@ export const ServerProvider: ParentComponent = (props) => {
     dropped = true;
     setConnected(false);
   });
+
+  // A reconnect means whatever was published while the stream was down never
+  // arrived — including a notes.changed. Re-read the config so the flag is
+  // current even if that event was missed. Deferred so it does not run on the
+  // initial pass (the first load already fetched it).
+  createEffect(on(reconnectTick, () => { loadConfig(); }, { defer: true }));
 
   function appendResourceSample(props: any) {
     const sample: ResourceSample | undefined = props?.sample;
@@ -191,6 +213,7 @@ export const ServerProvider: ParentComponent = (props) => {
     mode,
     connected,
     searchRunning,
+    notesEnabled,
     resources,
     resourceMeta,
     eventTick,

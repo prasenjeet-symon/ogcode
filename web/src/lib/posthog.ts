@@ -14,9 +14,12 @@ const POSTHOG_API_HOST = 'https://app.posthog.com';
 
 let initialised = false;
 
-// The distinct id the website handed to the installer, returned by /api/config.
-// When set it replaces the locally-generated id so the binary's first-run
-// ogcode_installed event and this browser session are the same person.
+// The install's distinct id, returned by /api/config: the one the website
+// handed to the installer, or one the server minted for an install that has
+// none. When set it replaces the locally-generated id so the binary's first-run
+// ogcode_installed event and this browser session are the same person. A
+// browser that predates minted ids switches onto one once, as a new person
+// (see EnsureInstallID in internal/server).
 let installId: string | null = null;
 
 // Bumped every time PostHog hands us a fresh set of flags — on the first load

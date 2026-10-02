@@ -1,3 +1,35 @@
+# Release Notes — v0.44.0
+
+## Minor: Project notes arrives gradually
+
+Project notes is now released a step at a time rather than all at once. On an
+install where it has not yet been switched on, the feature is simply absent —
+no Notes entry in a session's sidebar, no save-to-notes action on a message,
+and the notes pages fall through to the ordinary not-found page as though they
+were never there. Nothing else changes, and notes already kept are untouched;
+they reappear the moment the feature is switched on.
+
+Whether it is on is decided per install and re-checked while the app runs, so
+it can turn on without a restart and the interface follows in place.
+
+## Minor: A turn's reasoning reaches the memory it writes
+
+Every completed turn is summarised into a short note that later turns read.
+That note is built from the agent's final reply, so the reasoning behind a
+decision — why one approach was taken and another set aside — was lost once the
+reply was written up. The agent now closes a reply that involved real decisions
+with a brief "Decisions & why" section, and the memory writer keeps that
+section rather than paraphrasing it away. A turn with nothing to weigh in on
+leaves it out, so ordinary replies stay uncluttered.
+
+## Other changes
+
+- The Plan and Breakdown agents no longer list project notes among the things
+  to read when they start, because notes now reach them through the switch
+  above instead of being named unconditionally in their instructions.
+
+---
+
 # Release Notes — v0.43.1
 
 ## Patch: A generated title reaches the sidebar for any session

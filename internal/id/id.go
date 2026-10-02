@@ -85,6 +85,16 @@ func NewNoteVersionID() string {
 	return "ntv_" + newULID()
 }
 
+// NewInstallID mints a locally generated install id for a machine that has none
+// (no install script ever recorded the website's id). It is used as the PostHog
+// distinct id for the feature-flag lookup and for the browser's analytics
+// identity, so download/install stitching works on that machine too. The
+// "local-" prefix marks it as locally minted — see EnsureInstallID in
+// internal/server, which is what must never report it as a stitched install.
+func NewInstallID() string {
+	return "local-" + newULID()
+}
+
 func newULID() string {
 	mu.Lock()
 	defer mu.Unlock()
