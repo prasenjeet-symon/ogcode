@@ -1,3 +1,24 @@
+# Release Notes — v0.43.1
+
+## Patch: A generated title reaches the sidebar for any session
+
+A session's row carries its title and its utility token totals, and the server
+publishes `session.updated` whenever that row changes. The event was applied
+only to the session on screen, so a generated title — or a utility total — for
+any other session, or one still to be opened, never reached the sidebar.
+
+The event's row is now patched into the session list for every session, keeping
+the sidebar current; only the header and the token view stay scoped to the
+active session.
+
+## Other changes
+
+- The guides at `/docs/` now say what the code-map, file-map, and context tools
+  buy you rather than how they work inside, and the deployment guide no longer
+  names internal state paths and endpoints a reader has no use for.
+
+---
+
 # Release Notes — v0.43.0
 
 ## Minor: Long transcripts arrive in pages, and hold their place
