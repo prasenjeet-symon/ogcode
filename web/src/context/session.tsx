@@ -703,7 +703,8 @@ export const SessionProvider: ParentComponent = (props) => {
       // The list is deliberately NOT re-fetched here: selecting a session used to
       // send a redundant listSessions request on every click. The sidebar is
       // refreshed elsewhere (refresh(), create, rename, permission-mode change)
-      // and the background poll keeps it current.
+      // plus the session.updated event, which patches changed rows in place; the
+      // background poll only syncs messages, never the session list.
       let fresh = sessions().find((s) => s.id === id);
       if (!fresh) {
         try {
@@ -1326,9 +1327,12 @@ export const SessionProvider: ParentComponent = (props) => {
   // --- Session row updates ---
   // Utility calls (title generation, command risk assessment, compaction) spend
   // tokens recorded on the session row, not on a message, so nothing in the
-  // message stream carries them. The server publishes session.updated when that
-  // changes; re-read the active session so the token view reflects it. Ignore
-  // updates for other sessions — this only ever touches the one on screen.
+  // message stream carries them. The session row itself also changes off the
+  // message stream — most visibly a generated title, and the token totals after
+  // a utility call. The server publishes session.updated whenever the row
+  // changes; patch the event payload straight into the sidebar list so every
+  // session stays current, and re-read the active session so its header and
+  // token view reflect it too.
   // Debounced: the risk gate can fire several times in one Auto turn, and one
   // fetch of the accumulated total is enough.
   let lastProcessedSessionTick = 0;
@@ -1338,8 +1342,11 @@ export const SessionProvider: ParentComponent = (props) => {
     lastProcessedSessionTick = tick;
     const last = server.lastEvent();
     if (!last || last.type !== 'session.updated') return;
-    const id = last.properties?.id;
-    if (!id || activeSession()?.id !== id) return;
+    const updated = last.properties as Session | undefined;
+    const id = updated?.id;
+    if (!id) return;
+    setSessions((list) => list.map((s) => (s.id === id ? { ...s, ...updated } : s)));
+    if (activeSession()?.id !== id) return;
     if (sessionRowRefreshDebounce) clearTimeout(sessionRowRefreshDebounce);
     sessionRowRefreshDebounce = setTimeout(() => {
       if (activeSession()?.id !== id) return;
