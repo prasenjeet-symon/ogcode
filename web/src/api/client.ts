@@ -405,6 +405,8 @@ export interface ConfigInfo {
   installId?: string;
   /** Whether the server found the notes feature flag on for this install. */
   notesEnabled?: boolean;
+  /** Whether the server found the device-panel feature flag on for this install. */
+  devicePanelEnabled?: boolean;
 }
 
 export function getConfig(): Promise<ConfigInfo> {

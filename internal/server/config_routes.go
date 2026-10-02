@@ -196,8 +196,9 @@ func (s *Server) configPayload() map[string]any {
 		// install script recorded one, otherwise a locally minted id — so it is
 		// always set. The web UI adopts it so that download, install and first
 		// session share one person.
-		"installId":    s.installID,
-		"notesEnabled": s.notesEnabled.Load(),
+		"installId":          s.installID,
+		"notesEnabled":       s.notesEnabled.Load(),
+		"devicePanelEnabled": s.devicePanelEnabled.Load(),
 	}
 }
 

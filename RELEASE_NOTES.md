@@ -1,3 +1,29 @@
+# Release Notes — v0.44.1
+
+## Patch: The device panel arrives gradually
+
+The device panel — the live Android screen and its input — is now released a
+step at a time, the same way project notes are. On an install where it has not
+yet been switched on, the feature is simply absent: no Device entry in either
+sidebar, no device pill in a session's header, and the device page and its
+endpoints fall through to the ordinary not-found page as though they were never
+there. A running stream is never handed to a caller that has not been opted in.
+
+Whether it is on is decided per install and re-checked while the app runs, so it
+can switch on without a restart and the interface follows in place.
+
+## Other changes
+
+- A session's header toolbar no longer carries a device pill or a settings gear.
+  Settings is reached from the sidebar, and the device panel from the sidebar
+  too, so the header keeps to the session's own readouts.
+- On the device page, switching the decoder after a device is picked keeps the
+  stream on the device the header names, the decoder picker can be reached on a
+  narrow screen, and an unsupported decoder falls back to one the browser can
+  actually run instead of mounting a stream that never starts.
+
+---
+
 # Release Notes — v0.44.0
 
 ## Minor: Project notes arrives gradually

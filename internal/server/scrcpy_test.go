@@ -42,6 +42,11 @@ func TestServe_ScrcpyProxy(t *testing.T) {
 	resetScrcpyProxyForTest()
 
 	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	// The device panel is feature-flagged and fails closed; turn it on so this
+	// test exercises the proxy rather than the gate. The background refresher
+	// re-reads the flag once Serve is up, so stub /decide to keep it on too.
+	stubFeatureFlagsOn(t)
+	srv.devicePanelEnabled.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ctx) }()
@@ -136,6 +141,8 @@ func TestServe_ScrcpyDown(t *testing.T) {
 	backend.Close() // free the port so nothing answers on it
 
 	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	stubFeatureFlagsOn(t)
+	srv.devicePanelEnabled.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ctx) }()
@@ -185,6 +192,8 @@ func TestServe_ScrcpyStatus(t *testing.T) {
 	resetScrcpyProxyForTest()
 
 	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	stubFeatureFlagsOn(t)
+	srv.devicePanelEnabled.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ctx) }()
@@ -296,6 +305,57 @@ func TestParseAdbDevices_Empty(t *testing.T) {
 	}
 }
 
+// TestAdbBinarySkipsNonExecutableCandidate pins the executability check in
+// adbBinary(): a platform-tools/adb that exists but lacks the execute bit must
+// not be returned — os.Stat alone would accept it and then fail at exec time,
+// reporting an empty device list indistinguishable from "no devices".
+func TestAdbBinarySkipsNonExecutableCandidate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the execute bit is not meaningful on Windows")
+	}
+	home := t.TempDir()
+	tools := filepath.Join(home, "platform-tools")
+	if err := os.MkdirAll(tools, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nonExec := filepath.Join(tools, "adb")
+	if err := os.WriteFile(nonExec, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(nonExec, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ANDROID_HOME", home)
+	t.Setenv("ANDROID_SDK_ROOT", "")
+	if got := adbBinary(); got == nonExec {
+		t.Fatalf("adbBinary() = %q, want the non-executable SDK candidate skipped", got)
+	}
+}
+
+// TestAdbBinaryReturnsExecutableCandidate is the positive half: an executable
+// platform-tools/adb under ANDROID_HOME (checked first) is returned verbatim.
+func TestAdbBinaryReturnsExecutableCandidate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the execute bit is not meaningful on Windows")
+	}
+	home := t.TempDir()
+	tools := filepath.Join(home, "platform-tools")
+	if err := os.MkdirAll(tools, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(tools, "adb")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(exe, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ANDROID_HOME", home)
+	if got := adbBinary(); got != exe {
+		t.Fatalf("adbBinary() = %q, want %q", got, exe)
+	}
+}
+
 // TestServe_ScrcpyDevices covers GET /api/scrcpy/devices end to end with a
 // fake adb on PATH (CI has no adb and no emulator): the handler must list the
 // fake devices, and an adb that fails must degrade to an empty list — not a
@@ -318,6 +378,8 @@ func TestServe_ScrcpyDevices(t *testing.T) {
 	t.Setenv("ANDROID_HOME", scratch)
 
 	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	stubFeatureFlagsOn(t)
+	srv.devicePanelEnabled.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ctx) }()
@@ -348,7 +410,9 @@ func TestServe_ScrcpyDevices(t *testing.T) {
 	}
 
 	// Now make adb fail (not executable) and confirm the endpoint stays 200
-	// with an empty list instead of erroring.
+	// with an empty list instead of erroring. adbBinary() skips the
+	// non-executable SDK candidate, so the call falls to PATH (absent in CI)
+	// and fails there — same empty-list outcome, but via a real attempt.
 	if err := os.Chmod(fakeADB, 0o644); err != nil {
 		t.Fatal(err)
 	}

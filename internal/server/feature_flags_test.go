@@ -13,15 +13,15 @@ import (
 )
 
 // resetNotesFlagCache clears the package-level decision cache between cases:
-// NotesEnabled reuses an answer for half of notesFlagTTL, so a stale entry would
-// leak one case's answer into the next.
+// featureFlags reuses an answer for half of featureFlagTTL, so a stale entry
+// would leak one case's answer into the next.
 func resetNotesFlagCache(t *testing.T) {
 	t.Helper()
 	clear := func() {
-		notesFeatureCache.mu.Lock()
-		notesFeatureCache.enabled = false
-		notesFeatureCache.fetched = time.Time{}
-		notesFeatureCache.mu.Unlock()
+		featureFlagCache.mu.Lock()
+		featureFlagCache.flags = nil
+		featureFlagCache.fetched = time.Time{}
+		featureFlagCache.mu.Unlock()
 	}
 	clear()
 	t.Cleanup(clear)
@@ -39,13 +39,25 @@ func stubDecide(t *testing.T, status int, body string) *int {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
-	oldURL, oldClient := decideURL, notesHTTPClient
-	decideURL, notesHTTPClient = srv.URL, srv.Client()
+	oldURL, oldClient := decideURL, featureFlagHTTPClient
+	decideURL, featureFlagHTTPClient = srv.URL, srv.Client()
 	t.Cleanup(func() {
-		decideURL, notesHTTPClient = oldURL, oldClient
+		decideURL, featureFlagHTTPClient = oldURL, oldClient
 		srv.Close()
 	})
 	return &hits
+}
+
+// stubFeatureFlagsOn points /decide at a stub that turns every gated feature on,
+// clearing the package cache first so the answer is fetched fresh. A test that
+// runs a real Serve() (whose background refresher re-reads the flags) uses this
+// so the refresher's decision agrees with the test instead of clobbering it with
+// the live PostHog value. A caller should still Store(true) on the atomic to
+// cover the window before the refresher's first fetch completes.
+func stubFeatureFlagsOn(t *testing.T) {
+	t.Helper()
+	resetNotesFlagCache(t)
+	stubDecide(t, http.StatusOK, `{"featureFlags":{"notes-feature":true,"device-panel":true}}`)
 }
 
 // TestNotesEnabled pins the fail-safe contract of the /decide read: only a
@@ -70,7 +82,7 @@ func TestNotesEnabled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			resetNotesFlagCache(t)
 			stubDecide(t, tc.status, tc.body)
-			if got := NotesEnabled("install-abc", notesFlagHTTPTimeout); got != tc.want {
+			if got := NotesEnabled("install-abc", featureFlagHTTPTimeout); got != tc.want {
 				t.Errorf("NotesEnabled = %v, want %v", got, tc.want)
 			}
 		})
@@ -84,7 +96,7 @@ func TestNotesEnabledNetworkErrorIsOff(t *testing.T) {
 	oldURL := decideURL
 	decideURL = "http://127.0.0.1:0" // unroutable
 	t.Cleanup(func() { decideURL = oldURL })
-	if NotesEnabled("install-abc", notesFlagHTTPTimeout) {
+	if NotesEnabled("install-abc", featureFlagHTTPTimeout) {
 		t.Error("NotesEnabled over a dead endpoint = true, want false")
 	}
 }
@@ -99,13 +111,13 @@ func TestNotesEnabledReuseWindow(t *testing.T) {
 	resetNotesFlagCache(t)
 	hits := stubDecide(t, http.StatusOK, `{"featureFlags":{"notes-feature":true}}`)
 	age := func(d time.Duration) {
-		notesFeatureCache.mu.Lock()
-		notesFeatureCache.fetched = time.Now().Add(-d)
-		notesFeatureCache.mu.Unlock()
+		featureFlagCache.mu.Lock()
+		featureFlagCache.fetched = time.Now().Add(-d)
+		featureFlagCache.mu.Unlock()
 	}
 
 	for i := 0; i < 3; i++ {
-		if !NotesEnabled("install-abc", notesFlagHTTPTimeout) {
+		if !NotesEnabled("install-abc", featureFlagHTTPTimeout) {
 			t.Fatalf("call %d: NotesEnabled = false, want true", i)
 		}
 	}
@@ -113,14 +125,14 @@ func TestNotesEnabledReuseWindow(t *testing.T) {
 		t.Fatalf("decide endpoint hit %d times for calls in quick succession, want 1", *hits)
 	}
 
-	age(notesFlagTTL/2 - time.Second)
-	NotesEnabled("install-abc", notesFlagHTTPTimeout)
+	age(featureFlagTTL/2 - time.Second)
+	NotesEnabled("install-abc", featureFlagHTTPTimeout)
 	if *hits != 1 {
 		t.Errorf("an answer under half an interval old was fetched again (%d hits), want it reused", *hits)
 	}
 
-	age(notesFlagTTL - 50*time.Millisecond)
-	NotesEnabled("install-abc", notesFlagHTTPTimeout)
+	age(featureFlagTTL - 50*time.Millisecond)
+	NotesEnabled("install-abc", featureFlagHTTPTimeout)
 	if *hits != 2 {
 		t.Errorf("an answer just under one interval old was reused (%d hits), want the refresher's tick to fetch again", *hits)
 	}
@@ -142,7 +154,7 @@ func TestNotesEnabledSingleFlight(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			results[i] = NotesEnabled("install-abc", notesFlagHTTPTimeout)
+			results[i] = NotesEnabled("install-abc", featureFlagHTTPTimeout)
 		}(i)
 	}
 	close(start)
@@ -201,5 +213,94 @@ func TestNotesRoutesGatedByFlag(t *testing.T) {
 	}
 	if cfg["notesEnabled"] != true {
 		t.Errorf("/api/config notesEnabled = %v, want true", cfg["notesEnabled"])
+	}
+}
+
+// TestDevicePanelEnabled pins the device-panel read the same way as the notes
+// one: only a boolean true under the panel's key turns it on; an absent flag, or
+// one carried for another feature, reads as off.
+func TestDevicePanelEnabled(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"flag on", `{"featureFlags":{"device-panel":true}}`, true},
+		{"flag off", `{"featureFlags":{"device-panel":false}}`, false},
+		{"flag absent", `{"featureFlags":{}}`, false},
+		{"only another flag", `{"featureFlags":{"notes-feature":true}}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetNotesFlagCache(t)
+			stubDecide(t, http.StatusOK, tc.body)
+			if got := DevicePanelEnabled("install-abc", featureFlagHTTPTimeout); got != tc.want {
+				t.Errorf("DevicePanelEnabled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDevicePanelRoutesGatedByFlag pins the HTTP gate: with the flag off the
+// device endpoints answer as unknown endpoints and the /scrcpy proxy answers a
+// plain 404, so no stream can be opened; with the flag on the endpoints serve
+// and the proxy forwards to the configured target.
+func TestDevicePanelRoutesGatedByFlag(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.routes()
+
+	srv.devicePanelEnabled.Store(false)
+	for _, path := range []string{"/api/scrcpy/status", "/api/scrcpy/devices"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET %s with flag off = %d, want 404 (body %s)", path, rec.Code, rec.Body.String())
+		}
+		if body := rec.Body.String(); !strings.Contains(body, "no such API endpoint") {
+			t.Errorf("GET %s flag-off body = %q, want the unknown-endpoint 404", path, body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/scrcpy/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /scrcpy/ with flag off = %d, want 404", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	var cfg map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode /api/config: %v (body %s)", err, rec.Body.String())
+	}
+	if cfg["devicePanelEnabled"] != false {
+		t.Errorf("/api/config devicePanelEnabled = %v, want false", cfg["devicePanelEnabled"])
+	}
+
+	// Flag on: the API endpoints serve, and the proxy forwards to the target.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("device-ui"))
+	}))
+	t.Cleanup(backend.Close)
+	setenvScrappyTargetForTest(t, backend.URL)
+
+	srv.devicePanelEnabled.Store(true)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/scrcpy/status", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/scrcpy/status with flag on = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/scrcpy/", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "device-ui") {
+		t.Fatalf("GET /scrcpy/ with flag on = %d body %q, want the proxied backend", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode /api/config: %v (body %s)", err, rec.Body.String())
+	}
+	if cfg["devicePanelEnabled"] != true {
+		t.Errorf("/api/config devicePanelEnabled = %v, want true", cfg["devicePanelEnabled"])
 	}
 }

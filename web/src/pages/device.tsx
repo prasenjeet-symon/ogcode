@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onCleanup, onMount } from 'solid-js';
+import { createSignal, createMemo, For, Show, onCleanup, onMount } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
 import { useServer } from '../context/server';
 import { getScrcpyStatus, getScrcpyDevices, type ScrcpyDevice, type ScrcpyStatus } from '../api/client';
@@ -64,9 +64,13 @@ export default function DevicePage() {
     const v = searchParams.udid;
     return typeof v === 'string' && v ? v : '';
   };
+  // The ?player= param is honoured only when this browser can actually run
+  // that decoder — an unsupported one (webcodecs without VideoDecoder, say)
+  // falls through to defaultPlayer() in streamSrc() instead of mounting a
+  // dead stream. Same check the picker greys entries with.
   const player = () => {
     const v = searchParams.player;
-    if (typeof v === 'string' && v && PLAYERS.some((p) => p.name === v)) return v;
+    if (typeof v === 'string' && v && PLAYERS.some((p) => p.name === v && p.supported())) return v;
     return '';
   };
 
@@ -111,7 +115,10 @@ export default function DevicePage() {
   // when one is attached instead of a dead serial. A device that is present
   // but not ready still streams: ws-scrcpy shows its own waiting state.
   const attached = () => (devices() ?? []).filter((d) => d.state === 'device');
-  const resolvedUdid = () => {
+  // A memo, not a bare getter: resolvedUdid() is read many times over (once
+  // per device row, in the header, in the stream URL), and each read of a
+  // plain getter re-walks the device list.
+  const resolvedUdid = createMemo(() => {
     const explicit = udid();
     if (explicit) return explicit;
     const list = devices() ?? [];
@@ -121,7 +128,7 @@ export default function DevicePage() {
       list[0]?.serial ??
       DEFAULT_UDID
     );
-  };
+  });
 
   // The WebSocket URL the stream client connects to: same origin (so it
   // survives ogcode's /scrcpy proxy untouched), routed by ws-scrcpy's
@@ -170,11 +177,12 @@ export default function DevicePage() {
     setPlayerOpen(false);
     if (name === (player() || defaultPlayer())) return;
     setSearchParams(
-      { udid: udid() || undefined, player: name },
+      { udid: resolvedUdid(), player: name },
       { replace: true },
     );
     setStreamLive(false);
     setTimeout(() => setStreamLive(true), 50);
+    refresh();
   };
 
   const deepLink = () =>
@@ -223,7 +231,7 @@ export default function DevicePage() {
               stream on that device's deep link. */}
           <div class="relative shrink-0">
             <button
-              onClick={() => setPicking(!picking())}
+              onClick={() => { setPlayerOpen(false); setPicking(!picking()); }}
               class="h-8 pl-2.5 pr-2 rounded-lg text-[12px] bg-[color:var(--bg-elevated)] border border-[color:var(--border-subtle)] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:border-[color:var(--border-default)] transition flex items-center gap-1.5"
               title="Choose which attached device to stream"
             >
@@ -287,26 +295,30 @@ export default function DevicePage() {
 
           {/* Player picker: which in-browser decoder renders the H.264 stream.
               WebCodecs is the default; the rest are fallbacks for browsers
-              without VideoDecoder. Picking one remounts the stream. */}
-          <div class="relative shrink-0 hidden sm:block">
+              without VideoDecoder. Picking one remounts the stream. The label
+              and caret drop below sm so the control fits a narrow header as an
+              icon, and the popover pins to the viewport edge there rather than
+              the button (a 16rem panel anchored to a mid-header button would
+              run off the right edge). */}
+          <div class="relative shrink-0">
             <button
-              onClick={() => setPlayerOpen(!playerOpen())}
+              onClick={() => { setPicking(false); setPlayerOpen(!playerOpen()); }}
               class="h-8 pl-2.5 pr-2 rounded-lg text-[12px] bg-[color:var(--bg-elevated)] border border-[color:var(--border-subtle)] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:border-[color:var(--border-default)] transition flex items-center gap-1.5"
               title="Which browser decoder renders the stream"
             >
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 7.5h6.75a2.25 2.25 0 012.25 2.25v4.5a2.25 2.25 0 01-2.25 2.25H4.5a2.25 2.25 0 01-2.25-2.25v-6A2.25 2.25 0 014.5 7.5z" />
               </svg>
-              <span class="max-w-[120px] truncate">
+              <span class="hidden max-w-[120px] truncate sm:block">
                 {PLAYERS.find((p) => p.name === (player() || defaultPlayer()))?.label ?? 'WebCodecs (hardware)'}
               </span>
-              <svg class="w-3 h-3 text-[color:var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <svg class="hidden w-3 h-3 text-[color:var(--text-tertiary)] sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
             <Show when={playerOpen()}>
               <div class="fixed inset-0 z-30" onClick={() => setPlayerOpen(false)} />
-              <div class="absolute left-0 top-9 z-40 w-64 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] shadow-[var(--shadow-lg)] overflow-hidden">
+              <div class="fixed inset-x-2 top-14 z-40 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] shadow-[var(--shadow-lg)] overflow-hidden sm:absolute sm:inset-x-auto sm:left-0 sm:top-9 sm:w-64">
                 <p class="px-3 pt-2.5 pb-1 text-[10px] uppercase tracking-wide text-[color:var(--text-muted)]">Stream decoder</p>
                 <ul class="pb-1.5">
                   <For each={PLAYERS}>

@@ -111,11 +111,18 @@ type Server struct {
 	installID string
 
 	// notesEnabled is the notes feature-flag decision for this install. It is
-	// refreshed in the background (startNotesFlagRefresh); the loop runner reads
-	// this same flag through a pointer, so every turn's system prompt reflects
-	// it, and /api/config reports it too. atomic so readers and the refresh
-	// goroutine never race.
+	// refreshed in the background (startFeatureFlagRefresh); the loop runner
+	// reads this same flag through a pointer, so every turn's system prompt
+	// reflects it, and /api/config reports it too. atomic so readers and the
+	// refresh goroutine never race.
 	notesEnabled atomic.Bool
+
+	// devicePanelEnabled is the device-panel (scrcpy) feature-flag decision for
+	// this install, refreshed by the same background goroutine. It gates the
+	// /device UI, the /api/scrcpy/* endpoints and the /scrcpy/* stream proxy, and
+	// /api/config reports it. atomic so readers and the refresh goroutine never
+	// race.
+	devicePanelEnabled atomic.Bool
 
 	// Track running agent loops so they can be cancelled on abort
 	mu           sync.Mutex
@@ -652,10 +659,10 @@ func (s *Server) serve(ctx context.Context) error {
 	// and this only fills it in with whatever the endpoints report today.
 	s.refreshModelCatalogsInBackground()
 
-	// Keep the notes feature-flag decision current: PostHog can flip it while a
-	// session is open. The decision drives the note routes and every turn's
-	// system prompt.
-	s.startNotesFlagRefresh(ctx)
+	// Keep the feature-flag decisions current: PostHog can flip one while a
+	// session is open. The decisions drive the note and device-panel routes, the
+	// /scrcpy proxy, and every turn's system prompt.
+	s.startFeatureFlagRefresh(ctx)
 
 	// signalCh owns process signals; stopCh is the programmatic Stop() path, so
 	// a ctx-driven caller (the worker hosting N servers) is never torn down by a

@@ -37,6 +37,7 @@ import NotFound from './pages/not-found';
 
 export default function App() {
   const notesOn = () => useServer().notesEnabled();
+  const deviceOn = () => useServer().devicePanelEnabled();
   return (
     <Router root={AppWrapper}>
       <Route path="/onboarding" component={Onboarding} />
@@ -53,7 +54,11 @@ export default function App() {
         <Route path="/notes/:id" component={NoteDetailPage} />
       </Show>
       <Route path="/docindex" component={DocIndexPage} />
-      <Route path="/device" component={DevicePage} />
+      {/* The device panel (scrcpy screen + input) is gated behind its flag;
+          otherwise the wildcard renders the 404 page for /device. */}
+      <Show when={deviceOn()}>
+        <Route path="/device" component={DevicePage} />
+      </Show>
       <Route path="/preview" component={PreviewPage} />
       {/* A legacy /preview/<port>/ link is a client-side navigation that lands
           here with the port in the path. The page normalizes it to

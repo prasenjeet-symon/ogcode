@@ -19,6 +19,9 @@ interface ServerContextValue {
   // Whether the server resolved the notes feature flag as on for this install.
   // The server owns the flag; the browser never queries PostHog for it.
   notesEnabled: () => boolean;
+  // Whether the server resolved the device-panel feature flag as on for this
+  // install. Same ownership model as notesEnabled.
+  devicePanelEnabled: () => boolean;
   // Rolling window of this process's own CPU/memory samples, oldest first, and
   // the context needed to read them (cadence, core count, process uptime).
   resources: () => ResourceSample[];
@@ -58,6 +61,7 @@ export const ServerProvider: ParentComponent = (props) => {
   const [connected, setConnected] = createSignal(false);
   const [searchRunning, setSearchRunning] = createSignal(false);
   const [notesEnabled, setNotesEnabled] = createSignal(false);
+  const [devicePanelEnabled, setDevicePanelEnabled] = createSignal(false);
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
   const [resyncTick, setResyncTick] = createSignal(0);
@@ -116,6 +120,7 @@ export const ServerProvider: ParentComponent = (props) => {
     getConfig().then((config) => {
       setSearchRunning((config as any).searchRunning ?? false);
       setNotesEnabled(config.notesEnabled ?? false);
+      setDevicePanelEnabled(config.devicePanelEnabled ?? false);
     }).catch(() => { /* ignore */ });
   }
   loadConfig();
@@ -157,6 +162,9 @@ export const ServerProvider: ParentComponent = (props) => {
       // polls PostHog). Flip the gate immediately; consumers keyed on
       // notesEnabled load or clear their state in response.
       setNotesEnabled((event.properties as any)?.enabled ?? false);
+    } else if (event.type === 'device-panel.changed') {
+      // Same contract as notes.changed, for the device panel's flag.
+      setDevicePanelEnabled((event.properties as any)?.enabled ?? false);
     } else {
       setLastEvent(event);
       setEventTick((n) => n + 1);
@@ -214,6 +222,7 @@ export const ServerProvider: ParentComponent = (props) => {
     connected,
     searchRunning,
     notesEnabled,
+    devicePanelEnabled,
     resources,
     resourceMeta,
     eventTick,

@@ -83,15 +83,41 @@ func (s *Server) serveScrcpy(r chiRouter) {
 	// override) can point OGCODE_SCRCPY_TARGET elsewhere, and the sync.Once
 	// would freeze the default target forever.
 	r.Handle(scrcpyPrefix+"/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !s.devicePanelEnabled.Load() {
+			http.NotFound(w, req)
+			return
+		}
 		http.StripPrefix(scrcpyPrefix, getScrcpyProxy()).ServeHTTP(w, req)
 	}))
-	r.Handle(scrcpyPrefix, http.RedirectHandler(scrcpyPrefix+"/", http.StatusMovedPermanently))
+	r.Handle(scrcpyPrefix, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !s.devicePanelEnabled.Load() {
+			http.NotFound(w, req)
+			return
+		}
+		http.RedirectHandler(scrcpyPrefix+"/", http.StatusMovedPermanently).ServeHTTP(w, req)
+	}))
+}
+
+// devicePanelUnavailable writes a 404 and reports true when the device-panel
+// feature flag is off. It mirrors notesUnavailable: handlers call it as their
+// first statement so a gated route answers as if it did not exist — the same
+// body an unknown endpoint gets — and a live Android stream never reaches a
+// caller that has not been opted in.
+func (s *Server) devicePanelUnavailable(w http.ResponseWriter, r *http.Request) bool {
+	if s.devicePanelEnabled.Load() {
+		return false
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such API endpoint: " + r.URL.Path})
+	return true
 }
 
 // handleScrcpyStatus answers GET /api/scrcpy/status with whether ws-scrcpy is
 // up and where the proxy points. The device panel polls this to decide between
 // embedding the stream and showing the "start ws-scrcpy" hint.
-func (s *Server) handleScrcpyStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleScrcpyStatus(w http.ResponseWriter, r *http.Request) {
+	if s.devicePanelUnavailable(w, r) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"up":     s.scrcpyReachable(),
 		"target": scrcpyTarget(),
@@ -110,7 +136,13 @@ type scrcpyDevice struct {
 
 // adbBinary resolves the adb executable: ANDROID_HOME/platform-tools/adb, then
 // ANDROID_SDK_ROOT/platform-tools/adb, then ~/Library/Android/sdk/platform-tools/adb
-// (the macOS Android Studio layout), then plain PATH. First hit wins.
+// (the macOS Android Studio layout), then whatever adb is on PATH. First hit
+// wins.
+//
+// A candidate in a known SDK layout is accepted only when it is executable:
+// os.Stat alone would take a present-but-not-executable file and then fail at
+// exec time, giving an empty device list indistinguishable from "no devices".
+// The PATH fallback is left to exec, which reports its own error.
 func adbBinary() string {
 	var candidates []string
 	if home := os.Getenv("ANDROID_HOME"); home != "" {
@@ -123,12 +155,17 @@ func adbBinary() string {
 		candidates = append(candidates, filepath.Join(home, "Library", "Android", "sdk", "platform-tools", "adb"))
 	}
 	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
 			return c
 		}
 	}
-	// No SDK layout found — fall back to PATH; if adb is absent the devices
-	// call fails and the endpoint answers with an empty list.
+	// No usable SDK layout found. Try the PATH-resolved adb explicitly (so a
+	// non-executable entry there is skipped rather than returned), then fall
+	// back to the bare name; if adb is absent the devices call fails and the
+	// endpoint answers with an empty list.
+	if c, err := exec.LookPath("adb"); err == nil {
+		return c
+	}
 	return "adb"
 }
 
@@ -189,7 +226,10 @@ func parseAdbDevices(out string) []scrcpyDevice {
 // device list the picker offers: serial, adb state, model. It only reads the
 // list — starting emulators and pairing stay outside ogcode, same as
 // ws-scrcpy itself.
-func (s *Server) handleScrcpyDevices(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleScrcpyDevices(w http.ResponseWriter, r *http.Request) {
+	if s.devicePanelUnavailable(w, r) {
+		return
+	}
 	devices := adbDevices()
 	if devices == nil {
 		devices = []scrcpyDevice{}

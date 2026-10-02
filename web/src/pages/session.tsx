@@ -1,6 +1,5 @@
-import { useParams, useNavigate, useLocation } from '@solidjs/router';
+import { useParams } from '@solidjs/router';
 import { useSession } from '../context/session';
-import { useServer } from '../context/server';
 import { createEffect, createMemo, createSignal, on, Show } from 'solid-js';
 import MessageList from '../components/message-list';
 import PromptInput from '../components/prompt-input';
@@ -9,7 +8,6 @@ import TokenPill from '../components/token-pill';
 import ContextMeter from '../components/context-meter';
 import ResourcePill from '../components/resource-pill';
 import SubagentIndicator from '../components/subagent-indicator';
-import ScrcpyStatusPill from '../components/scrcpy-status-pill';
 import { DrawerToggle } from '../components/sidebar-shell';
 import AskUserDialog from '../components/ask-user-dialog';
 import { NotFoundPanel } from './not-found';
@@ -20,10 +18,7 @@ export default function Chat() {
 
 function ChatContent() {
   const session = useSession();
-  const server = useServer();
   const params = useParams();
-  const navigate = useNavigate();
-  const location = useLocation();
 
   createEffect(on(() => params.id, (id) => {
     if (id) {
@@ -71,19 +66,6 @@ function ChatContent() {
             <ContextMeter />
             <TokenPill />
             <ResourcePill />
-            <ScrcpyStatusPill />
-            <button
-              type="button"
-              onClick={() => navigate('/settings', { state: { from: location.pathname } })}
-              class="icon-btn transition-colors"
-              title="Settings"
-              aria-label="Settings"
-            >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c-.007-.38.138-.751.43-.992l1.004-.827a1.125 1.125 0 00.26-1.43l-1.298-2.247a1.125 1.125 0 00-1.37-.491l-1.216.456c-.356.133-.751.072-1.076-.124a6.47 6.47 0 01-.22-.128c-.331-.183-.581-.495-.644-.869l-.214-1.281z" />
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
           </div>
         </header>
 
