@@ -116,6 +116,6 @@ make build          # builds web/dist, then the Go binary with CGO_ENABLED=1
 make install        # copies to ~/.local/bin and re-signs on macOS
 ```
 
-`CGO_ENABLED=1` is required: PDF rendering and the tree-sitter grammars link native libraries.
+`CGO_ENABLED=1` is required because the binary links native libraries for PDF rendering and syntax parsing.
 
 Next: [Quick start](/docs/quick-start/).

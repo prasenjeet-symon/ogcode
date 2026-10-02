@@ -23,12 +23,16 @@ The mode you launch decides the shape of the work: **Build** for everyday conver
 
 The model decides *what* to do; the tools are *how*. Each turn offers the agent a set drawn from its definition — file reads and edits, shell commands, search, the code map, document indexing, web fetch, and any external tools you connect. Every call is recorded in the transcript with its arguments and result, so you can see exactly what happened.
 
-A few worth knowing by name:
+Three of them work together to keep the agent fast on a large project:
+
+- **`codebase_map`** — gives the agent a feel for an unfamiliar codebase, so it starts from your project's structure instead of opening files at random.
+- **`file_map`** — points the agent at the part of a file that matters, so it goes straight there instead of reading the whole file.
+- **`compact_context`** — lets a long turn carry on coherently, setting aside detail it has finished with and keeping the thread of the task.
+
+A few more worth knowing by name:
 
 | Tool | What it does |
 | --- | --- |
-| `codebase_map` | The indexed outline of the project, folder by folder |
-| `file_map` | The declarations inside one file, with line ranges |
 | `read`, `glob`, `grep` | Targeted reads and searches, budgeted so context stays useful |
 | `edit`, `write` | Change files; edits apply as explicit hunks you can review |
 | `bash` | Run commands, with a denylist for the dangerous ones |

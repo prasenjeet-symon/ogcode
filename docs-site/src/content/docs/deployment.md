@@ -23,9 +23,9 @@ It is about the **standalone server only**. If you are hosting ogcode for severa
 ogcode serve --port 9595      # or: ogcode -p 9595
 ```
 
-If the port is busy the server tries the next one, up to 50 times, and prints `port in use, trying next`. On a remote host you want a **fixed, known port** so your tunnel or proxy points at the right place — pass `--port` explicitly and make sure it is free. The server also remembers the port it used per project in `~/.ogcode/ports.json`; an explicit `--port` overrides and is saved.
+If the port is busy the server tries the next one, up to 50 times, and prints `port in use, trying next`. On a remote host you want a **fixed, known port** so your tunnel or proxy points at the right place — pass `--port` explicitly and make sure it is free. The server also remembers the port it used for each project; an explicit `--port` overrides and is saved.
 
-**There is no built-in authentication.** No login page, no basic auth, no bearer token — every route, including the file, shell, and settings APIs, is open to anyone who can reach the port. CORS is `Access-Control-Allow-Origin: *`. **Never expose the port directly to the public internet.** Authentication has to come from something in front of it: an SSH tunnel, or a reverse proxy with a password.
+**There is no built-in authentication.** No login page, no basic auth, no bearer token — anyone who can reach the port can drive the agent: read and write files, run shell commands, and change settings. **Never expose the port directly to the public internet.** Authentication has to come from something in front of it: an SSH tunnel, or a reverse proxy with a password.
 
 The startup banner prints `ogcode is running at http://localhost:<port>`; on a headless host the attempt to open a browser fails harmlessly.
 
@@ -113,9 +113,8 @@ server {
         proxy_set_header Upgrade           $http_upgrade;
         proxy_set_header Connection        "";
 
-        # The UI streams live updates over Server-Sent Events at GET /api/event.
-        # Buffering holds those messages until the buffer fills, so the UI appears
-        # frozen. ogcode already sends X-Accel-Buffering: no; this is belt and braces.
+        # The UI streams live updates over Server-Sent Events. Buffering holds
+        # those messages until the buffer fills, so the UI appears frozen.
         proxy_buffering off;
         proxy_read_timeout 3600s;
     }
@@ -147,7 +146,7 @@ Generate the hash with `caddy hash-password`. `flush_interval -1` forces streami
 
 ### If it feels frozen
 
-The symptom is a UI that loads but never updates — no new messages, no tool output. That is Server-Sent Events being buffered. ogcode serves progress on `GET /api/event` as `text/event-stream`; make sure the proxy does not buffer that response (`proxy_buffering off` in nginx, `flush_interval -1` in Caddy) and that the read timeout is generous (`proxy_read_timeout 3600s`). The client reconnects every 200 ms, so once buffering is off it recovers on its own.
+The symptom is a UI that loads but never updates — no new messages, no tool output. That is Server-Sent Events being buffered. ogcode streams progress over SSE (`text/event-stream`); make sure the proxy does not buffer that response (`proxy_buffering off` in nginx, `flush_interval -1` in Caddy) and that the read timeout is generous (`proxy_read_timeout 3600s`). Once buffering is off it recovers on its own.
 
 ### Stronger than a password
 
@@ -171,12 +170,12 @@ docker run -d --name ogcode \
 ```
 
 - `-p 127.0.0.1:9595:9595` publishes on the host's **loopback only** — pair this with an SSH tunnel or a reverse proxy on the host. Use `-p 9595:9595` only if you intend the port to be reachable on the network directly (which, again, has no authentication).
-- `-v ~/.ogcode:/root/.ogcode` persists the **global config DB** (`config.db`: providers, model preferences, theme, model catalogue), logs, and MCP tokens across container restarts.
+- `-v ~/.ogcode:/root/.ogcode` persists machine-wide state — providers, model preferences, theme, logs, and MCP tokens — across container restarts.
 - `-v /path/to/your/project:/workspace` mounts the code the agent will work on, and `-w /workspace` starts it there. git is installed in the image, so diffs and status work.
 - The image is also mirrored to Docker Hub as `prasenjeetsimon/ogcode:latest` — either reference works.
 - The container runs as root; `~/.ogcode` inside it is `/root/.ogcode`.
 
-Health: the image ships a `HEALTHCHECK` that probes `GET /api/config` (JSON 200). A running container with `(healthy)` is serving.
+Health: the image ships a `HEALTHCHECK` that probes the running server and expects a `200`. A running container with `(healthy)` is serving.
 
 ### Compose
 
@@ -195,7 +194,7 @@ services:
 
 ### Persistence matters
 
-ogcode keeps **two** databases: the global config DB at `~/.ogcode/config.db`, and a **per-project** DB at `<project>/.ogcode/ogcode.db` (sessions, messages, memory, notes). Mount both consistently: if the workspace path changes between runs, the project DB moves with it and previously-created sessions and notes appear to vanish. Bind-mount the same host paths every time.
+ogcode keeps machine-wide state in `~/.ogcode` and **per-project** state in `<project>/.ogcode/` (sessions, memory, notes). Mount both consistently: if the workspace path changes between runs, the project state moves with it and previously-created sessions and notes appear to vanish. Bind-mount the same host paths every time.
 
 
 ## Live service preview, remotely
@@ -218,7 +217,6 @@ Pick a **dedicated** domain for this — everything under it is treated as previ
 By default the terminal shows only errors; full logs go to a rotated file:
 
 - `<project>` server: `~/.ogcode/logs/<project>-<hash>/ogcode.log`
-- worker: `~/.ogcode/logs/worker.log`
 
 Directories are `0700`, files `0600`, and secrets are redacted. Useful environment variables:
 
@@ -240,7 +238,7 @@ To watch what the server is doing, run with `OGCODE_LOG_CONSOLE=info` (or set th
 
 - [ ] ogcode is **not** reachable on its port from the public internet.
 - [ ] Access is through an SSH tunnel **or** a reverse proxy with HTTPS **and** a password.
-- [ ] The proxy does not buffer `GET /api/event` (SSE) — verified by the UI updating live.
+- [ ] The proxy does not buffer the SSE progress stream — verified by the UI updating live.
 - [ ] The global config volume (`~/.ogcode`) and the workspace are mounted at **stable paths**.
 - [ ] For remotely-viewable service previews, `OGCODE_PREVIEW_DOMAIN` is set with matching wildcard DNS and TLS.
 - [ ] For more than one user, you are using the [control plane](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md) instead of the standalone server.

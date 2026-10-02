@@ -20,7 +20,7 @@ If you have used an editor plugin with a chat panel, the difference is the shape
 
 ## What you can do with it
 
-- **Understand a codebase.** Ask how a feature works and get an answer grounded in the real files, with the relevant declarations and line ranges pointed out.
+- **Understand a codebase.** Ask how a feature works and get an answer grounded in the real files, pointed straight at the parts that matter.
 - **Build and fix.** Describe a change and the agent edits the files, runs the build and tests, and reports what it changed and how it verified it.
 - **Plan larger work.** Give it a whole feature and let Plan Mode split it into tasks it can run in parallel and turn into pull requests.
 - **Research.** Let it search the web and read pages alongside your local code and documents.

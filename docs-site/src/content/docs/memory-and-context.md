@@ -1,6 +1,6 @@
 ---
 title: Memory & context
-description: Project instructions, turn-by-turn recall, and automatic compaction.
+description: Project instructions, turn-by-turn recall, and a working context that stays a useful size.
 ---
 
 A model can only reason over what is in front of it. Ogcode's job is to keep the right things in front of it — what you have told it about the project, what it learned in earlier sessions, and a working context that stays a useful size instead of growing without bound.
@@ -22,12 +22,9 @@ Because the summaries are kept as plain, readable files, the memory is something
 
 ## Keeping the context a useful size
 
-Long turns would otherwise fill the model's context and start to crowd out what matters. Ogcode handles this in two ways:
+Long turns would otherwise fill the model's context and start to crowd out what matters. Ogcode keeps the agent on task: as a turn grows, it moves the agent on from material it has already gathered, and when the working context gets large the agent continues from a summary of where things stand rather than the raw text it no longer needs.
 
-- **Read pressure** — as a turn accumulates a lot of file and search content, the agent is reminded to move on rather than keep reading.
-- **Compaction** — when the working context gets large, the agent replaces it with a summary of where things stand and keeps going. You do not lose the thread of the task; you lose the raw text it no longer needs.
-
-This runs automatically. You generally notice it only as a large job staying coherent instead of slowing down or losing track.
+This runs automatically. You do not lose the thread of a task — only the detail that has stopped being useful — and you generally notice it only as a large job staying coherent instead of slowing down or losing track.
 
 ## Indexing a project
 

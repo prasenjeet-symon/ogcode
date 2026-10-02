@@ -16,7 +16,7 @@ ogcode
 
 The server binds all interfaces on port `9595` and opens the web UI at [http://localhost:9595](http://localhost:9595). The directory you started it from is the workspace the agent can read and write; you can point it elsewhere from the workspace switcher.
 
-If the port is already taken, ogcode remembers the next free one **per project** in `~/.ogcode/ports.json` and prints the address it settled on.
+If the port is already taken, ogcode remembers the next free one **per project** and prints the address it settled on.
 
 ## Give it a task
 
@@ -75,13 +75,13 @@ The agent reads files on demand, but you can pre-build a searchable index of the
 ogcode index
 ```
 
-This walks the tree (honouring `.gitignore` and your exclude rules) and indexes source files, plus PDFs and DOCX documents, into the project's database. It is also refreshed automatically after a turn.
+This walks the tree (honouring `.gitignore` and your exclude rules) and indexes source files, plus PDFs and DOCX documents, into the project's own data. It is also refreshed automatically after a turn.
 
 ## Where things live
 
 | Path | What it holds |
 | --- | --- |
-| `.ogcode/` | Per-project state: the session database, index, and worktrees |
+| `.ogcode/` | Per-project state: sessions, the index, and worktrees |
 | `~/.ogcode/` | Machine-wide config, provider keys, the port map |
 | `~/.config/ogcode/config.json` | Global settings |
 | `ogcode.json` | Project settings (safe to commit) |

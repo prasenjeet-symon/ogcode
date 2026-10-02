@@ -75,7 +75,7 @@ const nav: DocGroup[] = [
       {
         title: 'Memory & context',
         slug: '/memory-and-context',
-        description: 'Project instructions, turn-by-turn recall, and automatic compaction.',
+        description: 'Project instructions, turn-by-turn recall, and a working context that stays a useful size.',
       },
       {
         title: 'Search, skills & MCP',
