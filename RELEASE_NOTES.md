@@ -1,3 +1,26 @@
+# Release Notes — v0.44.3
+
+## Patch: The mark goes orange, and Discord goes away
+
+The logo and the app's favicon are now the project's brand orange — the same
+colour the interface has used as its default accent since v0.42.0. Until now the
+mark was violet, so the tab icon and the accent inside the app did not match.
+
+Discord is gone. There was never a server, and there will not be one, so the
+badge, the nav item, the footer link and the FAQ entry pointed nowhere. The app
+had its own links on the home page and under Settings → About, and those are
+removed too.
+
+## Other changes
+
+- The README is rewritten to lead with what Ogcode does rather than how it
+  works — the architecture walkthrough and the roadmap are gone, and every
+  remaining detail is delegated to the docs site.
+- The README's hero screenshot is retaken against a throwaway project, so the
+  public page no longer shows this repository's own session titles and paths.
+
+---
+
 # Release Notes — v0.44.2
 
 ## Patch: The project moves to ogcode.in
