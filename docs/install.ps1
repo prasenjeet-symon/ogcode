@@ -1,5 +1,5 @@
 # Ogcode Installer for Windows
-# Usage: irm https://ogcode.xyz/install.ps1 | iex
+# Usage: irm https://ogcode.in/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 

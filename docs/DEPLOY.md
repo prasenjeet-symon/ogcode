@@ -2,7 +2,7 @@
 
 This guide has moved into the documentation site:
 
-**https://ogcode.xyz/docs/deployment/**
+**https://ogcode.in/docs/deployment/**
 
 It covers the three supported ways to reach a remote ogcode safely — an SSH
 tunnel, a reverse proxy with HTTPS and authentication, and Docker — and is kept

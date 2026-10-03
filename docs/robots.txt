@@ -1,6 +1,6 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ogcode.xyz/sitemap.xml
-Sitemap: https://ogcode.xyz/blog/sitemap-index.xml
-Sitemap: https://ogcode.xyz/docs/sitemap-index.xml
+Sitemap: https://ogcode.in/sitemap.xml
+Sitemap: https://ogcode.in/blog/sitemap-index.xml
+Sitemap: https://ogcode.in/docs/sitemap-index.xml
