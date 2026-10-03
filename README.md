@@ -8,13 +8,16 @@
 Ogcode is an AI agent that understands your codebase, uses real tools, researches the web, remembers decisions, plans complex work, and ships changes — from your browser. Your computer, your models, your data, your rules.
 
 <p align="center">
-  <a href="https://discord.gg/JQP9t8y2Zv"><img alt="Discord" src="https://img.shields.io/discord/1373677337985056828?style=flat-square&label=discord" /></a>
   <a href="https://github.com/prasenjeet-symon/ogcode/releases"><img alt="Release" src="https://img.shields.io/github/v/release/prasenjeet-symon/ogcode?style=flat-square&label=release" /></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/prasenjeet-symon/ogcode?style=flat-square&label=license&color=green" /></a>
   <a href="https://github.com/prasenjeet-symon/ogcode"><img alt="Stars" src="https://img.shields.io/github/stars/prasenjeet-symon/ogcode?style=flat-square&label=stars" /></a>
 </p>
 
-[![Ogcode web interface](docs/media/demo-poster.jpg)](https://ogcode.in)
+<p align="center">
+  <a href="https://ogcode.in">
+    <img src="docs/media/demo-poster-framed.webp" alt="The Ogcode web interface" width="100%">
+  </a>
+</p>
 
 ---
 
@@ -62,14 +65,6 @@ Use a local model with [Ollama](https://ollama.com) — no API key needed:
 ollama serve
 ogcode
 ```
-
-### Agents
-
-Ogcode ships built-in agents you switch between in the web interface.
-
-- **build** — the default, full-access agent: chat, inspect, edit, run commands, and verify. It asks before anything sensitive under the Ask and Auto permission modes.
-- **plan** — a read-only agent for exploring unfamiliar code and planning changes. It can search, read, and map the project, but will not edit files.
-- **task** — a focused agent for one scoped job, run in an isolated worktree.
 
 Permissions are per session: **Ask** (approve each step), **Auto** (risk-gated), or **Yolo** (no prompts). Learn more about [permissions](https://ogcode.in/docs/permissions/).
 
@@ -136,7 +131,7 @@ Working setups — SSH tunnel, reverse proxy, and Docker — are in the [remote 
 
 If you're interested in contributing to Ogcode, please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
 
-Development builds use `make build`, and tests run with `CGO_ENABLED=1 go test ./...`. Say hello on [Discord](https://discord.gg/JQP9t8y2Zv).
+Development builds use `make build`, and tests run with `CGO_ENABLED=1 go test ./...`.
 
 ### Security
 
@@ -161,4 +156,4 @@ Releases up to and including **v0.36.1** remain MIT. **v0.37.0 onward is AGPL-3.
 
 ---
 
-**Join our community** [Discord](https://discord.gg/JQP9t8y2Zv) | [Documentation](https://ogcode.in/docs/) | [Star on GitHub](https://github.com/prasenjeet-symon/ogcode)
+**Join our community** [Documentation](https://ogcode.in/docs/) | [Star on GitHub](https://github.com/prasenjeet-symon/ogcode)

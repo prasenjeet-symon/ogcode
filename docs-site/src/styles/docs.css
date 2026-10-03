@@ -821,9 +821,6 @@ main > *:not(.guides) { position: relative; z-index: 1; }
 .ds-search .pagefind-ui__button { margin-top: 10px; }
 
 /* ══ Responsive ═════════════════════════════════════════════════ */
-@media (max-width: 1180px) {
-  .nav-link.nav-hide { display: none; }
-}
 @media (max-width: 1080px) {
   .ds-frame { grid-template-columns: 230px minmax(0, 1fr); }
   .ds-toc { display: none; }

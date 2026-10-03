@@ -55,8 +55,8 @@ public releases proprietary.
 
 ### How to get one
 
-Open a licensing enquiry at <https://github.com/prasenjeet-symon/ogcode/issues>, reach
-out on [Discord](https://discord.gg/JQP9t8y2Zv), or email **licensing@ogcode.in**.
+Open a licensing enquiry at <https://github.com/prasenjeet-symon/ogcode/issues>, or email
+**licensing@ogcode.in**.
 Include your company, the product or service involved, and roughly how you intend to
 deploy Ogcode.
 

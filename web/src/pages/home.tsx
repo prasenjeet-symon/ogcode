@@ -364,14 +364,6 @@ function HomeContent() {
                 GitHub
               </a>
               <span class="text-zinc-700">·</span>
-              <a href="https://discord.gg/JQP9t8y2Zv" target="_blank" rel="noopener"
-                 class="hover:text-zinc-300 transition-colors var(--spring-sm) flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M20.3 4.4A19.8 19.8 0 0015.4 3l-.3.5c1.5.4 2.7.9 4 1.7a13.6 13.6 0 00-11.9 0c1.2-.8 2.6-1.3 4-1.7L10.6 3a19.8 19.8 0 00-4.9 1.4C2.5 9.1 1.7 13.7 2.1 18.3a20 20 0 006 3l.5-.7c-1-.4-2-1-2.8-1.6l.7-.5a14.2 14.2 0 0012.7 0l.7.5c-.9.6-1.8 1.2-2.8 1.6l.5.7a20 20 0 006-3c.5-5.3-.8-9.9-3.3-14zM8.5 15c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2zm7 0c-.9 0-1.7-.9-1.7-2s.7-2 1.7-2 1.7.9 1.7 2-.8 2-1.7 2z" />
-                </svg>
-                Discord
-              </a>
-              <span class="text-zinc-700">·</span>
               <a href="https://github.com/prasenjeet-symon/ogcode/blob/main/LICENSE" target="_blank" rel="noopener"
                  class="font-mono hover:text-zinc-300 transition-colors var(--spring-sm)">AGPL-3.0</a>
             </div>

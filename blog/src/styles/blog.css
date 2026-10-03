@@ -724,10 +724,6 @@ main > *:not(.guides) { position: relative; z-index: 1; }
 .footer-legal .sep { margin: 0 10px; color: var(--line-3); }
 
 /* ══ Responsive ═════════════════════════════════════════════════ */
-/* same width as the homepage and /ogx/ drop the Discord text link */
-@media (max-width: 1180px) {
-  .nav-link.nav-hide { display: none; }
-}
 @media (max-width: 1000px) {
   .cells-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .footer-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
