@@ -59,14 +59,15 @@ ogcode-live-demo.mp4
 demo-recording/
 
 # Local scratch documents — planning notes kept machine-local; untracked now.
-# (GIT_DIFF_PLAN.md was previously listed; the other three are still tracked,
-# so their rules only take effect if they are ever git rm --cached'd.)
-exponential_equations.tex
-polynomial_equations.pdf
-GIT_DIFF_PLAN.md
-MCP_IMPLEMENTATION_PLAN.md
-MCP_OAUTH_PLAN.md
-SKILL_FEATURE_IMPLEMENTATION.md
+# The planning/research documents live in plans/ (committed); these rules are
+# root-anchored (/), so they match only a vestigial copy re-created at the repo
+# root — never the tracked file under plans/.
+/exponential_equations.tex
+/polynomial_equations.pdf
+/GIT_DIFF_PLAN.md
+/MCP_IMPLEMENTATION_PLAN.md
+/MCP_OAUTH_PLAN.md
+/SKILL_FEATURE_IMPLEMENTATION.md
 
 # Project long-term memory — machine-local working notes, loaded at runtime by
 # LoadMemoryMD from whatever directory ogcode is opened in. Never tracked: it is

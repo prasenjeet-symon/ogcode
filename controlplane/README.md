@@ -227,7 +227,7 @@ uses `*.localhost` / a `<label>.localhost` host and cleartext HTTP/2 (h2c).
   design (mirroring the worker's own re-seeding): a master restart re-records
   a repo lazily at its next assignment.
 
-- **Container mode (`incus` block, INCUS_WORKERS_PLAN.md §Phase B).** With
+- **Container mode (`incus` block, plans/INCUS_WORKERS_PLAN.md §Phase B).** With
   `master.incus` configured, assignment switches grain: **one Incus container
   per user-repo assignment**. Assigning a user to a repo creates a container
   from `imageAlias` with the `profile` profile, seeding it via cloud-init
@@ -263,7 +263,7 @@ A JSON file (default `control-plane.json`; see `control-plane.example.json`):
     "tokenTtlSeconds": 900,                 // worker token lifetime (default 15m)
     "workerTimeoutSeconds": 45,             // missed-heartbeat death (default 45s)
     "tls": { "cert": "…/cert.pem", "key": "…/key.pem" }, // omit ⇒ h2c (dev only)
-    // Optional container mode (INCUS_WORKERS_PLAN.md §Phase B): one Incus
+    // Optional container mode (plans/INCUS_WORKERS_PLAN.md §Phase B): one Incus
     // container per user-repo assignment. Omitting the block keeps bare mode.
     "incus": {
       "socket": "/var/lib/incus/incus.socket", // empty = platform default
@@ -380,8 +380,8 @@ Done:
       targeting for user sessions, admin/user roles with console + monitor
       scoping
 - [x] **Merge/deprovision lifecycle**: merging `user/<name>` back, removing a
-      user worktree, deprovisioning a repo (Phase 4 of `MULTI_USER_REPOS_PLAN.md`)
-- [x] **Container mode** (`incus` block, Phase B of `INCUS_WORKERS_PLAN.md`):
+      user worktree, deprovisioning a repo (Phase 4 of `plans/MULTI_USER_REPOS_PLAN.md`)
+- [x] **Container mode** (`incus` block, Phase B of `plans/INCUS_WORKERS_PLAN.md`):
       one Incus container per user-repo assignment — driver over the Incus unix
       socket, durable placement store in the registry bbolt file, readiness via
       the worker's Register, provisioning reaper, capacity cap, placements
@@ -393,4 +393,4 @@ Next:
 - [ ] Built-in ACME DNS-01 auto-issue/renew (currently bring-your-own cert)
 - [ ] Optional friendly subdomains (worker `--name` instead of id)
 - [ ] Container-mode orphan reconciliation + multi-host drivers (Phase C of
-      `INCUS_WORKERS_PLAN.md`)
+      `plans/INCUS_WORKERS_PLAN.md`)

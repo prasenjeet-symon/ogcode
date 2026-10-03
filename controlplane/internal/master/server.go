@@ -69,7 +69,7 @@ type Options struct {
 	// Gate is the operator login for the browser-facing UI proxy. When nil or
 	// disabled (no password), the proxy runs unauthenticated.
 	Gate *auth.Gate
-	// Incus switches assignment to container mode (INCUS_WORKERS_PLAN.md
+	// Incus switches assignment to container mode (plans/INCUS_WORKERS_PLAN.md
 	// §Phase B): one container per user-repo assignment, provisioned through
 	// Driver and made ready by the worker's Register. When nil — the default —
 	// the master behaves exactly as before (bare workers, pickWorker).

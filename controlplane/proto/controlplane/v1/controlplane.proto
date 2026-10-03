@@ -122,7 +122,7 @@ message MasterToWorker {
     // Multi-user repos: provision (clone + user worktree) eagerly at
     // assignment time; the session-time ensure calls are an idempotent backstop.
     //
-    // Deprecated: bare-worker mode only. Container mode (INCUS_WORKERS_PLAN.md
+    // Deprecated: bare-worker mode only. Container mode (plans/INCUS_WORKERS_PLAN.md
     // §Phase B) provisions via the master-side Incus driver — the container's
     // cloud-init clones the repo at boot — and never sends this command. Kept
     // for bare workers.

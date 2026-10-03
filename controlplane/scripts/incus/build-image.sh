@@ -8,7 +8,7 @@
 # Everything the guest needs is pushed from this host — the guest never
 # downloads ogcode from the internet.
 #
-# What the image bakes (the "golden image" contract of INCUS_WORKERS_PLAN.md):
+# What the image bakes (the "golden image" contract of plans/INCUS_WORKERS_PLAN.md):
 #   /usr/local/bin/ogcode              the worker-capable server binary
 #   /etc/systemd/system/ogcode-clone.service   oneshot: clones the assigned repo BEFORE the worker starts
 #   /etc/systemd/system/ogcode-worker.service  Restart=always; runs after ogcode-clone

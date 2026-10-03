@@ -21,7 +21,7 @@
 # plan's threat model: the operator runs these scripts on the VM they
 # administer).
 config:
-  # "golden image" sizing per INCUS_WORKERS_PLAN.md.
+  # "golden image" sizing per plans/INCUS_WORKERS_PLAN.md.
   limits.cpu: "4"
   limits.memory: 8GiB
   limits.memory.swap: "false"

@@ -55,7 +55,7 @@
 #   user slug   safeUserName / userWorktreeSlug (internal/worker/repos.go:226,
 #               controlplane/internal/master/repos.go:123) — branch/worktree
 #               segment, from the panel at assignment time (NOT here).
-#   name        "og-<reposlug>-<user>" (INCUS_WORKERS_PLAN.md §naming), capped
+#   name        "og-<reposlug>-<user>" (plans/INCUS_WORKERS_PLAN.md §naming), capped
 #               at NAME_BUDGET=40 bytes (repo segment trimmed first, user
 #               survives — routeLabel's rule) so container name (<=63) + tunnel
 #               route (<=63) can't jointly overflow one DNS label.

@@ -15,7 +15,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode-control-plane/internal/incus"
 )
 
-// Container-mode assignment (INCUS_WORKERS_PLAN.md §Phase B): one Incus
+// Container-mode assignment (plans/INCUS_WORKERS_PLAN.md §Phase B): one Incus
 // container per user-repo assignment. The container registers as an ordinary
 // worker (cloud-init writes the container name into /root/.ogcode/worker-id),
 // so nothing downstream — tunnels, panel subdomains, sessions — distinguishes

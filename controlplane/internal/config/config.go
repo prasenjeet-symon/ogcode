@@ -68,7 +68,7 @@ type MasterConfig struct {
 	Incus *IncusConfig `json:"incus,omitempty"`
 }
 
-// IncusConfig configures container mode (INCUS_WORKERS_PLAN.md §Phase B). All
+// IncusConfig configures container mode (plans/INCUS_WORKERS_PLAN.md §Phase B). All
 // timeouts apply to master-side bookkeeping only — no Incus operation is ever
 // awaited through the ConnectRPC command channel.
 type IncusConfig struct {

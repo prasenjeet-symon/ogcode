@@ -141,7 +141,7 @@ func serve(ctx context.Context, configPath string) error {
 		}
 	}
 
-	// Container mode (INCUS_WORKERS_PLAN.md §Phase B): a configured incus
+	// Container mode (plans/INCUS_WORKERS_PLAN.md §Phase B): a configured incus
 	// block switches assignment to one container per user-repo assignment.
 	// A nil block keeps the bare-worker behavior byte-for-byte.
 	var incusOpts *master.IncusOptions

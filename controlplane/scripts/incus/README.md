@@ -1,6 +1,6 @@
 # Incus container-per-assignment scripts (Phase A, operator-only)
 
-Operator scripts implementing Phase A of `INCUS_WORKERS_PLAN.md` (repo root).
+Operator scripts implementing Phase A of `plans/INCUS_WORKERS_PLAN.md`.
 They create one Incus container per user-repo assignment, bake the golden
 image, and tear down on unassign. **No Go code changes**: the container runs
 the stock ogcode worker binary, registers as an ordinary worker, and the

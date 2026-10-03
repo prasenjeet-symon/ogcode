@@ -22,7 +22,7 @@ const (
 	operatorReposRmPath          = "/__operator/repos/forget"
 	operatorReposMergePath       = "/__operator/repos/merge"
 	operatorReposDeprovisionPath = "/__operator/repos/deprovision"
-	// Container mode (INCUS_WORKERS_PLAN.md §Phase B): the placements table's
+	// Container mode (plans/INCUS_WORKERS_PLAN.md §Phase B): the placements table's
 	// create (assign = create container) and destroy (unassign = delete
 	// container) actions.
 	operatorPlacementsCreatePath  = "/__operator/repos/placements/create"

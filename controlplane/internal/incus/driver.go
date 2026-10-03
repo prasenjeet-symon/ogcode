@@ -1,6 +1,6 @@
 // Package incus drives Incus (LXD fork) containers on the master's host.
 //
-// Container mode (INCUS_WORKERS_PLAN.md §Phase B): one container per
+// Container mode (plans/INCUS_WORKERS_PLAN.md §Phase B): one container per
 // user-repo assignment. The driver is deliberately narrow — create with
 // cloud-init seed, delete, read state, list og-* containers — and it never
 // shells out to `incus exec`; in-guest work happens through cloud-init
