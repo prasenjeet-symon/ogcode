@@ -717,7 +717,7 @@ func (p *OpenAIProvider) sendsPromptCacheKey() bool {
 	return strings.Contains(u, "api.openai.com") ||
 		strings.Contains(u, "openrouter.ai") ||
 		strings.Contains(u, "ollama.com") ||
-		strings.Contains(u, "ogx.ogcode.xyz")
+		strings.Contains(u, "ogx.ogcode.in")
 }
 
 // needsExplicitCacheBreakpoints reports whether this request must carry
@@ -1066,7 +1066,7 @@ func (p *OpenAIProvider) setChatHeaders(req *http.Request) {
 	if p.isOpenRouter() {
 		// OpenRouter credits an app for its traffic via these headers. Without
 		// them the request is anonymous on the dashboard and the leaderboard.
-		req.Header.Set("HTTP-Referer", "https://ogcode.xyz")
+		req.Header.Set("HTTP-Referer", "https://ogcode.in")
 		req.Header.Set("X-Title", "ogcode")
 	}
 	// The gateway refuses an unasserted request once it has been given any

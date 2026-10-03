@@ -26,7 +26,7 @@ interface Props {
 
 const { title, description, slug, lede = description, headings = [] } = Astro.props;
 
-const canonical = `https://ogcode.xyz${pageUrl(slug)}`;
+const canonical = `https://ogcode.in${pageUrl(slug)}`;
 const group = groupFor(slug);
 const pages = flatPages();
 const idx = pages.findIndex((p) => p.slug === slug);

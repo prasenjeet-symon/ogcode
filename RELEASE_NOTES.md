@@ -1,3 +1,22 @@
+# Release Notes — v0.44.2
+
+## Patch: The project moves to ogcode.in
+
+The project's web address is now **ogcode.in**. Everything the software reaches
+out to moved with it: the site and its downloads, the documentation, the OGX
+gateway that plan models run through, the connect page the browser is handed to,
+and the update commands the built-in update skill tells you to run. An install
+built from this release talks to the live endpoints; one built from an earlier
+release still points at the retired `ogcode.xyz` hosts, which no longer resolve.
+
+## Other changes
+
+- The OpenRouter requests this app makes now credit traffic to the new address,
+  so they are no longer attributed to a host that is gone.
+- Support and licensing email addresses now use the new domain.
+
+---
+
 # Release Notes — v0.44.1
 
 ## Patch: The device panel arrives gradually

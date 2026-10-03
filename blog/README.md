@@ -1,6 +1,6 @@
 # Ogcode blog
 
-The blog at [ogcode.xyz/blog](https://ogcode.xyz/blog/). Fully static — every
+The blog at [ogcode.in/blog](https://ogcode.in/blog/). Fully static — every
 page is pre-rendered HTML with zero client-side JavaScript, built with
 [Astro](https://astro.build) and styled to match the homepage design system
 (`docs/index.html`).
@@ -8,7 +8,7 @@ page is pre-rendered HTML with zero client-side JavaScript, built with
 ## Writing a post
 
 Add one markdown file to `src/content/posts/`. The filename becomes the URL:
-`why-recall.md` → `ogcode.xyz/blog/why-recall/`.
+`why-recall.md` → `ogcode.in/blog/why-recall/`.
 
 ```markdown
 ---
@@ -22,7 +22,7 @@ heroAlt: "One sentence describing the image."
 # ogImage should point at the same hero (absolute URL) so shares show it too
 # updatedDate: 2026-09-25      # optional
 # author: "Prasenjeet Kumar"   # optional, this is the default
-# ogImage: "https://ogcode.xyz/media/og.png"  # optional, this is the default
+# ogImage: "https://ogcode.in/media/og.png"  # optional, this is the default
 ---
 
 Post body in markdown. Code blocks are highlighted with the site palette.

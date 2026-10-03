@@ -7,7 +7,7 @@
 #   cloudflared tunnel --config deploy/cloudflared/ogcode-dev.yml run ogcode-dev
 #
 # The DNS record is created once:
-#   cloudflared tunnel route dns ogcode-dev ogcode-dev.ogcode.xyz
+#   cloudflared tunnel route dns ogcode-dev ogcode-dev.ogcode.in
 #
 # SECURITY: ogcode has write/shell/file tools — a public subdomain means anyone
 # reaching it controls a shell. Cloudflare Access is configured in front of this
@@ -17,6 +17,6 @@ tunnel: 0481782a-5241-4fff-9665-276ae52dd6bb
 credentials-file: /Users/prasenjeet/.cloudflared/0481782a-5241-4fff-9665-276ae52dd6bb.json
 
 ingress:
-  - hostname: ogcode-dev.ogcode.xyz
+  - hostname: ogcode-dev.ogcode.in
     service: http://localhost:9595
   - service: http_status:404

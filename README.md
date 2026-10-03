@@ -269,7 +269,7 @@ Ogcode is not trying to be an IDE plugin with a chat panel. It is trying to be a
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://ogcode.xyz/install.sh | sh
+curl -fsSL https://ogcode.in/install.sh | sh
 export ANTHROPIC_API_KEY=sk-ant-...
 ogcode
 ```
@@ -284,7 +284,7 @@ brew install ogcode
 ### Windows
 
 ```powershell
-irm https://ogcode.xyz/install.ps1 | iex
+irm https://ogcode.in/install.ps1 | iex
 ogcode
 ```
 
@@ -342,7 +342,7 @@ Ogcode detects providers from the environment. Set at least one of:
 
 You can also use `~/.config/ogcode/config.json` for global settings and `ogcode.json` at the project root for project settings. Environment variables override config values.
 
-OGX is the subscription plan sold by OG Lab, connected from the settings screen rather than an environment variable: signing in on the OG Lab side links this install, and the plan's models then run through OG Lab's gateway. `OGX_GATEWAY_URL` overrides the gateway base URL (default `https://ogx.ogcode.xyz/v1`) and `OGX_CONNECT_URL` overrides the connect page.
+OGX is the subscription plan sold by OG Lab, connected from the settings screen rather than an environment variable: signing in on the OG Lab side links this install, and the plan's models then run through OG Lab's gateway. `OGX_GATEWAY_URL` overrides the gateway base URL (default `https://ogx.ogcode.in/v1`) and `OGX_CONNECT_URL` overrides the connect page.
 
 A release build also bakes in the first-party secret with `make build-server OGX_APP_SECRET=...` (an ldflags value, not a runtime variable). ogcode then stamps every gateway call with `X-Client-App`, `X-Client-Timestamp` and `X-Client-Signature` — the base64url HMAC-SHA256 of the app name, timestamp, method and path under that secret — so the gateway admits this install rather than a bearer token copied out of it. A build with no secret signs nothing and talks to a gateway that has not been told any secrets.
 
@@ -376,7 +376,7 @@ Agentic memory is enabled with:
 export OGCODE_AGENTIC_MEMORY_MODE=true
 ```
 
-Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. The deep-research pipeline reads four pages of 6000 characters by default; tune it with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and `OGCODE_SEARCH_PAGE_CHARS` (1000–20000). The agent is reminded to compact once about 40000 tokens of file, search, and page content have been read in one turn; tune that with `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`. Because every step re-sends the whole context, a second trigger reminds the agent once the accumulated re-send cost crosses the model's context window; tune that multiple with `OGCODE_RESEND_COST_WINDOW_MULTIPLE`. Mid-turn compaction is on by default; disable it with `OGCODE_COMPACT_CONTEXT=false`. A project index runs many turns at once, and a wave of them can trip the endpoint's rate limiter; cap how many provider requests may be in flight process-wide with `OGCODE_PROVIDER_MAX_CONCURRENT` (default 8), which reserves two slots for interactive turns so indexing cannot starve the turn you are watching. `AGENT.md` and `MEMORY.md` are loaded whole with no size cap by default — cap them with `OGCODE_AGENT_MD_MAX_BYTES` and `OGCODE_MEMORY_MD_MAX_BYTES` if you need to. See the [documentation](https://ogcode.xyz/docs/) for provider, skill, search, remote deployment, and control-plane configuration.
+Web search is enabled by default. Disable it with `OGCODE_SEARCH_ENABLED=false`. The deep-research pipeline reads four pages of 6000 characters by default; tune it with `OGCODE_SEARCH_FETCH_TOP_K` (1–10) and `OGCODE_SEARCH_PAGE_CHARS` (1000–20000). The agent is reminded to compact once about 40000 tokens of file, search, and page content have been read in one turn; tune that with `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`. Because every step re-sends the whole context, a second trigger reminds the agent once the accumulated re-send cost crosses the model's context window; tune that multiple with `OGCODE_RESEND_COST_WINDOW_MULTIPLE`. Mid-turn compaction is on by default; disable it with `OGCODE_COMPACT_CONTEXT=false`. A project index runs many turns at once, and a wave of them can trip the endpoint's rate limiter; cap how many provider requests may be in flight process-wide with `OGCODE_PROVIDER_MAX_CONCURRENT` (default 8), which reserves two slots for interactive turns so indexing cannot starve the turn you are watching. `AGENT.md` and `MEMORY.md` are loaded whole with no size cap by default — cap them with `OGCODE_AGENT_MD_MAX_BYTES` and `OGCODE_MEMORY_MD_MAX_BYTES` if you need to. See the [documentation](https://ogcode.in/docs/) for provider, skill, search, remote deployment, and control-plane configuration.
 
 ---
 
@@ -498,6 +498,6 @@ Releases up to and including **v0.36.1** remain MIT. **v0.37.0 onward is AGPL-3.
 
 **Build the open-source AI teammate.**
 
-[Star on GitHub](https://github.com/prasenjeet-symon/ogcode) · [Discord](https://discord.gg/JQP9t8y2Zv) · [Documentation](https://ogcode.xyz/docs/)
+[Star on GitHub](https://github.com/prasenjeet-symon/ogcode) · [Discord](https://discord.gg/JQP9t8y2Zv) · [Documentation](https://ogcode.in/docs/)
 
 </div>

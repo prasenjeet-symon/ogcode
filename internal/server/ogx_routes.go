@@ -44,7 +44,7 @@ import (
 // defaultOGXConnectURL is where the browser hand-off goes when the env var is
 // unset. OGX_CONNECT_URL overrides it (with a trailing ? or &, no space) so a
 // development or staging deployment can point at its own web side.
-const defaultOGXConnectURL = "https://ogx.ogcode.xyz/connect"
+const defaultOGXConnectURL = "https://ogx.ogcode.in/connect"
 
 // ogxStateTTL bounds how long a minted state is redeemable. The user is
 // clicking through sign-up and payment, so it is generous — but a state that

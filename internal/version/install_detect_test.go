@@ -36,7 +36,7 @@ func TestDetectInstallCommandFor(t *testing.T) {
 			name:     "curl script install is not homebrew",
 			goos:     "darwin",
 			execPath: "/usr/local/bin/ogcode",
-			want:     "curl -fsSL https://ogcode.xyz/install.sh | sh",
+			want:     "curl -fsSL https://ogcode.in/install.sh | sh",
 		},
 		{
 			name:     "curl script install windows temp",
@@ -90,7 +90,7 @@ func TestDetectInstallCommandFor(t *testing.T) {
 				return ""
 			},
 			execPath: `/Users/dev/scoop/shims/ogcode`,
-			want:     "curl -fsSL https://ogcode.xyz/install.sh | sh",
+			want:     "curl -fsSL https://ogcode.in/install.sh | sh",
 		},
 		{
 			name: "cargo default bin",
@@ -138,7 +138,7 @@ func TestDetectInstallCommandFor(t *testing.T) {
 				return ""
 			},
 			execPath: "/home/developer/.cargo/bin/ogcode",
-			want:     "curl -fsSL https://ogcode.xyz/install.sh | sh",
+			want:     "curl -fsSL https://ogcode.in/install.sh | sh",
 		},
 		{
 			name: "install.ps1 directory",
@@ -150,7 +150,7 @@ func TestDetectInstallCommandFor(t *testing.T) {
 				return ""
 			},
 			execPath: `C:\Users\dev\AppData\Local\ogcode\ogcode.exe`,
-			want:     "irm https://ogcode.xyz/install.ps1 | iex",
+			want:     "irm https://ogcode.in/install.ps1 | iex",
 		},
 		{
 			name:     "winget fallback on windows",
@@ -240,7 +240,7 @@ func TestDetectInstallCommandFor_CaseInsensitiveWindowsPaths(t *testing.T) {
 		return ""
 	}
 	got := detectInstallCommandFor("windows", `C:\Users\DEV\AppData\Local\ogcode\ogcode.exe`, getenv)
-	want := "irm https://ogcode.xyz/install.ps1 | iex"
+	want := "irm https://ogcode.in/install.ps1 | iex"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -259,8 +259,8 @@ func TestDetectInstallCommand_KnownChannelsShape(t *testing.T) {
 		"cargo install ogcode --force",
 		"scoop update ogcode",
 		"winget upgrade ogcode",
-		"irm https://ogcode.xyz/install.ps1 | iex",
-		"curl -fsSL https://ogcode.xyz/install.sh | sh",
+		"irm https://ogcode.in/install.ps1 | iex",
+		"curl -fsSL https://ogcode.in/install.sh | sh",
 	} {
 		if got == cmd {
 			return
@@ -279,9 +279,9 @@ func TestDetectInstallChannel(t *testing.T) {
 		{"scoop update ogcode", "scoop"},
 		{"brew upgrade ogcode", "homebrew"},
 		{"cargo install ogcode --force", "cargo"},
-		{"irm https://ogcode.xyz/install.ps1 | iex", "install-ps1"},
+		{"irm https://ogcode.in/install.ps1 | iex", "install-ps1"},
 		{"winget upgrade ogcode", "winget"},
-		{"curl -fsSL https://ogcode.xyz/install.sh | sh", "install-sh"},
+		{"curl -fsSL https://ogcode.in/install.sh | sh", "install-sh"},
 		{"", "unknown"},
 		{"something else entirely", "unknown"},
 	}

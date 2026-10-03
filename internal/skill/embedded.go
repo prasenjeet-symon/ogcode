@@ -243,9 +243,9 @@ table, narrowest first:
 | anything containing ` + "`/Cellar/`" + ` | Homebrew | ` + "`brew upgrade ogcode`" + ` |
 | ` + "`/opt/homebrew/bin`" + ` | Homebrew (Apple Silicon) | ` + "`brew upgrade ogcode`" + ` |
 | ` + "`$CARGO_HOME/bin`" + `, by default ` + "`~/.cargo/bin`" + ` | cargo | ` + "`cargo install ogcode --force`" + ` |
-| ` + "`%LOCALAPPDATA%\\ogcode`" + ` | the install.ps1 script | ` + "`irm https://ogcode.xyz/install.ps1 | iex`" + ` |
+| ` + "`%LOCALAPPDATA%\\ogcode`" + ` | the install.ps1 script | ` + "`irm https://ogcode.in/install.ps1 | iex`" + ` |
 | any other Windows location | winget (documented default) | ` + "`winget upgrade ogcode`" + ` |
-| any other macOS/Linux location | the install.sh script | ` + "`curl -fsSL https://ogcode.xyz/install.sh | sh`" + ` |
+| any other macOS/Linux location | the install.sh script | ` + "`curl -fsSL https://ogcode.in/install.sh | sh`" + ` |
 
 Scoop's root is ` + "`$env:SCOOP`" + `, ` + "`$env:SCOOP_GLOBAL`" + `, or
 ` + "`$env:USERPROFILE\\scoop`" + `. A ` + "`/usr/local/bin/ogcode`" + ` on macOS or Linux

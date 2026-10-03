@@ -63,7 +63,7 @@ const CHIP_ICON =
 const OGX_SLOT = 'ogx';
 
 /** The OGLAB dashboard. Plan state, billing and token usage live there. */
-const OGX_WEB_URL = 'https://oglab.ogcode.xyz';
+const OGX_WEB_URL = 'https://oglab.ogcode.in';
 
 /**
  * PostHog flag gating the OGX tab while the plan feature is unreleased. The

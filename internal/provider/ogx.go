@@ -46,7 +46,7 @@ const OGXAppID = "ogcode"
 // DefaultOGXGatewayURL is OG Lab's gateway, the endpoint the OGX token is valid
 // against. OGX_GATEWAY_URL overrides it — development and staging point this at
 // a local gateway.
-const DefaultOGXGatewayURL = "https://ogx.ogcode.xyz/v1"
+const DefaultOGXGatewayURL = "https://ogx.ogcode.in/v1"
 
 // OGXAppSecret is the shared secret ogcode signs its gateway requests with, so
 // the gateway admits this first-party client and not a bearer token copied out

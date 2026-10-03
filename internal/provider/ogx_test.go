@@ -129,7 +129,7 @@ func TestOGXProviderSendsPromptCacheKey(t *testing.T) {
 		t.Fatal("ogx provider must send prompt_cache_key")
 	}
 	// A custom slot pointed straight at the gateway host, without the id.
-	byHost := &OpenAIProvider{id: "openai", baseURL: "https://ogx.ogcode.xyz/v1"}
+	byHost := &OpenAIProvider{id: "openai", baseURL: "https://ogx.ogcode.in/v1"}
 	if !byHost.sendsPromptCacheKey() {
 		t.Error("a base URL on the ogx gateway host must send prompt_cache_key")
 	}

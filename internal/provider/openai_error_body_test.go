@@ -115,7 +115,7 @@ func TestOpenRouterAttributionHeaders(t *testing.T) {
 
 			referer, title := req.Header.Get("HTTP-Referer"), req.Header.Get("X-Title")
 			if c.want {
-				if referer != "https://ogcode.xyz" || title != "ogcode" {
+				if referer != "https://ogcode.in" || title != "ogcode" {
 					t.Errorf("attribution headers missing: referer=%q title=%q", referer, title)
 				}
 			} else if referer != "" || title != "" {

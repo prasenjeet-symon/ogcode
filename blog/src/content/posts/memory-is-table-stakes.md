@@ -5,7 +5,7 @@ pubDate: 2026-09-20
 tags: ["memory", "context-engine"]
 hero: "/blog/media/memory-is-table-stakes-hero.jpg"
 heroAlt: "A dim archive of note cards on a dark grid; one card floats above the rest, glowing indigo, connected by a thin thread to an empty prompt bar below."
-ogImage: "https://ogcode.xyz/blog/media/memory-is-table-stakes-hero.jpg"
+ogImage: "https://ogcode.in/blog/media/memory-is-table-stakes-hero.jpg"
 ---
 
 xAI shipped memory in Grok Build this week: after a session, it writes markdown

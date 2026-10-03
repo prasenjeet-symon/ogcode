@@ -2,7 +2,7 @@
 //
 // Like the blog, the docs are a fully static, pre-rendered site: every page is
 // plain HTML at build time. It builds into ../docs/docs so GitHub Pages (which
-// serves the docs/ folder as ogcode.xyz) picks it up at ogcode.xyz/docs/.
+// serves the docs/ folder as ogcode.in) picks it up at ogcode.in/docs/.
 // docs/docs is gitignored — CI builds it fresh on every Pages deploy.
 import { defineConfig } from 'astro/config';
 import mdx from '@astrojs/mdx';
@@ -35,7 +35,7 @@ function rootFonts() {
 }
 
 export default defineConfig({
-  site: 'https://ogcode.xyz',
+  site: 'https://ogcode.in',
   base: '/docs',
   outDir: '../docs/docs',
   trailingSlash: 'always',

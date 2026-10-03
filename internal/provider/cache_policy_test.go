@@ -186,7 +186,7 @@ func TestOpenAI_PromptCacheKeyEndpointGate(t *testing.T) {
 		{"ollama", "https://ollama.com/v1", true},
 		{"x", "https://ollama.com/v1", true},      // custom slot pointed straight at the cloud endpoint
 		{"ogx", "http://127.0.0.1:9999/v1", true}, // the plan's gateway reads the field as session identity
-		{"x", "https://ogx.ogcode.xyz/v1", true},  // custom slot pointed straight at the gateway
+		{"x", "https://ogx.ogcode.in/v1", true},   // custom slot pointed straight at the gateway
 		{"", "http://localhost:11434/v1", false},  // an Ollama-shaped URL without the Ollama identity
 		{"", "https://api.groq.com/openai/v1", false},
 		{"", "https://api.deepseek.com/v1", false},

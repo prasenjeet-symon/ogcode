@@ -1,6 +1,6 @@
 # Ogcode docs site
 
-The documentation at [ogcode.xyz/docs](https://ogcode.xyz/docs). A sibling of
+The documentation at [ogcode.in/docs](https://ogcode.in/docs). A sibling of
 `blog/`, built the same way: a fully static Astro project that pre-renders every
 page to plain HTML, with a small Pagefind search index and a dark/light toggle
 as the only client-side JavaScript.
@@ -15,7 +15,7 @@ as the only client-side JavaScript.
 ## Writing a page
 
 Add a file under `src/content/docs/`. The filename is the URL: `install.mdx` →
-`ogcode.xyz/docs/install/`. Frontmatter:
+`ogcode.in/docs/install/`. Frontmatter:
 
 ```yaml
 ---

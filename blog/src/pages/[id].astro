@@ -19,7 +19,7 @@ interface Props {
 const { post } = Astro.props;
 const { Content, remarkPluginFrontmatter } = await render(post);
 
-const canonical = `https://ogcode.xyz/blog/${post.id}/`;
+const canonical = `https://ogcode.in/blog/${post.id}/`;
 const readingTime = remarkPluginFrontmatter.readingTime as number;
 const byDefaultAuthor = post.data.author === AUTHOR.name;
 
@@ -31,7 +31,7 @@ const jsonLd = JSON.stringify({
   datePublished: post.data.pubDate.toISOString(),
   ...(post.data.updatedDate && { dateModified: post.data.updatedDate.toISOString() }),
   author: { '@type': 'Person', name: post.data.author },
-  publisher: { '@type': 'Organization', name: 'Ogcode', url: 'https://ogcode.xyz/' },
+  publisher: { '@type': 'Organization', name: 'Ogcode', url: 'https://ogcode.in/' },
   mainEntityOfPage: canonical,
   image: post.data.ogImage,
 });

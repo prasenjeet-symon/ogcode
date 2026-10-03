@@ -1,6 +1,6 @@
 {
   "name": "ogcode-docs",
-  "description": "The Ogcode documentation — fully pre-rendered static pages served at ogcode.xyz/docs",
+  "description": "The Ogcode documentation — fully pre-rendered static pages served at ogcode.in/docs",
   "private": true,
   "version": "0.1.0",
   "license": "AGPL-3.0-only",

@@ -15,7 +15,7 @@ import (
 
 // Build info set via ldflags during build.
 var (
-	Version = "v0.44.1"
+	Version = "v0.44.2"
 	Commit  = "none"
 	Date    = "unknown"
 )
@@ -266,11 +266,11 @@ func installChannelFor(command string) string {
 		return "homebrew"
 	case "cargo install ogcode --force":
 		return "cargo"
-	case "irm https://ogcode.xyz/install.ps1 | iex":
+	case "irm https://ogcode.in/install.ps1 | iex":
 		return "install-ps1"
 	case "winget upgrade ogcode":
 		return "winget"
-	case "curl -fsSL https://ogcode.xyz/install.sh | sh":
+	case "curl -fsSL https://ogcode.in/install.sh | sh":
 		return "install-sh"
 	default:
 		return "unknown"
@@ -307,7 +307,7 @@ func detectInstallCommandFor(goos, execPath string, getenv func(string) string) 
 	case isCargoInstall(execPath, getenv):
 		return "cargo install ogcode --force"
 	case isScriptInstall(goos, execPath, getenv):
-		return "irm https://ogcode.xyz/install.ps1 | iex"
+		return "irm https://ogcode.in/install.ps1 | iex"
 	case goos == "windows":
 		// winget is the documented default Windows channel, but it writes no
 		// install fingerprint of its own, so it claims any Windows install the
@@ -315,7 +315,7 @@ func detectInstallCommandFor(goos, execPath string, getenv func(string) string) 
 		return "winget upgrade ogcode"
 	default:
 		// For manual installs, use the curl install script
-		return "curl -fsSL https://ogcode.xyz/install.sh | sh"
+		return "curl -fsSL https://ogcode.in/install.sh | sh"
 	}
 }
 

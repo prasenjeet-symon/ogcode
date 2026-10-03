@@ -1,6 +1,6 @@
 {
   "name": "ogcode-blog",
-  "description": "The Ogcode blog — fully pre-rendered static pages served at ogcode.xyz/blog",
+  "description": "The Ogcode blog — fully pre-rendered static pages served at ogcode.in/blog",
   "private": true,
   "version": "0.1.0",
   "license": "AGPL-3.0-only",

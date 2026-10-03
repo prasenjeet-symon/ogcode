@@ -65,7 +65,7 @@ func TestSignAssertionIsHMACOfThePayload(t *testing.T) {
 // headers land and the signature verifies against the payload over the request's
 // own method and path.
 func TestSignRequestAssertionStampsTheHeaders(t *testing.T) {
-	req, err := http.NewRequest("GET", "https://ogx.ogcode.xyz/v1/models", nil)
+	req, err := http.NewRequest("GET", "https://ogx.ogcode.in/v1/models", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestSignRequestAssertionIsANoOpWhenUnconfigured(t *testing.T) {
 		{"ogcode", ""},
 		{"", testAppSecret},
 	} {
-		req, _ := http.NewRequest("GET", "https://ogx.ogcode.xyz/v1/models", nil)
+		req, _ := http.NewRequest("GET", "https://ogx.ogcode.in/v1/models", nil)
 		signRequestAssertion(req, tc.app, tc.secret)
 		if v := req.Header.Get(headerClientApp); v != "" {
 			t.Errorf("app=%q secret=%q: unexpected %s = %q", tc.app, tc.secret, headerClientApp, v)

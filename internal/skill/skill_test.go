@@ -223,8 +223,8 @@ func TestEmbedded_UpdateSkillMatchesDetection(t *testing.T) {
 		"brew upgrade ogcode",
 		"cargo install ogcode --force",
 		"winget upgrade ogcode",
-		"irm https://ogcode.xyz/install.ps1 | iex",
-		"curl -fsSL https://ogcode.xyz/install.sh | sh",
+		"irm https://ogcode.in/install.ps1 | iex",
+		"curl -fsSL https://ogcode.in/install.sh | sh",
 	} {
 		if !strings.Contains(update.Content, cmd) {
 			t.Errorf("update-ogcode skill does not mention channel command %q", cmd)
