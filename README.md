@@ -1,50 +1,79 @@
-<div align="center">
-
-<img src="assets/ogcode-logo.png" alt="ogcode" width="180" height="180">
-
-# Ogcode
-
-**The open-source, self-hostable Grok Bot for software work.**
+<p align="center">
+  <a href="https://ogcode.in">
+    <img src="assets/ogcode-logo.png" alt="ogcode" width="180">
+  </a>
+</p>
+<p align="center"><strong>The open-source, self-hostable AI coding agent.</strong></p>
 
 Ogcode is an AI agent that understands your codebase, uses real tools, researches the web, remembers decisions, plans complex work, and ships changes — from your browser. Your computer, your models, your data, your rules.
 
-**Today:** a production-ready agentic coding workbench.
-**Our vision:** an open-source Grok Bot — a general-purpose digital teammate that works across your software, browser, and tools with your approval.
+<p align="center">
+  <a href="https://discord.gg/JQP9t8y2Zv"><img alt="Discord" src="https://img.shields.io/discord/1373677337985056828?style=flat-square&label=discord" /></a>
+  <a href="https://github.com/prasenjeet-symon/ogcode/releases"><img alt="Release" src="https://img.shields.io/github/v/release/prasenjeet-symon/ogcode?style=flat-square&label=release" /></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/prasenjeet-symon/ogcode?style=flat-square&label=license&color=green" /></a>
+  <a href="https://github.com/prasenjeet-symon/ogcode"><img alt="Stars" src="https://img.shields.io/github/stars/prasenjeet-symon/ogcode?style=flat-square&label=stars" /></a>
+</p>
 
-<br/>
-
-[![Discord](https://img.shields.io/discord/1373677337985056828?label=Discord&logo=discord&logoColor=white&color=5865F2)](https://discord.gg/JQP9t8y2Zv)
-[![Release](https://img.shields.io/github/v/release/prasenjeet-symon/ogcode?label=Release&style=flat)](https://github.com/prasenjeet-symon/ogcode/releases)
-[![License](https://img.shields.io/github/license/prasenjeet-symon/ogcode?label=License&color=green)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/prasenjeet-symon/ogcode?style=social)](https://github.com/prasenjeet-symon/ogcode)
-
-[Quick Start](#quick-start) · [What You Can Do](#what-you-can-do-with-ogcode) · [Configuration](#configuration) · [Contributing](#contributing) · [Docs](https://ogcode.in/docs/)
-
-</div>
+[![Ogcode web interface](docs/media/demo-poster.jpg)](https://ogcode.in)
 
 ---
 
-## What is Ogcode?
+### Installation
 
-Most AI assistants answer questions. Ogcode is built to **finish multi-step work**.
+```bash
+# YOLO
+curl -fsSL https://ogcode.in/install.sh | sh
 
-Give it a goal:
+# Package managers
+brew tap prasenjeet-symon/tap && brew install ogcode   # macOS and Linux
+winget install prasenjeet-symon.ogcode                 # Windows
+go install github.com/prasenjeet-symon/ogcode@latest   # any OS with Go
+```
 
-> “Add GitHub OAuth, write the tests, update the documentation, and open a pull request.”
+> [!TIP]
+> `CGO_ENABLED=1` is required when building from source — the Swift tree-sitter binding is cgo.
 
-It inspects the repository, forms a plan, asks before anything sensitive, edits the files, runs the commands, validates the result, records the important decisions, and organizes the work into isolated branches and pull requests. Throughout, you can watch, steer, and approve — or step away.
+On Windows without winget:
 
-Ogcode runs as one program with a built-in web interface, so you use it from any browser and keep whatever editor you already like.
+```powershell
+irm https://ogcode.in/install.ps1 | iex
+```
 
-- **Open source and self-hostable** — run it on a laptop, workstation, server, or private network.
-- **Model-agnostic** — Anthropic, OpenAI, OpenRouter, Ollama, or any compatible endpoint.
-- **Browser-native** — a complete workbench, with no IDE lock-in.
-- **Built for long-running work** — persistent memory and a context that stays a useful size.
-- **Git-native** — plans, isolated task branches, and pull requests.
-- **Permission-aware** — explore freely; gate writes, edits, and shell commands.
-- **Designed to grow** — coding is the first deeply built domain, not the last.
+Or run the container:
 
-## What you can do with Ogcode
+```bash
+docker run -p 9595:9595 \
+  -v ~/.ogcode:/root/.ogcode \
+  -v "$(pwd):/workspace" -w /workspace \
+  ghcr.io/prasenjeet-symon/ogcode:latest
+```
+
+The image is also on Docker Hub as `prasenjeetsimon/ogcode:latest`.
+
+Start it and open the web interface:
+
+```bash
+ogcode            # serves the UI on http://localhost:9595
+```
+
+Use a local model with [Ollama](https://ollama.com) — no API key needed:
+
+```bash
+ollama serve
+ogcode
+```
+
+### Agents
+
+Ogcode ships built-in agents you switch between in the web interface.
+
+- **build** — the default, full-access agent: chat, inspect, edit, run commands, and verify. It asks before anything sensitive under the Ask and Auto permission modes.
+- **plan** — a read-only agent for exploring unfamiliar code and planning changes. It can search, read, and map the project, but will not edit files.
+- **task** — a focused agent for one scoped job, run in an isolated worktree.
+
+Permissions are per session: **Ask** (approve each step), **Auto** (risk-gated), or **Yolo** (no prompts). Learn more about [permissions](https://ogcode.in/docs/permissions/).
+
+### What you can do with Ogcode
 
 - **Understand unfamiliar code** — Ogcode maps a project before reading it, outlines files with exact line ranges, and reads only what matters. [Core concepts →](https://ogcode.in/docs/core-concepts/)
 - **Build and fix software** — implement features and fixes across files, run your builds and tests, and investigate failures instead of retrying blindly.
@@ -54,76 +83,11 @@ Ogcode runs as one program with a built-in web interface, so you use it from any
 - **Research as you go** — built-in web search and page reading, reusable `SKILL.md` workflows, and external MCP servers. [Search, skills & MCP →](https://ogcode.in/docs/search-and-skills/)
 - **See more than text** — Mermaid diagrams, LaTeX and rendered PDFs, Plotly charts, sandboxed HTML, and downloadable artifacts. [Rich results & preview →](https://ogcode.in/docs/rich-results/)
 
-New here? The [Quick start guide](https://ogcode.in/docs/quick-start/) walks from a fresh install to Ogcode editing files in your repo.
+### Documentation
 
----
+For configuration, providers, skills, remote deployment, and everything else, [**head over to our docs**](https://ogcode.in/docs/).
 
-## Quick Start
-
-### macOS / Linux
-
-```bash
-curl -fsSL https://ogcode.in/install.sh | sh
-export ANTHROPIC_API_KEY=sk-ant-...
-ogcode
-```
-
-Then open `http://localhost:9595`. With Homebrew:
-
-```bash
-brew tap prasenjeet-symon/tap
-brew install ogcode
-```
-
-### Windows
-
-```powershell
-irm https://ogcode.in/install.ps1 | iex
-ogcode
-```
-
-Or with winget:
-
-```powershell
-winget install prasenjeet-symon.ogcode
-```
-
-### Docker
-
-```bash
-docker run -p 9595:9595 \
-  -v ~/.ogcode:/root/.ogcode \
-  -v "$(pwd):/workspace" -w /workspace \
-  ghcr.io/prasenjeet-symon/ogcode:latest
-```
-
-Then open `http://localhost:9595`. The image is also on Docker Hub as `prasenjeetsimon/ogcode:latest` — either reference works.
-
-### Use a local model with Ollama
-
-```bash
-ollama serve
-ogcode
-```
-
-Or point Ogcode at an explicit endpoint:
-
-```bash
-export OLLAMA_BASE_URL=http://localhost:11434/v1
-ogcode
-```
-
-### Modes
-
-```bash
-ogcode              # Build mode: chat, inspect, edit, execute, verify
-ogcode plan         # Plan mode: decompose and execute a larger feature
-ogcode -p 3000      # Run on a custom port
-```
-
----
-
-## Configuration
+### Configuration
 
 Ogcode detects your provider from the environment. Set at least one:
 
@@ -151,21 +115,7 @@ Settings can also live in `ogcode.json` at the project root (project settings) a
 
 **OGX** is a subscription plan from OG Lab. Connect it from the settings screen and the plan's models run through OG Lab's gateway — no environment variable needed.
 
-Everything else — provider, search, skill, memory, context, and deployment tuning — lives in the [documentation](https://ogcode.in/docs/).
-
----
-
-## The open-source Grok Bot vision
-
-The long-term goal is simple: **give everyone a capable, transparent, local-first AI teammate that can turn intent into finished work.**
-
-Ogcode starts with software because a codebase is an honest testbed — files are inspectable, changes are diffable, tests give feedback, and git is a safe history. The same approach then extends beyond the repository: to the browser and the tools you already use, moving information safely while keeping an audit trail. Some of this ships today; the rest is a roadmap we mark clearly rather than dress up as finished.
-
-> Ogcode is an independent open-source project inspired by the emerging AI-agent category. It is not affiliated with, endorsed by, or produced by xAI, Grok, or X.
-
----
-
-## Remote deployment and security
+### Remote deployment and security
 
 Ogcode can run on a remote machine and be reached from a browser — but it can read and modify files and run commands. **Never expose it directly to the public internet without authentication.**
 
@@ -182,22 +132,13 @@ ssh -L 9595:localhost:9595 user@your-server
 
 Working setups — SSH tunnel, reverse proxy, and Docker — are in the [remote deployment guide](https://ogcode.in/docs/deployment/). For a hosted, multi-user deployment, see the [control-plane documentation](controlplane/docs/deploy.md).
 
----
+### Contributing
 
-## Contributing
+If you're interested in contributing to Ogcode, please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
 
-Ogcode is open source and contributions are welcome — code, tests, documentation, skills, integrations, and design ideas.
+Development builds use `make build`, and tests run with `CGO_ENABLED=1 go test ./...`. Say hello on [Discord](https://discord.gg/JQP9t8y2Zv).
 
-1. Fork the repository and create a branch.
-2. Make your change, with tests where they matter.
-3. Run `CGO_ENABLED=1 go test ./...`.
-4. Open a pull request.
-
-Development builds use `make build`. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting, and say hello on [Discord](https://discord.gg/JQP9t8y2Zv).
-
----
-
-## Security
+### Security
 
 Treat Ogcode like a powerful automation process:
 
@@ -209,9 +150,7 @@ Treat Ogcode like a powerful automation process:
 
 Your code and session data stay local; only conversation content is sent to the model provider you configure, where that provider's privacy policy applies.
 
----
-
-## License
+### License
 
 Ogcode is dual-licensed:
 
@@ -220,12 +159,6 @@ Ogcode is dual-licensed:
 
 Releases up to and including **v0.36.1** remain MIT. **v0.37.0 onward is AGPL-3.0-only.** Bundled third-party code is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-<br/>
+---
 
-<div align="center">
-
-**Build the open-source AI teammate.**
-
-[Star on GitHub](https://github.com/prasenjeet-symon/ogcode) · [Discord](https://discord.gg/JQP9t8y2Zv) · [Documentation](https://ogcode.in/docs/)
-
-</div>
+**Join our community** [Discord](https://discord.gg/JQP9t8y2Zv) | [Documentation](https://ogcode.in/docs/) | [Star on GitHub](https://github.com/prasenjeet-symon/ogcode)
