@@ -213,7 +213,7 @@ func (r *RotatingFile) rotate(incoming int64) {
 	if err := os.Rename(r.path, r.backupPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		// Keep appending to the oversized file and try again later.
 		r.retryAt = r.now().Add(rotationRetry)
-		fmt.Fprintf(os.Stderr, "ogcode: could not rotate log file %s: %v\n", r.path, err)
+		fmt.Fprintf(os.Stderr, "ogcode: could not rotate log file %s: %v\n", Scrub(r.path), Scrub(err.Error()))
 	}
 	if err := r.open(); err != nil {
 		return
@@ -304,7 +304,7 @@ func (r *RotatingFile) mill() {
 			continue
 		}
 		if err := compressFile(b.path); err != nil {
-			fmt.Fprintf(os.Stderr, "ogcode: could not compress log file %s: %v\n", b.path, err)
+			fmt.Fprintf(os.Stderr, "ogcode: could not compress log file %s: %v\n", Scrub(b.path), Scrub(err.Error()))
 		}
 	}
 	if pending {
@@ -413,7 +413,6 @@ func compressFile(src string) error {
 	if err := os.Rename(tmpPath, src+".gz"); err != nil {
 		return err
 	}
-	in.Close()
 	return os.Remove(src)
 }
 

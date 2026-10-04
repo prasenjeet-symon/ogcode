@@ -12,6 +12,14 @@
 //	OGCODE_LOG_MAX_FILES    rotated files kept (default 5)
 //	OGCODE_LOG_MAX_AGE_DAYS rotated files older than this are deleted (default 14, 0 = keep)
 //	OGCODE_LOG_COMPRESS     gzip rotated files (default on)
+//
+// Records can also be shipped to PostHog Logs, off by default:
+//
+//	OGCODE_POSTHOG_LOGS       on | off (default) — ship records to PostHog Logs
+//	OGCODE_POSTHOG_LOGS_LEVEL severity floor for shipped records (default warn)
+//
+// Shipping is opt-in and honours DO_NOT_TRACK; records are redacted before they
+// leave the process.
 package logging
 
 import (
@@ -24,10 +32,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // LevelOff is a threshold no record reaches: the sink is silent.
 const LevelOff = slog.Level(math.MaxInt32)
+
+// DefaultRemoteLevel is the floor below which records are never shipped to
+// PostHog: a debug log file is for the machine it runs on, and shipping debug
+// lines would be both noisy and a surprise. The file's level raises or lowers
+// nothing here — OGCODE_POSTHOG_LOGS_LEVEL is the only remote knob.
+const DefaultRemoteLevel = slog.LevelWarn
 
 // Defaults for a log file's size and retention. The worst case on disk is
 // MaxSizeMB × (MaxFiles + 1), before compression.
@@ -73,22 +89,22 @@ func FromEnv(dir, name string) Options {
 			Compress:   true,
 		},
 	}
-	if l, ok := parseLevel(os.Getenv("OGCODE_LOG_LEVEL")); ok && l != LevelOff {
+	if l, ok := envLevel("OGCODE_LOG_LEVEL"); ok {
 		o.Level = l
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("OGCODE_LOG_FORMAT")), "json") {
 		o.Format = "json"
 	}
-	if l, ok := parseLevel(os.Getenv("OGCODE_LOG_CONSOLE")); ok {
+	if l, ok := envLevel("OGCODE_LOG_CONSOLE"); ok {
 		o.Console = l
 	}
-	if n, ok := envInt("OGCODE_LOG_MAX_SIZE_MB"); ok && n > 0 {
+	if n, ok := envIntChecked("OGCODE_LOG_MAX_SIZE_MB"); ok && n > 0 {
 		o.Rotate.MaxSize = int64(n) << 20
 	}
-	if n, ok := envInt("OGCODE_LOG_MAX_FILES"); ok && n >= 0 {
+	if n, ok := envIntChecked("OGCODE_LOG_MAX_FILES"); ok && n >= 0 {
 		o.Rotate.MaxBackups = n
 	}
-	if n, ok := envInt("OGCODE_LOG_MAX_AGE_DAYS"); ok && n >= 0 {
+	if n, ok := envIntChecked("OGCODE_LOG_MAX_AGE_DAYS"); ok && n >= 0 {
 		o.Rotate.MaxAge = time.Duration(n) * 24 * time.Hour
 	}
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_LOG_COMPRESS"))); v != "" {
@@ -114,19 +130,47 @@ func parseLevel(s string) (slog.Level, bool) {
 	return 0, false
 }
 
-func envInt(name string) (int, bool) {
+// envLevel reads a level from the named environment variable. An empty value
+// is simply unset; a value that is present but not a level name is ignored
+// with one warning, so a typo does not silently leave the default in place.
+func envLevel(name string) (slog.Level, bool) {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return 0, false
+	}
+	l, ok := parseLevel(v)
+	if !ok {
+		slog.Warn("ignoring unparseable log level", "env", name, "value", v)
+		return 0, false
+	}
+	return l, true
+}
+
+// envIntChecked reads an integer setting. An empty value is simply unset; a
+// value that is present but unparseable is ignored with one warning, so a typo
+// does not silently leave the default in place.
+func envIntChecked(name string) (int, bool) {
 	v := strings.TrimSpace(os.Getenv(name))
 	if v == "" {
 		return 0, false
 	}
 	n, err := strconv.Atoi(v)
-	return n, err == nil
+	if err != nil {
+		slog.Warn("ignoring unparseable log setting", "env", name, "value", v)
+		return 0, false
+	}
+	return n, true
 }
 
 // Logger is a configured process logger and the file behind it.
 type Logger struct {
 	*slog.Logger
 	file *RotatingFile
+	ship *posthogSink
+
+	// ConsoleFallback reports that the log file could not be opened and the
+	// terminal is carrying its records. Set once by New.
+	ConsoleFallback bool
 }
 
 // Path is the active log file, or "" when there is none.
@@ -137,9 +181,12 @@ func (l *Logger) Path() string {
 	return l.file.Path()
 }
 
-// Close flushes nothing (writes are unbuffered) but closes the file and waits
-// for pending rotation housekeeping.
+// Close stops the PostHog sink (flushing any buffered records), closes the file
+// and waits for pending rotation housekeeping.
 func (l *Logger) Close() error {
+	if l.ship != nil {
+		l.ship.stop()
+	}
 	if l.file == nil {
 		return nil
 	}
@@ -157,18 +204,26 @@ func New(o Options) *Logger {
 	l := &Logger{}
 	var handlers []slog.Handler
 	var openErr error
-	if o.Name != "" {
+	// An Off file level means no file at all: neither opened nor created.
+	if o.Name != "" && o.Level != LevelOff {
 		f, err := OpenRotating(filepath.Join(o.Dir, o.Name), o.Rotate)
 		if err == nil {
 			l.file = f
 			handlers = append(handlers, fileHandler(f, o))
 		} else {
 			openErr = err
+			// The file cannot take its records, so the terminal takes over at
+			// the file's level and the fallback is recorded on the logger.
 			o.Console = min(o.Console, o.Level)
+			l.ConsoleFallback = true
 		}
 	}
 	if o.Console != LevelOff {
 		handlers = append(handlers, consoleHandler(stderr, o.Console))
+	}
+	if o.shipsLogs() {
+		l.ship = newPostHogSink(posthogShipLevel(), posthogLogsEndpoint, posthogLogsToken, posthogLogsClient, posthogFlushInterval)
+		handlers = append(handlers, &posthogHandler{sink: l.ship})
 	}
 	switch len(handlers) {
 	case 0:
@@ -205,10 +260,18 @@ func fileHandler(w io.Writer, o Options) slog.Handler {
 	return slog.NewTextHandler(w, opts)
 }
 
-// consoleHandler writes terse lines for a person watching the terminal: no
-// timestamp (they are watching it happen) and no stack traces (those stay in
-// the file, where a panic's full record belongs).
+// consoleHandler writes the terminal's view of the log. On a terminal it is
+// terse for a person watching: no timestamp (they are watching it happen) and
+// no stack traces (those stay in the file, where a panic's full record
+// belongs). Piped — under a container, in a service unit — it is JSON with the
+// timestamp kept, because a collector parses it rather than reads it.
 func consoleHandler(w io.Writer, level slog.Level) slog.Handler {
+	if !consoleIsTerminal(w) {
+		return slog.NewJSONHandler(w, &slog.HandlerOptions{
+			Level:       level,
+			ReplaceAttr: redactAttr,
+		})
+	}
 	return slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -220,10 +283,39 @@ func consoleHandler(w io.Writer, level slog.Level) slog.Handler {
 	})
 }
 
+// consoleIsTerminal reports whether the console sink is an interactive
+// terminal, which decides its format. A var so a test need not hold a tty.
+var consoleIsTerminal = isTerminalWriter
+
+// isTerminalWriter reports whether w is an interactive terminal.
+func isTerminalWriter(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// shipsLogs reports whether this logger forwards records to PostHog Logs. It
+// is opt-in: a logger with a file behind it — a real command, not the throwaway
+// bootstrap that has no Name — ships only when OGCODE_POSTHOG_LOGS turns it on
+// and the floor admits some level.
+func (o Options) shipsLogs() bool {
+	return o.Name != "" && posthogLogsEnabled() && posthogShipLevel() != LevelOff
+}
+
+// posthogShipLevel is the severity floor for shipped records: the configured
+// remote level, but never below DefaultRemoteLevel. The file's level does not
+// enter into it, so OGCODE_LOG_LEVEL=debug cannot turn on debug shipping.
+func posthogShipLevel() slog.Level {
+	level := posthogLogsLevel()
+	if level < DefaultRemoteLevel {
+		level = DefaultRemoteLevel
+	}
+	return level
+}
+
 // describe renders the options for the startup line.
 func (o Options) describe() []any {
-	return []any{
-		"fileLevel", o.Level.String(),
+	args := []any{
+		"fileLevel", levelName(o.Level),
 		"format", o.Format,
 		"console", levelName(o.Console),
 		"maxSizeMB", o.Rotate.MaxSize >> 20,
@@ -231,6 +323,12 @@ func (o Options) describe() []any {
 		"maxAge", o.Rotate.MaxAge.String(),
 		"compress", o.Rotate.Compress,
 	}
+	if o.shipsLogs() {
+		args = append(args, "posthogLogs", true, "posthogLogsLevel", levelName(posthogShipLevel()))
+	} else {
+		args = append(args, "posthogLogs", false)
+	}
+	return args
 }
 
 func levelName(l slog.Level) string {
@@ -245,6 +343,6 @@ func levelName(l slog.Level) string {
 // file shared by restarts (and, rarely, by concurrent processes) readable, and
 // names the project a per-project log folder belongs to.
 func (l *Logger) Started(ctx context.Context, command, dir, version string, o Options) {
-	args := append([]any{"dir", dir, "version", version, "pid", os.Getpid()}, o.describe()...)
+	args := append([]any{"host", hostName(), "dir", dir, "version", version, "pid", os.Getpid()}, o.describe()...)
 	l.InfoContext(ctx, command+" started", args...)
 }

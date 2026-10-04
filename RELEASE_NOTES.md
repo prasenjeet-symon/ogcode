@@ -1,3 +1,31 @@
+# Release Notes — v0.44.4
+
+## Patch: Your logs can reach us, when you ask them to
+
+Ogcode can now forward its log records to PostHog Logs, so a crash or an error
+on your machine is visible to the maintainers without you first having to
+reproduce it in an issue.
+
+It is off until you turn it on. Set `OGCODE_POSTHOG_LOGS=1` and records at or
+above `OGCODE_POSTHOG_LOGS_LEVEL` (default `warn`) are shipped; `DO_NOT_TRACK`
+switches it off no matter what the flag says. Secrets are redacted before
+anything leaves the process, so a key that appears in a log line is written as
+`[REDACTED]`. The deployment guide documents both variables.
+
+## Other changes
+
+- When the console output is piped rather than a terminal — under a container,
+  in a service unit — it is now JSON with the timestamp kept, so a collector can
+  parse it. On a terminal it stays the terse text you read.
+- The access log now records client errors: a 4xx logs at Info, and a 401, 403
+  or 429 logs at Warn, so a default log still shows what a caller got wrong.
+- Setting `OGCODE_LOG_LEVEL=off` no longer creates a log file at all.
+- A log setting that is present but unparseable — a typo in a level or a size —
+  now warns once instead of being silently ignored.
+- The startup line names the host the server runs on.
+
+---
+
 # Release Notes — v0.44.3
 
 ## Patch: The mark goes orange, and Discord goes away

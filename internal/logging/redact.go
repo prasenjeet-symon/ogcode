@@ -25,6 +25,11 @@ func isSecretKey(key string) bool {
 	if k == "auth" {
 		return true
 	}
+	// "authorization" is not only a suffix ("x-authorization-header"); any
+	// key it appears in names the Authorization header, whose value is a secret.
+	if strings.Contains(k, "authorization") {
+		return true
+	}
 	for _, s := range secretKeySuffixes {
 		if strings.HasSuffix(k, s) {
 			return true

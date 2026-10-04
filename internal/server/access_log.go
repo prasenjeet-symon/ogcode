@@ -15,7 +15,9 @@ import (
 // polls several endpoints every few seconds, so ogcode's own successful
 // requests pass Debug and stay out of a default Info log, while the preview
 // proxy passes Info to keep every request under the preview domain on record.
-// Server errors log at Warn either way.
+// A client error (4xx) logs above the floor at Info so a default log still
+// shows what a caller got wrong; 401, 403 and 429 are worth a look and log at
+// Warn, as do server errors (5xx).
 func accessLog(floor slog.Level) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,8 +29,13 @@ func accessLog(floor slog.Level) func(http.Handler) http.Handler {
 					status = http.StatusOK // handler wrote nothing
 				}
 				level := floor
-				if status >= 500 {
+				switch {
+				case status >= 500:
 					level = max(level, slog.LevelWarn)
+				case status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusTooManyRequests:
+					level = max(level, slog.LevelWarn)
+				case status >= 400:
+					level = max(level, slog.LevelInfo)
 				}
 				ctx := r.Context()
 				if !slog.Default().Enabled(ctx, level) {

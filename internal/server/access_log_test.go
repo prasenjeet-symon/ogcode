@@ -27,7 +27,9 @@ func TestAccessLogLevels(t *testing.T) {
 		want   string
 	}{
 		{"api success stays at debug", slog.LevelDebug, http.StatusOK, "level=DEBUG"},
-		{"api client error stays at debug", slog.LevelDebug, http.StatusNotFound, "level=DEBUG"},
+		{"api client error logs at info", slog.LevelDebug, http.StatusNotFound, "level=INFO"},
+		{"api auth error is a warning", slog.LevelDebug, http.StatusUnauthorized, "level=WARN"},
+		{"api rate limit is a warning", slog.LevelDebug, http.StatusTooManyRequests, "level=WARN"},
 		{"api server error is a warning", slog.LevelDebug, http.StatusBadGateway, "level=WARN"},
 		{"preview success is on record", slog.LevelInfo, http.StatusOK, "level=INFO"},
 		{"preview server error is a warning", slog.LevelInfo, http.StatusInternalServerError, "level=WARN"},

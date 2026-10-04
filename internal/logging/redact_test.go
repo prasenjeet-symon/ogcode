@@ -38,12 +38,49 @@ func TestSecretKeys(t *testing.T) {
 		"apiKey": true, "api_key": true, "OPENAI_API_KEY": true, "token": true,
 		"refreshToken": true, "client-secret": true, "password": true,
 		"Authorization": true, "cookie": true, "auth": true,
+		"authorization_header": true, "x-authorization-header": true,
 		"tokens": false, "inputTokens": false, "session": false, "author": false,
 		"key": false, "path": false,
 	} {
 		if got := isSecretKey(key); got != want {
 			t.Errorf("isSecretKey(%q) = %v, want %v", key, got, want)
 		}
+	}
+}
+
+// The KindAny branch handles every non-string value a caller can pass: an
+// error's message, raw bytes, and anything else formatted with %+v — each
+// scrubbed by content, and blanked outright under a secret-named key.
+func TestRedactAttrKindAny(t *testing.T) {
+	type payload struct{ Key string }
+	for _, tc := range []struct {
+		name string
+		attr slog.Attr
+		want string // the expected string output, or "" when the attr must pass through unchanged
+	}{
+		{"error", slog.Any("err", errors.New("rejected sk-ant-abcdefghijklmnop")), "rejected " + Redacted},
+		{"bytes", slog.Any("blob", []byte("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")), "token " + Redacted},
+		{"struct", slog.Any("cfg", payload{Key: "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX"}), "{Key:" + Redacted + "}"},
+		{"plain", slog.Any("n", 7), ""}, // nothing to redact: a structured value is left intact
+		{"secret key", slog.Any("password", payload{Key: "hunter2"}), Redacted},
+		{"secret error", slog.Any("api_key", errors.New("sk-live-abc")), Redacted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactAttr(nil, tc.attr)
+			if tc.want == "" {
+				if !got.Equal(tc.attr) {
+					t.Errorf("redactAttr(%v) = %v, want it unchanged", tc.attr, got)
+				}
+				return
+			}
+			if got.Value.Kind() != slog.KindString || got.Value.String() != tc.want {
+				t.Errorf("redactAttr(%v) = %v, want %q", tc.attr, got.Value, tc.want)
+			}
+		})
+	}
+	// A nil Any passes through untouched.
+	if got := redactAttr(nil, slog.Any("x", nil)); !got.Equal(slog.Any("x", nil)) {
+		t.Errorf("nil Any changed: %v", got)
 	}
 }
 

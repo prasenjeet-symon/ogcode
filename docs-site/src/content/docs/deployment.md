@@ -230,8 +230,12 @@ Directories are `0700`, files `0600`, and secrets are redacted. Useful environme
 | `OGCODE_LOG_MAX_FILES` | `5` | Files kept |
 | `OGCODE_LOG_MAX_AGE_DAYS` | `14` | Age limit |
 | `OGCODE_LOG_COMPRESS` | `on` | Compress rotated files |
+| `OGCODE_POSTHOG_LOGS` | `off` | Opt in to shipping logs to PostHog |
+| `OGCODE_POSTHOG_LOGS_LEVEL` | `warn` | Severity floor for shipped logs |
 
-To watch what the server is doing, run with `OGCODE_LOG_CONSOLE=info` (or set the UI log level in settings).
+To watch what the server is doing, run with `OGCODE_LOG_CONSOLE=info`.
+
+Log shipping is **opt in and off by default**. When `OGCODE_POSTHOG_LOGS=1`, records at or above `OGCODE_POSTHOG_LOGS_LEVEL` are sent (redacted) to PostHog Logs, so the ogcode maintainers can see crashes and errors across installs; setting `DO_NOT_TRACK` to any value but `0` disables it regardless of the flag.
 
 
 ## Checklist
