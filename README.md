@@ -156,4 +156,4 @@ Releases up to and including **v0.36.1** remain MIT. **v0.37.0 onward is AGPL-3.
 
 ---
 
-**Join our community** [Documentation](https://ogcode.in/docs/) | [Star on GitHub](https://github.com/prasenjeet-symon/ogcode)
+**Join our community** [Documentation](https://ogcode.in/docs/) | [Star on GitHub](https://github.com/prasenjeet-symon/ogcode) | [Reddit](https://www.reddit.com/r/ogcode/)
