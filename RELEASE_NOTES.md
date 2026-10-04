@@ -1,3 +1,18 @@
+# Release Notes — v0.44.5
+
+## Patch: The home page greets you by project
+
+The home page now opens with a greeting that names the project you are working
+in — _Good to see you in <project>_ — instead of the old generic headline. It is
+one line, but it says something about _your_ workspace rather than about the
+product.
+
+The badge above the headline is gone, and so is the faint colour glow behind it
+and the paragraph under the headline. The page opens straight onto the greeting
+and the prompt box, with the dot-grid texture left in place.
+
+---
+
 # Release Notes — v0.44.4
 
 ## Patch: Your logs can reach us, when you ask them to

@@ -7,6 +7,7 @@ import { DrawerToggle } from '../components/sidebar-shell';
 import ModelSelector from '../components/model-selector';
 import Logo from '../components/logo';
 import { getVersion } from '../api/client';
+import { projectName } from '../lib/paths';
 
 const SUGGESTIONS: string[] = [
   'Explain this codebase',
@@ -156,14 +157,6 @@ function HomeContent() {
       <SessionSidebar />
 
       <div class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
-        {/* Ambient background glow — subtle accent radial */}
-        <div
-          class="pointer-events-none absolute inset-0 opacity-60"
-          style={{
-            background:
-              'radial-gradient(ellipse 70% 50% at 50% -8%, rgba(255,94,31,0.10), transparent 70%)',
-          }}
-        />
         {/* Dot grid texture */}
         <div class="pointer-events-none absolute inset-0 bg-grid opacity-40" />
 
@@ -199,36 +192,16 @@ function HomeContent() {
           </header>
 
           {/* ── Hero ───────────────────────────────────────────── */}
-          <section class="relative flex flex-col items-center pt-10 sm:pt-20 pb-10 px-4 sm:px-6">
-            {/* Badge */}
-            <div class="mb-7 animate-fade-in-up flex items-center gap-2 px-3 py-1.5 rounded-full
-                        border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]/60
-                        text-[11px] text-zinc-400 text-center">
-              <span class="relative flex h-1.5 w-1.5 shrink-0">
-                <span class="absolute inline-flex h-full w-full rounded-full bg-[color:var(--accent)] opacity-60 animate-ping" />
-                <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]" />
-              </span>
-              The token-efficient agentic coding workbench
-            </div>
-
+          <section class="relative flex flex-col items-center pt-14 sm:pt-24 pb-10 px-4 sm:px-6">
             {/* Headline */}
             <h1 class="text-center text-[32px] sm:text-[42px] md:text-[54px] font-bold tracking-tight text-zinc-50 leading-[1.05]
                        animate-fade-in-up max-w-3xl" style={{ 'animation-delay': '40ms' }}>
-              Where everyone is a
+              Good to see you in
               <span class="block mt-1 bg-gradient-to-r from-[color:var(--accent)] via-[#ffb38a] to-[color:var(--accent)]
                            bg-clip-text text-transparent">
-                software developer.
+                {server.directory() ? projectName(server.directory()) : 'ogcode'}
               </span>
             </h1>
-
-            {/* Subheadline */}
-            <p class="mt-5 max-w-xl text-center text-[15px] md:text-[16px] text-zinc-400 leading-relaxed
-                      animate-fade-in-up" style={{ 'animation-delay': '80ms' }}>
-              No gatekeepers, no boilerplate. Describe what you want in plain English and ogcode builds it —
-              curating <em class="not-italic text-zinc-200 font-medium">relevant</em> context per turn, cutting
-              <strong class="text-zinc-100 font-semibold"> 70%+ of tokens</strong>, and letting conversations run
-              <strong class="text-zinc-100 font-semibold"> effectively forever</strong>.
-            </p>
           </section>
 
           {/* ── Prompt input ────────────────────────────────────── */}
