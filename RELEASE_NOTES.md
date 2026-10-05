@@ -1,3 +1,14 @@
+# Release Notes — v0.44.6
+
+## Patch: The rooms where everyone hangs out reach the app
+
+Settings → About now carries a **Community** section: three cards for the
+Telegram group, the WhatsApp group, and r/ogcode — the same rooms the dashboard
+links to. Each card is a single link out, so there is no account to make and
+nothing metered.
+
+---
+
 # Release Notes — v0.44.5
 
 ## Patch: The home page greets you by project
