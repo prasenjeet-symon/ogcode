@@ -122,7 +122,7 @@ type LoopRunner struct {
 	// hence atomic — and it is a pointer so the runners a sub-agent or task
 	// copies from this one read the same live flag rather than a snapshot
 	// (copying the atomic itself is what go vet's copylocks check rejects).
-	// nil — the default for the worker and tests — reads as off.
+	// nil — the default in tests — reads as off.
 	NotesEnabled *atomic.Bool
 }
 

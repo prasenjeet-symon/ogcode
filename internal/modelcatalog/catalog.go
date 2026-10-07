@@ -3,7 +3,7 @@
 //
 // It exists because the provider package must not import the session store (the
 // dependency runs the other way) and the server is not the only entry point that
-// builds a registry: `ogcode index` and a hosted worker do too, and each needs
+// builds a registry: `ogcode index` and `ogcode run` do too, and each needs
 // its picker populated before its first network fetch. Keeping the conversions
 // and the seed/persist logic here means all three entry points share one
 // implementation rather than three drift-prone copies.

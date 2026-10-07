@@ -11,7 +11,7 @@ import (
 
 // AskUserFunc puts a batch of questions in front of the user and blocks until
 // they answer. Implemented by agent.LoopRunner.AskUser and wired in from
-// server.go/worker to avoid the tool→agent import cycle.
+// server.go to avoid the tool→agent import cycle.
 type AskUserFunc func(ctx context.Context, sessionID string, questions []question.Question) (question.Reply, error)
 
 // maxAskUserQuestions caps a batch so the dialog stays a short set of screens

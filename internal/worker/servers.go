@@ -13,13 +13,12 @@ import (
 
 // serverManager hosts one standalone ogcode server per worktree directory.
 //
-// Phase 2 of the remote-agent-workers plan: hosted sessions no longer run on a
-// shared in-process buildEnv — every worktree gets a full server.Server wired
-// by server.NewWithOptions + Serve(ctx), which brings its own DB, bus, stores,
-// providers, permission manager, loop runner and loopback HTTP listener. The
-// per-dir isolation is automatic; machine-global state (~/.ogcode/config.db,
-// embed model, mcp-tokens) is designed for N-process sharing and needs nothing
-// here.
+// Phase 2 of the remote-agent-workers plan: every worktree gets a full
+// server.Server wired by server.NewWithOptions + Serve(ctx), which brings its
+// own DB, bus, stores, providers, permission manager, loop runner and loopback
+// HTTP listener. The per-dir isolation is automatic; machine-global state
+// (~/.ogcode/config.db, embed model, mcp-tokens) is designed for N-process
+// sharing and needs nothing here.
 type serverManager struct {
 	mu      sync.Mutex
 	ctx     context.Context

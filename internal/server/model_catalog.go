@@ -12,9 +12,9 @@ import (
 // The model catalogue of every provider is persisted in the global config DB so
 // a fresh process can populate the picker without a network call, and refreshed
 // in the background so a live picker updates on its own. The conversions and the
-// seed/persist logic live in internal/modelcatalog (shared with the CLI and the
-// worker); this file owns the server-only part: the refresh guard and the
-// models.updated event that follows a refresh.
+// seed/persist logic live in internal/modelcatalog (shared with the CLI); this
+// file owns the server-only part: the refresh guard and the models.updated
+// event that follows a refresh.
 //
 // The split exists because Models() must never block: it is a pure read of the
 // in-memory catalogue, and every fetch runs here, off the read path.
