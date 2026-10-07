@@ -114,12 +114,16 @@ export interface CompatiblePreset {
   keysURL?: string;
 }
 
-// These endpoints are exactly the hosts `collectionFromBaseURL` recognises in
+// Every preset's host is one `collectionFromBaseURL` recognises in
 // internal/provider/openai.go. Keeping the two lists in step is what makes a
 // preset useful: the server reads the saved base URL, derives the collection
 // label from the host, and the model picker then groups those models under the
 // vendor's own name instead of a generic "openai". A URL the server does not
 // recognise still works — its models simply stay grouped under OpenAI.
+//
+// The server also recognises a few hosts that are not presets: OpenRouter,
+// which has its own slot, and retired vendors, kept so a slot still saved
+// against one keeps its name. collectionForBaseURL lists those by hand.
 export const COMPATIBLE_PRESETS: CompatiblePreset[] = [
   { collection: 'Gemini',   label: 'Google Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai', keyHint: 'AIza…', dot: 'bg-blue-400',   keysURL: 'https://aistudio.google.com/apikey' },
   { collection: 'DeepSeek', label: 'DeepSeek',      baseURL: 'https://api.deepseek.com/v1',        keyHint: 'sk-…',   dot: 'bg-indigo-400' },
@@ -129,7 +133,6 @@ export const COMPATIBLE_PRESETS: CompatiblePreset[] = [
   { collection: 'Mistral',  label: 'Mistral AI',    baseURL: 'https://api.mistral.ai/v1',          keyHint: '…',      dot: 'bg-rose-400' },
   { collection: 'SambaNova', label: 'SambaNova',    baseURL: 'https://api.sambanova.ai/v1',        keyHint: '…',      dot: 'bg-fuchsia-400' },
   { collection: 'NVIDIA',   label: 'NVIDIA NIM',    baseURL: 'https://integrate.api.nvidia.com/v1', keyHint: 'nvapi-…', dot: 'bg-lime-400' },
-  { collection: 'GitHub Models', label: 'GitHub Models', baseURL: 'https://models.inference.ai.azure.com', keyHint: 'ghp_…', dot: 'bg-zinc-300' },
 ];
 
 // Client-side mirror of collectionFromBaseURL (internal/provider/openai.go):
@@ -149,6 +152,10 @@ export function collectionForBaseURL(baseURL: string): string {
     if (u.includes(host)) return collection;
   }
   if (u.includes('openrouter.ai')) return 'OpenRouter';
+  // GitHub Models was retired on 2026-07-30 and its host no longer resolves,
+  // so it is no longer a preset. A slot still saved against it keeps its name
+  // here, as it does on the server, instead of passing for plain OpenAI.
+  if (u.includes('models.inference.ai.azure.com')) return 'GitHub Models';
   return '';
 }
 

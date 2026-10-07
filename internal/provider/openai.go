@@ -714,6 +714,9 @@ func shapeForOpenAIModel(body *oaiRequest, thinking bool) {
 // collectionFromBaseURL infers a grouping label from an OpenAI-compatible base
 // URL so dynamically-fetched models can be grouped in the UI. Returns "" when
 // the URL is the canonical OpenAI endpoint (no grouping needed).
+//
+// The web app mirrors this in collectionForBaseURL (web/src/lib/providers.ts),
+// and every endpoint preset it offers must be a host recognised here.
 func collectionFromBaseURL(baseURL string) string {
 	u := strings.ToLower(baseURL)
 	switch {
@@ -730,6 +733,10 @@ func collectionFromBaseURL(baseURL string) string {
 	case strings.Contains(u, "sambanova"):
 		return "SambaNova"
 	case strings.Contains(u, "models.inference.ai.azure.com"):
+		// GitHub Models was retired on 2026-07-30 and this host no longer
+		// resolves, so nothing is fetched from it and it is no longer a preset.
+		// It stays so this and the web mirror agree on the name of a slot that
+		// is still saved against it.
 		return "GitHub Models"
 	case strings.Contains(u, "integrate.api.nvidia.com"):
 		return "NVIDIA"
