@@ -1022,7 +1022,7 @@ func tavilyKeyFor(cfg *session.SearchConfig) string {
 }
 
 // logSearchProvider records which backend cfg resolves to, with a warning when
-// Tavily is selected but unusable (so it silently runs on native).
+// Tavily or You.com is selected but unusable (so it silently runs on native).
 func logSearchProvider(prefix string, cfg *session.SearchConfig) {
 	if cfg.Provider == session.SearchProviderTavily {
 		if tavilyKeyFor(cfg) != "" {
@@ -1030,6 +1030,14 @@ func logSearchProvider(prefix string, cfg *session.SearchConfig) {
 			return
 		}
 		slog.Warn(prefix + "; provider=tavily but no API key is configured — using the native engine")
+		return
+	}
+	if cfg.Provider == session.SearchProviderYoucom {
+		if strings.TrimSpace(os.Getenv("YDC_API_KEY")) != "" {
+			slog.Info(prefix + "; provider=youcom (native fallback)")
+			return
+		}
+		slog.Warn(prefix + "; provider=youcom but no YDC_API_KEY is set in the environment — using the native engine")
 		return
 	}
 	slog.Info(prefix + "; provider=native")
