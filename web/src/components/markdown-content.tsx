@@ -196,7 +196,7 @@ export default function MarkdownContent(props: { text: string; class?: string })
     // Render mermaid diagrams. The source is read off each node before run(),
     // because run() replaces the node's children with the rendered <svg> and
     // the definition would otherwise be gone by the time the zoom opens.
-    const mermaidNodes = containerRef.querySelectorAll('.mermaid');
+    const mermaidNodes = containerRef.querySelectorAll<HTMLElement>('.mermaid');
     if (mermaidNodes.length > 0) {
       requestAnimationFrame(() => {
         const sources = new Map<Element, string>();
@@ -207,7 +207,7 @@ export default function MarkdownContent(props: { text: string; class?: string })
             mermaidNodes.forEach((node) => {
               const src = sources.get(node) ?? '';
               if (!src.trim()) return;
-              attachZoom(node as HTMLElement, 'Mermaid diagram', async (host) => {
+              attachZoom(node, 'Mermaid diagram', async (host) => {
                 const { svg } = await mermaid.render(`diagram-zoom-${++zoomSeq}`, src);
                 host.innerHTML = svg;
               });

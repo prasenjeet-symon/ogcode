@@ -154,8 +154,6 @@ export default function GitDiff(props: { diff: string; filename?: string }) {
                   style={{
                     color: 'var(--text-primary)',
                     background: 'rgba(148,163,184,0.12)',
-                    borderTop: '1px solid var(--border-subtle)',
-                    borderBottom: '1px solid var(--border-subtle)',
                     'margin-top': (row as { kind: 'file'; text: string; first: boolean }).first ? '0' : '12px',
                   }}
                 >
