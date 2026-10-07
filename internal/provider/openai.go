@@ -895,12 +895,16 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		pendingImages = nil
 	}
 
+	echo := p.reasoningEcho()
 	for _, m := range req.Messages {
 		// A non-tool message ends the run of tool results; flush buffered images first.
 		if m.ToolCallID == "" {
 			flushImages()
 		}
 		msg := oaiMessage{Role: m.Role}
+		if m.Role == "assistant" {
+			echo.write(&msg, m.ReasoningText)
+		}
 		if m.ToolCallID != "" {
 			// Tool result message: role=tool, content=output, tool_call_id, name
 			msg.ToolCallID = m.ToolCallID
@@ -1447,11 +1451,17 @@ type oaiStreamOptions struct {
 }
 
 type oaiMessage struct {
-	Role       string          `json:"role"`
-	Content    any             `json:"content,omitempty"`
-	ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Name       string          `json:"name,omitempty"`
+	Role    string `json:"role"`
+	Content any    `json:"content,omitempty"`
+	// ReasoningContent and Reasoning hand an assistant message's own reasoning
+	// back to the hosts that read it, each under its own name — see
+	// openai_reasoning.go. ReasoningContent is a pointer so a host that
+	// requires the field can be sent it empty.
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	Reasoning        string          `json:"reasoning,omitempty"`
+	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
 }
 
 type oaiTool struct {

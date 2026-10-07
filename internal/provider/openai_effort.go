@@ -17,7 +17,8 @@ import (
 // host this file knows, for a model whose levels it knows, in that host's own
 // field. Everything else gets no effort picker at all.
 
-// effortHost is the endpoint family a provider talks to, as far as effort goes.
+// effortHost is the endpoint family a provider talks to, as far as effort goes
+// — and the reasoning it takes back (see openai_reasoning.go).
 type effortHost int
 
 const (

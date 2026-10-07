@@ -373,6 +373,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// Delegated work (task sub-agents) inherits it through ctx.
 	effort := resolveRunEffort(p, sess, modelID)
 	ctx = withRunEffort(ctx, effort)
+	// Whether this endpoint takes each assistant message's own reasoning back
+	// (DeepSeek's reasoning_content and the like). Fixed for the run, so every
+	// step resends the history in the same shape.
+	echoReasoning := provider.EchoesReasoning(p)
 
 	compactionThreshold := compactionThresholdTokens(modelContextWindow)
 	// The model's output ceiling (0 = unknown). Sent as the per-request output
@@ -713,9 +717,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// compaction (if it ever fires) covers anything older within the session.
 		turnStartIdx := findLastTextUserMessageIndex(messages)
 		if turnStartIdx >= 0 && turnStartIdx < len(messages) {
-			modelMessages = convertMessages(messages[watermark.sliceStart(messages, turnStartIdx):], modelSupportsImages, modelID)
+			modelMessages = convertMessages(messages[watermark.sliceStart(messages, turnStartIdx):], modelSupportsImages, modelID, echoReasoning)
 		} else {
-			modelMessages = convertMessages(messages, modelSupportsImages, modelID)
+			modelMessages = convertMessages(messages, modelSupportsImages, modelID, echoReasoning)
 		}
 		// Skip when this same summary is already carried this turn by the
 		// watermark's prepended message. Proactive compaction sets the watermark
@@ -3406,6 +3410,30 @@ func replayableReasoning(parts []session.ReasoningPartData, modelID string) []pr
 	return out
 }
 
+// echoedReasoning returns an assistant message's reasoning as the plain text an
+// OpenAI-compatible host takes back (DeepSeek's reasoning_content — see
+// provider.EchoesReasoning). Unlike a thinking block it needs no signature:
+// these hosts send none and check none.
+//
+// Only reasoning modelID produced goes back, all or nothing, as in
+// replayableReasoning: another model's chain of thought is not this one's to
+// continue, and is billed as input all the same. The text is what was stored —
+// final once its step ended — so a message resent on every later step carries
+// identical bytes each time.
+func echoedReasoning(parts []session.ReasoningPartData, modelID string) string {
+	if modelID == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, d := range parts {
+		if d.Model != modelID {
+			return ""
+		}
+		b.WriteString(d.Text)
+	}
+	return b.String()
+}
+
 // validToolInput returns tool-call arguments that are safe to persist and to
 // replay, substituting an empty object for anything that is not a JSON object.
 //
@@ -3423,7 +3451,10 @@ func validToolInput(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-func convertMessages(messages []*session.MessageWithParts, modelSupportsImages bool, modelID string) []provider.ModelMessage {
+// convertMessages turns stored messages into the provider-neutral request
+// history. echoReasoning attaches each assistant message's own reasoning as
+// plain text, for a provider that sends it back (provider.EchoesReasoning).
+func convertMessages(messages []*session.MessageWithParts, modelSupportsImages bool, modelID string, echoReasoning bool) []provider.ModelMessage {
 	var result []provider.ModelMessage
 	for _, m := range messages {
 		// Transcript-only records never reach a model. See MessageInfo.DisplayOnly:
@@ -3487,6 +3518,10 @@ func convertMessages(messages []*session.MessageWithParts, modelSupportsImages b
 		}
 
 		reasoningParts := replayableReasoning(reasoningData, modelID)
+		var reasoningText string
+		if echoReasoning && m.Info.Role == session.RoleAssistant {
+			reasoningText = echoedReasoning(reasoningData, modelID)
+		}
 
 		if m.Info.Role == session.RoleAssistant && len(toolCallParts) > 0 {
 			// Assistant message with tool calls: emit as a single message with tool_calls array
@@ -3520,6 +3555,7 @@ func convertMessages(messages []*session.MessageWithParts, modelSupportsImages b
 				Role:           "assistant",
 				ToolCalls:      toolCallsJSON,
 				ReasoningParts: reasoningParts,
+				ReasoningText:  reasoningText,
 			}
 			if len(textParts) > 0 {
 				msg.Content, _ = json.Marshal(strings.Join(textParts, ""))
@@ -3572,6 +3608,7 @@ func convertMessages(messages []*session.MessageWithParts, modelSupportsImages b
 				if m.Info.Role == session.RoleAssistant && len(reasoningParts) > 0 {
 					msg.ReasoningParts = reasoningParts
 				}
+				msg.ReasoningText = reasoningText
 				result = append(result, msg)
 			}
 		}

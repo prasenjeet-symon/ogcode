@@ -527,7 +527,7 @@ func TestConvertMessagesReasoningParts(t *testing.T) {
 		},
 	}
 
-	result := convertMessages(messages, false, "claude-opus-4-6")
+	result := convertMessages(messages, false, "claude-opus-4-6", false)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
@@ -570,7 +570,7 @@ func TestConvertMessagesReasoningPartsWithToolCalls(t *testing.T) {
 		},
 	}
 
-	result := convertMessages(messages, false, "claude-opus-4-6")
+	result := convertMessages(messages, false, "claude-opus-4-6", false)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
@@ -612,7 +612,7 @@ func TestConvertMessagesReasoningReplayGuard(t *testing.T) {
 
 	t.Run("unsigned reasoning from an OpenAI-family model is dropped", func(t *testing.T) {
 		msgs := assistantWith(session.ReasoningPartData{Text: "thinking out loud", Model: "deepseek-reasoner"})
-		got := convertMessages(msgs, false, "claude-opus-4-6")
+		got := convertMessages(msgs, false, "claude-opus-4-6", false)
 		if len(got[0].ReasoningParts) != 0 {
 			t.Errorf("unsigned reasoning must not reach Anthropic, got %+v", got[0].ReasoningParts)
 		}
@@ -620,7 +620,7 @@ func TestConvertMessagesReasoningReplayGuard(t *testing.T) {
 
 	t.Run("signed reasoning from a different model is dropped", func(t *testing.T) {
 		msgs := assistantWith(session.ReasoningPartData{Text: "prior", Signature: "sig==", Model: "claude-opus-4-6"})
-		got := convertMessages(msgs, false, "claude-sonnet-4-6")
+		got := convertMessages(msgs, false, "claude-sonnet-4-6", false)
 		if len(got[0].ReasoningParts) != 0 {
 			t.Errorf("cross-model reasoning must not be replayed, got %+v", got[0].ReasoningParts)
 		}
@@ -628,7 +628,7 @@ func TestConvertMessagesReasoningReplayGuard(t *testing.T) {
 
 	t.Run("reasoning of unknown origin is dropped", func(t *testing.T) {
 		msgs := assistantWith(session.ReasoningPartData{Text: "legacy row", Signature: "sig=="})
-		got := convertMessages(msgs, false, "claude-opus-4-6")
+		got := convertMessages(msgs, false, "claude-opus-4-6", false)
 		if len(got[0].ReasoningParts) != 0 {
 			t.Errorf("reasoning with no recorded model must be dropped, got %+v", got[0].ReasoningParts)
 		}
@@ -639,7 +639,7 @@ func TestConvertMessagesReasoningReplayGuard(t *testing.T) {
 			session.ReasoningPartData{Text: "b", Signature: "sig2==", Model: "claude-opus-4-6"},
 			session.ReasoningPartData{Text: "a", Signature: "sig1==", Model: "gpt-5"},
 		)
-		got := convertMessages(msgs, false, "claude-opus-4-6")
+		got := convertMessages(msgs, false, "claude-opus-4-6", false)
 		if len(got[0].ReasoningParts) != 0 {
 			t.Errorf("a partial sequence is itself a 400; expected all dropped, got %+v", got[0].ReasoningParts)
 		}
@@ -647,7 +647,7 @@ func TestConvertMessagesReasoningReplayGuard(t *testing.T) {
 
 	t.Run("redacted block from the current model survives", func(t *testing.T) {
 		msgs := assistantWith(session.ReasoningPartData{RedactedData: "EuYBCg==", Model: "claude-opus-4-6"})
-		got := convertMessages(msgs, false, "claude-opus-4-6")
+		got := convertMessages(msgs, false, "claude-opus-4-6", false)
 		if len(got[0].ReasoningParts) != 1 {
 			t.Fatalf("expected the redacted block to be replayed, got %+v", got[0].ReasoningParts)
 		}
@@ -695,7 +695,7 @@ func TestConvertMessages_StripsToolResultImagesWhenModelLacksVision(t *testing.T
 	}
 
 	// modelSupportsImages=false: the image must NOT be forwarded.
-	stripped := convertMessages(messages, false, "claude-opus-4-6")
+	stripped := convertMessages(messages, false, "claude-opus-4-6", false)
 	if len(stripped) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(stripped))
 	}
@@ -707,7 +707,7 @@ func TestConvertMessages_StripsToolResultImagesWhenModelLacksVision(t *testing.T
 	}
 
 	// modelSupportsImages=true: the image MUST be forwarded.
-	withImages := convertMessages(messages, true, "claude-opus-4-6")
+	withImages := convertMessages(messages, true, "claude-opus-4-6", false)
 	if len(withImages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(withImages))
 	}
@@ -768,7 +768,7 @@ func TestConvertMessages_StripsImagesFromPriorHistory(t *testing.T) {
 		},
 	}
 
-	result := convertMessages(messages, false, "claude-opus-4-6")
+	result := convertMessages(messages, false, "claude-opus-4-6", false)
 	imageCount := 0
 	for _, m := range result {
 		imageCount += len(m.Images)

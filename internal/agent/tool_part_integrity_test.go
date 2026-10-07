@@ -146,7 +146,7 @@ func TestRunLoop_InvalidToolArgumentsStayPairable(t *testing.T) {
 	// every tool_use answered, no empty ids, no stray "tool" role reaching a
 	// provider that has no such role.
 	calls, results := map[string]bool{}, map[string]bool{}
-	for _, mm := range convertMessages(msgs, false, "claude-opus-4-6") {
+	for _, mm := range convertMessages(msgs, false, "claude-opus-4-6", false) {
 		if mm.ToolCalls != nil {
 			var cs []struct {
 				ID string `json:"id"`

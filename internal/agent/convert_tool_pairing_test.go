@@ -49,7 +49,7 @@ func TestConvertMessages_DropsUnpairableToolParts(t *testing.T) {
 		),
 	}
 
-	out := convertMessages(msgs, false, "test-model")
+	out := convertMessages(msgs, false, "test-model", false)
 
 	var toolCallIDs, resultIDs []string
 	for _, m := range out {
@@ -114,7 +114,7 @@ func TestConvertMessages_NoEmptyToolCallsArray(t *testing.T) {
 	msgs := []*session.MessageWithParts{
 		msgWith(session.RoleAssistant, toolPart(session.RoleAssistant, "", "broken", "")),
 	}
-	for _, m := range convertMessages(msgs, false, "test-model") {
+	for _, m := range convertMessages(msgs, false, "test-model", false) {
 		if m.ToolCalls != nil && strings.TrimSpace(string(m.ToolCalls)) == "[]" {
 			t.Error("emitted an empty tool_calls array")
 		}
@@ -185,7 +185,7 @@ func TestConvertMessages_UnreadablePartDoesNotPoisonTheRequest(t *testing.T) {
 		msgWith(session.RoleUser, session.Part{ID: session.NewPartID(), Type: session.PartTool, Data: json.RawMessage(`{}`)}),
 	}
 
-	for _, m := range convertMessages(msgs, false, "claude-opus-4-6") {
+	for _, m := range convertMessages(msgs, false, "claude-opus-4-6", false) {
 		if m.Role == "tool" {
 			t.Errorf("an unreadable part still produced a tool result (id %q)", m.ToolCallID)
 		}
@@ -224,7 +224,7 @@ func TestConvertMessages_SkipsDisplayOnly(t *testing.T) {
 		msgWith(session.RoleAssistant, textPart("done")),
 	}
 
-	out := convertMessages(msgs, false, "gpt-4o")
+	out := convertMessages(msgs, false, "gpt-4o", false)
 
 	if len(out) != 2 {
 		t.Fatalf("got %d model messages, want 2 (the display-only row must not be sent)", len(out))
@@ -250,7 +250,7 @@ func TestConvertMessages_KeepsOrdinaryUserMessages(t *testing.T) {
 		msgWith(session.RoleAssistant, textPart("second")),
 		msgWith(session.RoleUser, textPart("third")),
 	}
-	if out := convertMessages(msgs, false, "gpt-4o"); len(out) != 3 {
+	if out := convertMessages(msgs, false, "gpt-4o", false); len(out) != 3 {
 		t.Fatalf("got %d model messages, want all 3 kept", len(out))
 	}
 }

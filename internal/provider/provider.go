@@ -484,9 +484,14 @@ type ModelMessage struct {
 	Images []MessageImage `json:"images,omitempty"`
 	// ReasoningParts carries thinking/reasoning blocks from a previous assistant
 	// turn. Anthropic requires these to be forwarded back as "thinking" content
-	// blocks with their signatures intact; OpenAI-family providers handle
-	// reasoning tokens server-side and should ignore this field.
+	// blocks with their signatures intact; OpenAI-family providers ignore this
+	// field.
 	ReasoningParts []ReasoningPart `json:"reasoningParts,omitempty"`
+	// ReasoningText is the plain text of the reasoning the model produced for
+	// this assistant message, for the OpenAI-compatible hosts that take it back
+	// unsigned — DeepSeek's reasoning_content, Ollama's reasoning. The agent loop
+	// fills it only for a provider that sends it (see ReasoningEchoer).
+	ReasoningText string `json:"reasoningText,omitempty"`
 }
 
 // ReasoningPart represents a thinking/reasoning block from a model's response.
@@ -567,6 +572,22 @@ type GuidancePlacer interface {
 func PlacesGuidance(p Provider) bool {
 	gp, ok := p.(GuidancePlacer)
 	return ok && gp.PlacesGuidance()
+}
+
+// ReasoningEchoer is implemented by providers whose endpoint takes each
+// assistant message's own reasoning back as plain text, from
+// ModelMessage.ReasoningText.
+type ReasoningEchoer interface {
+	// EchoesReasoning reports whether StreamChat sends ReasoningText.
+	EchoesReasoning() bool
+}
+
+// EchoesReasoning reports whether p sends an assistant message's reasoning
+// back. The caller fills ModelMessage.ReasoningText only then, so text a
+// provider would drop is neither carried nor counted toward the request's size.
+func EchoesReasoning(p Provider) bool {
+	re, ok := p.(ReasoningEchoer)
+	return ok && re.EchoesReasoning()
 }
 
 type ModelInfo struct {

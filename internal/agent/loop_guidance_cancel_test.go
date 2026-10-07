@@ -92,7 +92,7 @@ func TestCancelPartialToolCalls_PairsToolUseWithResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
-	if uses, results := toolUseIDs(convertMessages(before, false, "claude-opus-4-6")), toolResultIDs(convertMessages(before, false, "claude-opus-4-6")); len(uses) == 0 || len(results) != 0 {
+	if uses, results := toolUseIDs(convertMessages(before, false, "claude-opus-4-6", false)), toolResultIDs(convertMessages(before, false, "claude-opus-4-6", false)); len(uses) == 0 || len(results) != 0 {
 		t.Fatalf("precondition: expected dangling tool_use and no results, got uses=%v results=%v", uses, results)
 	}
 
@@ -105,7 +105,7 @@ func TestCancelPartialToolCalls_PairsToolUseWithResult(t *testing.T) {
 	}
 
 	// Every assistant tool_use must now be paired with a tool_result.
-	model := convertMessages(msgs, false, "claude-opus-4-6")
+	model := convertMessages(msgs, false, "claude-opus-4-6", false)
 	uses := toolUseIDs(model)
 	results := toolResultIDs(model)
 	if len(uses) != 2 {
@@ -199,7 +199,7 @@ func TestCancelPartialToolCalls_SanitizesInvalidJSONArgs(t *testing.T) {
 
 	// The tool_use arguments in the converted (provider-bound) request must now
 	// be valid JSON.
-	model := convertMessages(msgs, false, "claude-opus-4-6")
+	model := convertMessages(msgs, false, "claude-opus-4-6", false)
 	sawToolUse := false
 	for _, m := range model {
 		if m.Role != "assistant" || m.ToolCalls == nil {

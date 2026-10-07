@@ -110,6 +110,8 @@ func estimateRequestTokens(req provider.StreamRequest) int {
 			tokens += estimateTokens(rp.Signature)
 			tokens += estimateTokens(rp.RedactedData)
 		}
+		// Set only for a provider that sends it, so it counts only then.
+		tokens += estimateTokens(m.ReasoningText)
 	}
 	// Tool definitions are sent on every request and were previously ignored.
 	for _, t := range req.Tools {
