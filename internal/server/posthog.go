@@ -14,12 +14,15 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/version"
 )
 
-// Hardcoded PostHog project credentials. These are baked into the binary —
-// users have no control over analytics configuration.
-const (
-	PostHogAPIKey  = "phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z"
-	PostHogAPIHost = "https://app.posthog.com"
-)
+// PostHogAPIKey is the PostHog project key, baked into the binary — users have
+// no control over analytics configuration. It is a variable only so a test
+// binary can blank it (TestMain here and in worker): with no key, Serve builds
+// no capture client and starts no feature-flag refresher, so a test run sends
+// nothing to PostHog. Nothing in the shipped binary assigns it.
+var PostHogAPIKey = "phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z"
+
+// PostHogAPIHost is the PostHog instance events and flag lookups go to.
+const PostHogAPIHost = "https://app.posthog.com"
 
 // PostHogClient captures server-side analytics events to a PostHog project.
 // Events are sent via the /capture REST endpoint — no SDK dependency required.

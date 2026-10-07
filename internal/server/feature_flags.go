@@ -71,8 +71,13 @@ var featureFlagCache flagCache
 // the routes and prompts seconds after boot rather than a minute, and re-reads
 // it on featureFlagTTL thereafter. A change is stored on the server — the loop
 // runner reads the same atomic — and published so an open UI can re-render
-// without a reload.
+// without a reload. With no PostHog key there is nothing to ask: it starts
+// nothing, and every feature keeps the value it has. Only a test binary blanks
+// the key, so a test's stored decision is never overwritten.
 func (s *Server) startFeatureFlagRefresh(ctx context.Context) {
+	if PostHogAPIKey == "" {
+		return
+	}
 	refresh := func() {
 		flags := featureFlags(s.installID, featureFlagHTTPTimeout)
 		s.applyFeatureFlag(&s.notesEnabled, flags[notesFeatureFlagKey], "notes.changed")

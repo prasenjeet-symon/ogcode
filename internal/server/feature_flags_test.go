@@ -48,18 +48,6 @@ func stubDecide(t *testing.T, status int, body string) *int {
 	return &hits
 }
 
-// stubFeatureFlagsOn points /decide at a stub that turns every gated feature on,
-// clearing the package cache first so the answer is fetched fresh. A test that
-// runs a real Serve() (whose background refresher re-reads the flags) uses this
-// so the refresher's decision agrees with the test instead of clobbering it with
-// the live PostHog value. A caller should still Store(true) on the atomic to
-// cover the window before the refresher's first fetch completes.
-func stubFeatureFlagsOn(t *testing.T) {
-	t.Helper()
-	resetNotesFlagCache(t)
-	stubDecide(t, http.StatusOK, `{"featureFlags":{"notes-feature":true,"device-panel":true,"plan-mode":true}}`)
-}
-
 // TestNotesEnabled pins the fail-safe contract of the /decide read: only a
 // boolean true in the flag map turns the feature on; every other shape of
 // answer — a false, an absent or non-boolean flag, a non-200, a malformed body
