@@ -6,12 +6,14 @@ import (
 	"testing"
 )
 
-// isolateHome points os.UserHomeDir at a temp dir so a test never reads or
-// writes the real ~/.ogcode/worker-id.
+// isolateHome points os.UserHomeDir at a fresh temp dir, so a test sees no
+// worker-id or credential another test left behind (TestMain already keeps the
+// whole package off the real ~/.ogcode).
 func isolateHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
 }
 
 func TestLoadOrCreateWorkerID_PersistsAcrossCalls(t *testing.T) {

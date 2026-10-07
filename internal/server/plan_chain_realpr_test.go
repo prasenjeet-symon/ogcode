@@ -42,6 +42,10 @@ func TestE2E_RealChainPR(t *testing.T) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		t.Skip("gh not installed")
 	}
+	// gh and git find the developer's GitHub login under the real home, which
+	// TestMain hides. This test builds its Server by hand and never opens the
+	// global config DB, so it alone gets the real home back.
+	t.Setenv("HOME", realHome)
 
 	// 1. Create a real (private) throwaway repo and clone it.
 	repoName := "ogcode-e2e-chainpr-" + time.Now().Format("20060102-150405")
