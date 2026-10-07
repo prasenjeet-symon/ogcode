@@ -34,6 +34,7 @@ var (
 	runOutputFormat string
 	runMaxTurns     int
 	runModel        string
+	runEffort       string
 )
 
 var runCmd = &cobra.Command{
@@ -50,6 +51,7 @@ func init() {
 	runCmd.Flags().StringVarP(&runOutputFormat, "output-format", "o", "text", "Output format: text or json")
 	runCmd.Flags().IntVar(&runMaxTurns, "max-turns", 100, "Maximum agent loop iterations")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Model ID override (e.g. claude-sonnet-4-5)")
+	runCmd.Flags().StringVar(&runEffort, "effort", "", "Reasoning effort: none, on, minimal, low, medium, high, xhigh or max; a level the model does not take runs it at its default")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -71,6 +73,9 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	prompt := strings.TrimSpace(strings.Join(parts, "\n\n"))
 	if prompt == "" {
 		return fmt.Errorf("prompt required — pass as argument or pipe via stdin")
+	}
+	if runEffort != "" && !provider.IsEffort(runEffort) {
+		return fmt.Errorf("unknown --effort %q: use none, on, minimal, low, medium, high, xhigh or max", runEffort)
 	}
 
 	dir, err := os.Getwd()
@@ -235,6 +240,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		Directory:   dir,
 		Title:       title,
 		Model:       runModel,
+		Effort:      runEffort,
 		SessionType: runAgentName,
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),

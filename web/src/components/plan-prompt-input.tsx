@@ -1,9 +1,14 @@
 import { createSignal, createEffect, Show, onCleanup, onMount } from 'solid-js';
 import { usePlan } from '../context/plan';
+import { useSession } from '../context/session';
 import ModelSelector from './model-selector';
+import EffortSelector from './effort-selector';
 
 export default function PlanPromptInput() {
   const plan = usePlan();
+  // Effort picks are remembered per model in the session context, shared with
+  // the chat composer: a model runs at the same depth wherever it is picked.
+  const session = useSession();
   const [text, setText] = createSignal('');
   const [focused, setFocused] = createSignal(false);
   let textareaRef: HTMLTextAreaElement | undefined;
@@ -98,6 +103,12 @@ export default function PlanPromptInput() {
               selectedModel={plan.selectedModel}
               models={plan.models}
               onSelect={plan.selectModel}
+            />
+            <EffortSelector
+              modelId={plan.selectedModel}
+              providerId={plan.selectedProvider}
+              value={() => session.effortFor(plan.selectedModel(), plan.selectedProvider())}
+              onSelect={(level) => session.setEffortPick(plan.selectedModel(), plan.selectedProvider(), level)}
             />
 
             <div class="flex-1" />

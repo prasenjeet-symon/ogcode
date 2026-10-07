@@ -526,6 +526,12 @@ type StreamRequest struct {
 	// auto-mode risk gate was sent 8 tokens on this assumption and silently
 	// failed to judge any command; see riskLLMMaxTokens.)
 	Thinking bool `json:"thinking,omitempty"`
+	// Effort is the reasoning effort to ask for, in ogcode's vocabulary (see
+	// effort.go), or "" for the model's default. It applies only with Thinking:
+	// the agent loop sets both, from the session's choice, after checking the
+	// model takes the level (ResolveEffort). Each provider translates it into
+	// its own field and drops a level the model would reject.
+	Effort string `json:"effort,omitempty"`
 	// CacheKey identifies the conversation this request belongs to, for
 	// providers whose prompt cache is shared across machines and needs a routing
 	// hint to land a session's requests on the node holding its prefix. Only the
@@ -583,6 +589,12 @@ type ModelInfo struct {
 	// from OpenAI-compatible providers (e.g. "DeepSeek", "Gemini") so the UI can
 	// group them instead of collapsing everything under the OpenAI provider id.
 	Collection string `json:"collection,omitempty"`
+	// Efforts and DefaultEffort are the reasoning levels the serving host itself
+	// reports for the model, lowest first, in ogcode's vocabulary — Ollama's
+	// /api/show thinking metadata, OpenRouter's reasoning object. Empty when the
+	// host reports none; the catalogue answers then (see EffortSpecifier).
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"defaultEffort,omitempty"`
 }
 
 type Provider interface {

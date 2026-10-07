@@ -36,6 +36,7 @@ import {
   trackSessionStarted,
   trackMessageSent,
   trackModelSelected,
+  trackEffortSelected,
   trackPermissionPromptAnswered,
   trackCompactTriggered,
   trackErrorShown,
@@ -111,6 +112,19 @@ interface SessionContextValue {
   /** The provider chosen with the model; '' means resolve it from the model id. */
   selectedProvider: () => string;
   selectModel: (modelId: string, providerId?: string) => void;
+  /** The reasoning effort the next turn runs at for the selected model; '' is
+   *  the model's own default. */
+  selectedEffort: () => string;
+  /** The reasoning effort a given model would run at (its remembered pick). */
+  effortFor: (modelId: string, providerId?: string) => string;
+  /** What a request for that model should carry about effort: its level, or
+   *  undefined while the model listing has not loaded (leave the stored one). */
+  effortToSend: (modelId: string, providerId?: string) => string | undefined;
+  /** Pick the effort for the selected model and store it on the active session. */
+  selectEffort: (level: string) => Promise<void>;
+  /** Remember an effort for a model without touching the active session — for
+   *  composers that run another session (a plan's). */
+  setEffortPick: (modelId: string, providerId: string, level: string) => void;
   permissionMode: () => 'auto' | 'ask' | 'yolo';
   setPermissionMode: (mode: 'auto' | 'ask' | 'yolo') => Promise<void>;
   selectSession: (id: string) => Promise<void>;
@@ -393,6 +407,28 @@ export const SessionProvider: ParentComponent = (props) => {
     typeof localStorage !== 'undefined' ? localStorage.getItem(PROVIDER_STORAGE_KEY) || '' : ''
   );
 
+  // Reasoning effort, remembered per model. Levels are a property of the model
+  // on its provider — Claude's run to max, gpt-oss stops at high, some models
+  // only switch thinking on or off — so a single global pick could not survive
+  // a model switch; each model keeps its own, the way the model choice itself
+  // is remembered. Keyed by provider and model, since one id can be served by
+  // two providers with different levels. A missing key means "never picked":
+  // the model runs at its default.
+  const EFFORT_STORAGE_KEY = 'ogcode-effort-by-model';
+  const effortKey = (providerId: string, modelId: string) => `${providerId}::${modelId}`;
+  const [effortPicks, setEffortPicks] = createSignal<Record<string, string>>((() => {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(EFFORT_STORAGE_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const picks: Record<string, string> = {};
+        for (const [k, v] of Object.entries(parsed)) if (typeof v === 'string') picks[k] = v;
+        return picks;
+      }
+    } catch (_e) { /* ignore parse errors */ }
+    return {};
+  })());
+
   // Model hotkey slots — up to 4 models that can be switched to with Alt+1–4.
   // Persisted in localStorage so assignments survive app restarts.
   const SLOTS_KEY = 'ogcode-model-slots';
@@ -485,6 +521,66 @@ export const SessionProvider: ParentComponent = (props) => {
     return models().find((m) => m.id === id)?.providerId || '';
   };
 
+  // The listing entry for a model, preferring the given provider's: the same id
+  // can come from two providers, with different effort levels.
+  function modelInfoFor(modelId: string, providerId?: string): ModelInfo | undefined {
+    const list = models();
+    return (providerId ? list.find((m) => m.id === modelId && m.providerId === providerId) : undefined)
+      ?? list.find((m) => m.id === modelId);
+  }
+
+  // The effort a model runs at: the user's pick for it while the model still
+  // takes that level, else what the active session already stores for that same
+  // model, else '' — the model's default. A model with no levels is always ''.
+  function effortFor(modelId: string, providerId?: string): string {
+    const info = modelInfoFor(modelId, providerId);
+    const levels = info?.efforts ?? [];
+    if (!info || levels.length === 0) return '';
+    const pick = effortPicks()[effortKey(info.providerId, info.id)];
+    if (pick !== undefined) return levels.includes(pick) ? pick : '';
+    const sess = activeSession();
+    if (sess?.effort && sess.model === modelId && levels.includes(sess.effort)) return sess.effort;
+    return '';
+  }
+
+  const selectedEffort = (): string => effortFor(selectedModel(), selectedProvider());
+
+  // What a request should say about effort: the selected level, or undefined
+  // while the model listing has not loaded — then nothing is known about the
+  // model's levels, and sending '' would wipe the session's stored choice.
+  const effortToSend = (modelId: string, providerId?: string): string | undefined =>
+    modelInfoFor(modelId, providerId) ? effortFor(modelId, providerId) : undefined;
+
+  function setEffortPick(modelId: string, providerId: string, level: string): ModelInfo | undefined {
+    const info = modelInfoFor(modelId, providerId);
+    if (!info) return undefined;
+    const key = effortKey(info.providerId, info.id);
+    setEffortPicks((prev) => {
+      const next = { ...prev, [key]: level };
+      try { localStorage.setItem(EFFORT_STORAGE_KEY, JSON.stringify(next)); } catch (_e) { /* ignore quota errors */ }
+      return next;
+    });
+    trackEffortSelected({ model: info.id, provider: info.providerId, level });
+    return info;
+  }
+
+  async function selectEffort(level: string) {
+    if (!setEffortPick(selectedModel(), selectedProvider(), level)) return;
+    // Store it on the session too, so a turn the server starts on its own — a
+    // resume, a restart — runs at the same depth as one the user sends.
+    const sess = activeSession();
+    if (!sess || (sess.effort ?? '') === level) return;
+    setActiveSession({ ...sess, effort: level }); // optimistic
+    try {
+      const updated = await updateSession(sess.id, { effort: level });
+      setActiveSession(updated);
+      setSessions((list) => list.map((s) => (s.id === updated.id ? updated : s)));
+    } catch (e) {
+      console.error('update effort failed:', e);
+      setActiveSession(sess); // revert on failure
+    }
+  }
+
   async function selectModel(modelId: string, providerId?: string) {
     // Set pendingModel immediately (optimistic) so selectedModel() reflects the change
     // before the network request completes — prevents the old model from being sent if
@@ -501,7 +597,14 @@ export const SessionProvider: ParentComponent = (props) => {
     const sess = activeSession();
     if (!sess) return;
     try {
-      const updated = await updateSession(sess.id, providerId ? { model: modelId, provider: providerId } : { model: modelId });
+      // The effort travels with the model: the new model runs at its own
+      // remembered level, not at one the previous model may not even take.
+      const effort = effortToSend(modelId, providerId);
+      const updated = await updateSession(sess.id, {
+        model: modelId,
+        ...(providerId ? { provider: providerId } : {}),
+        ...(effort !== undefined ? { effort } : {}),
+      });
       setActiveSession(updated);
     } catch (e) {
       console.error('update model failed:', e);
@@ -811,7 +914,9 @@ export const SessionProvider: ParentComponent = (props) => {
     setCompacted(false);
     setLoopError(null);
     if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
-    const session = await createSession(server.directory(), model || selectedModel(), provider || selectedProvider());
+    const sessionModel = model || selectedModel();
+    const sessionProvider = provider || selectedProvider();
+    const session = await createSession(server.directory(), sessionModel, sessionProvider, effortToSend(sessionModel, sessionProvider));
     trackSessionStarted({ model: session.model || '', provider: session.provider || '' });
     setSessions((prev) => [session, ...prev]);
     // The transcript is cleared raw, in the same update that puts the new
@@ -1049,7 +1154,7 @@ export const SessionProvider: ParentComponent = (props) => {
         images: (images || []).length,
         length: content.length,
       });
-      await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider());
+      await sendPrompt(session.id, content, images, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider(), effortToSend(selectedModel(), selectedProvider()));
       // Immediately fetch to get the real user message + start seeing assistant
       const page = await fetchNewest(session.id);
       if (!page) return;
@@ -1510,6 +1615,11 @@ export const SessionProvider: ParentComponent = (props) => {
     selectedModel,
     selectedProvider,
     selectModel,
+    selectedEffort,
+    effortFor,
+    effortToSend,
+    selectEffort,
+    setEffortPick: (modelId: string, providerId: string, level: string) => { setEffortPick(modelId, providerId, level); },
     permissionMode,
     setPermissionMode,
     selectSession,

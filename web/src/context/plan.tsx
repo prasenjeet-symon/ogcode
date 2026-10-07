@@ -992,7 +992,8 @@ export const PlanProvider: ParentComponent = (props) => {
       setMessages((prev) => [...prev, tempUserMsg]);
 
       try {
-        await sendPlanPrompt(plan.id, content, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider());
+        await sendPlanPrompt(plan.id, content, selectedModel(), window.innerWidth, window.innerHeight, selectedProvider(),
+          session.effortToSend(selectedModel(), selectedProvider()));
         const page = await fetchNewest(plan.id);
         if (page) applyNewestPage(page);
         startBgPoll(plan.id);

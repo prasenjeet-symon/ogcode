@@ -119,39 +119,94 @@ type CatalogModel struct {
 	// catalogue still knows its window and price for a host that bridges the
 	// two (OpenRouter).
 	ResponsesOnly bool
+
+	// Efforts are the reasoning-effort levels the model itself accepts, lowest
+	// first, in ogcode's vocabulary (see effort.go): graded levels for a model
+	// that takes a depth, EffortNone and EffortOn for one that only switches
+	// thinking on or off. Empty means the catalogue knows no effort control for
+	// it — it may still reason, just not on request. DefaultEffort is the level
+	// its vendor applies when none is sent.
+	//
+	// These are facts about the model. Whether a given endpoint can carry the
+	// level is the provider's call (see EffortSpecifier), so a model listed
+	// here can still have no picker behind a host that takes no effort field.
+	Efforts       []string
+	DefaultEffort string
 }
+
+// Effort ladders shared by catalogue entries, lowest first. A ladder records
+// what the model's vendor accepts; see each list's source note for the models.
+var (
+	// Claude Opus 4.7 and later, Sonnet 5 and later, and the Fable and Mythos
+	// models: the full ladder, xhigh included.
+	claudeEfforts = []string{EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
+	// Claude Opus 4.6 and Sonnet 4.6: no xhigh, which arrived with Opus 4.7.
+	claude46Efforts = []string{EffortLow, EffortMedium, EffortHigh, EffortMax}
+	// Claude Opus 4.5, the o-series, gpt-oss, Gemini 3.x Flash and Pro, Gemini
+	// 2.5 Pro.
+	lowToHighEfforts = []string{EffortLow, EffortMedium, EffortHigh}
+	// GPT-5 (which always reasons) and the Gemini Flash-Lite models.
+	minimalToHighEfforts = []string{EffortMinimal, EffortLow, EffortMedium, EffortHigh}
+	// GPT-5.1 and Gemini 2.5 Flash / Flash-Lite.
+	noneToHighEfforts = []string{EffortNone, EffortLow, EffortMedium, EffortHigh}
+	// GPT-5.2 and later on Chat Completions ("max" is Responses-only there).
+	noneToXHighEfforts = []string{EffortNone, EffortLow, EffortMedium, EffortHigh, EffortXHigh}
+	// GPT-6 Astra and GPT-5.3 Codex (no "none").
+	lowToXHighEfforts = []string{EffortLow, EffortMedium, EffortHigh, EffortXHigh}
+	// The GPT-5.x pro models.
+	mediumToXHighEfforts = []string{EffortMedium, EffortHigh, EffortXHigh}
+	// DeepSeek V4: off, or thinking at low, high or max.
+	noneLowHighMaxEfforts = []string{EffortNone, EffortLow, EffortHigh, EffortMax}
+	// Kimi K3 and GLM-5.3, which always think.
+	lowHighMaxEfforts = []string{EffortLow, EffortHigh, EffortMax}
+	// GLM-5.2: off, high or max.
+	noneHighMaxEfforts = []string{EffortNone, EffortHigh, EffortMax}
+	// Qwen3.8's hybrid models, and the always-thinking 2.4T.
+	qwen38Efforts         = []string{EffortNone, EffortLow, EffortMedium, EffortXHigh}
+	qwen38ThinkingEfforts = []string{EffortLow, EffortMedium, EffortXHigh}
+	// Models that switch thinking on or off and take no depth.
+	onOffEfforts = []string{EffortNone, EffortOn}
+)
 
 // AnthropicModels is the authoritative list of models the Claude API serves
 // (current and legacy-but-active; retired models are in LegacyModels).
 // Maintained by contributors — see file header for instructions.
 //
 // Source: platform.claude.com/docs models overview, per-model pages, pricing and
-// model-deprecations pages, verified 2026-09-28. All are multimodal. From the
-// 4.6 generation on, the dateless ID is the pinned snapshot, the default window
-// is 1M tokens (generally available, no beta header, no long-context premium)
-// and output is capped at 128K; the 4.5 models are 200K/64K. Cache prices are
-// the 5-minute write and the read; Fable 5.1 and Opus 5.5 discount reads below
-// the usual 0.1x.
+// model-deprecations pages, verified 2026-09-28; Sonnet 5.5 and the effort
+// ladders (the effort guide's per-model levels and defaults) 2026-10-07. All
+// are multimodal. From the 4.6 generation on, the dateless ID is the pinned
+// snapshot, the default window is 1M tokens (generally available, no beta
+// header, no long-context premium) and output is capped at 128K; the 4.5 models
+// are 200K/64K. Cache prices are the 5-minute write and the read; Fable 5.1 and
+// Opus 5.5 discount reads below the usual 0.1x. Effort defaults to high on every
+// model that takes it except Opus 5.5, whose default is medium; no Claude model
+// is given EffortNone, because turning thinking off is a 400 on the newest
+// models and invites tool calls written as prose on the rest — low effort is
+// the cheap setting instead.
 var AnthropicModels = []CatalogModel{
 	// ── Current ──────────────────────────────────────────────────────────────
-	{ID: "claude-fable-5-1", Name: "Claude Fable 5.1", ActiveByDefault: true, InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
-	{ID: "claude-opus-5-5", Name: "Claude Opus 5.5", ActiveByDefault: true, InputPricePerM: 4, OutputPricePerM: 20, CacheWritePricePerM: 5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
-	{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", ActiveByDefault: true, InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
+	{ID: "claude-fable-5-1", Name: "Claude Fable 5.1", ActiveByDefault: true, InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-opus-5-5", Name: "Claude Opus 5.5", ActiveByDefault: true, InputPricePerM: 4, OutputPricePerM: 20, CacheWritePricePerM: 5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortMedium},
+	{ID: "claude-sonnet-5-5", Name: "Claude Sonnet 5.5", ActiveByDefault: true, InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-haiku-4-5-20251001", Aliases: []string{"claude-haiku-4-5"}, Name: "Claude Haiku 4.5", ActiveByDefault: true, InputPricePerM: 1, OutputPricePerM: 5, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.1, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000},
 	// Invitation-only (Project Glasswing): listed so an invited account can pick it.
-	{ID: "claude-mythos-5-1", Name: "Claude Mythos 5.1", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
+	{ID: "claude-mythos-5-1", Name: "Claude Mythos 5.1", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 
 	// ── Legacy (still served) ────────────────────────────────────────────────
-	{ID: "claude-fable-5", Name: "Claude Fable 5", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
-	{ID: "claude-mythos-5", Name: "Claude Mythos 5", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
-	{ID: "claude-opus-5", Name: "Claude Opus 5", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
-	{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
-	{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true},
-	{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive"},
-	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", InputPricePerM: 3, OutputPricePerM: 15, CacheWritePricePerM: 3.75, CacheReadPricePerM: 0.3, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive"},
+	{ID: "claude-fable-5", Name: "Claude Fable 5", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-mythos-5", Name: "Claude Mythos 5", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-opus-5", Name: "Claude Opus 5", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", Efforts: claude46Efforts, DefaultEffort: EffortHigh},
+	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", InputPricePerM: 3, OutputPricePerM: 15, CacheWritePricePerM: 3.75, CacheReadPricePerM: 0.3, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", Efforts: claude46Efforts, DefaultEffort: EffortHigh},
 	// The 4.5 models take only a fixed thinking budget, which the loop does not
-	// size, so no thinking mode is requested for them.
-	{ID: "claude-opus-4-5-20251101", Aliases: []string{"claude-opus-4-5"}, Name: "Claude Opus 4.5", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000},
+	// size, so no thinking mode is requested for them. Opus 4.5 still takes an
+	// effort (low to high), which governs all of its output; Sonnet 4.5 and
+	// Haiku 4.5 reject the parameter.
+	{ID: "claude-opus-4-5-20251101", Aliases: []string{"claude-opus-4-5"}, Name: "Claude Opus 4.5", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000, Efforts: lowToHighEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-sonnet-4-5-20250929", Aliases: []string{"claude-sonnet-4-5"}, Name: "Claude Sonnet 4.5", InputPricePerM: 3, OutputPricePerM: 15, CacheWritePricePerM: 3.75, CacheReadPricePerM: 0.3, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000},
 }
 
@@ -160,7 +215,11 @@ var AnthropicModels = []CatalogModel{
 // Maintained by contributors — see file header for instructions.
 //
 // Source: developers.openai.com model pages, pricing, deprecations, changelog
-// and the GPT-6 and Responses migration guides, verified 2026-09-28. Prices are
+// and the GPT-6 and Responses migration guides, verified 2026-09-28; effort
+// ladders and defaults (the reasoning guide and model pages) 2026-10-07. The
+// ladders are what Chat Completions accepts: "max" is Responses-only on GPT-5.6
+// and GPT-6, so it is left off. GPT-5.5 and later default to medium even with
+// tools, where Chat Completions takes only "none" — see ToolsNeedNoReasoning. Prices are
 // the Standard tier for prompts under 272K tokens. Already-retired models are
 // left out (the retired Codex models OpenRouter still serves are in
 // LegacyModels), as are gpt-oss (in OpenModels: OpenAI does not serve it) and
@@ -170,42 +229,42 @@ var OpenAIModels = []CatalogModel{
 	// 1.05M-token window with at most 922K in and 128K out. A prompt over 272K
 	// input tokens bills the whole request at 2x input and 1.5x output; the
 	// estimates here use the standard rates. Cache writes cost 1.25x input.
-	{ID: "gpt-6-sol", Aliases: []string{"gpt-6-sol-pro"}, Name: "GPT-6 Sol", ActiveByDefault: true, InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
-	{ID: "gpt-6-luna", Aliases: []string{"gpt-6-luna-pro"}, Name: "GPT-6 Luna", ActiveByDefault: true, InputPricePerM: 0.1, OutputPricePerM: 0.5, CacheWritePricePerM: 0.125, CacheReadPricePerM: 0.01, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
+	{ID: "gpt-6-sol", Aliases: []string{"gpt-6-sol-pro"}, Name: "GPT-6 Sol", ActiveByDefault: true, InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-6-luna", Aliases: []string{"gpt-6-luna-pro"}, Name: "GPT-6 Luna", ActiveByDefault: true, InputPricePerM: 0.1, OutputPricePerM: 0.5, CacheWritePricePerM: 0.125, CacheReadPricePerM: 0.01, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortMedium},
 	// Astra's tool calling needs the Responses API, and it has no "none" effort.
-	{ID: "gpt-6-astra", Aliases: []string{"gpt-6-astra-pro"}, Name: "GPT-6 Astra", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "low", ResponsesOnly: true},
+	{ID: "gpt-6-astra", Aliases: []string{"gpt-6-astra-pro"}, Name: "GPT-6 Astra", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "low", ResponsesOnly: true, Efforts: lowToXHighEfforts},
 
 	// ── GPT-5.6 ─────────────────────────────────────────────────────────────
 	// Same limits and long-prompt rule as GPT-6. Sol's $4/$20 is promotional,
 	// "available at least through November 21, 2026"; "gpt-5.6" routes to Sol.
-	{ID: "gpt-5.6-sol", Aliases: []string{"gpt-5.6", "gpt-5.6-sol-pro"}, Name: "GPT-5.6 Sol", ActiveByDefault: true, InputPricePerM: 4, OutputPricePerM: 20, CacheWritePricePerM: 5, CacheReadPricePerM: 0.4, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
-	{ID: "gpt-5.6-terra", Aliases: []string{"gpt-5.6-terra-pro"}, Name: "GPT-5.6 Terra", ActiveByDefault: true, InputPricePerM: 2, OutputPricePerM: 12, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
-	{ID: "gpt-5.6-luna", Aliases: []string{"gpt-5.6-luna-pro"}, Name: "GPT-5.6 Luna", InputPricePerM: 0.2, OutputPricePerM: 1.2, CacheWritePricePerM: 0.25, CacheReadPricePerM: 0.02, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
+	{ID: "gpt-5.6-sol", Aliases: []string{"gpt-5.6", "gpt-5.6-sol-pro"}, Name: "GPT-5.6 Sol", ActiveByDefault: true, InputPricePerM: 4, OutputPricePerM: 20, CacheWritePricePerM: 5, CacheReadPricePerM: 0.4, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-5.6-terra", Aliases: []string{"gpt-5.6-terra-pro"}, Name: "GPT-5.6 Terra", ActiveByDefault: true, InputPricePerM: 2, OutputPricePerM: 12, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-5.6-luna", Aliases: []string{"gpt-5.6-luna-pro"}, Name: "GPT-5.6 Luna", InputPricePerM: 0.2, OutputPricePerM: 1.2, CacheWritePricePerM: 0.25, CacheReadPricePerM: 0.02, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortMedium},
 
 	// ── GPT-5.5 and 5.4 ─────────────────────────────────────────────────────
 	// OpenAI states no input cap for the 1.05M models here; 922K is the cap it
 	// states for the same window on GPT-5.6 and 6. Pro models have no cache
 	// discount and need the Responses API.
-	{ID: "gpt-5.5", Name: "GPT-5.5", InputPricePerM: 5, OutputPricePerM: 30, CacheWritePricePerM: 5, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
-	{ID: "gpt-5.5-pro", Name: "GPT-5.5 Pro", InputPricePerM: 30, OutputPricePerM: 180, CacheWritePricePerM: 30, CacheReadPricePerM: 30, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "medium", ResponsesOnly: true},
-	{ID: "gpt-5.4", Name: "GPT-5.4", InputPricePerM: 2.5, OutputPricePerM: 15, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
-	{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", InputPricePerM: 0.75, OutputPricePerM: 4.5, CacheWritePricePerM: 0.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
-	{ID: "gpt-5.4-nano", Name: "GPT-5.4 Nano", InputPricePerM: 0.2, OutputPricePerM: 1.25, CacheWritePricePerM: 0.2, CacheReadPricePerM: 0.02, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none", ToolsNeedNoReasoning: true},
-	{ID: "gpt-5.4-pro", Name: "GPT-5.4 Pro", InputPricePerM: 30, OutputPricePerM: 180, CacheWritePricePerM: 30, CacheReadPricePerM: 30, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "medium", ResponsesOnly: true},
-	{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex", InputPricePerM: 1.75, OutputPricePerM: 14, CacheWritePricePerM: 1.75, CacheReadPricePerM: 0.175, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "low", ResponsesOnly: true},
+	{ID: "gpt-5.5", Name: "GPT-5.5", InputPricePerM: 5, OutputPricePerM: 30, CacheWritePricePerM: 5, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-5.5-pro", Name: "GPT-5.5 Pro", InputPricePerM: 30, OutputPricePerM: 180, CacheWritePricePerM: 30, CacheReadPricePerM: 30, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "medium", ResponsesOnly: true, Efforts: mediumToXHighEfforts, DefaultEffort: EffortHigh},
+	{ID: "gpt-5.4", Name: "GPT-5.4", InputPricePerM: 2.5, OutputPricePerM: 15, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortNone},
+	{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", InputPricePerM: 0.75, OutputPricePerM: 4.5, CacheWritePricePerM: 0.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortNone},
+	{ID: "gpt-5.4-nano", Name: "GPT-5.4 Nano", InputPricePerM: 0.2, OutputPricePerM: 1.25, CacheWritePricePerM: 0.2, CacheReadPricePerM: 0.02, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none", ToolsNeedNoReasoning: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortNone},
+	{ID: "gpt-5.4-pro", Name: "GPT-5.4 Pro", InputPricePerM: 30, OutputPricePerM: 180, CacheWritePricePerM: 30, CacheReadPricePerM: 30, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "medium", ResponsesOnly: true, Efforts: mediumToXHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex", InputPricePerM: 1.75, OutputPricePerM: 14, CacheWritePricePerM: 1.75, CacheReadPricePerM: 0.175, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "low", ResponsesOnly: true, Efforts: lowToXHighEfforts},
 
 	// ── GPT-5.2 and 5.1 ─────────────────────────────────────────────────────
 	// 400K window, 128K out; OpenAI states no input cap, so the 272K it states
 	// for the same window on GPT-5 stands. Tools work with reasoning here.
-	{ID: "gpt-5.2", Name: "GPT-5.2", InputPricePerM: 1.75, OutputPricePerM: 14, CacheWritePricePerM: 1.75, CacheReadPricePerM: 0.175, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none"},
-	{ID: "gpt-5.2-pro", Name: "GPT-5.2 Pro", InputPricePerM: 21, OutputPricePerM: 168, CacheWritePricePerM: 21, CacheReadPricePerM: 21, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "medium", ResponsesOnly: true},
-	{ID: "gpt-5.1", Name: "GPT-5.1", InputPricePerM: 1.25, OutputPricePerM: 10, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.125, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none"},
+	{ID: "gpt-5.2", Name: "GPT-5.2", InputPricePerM: 1.75, OutputPricePerM: 14, CacheWritePricePerM: 1.75, CacheReadPricePerM: 0.175, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none", Efforts: noneToXHighEfforts, DefaultEffort: EffortNone},
+	{ID: "gpt-5.2-pro", Name: "GPT-5.2 Pro", InputPricePerM: 21, OutputPricePerM: 168, CacheWritePricePerM: 21, CacheReadPricePerM: 21, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "medium", ResponsesOnly: true, Efforts: mediumToXHighEfforts},
+	{ID: "gpt-5.1", Name: "GPT-5.1", InputPricePerM: 1.25, OutputPricePerM: 10, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.125, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "none", Efforts: noneToHighEfforts, DefaultEffort: EffortNone},
 
 	// ── GPT-5 (snapshots shut down 2026-12-11) ──────────────────────────────
 	// Always reasons: "minimal" is the least it accepts.
-	{ID: "gpt-5", Name: "GPT-5", InputPricePerM: 1.25, OutputPricePerM: 10, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.125, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "minimal"},
-	{ID: "gpt-5-mini", Name: "GPT-5 Mini", InputPricePerM: 0.25, OutputPricePerM: 2, CacheWritePricePerM: 0.25, CacheReadPricePerM: 0.025, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "minimal"},
-	{ID: "gpt-5-nano", Name: "GPT-5 Nano", InputPricePerM: 0.05, OutputPricePerM: 0.4, CacheWritePricePerM: 0.05, CacheReadPricePerM: 0.005, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "minimal"},
+	{ID: "gpt-5", Name: "GPT-5", InputPricePerM: 1.25, OutputPricePerM: 10, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.125, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "minimal", Efforts: minimalToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-5-mini", Name: "GPT-5 Mini", InputPricePerM: 0.25, OutputPricePerM: 2, CacheWritePricePerM: 0.25, CacheReadPricePerM: 0.025, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "minimal", Efforts: minimalToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-5-nano", Name: "GPT-5 Nano", InputPricePerM: 0.05, OutputPricePerM: 0.4, CacheWritePricePerM: 0.05, CacheReadPricePerM: 0.005, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "minimal", Efforts: minimalToHighEfforts, DefaultEffort: EffortMedium},
 	{ID: "gpt-5-pro", Name: "GPT-5 Pro", InputPricePerM: 15, OutputPricePerM: 120, CacheWritePricePerM: 15, CacheReadPricePerM: 15, SupportsImages: true, ContextWindow: 272_000, EffortFloor: "high", ResponsesOnly: true},
 
 	// ── GPT-4.1 and GPT-4o (no reasoning) ───────────────────────────────────
@@ -220,12 +279,52 @@ var OpenAIModels = []CatalogModel{
 	// ── o-series (always reason; take no temperature) ───────────────────────
 	// 200K window, 100K out. o4-mini, o3-mini and o1 shut down 2026-10-23; o3
 	// and the pro models 2026-12-11.
-	{ID: "o3", Name: "o3", InputPricePerM: 2, OutputPricePerM: 8, CacheWritePricePerM: 2, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low"},
-	{ID: "o4-mini", Aliases: []string{"o4-mini-high"}, Name: "o4 Mini", InputPricePerM: 1.1, OutputPricePerM: 4.4, CacheWritePricePerM: 1.1, CacheReadPricePerM: 0.275, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low"},
-	{ID: "o3-mini", Aliases: []string{"o3-mini-high"}, Name: "o3 Mini", InputPricePerM: 1.1, OutputPricePerM: 4.4, CacheWritePricePerM: 1.1, CacheReadPricePerM: 0.55, ContextWindow: 200_000, EffortFloor: "low"},
-	{ID: "o1", Name: "o1", InputPricePerM: 15, OutputPricePerM: 60, CacheWritePricePerM: 15, CacheReadPricePerM: 7.5, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low"},
+	{ID: "o3", Name: "o3", InputPricePerM: 2, OutputPricePerM: 8, CacheWritePricePerM: 2, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low", Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "o4-mini", Aliases: []string{"o4-mini-high"}, Name: "o4 Mini", InputPricePerM: 1.1, OutputPricePerM: 4.4, CacheWritePricePerM: 1.1, CacheReadPricePerM: 0.275, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low", Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "o3-mini", Aliases: []string{"o3-mini-high"}, Name: "o3 Mini", InputPricePerM: 1.1, OutputPricePerM: 4.4, CacheWritePricePerM: 1.1, CacheReadPricePerM: 0.55, ContextWindow: 200_000, EffortFloor: "low", Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "o1", Name: "o1", InputPricePerM: 15, OutputPricePerM: 60, CacheWritePricePerM: 15, CacheReadPricePerM: 7.5, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low", Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
 	{ID: "o3-pro", Name: "o3 Pro", InputPricePerM: 20, OutputPricePerM: 80, CacheWritePricePerM: 20, CacheReadPricePerM: 20, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low", ResponsesOnly: true},
 	{ID: "o1-pro", Name: "o1 Pro", InputPricePerM: 150, OutputPricePerM: 600, CacheWritePricePerM: 150, CacheReadPricePerM: 150, SupportsImages: true, ContextWindow: 200_000, EffortFloor: "low", ResponsesOnly: true},
+}
+
+// GoogleModels are Google's Gemini models. No provider lists them on its own:
+// they are reached through the Gemini API's OpenAI-compatible endpoint (the
+// OpenAI slot pointed at generativelanguage.googleapis.com) or OpenRouter.
+//
+// Source: ai.google.dev Gemini API docs — models and per-model pages, pricing,
+// the thinking guide, the OpenAI compatibility page, deprecations and the
+// changelog — verified 2026-10-07. Every model takes text, images, audio and
+// video in a 1,048,576-token window and writes up to 65,536 tokens, thinking
+// included. Prices are the Standard paid tier for prompts up to 200K tokens;
+// 3.6–3.8 Flash are at an introductory price through 2026-12-31 ($1.50 in /
+// $7.50 out / $0.15 cached after). The 2.5 models are open only to projects
+// that used them before 2026-09-18. 3.x deprecated sampling parameters, so they
+// are dropped as for the models that reject them.
+//
+// Effort is reasoning_effort on the compatible endpoint, mapped onto the
+// model's thinking level. No 3.x model can turn thinking off, and "minimal" is
+// left off the 3.x ladders except where it is the model's own default: Google
+// rejects it outright on several of them, and elsewhere it needs the thought
+// signatures ogcode does not send back. 2.5 Pro cannot turn thinking off; 2.5
+// Flash and Flash-Lite can ("none"). Gemini answers a level a model lacks with a
+// 400, which is why every level here is per model.
+var GoogleModels = []CatalogModel{
+	{ID: "gemini-3.8-flash", Name: "Gemini 3.8 Flash", InputPricePerM: 0.75, OutputPricePerM: 3.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gemini-3.7-flash", Name: "Gemini 3.7 Flash", InputPricePerM: 0.75, OutputPricePerM: 3.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gemini-3.6-flash", Name: "Gemini 3.6 Flash", InputPricePerM: 0.75, OutputPricePerM: 3.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", InputPricePerM: 1.5, OutputPricePerM: 9, CacheReadPricePerM: 0.15, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gemini-3.5-flash-lite", Name: "Gemini 3.5 Flash-Lite", InputPricePerM: 0.3, OutputPricePerM: 2.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: minimalToHighEfforts, DefaultEffort: EffortMinimal},
+	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash-Lite", InputPricePerM: 0.25, OutputPricePerM: 1.5, CacheReadPricePerM: 0.025, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: minimalToHighEfforts, DefaultEffort: EffortMinimal},
+	// The retired gemini-3-pro-preview id now routes here. Prompts over 200K
+	// tokens cost $4 / $18 / $0.40.
+	{ID: "gemini-3.1-pro-preview", Aliases: []string{"gemini-3.1-pro-preview-customtools", "gemini-3-pro-preview"}, Name: "Gemini 3.1 Pro (preview)", InputPricePerM: 2, OutputPricePerM: 12, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortHigh},
+	{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash (preview)", InputPricePerM: 0.5, OutputPricePerM: 3, CacheReadPricePerM: 0.05, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortHigh},
+	// 2.5 thinks on a budget the model sizes itself unless told otherwise, so
+	// its default is not a level. Prompts over 200K tokens on Pro cost $2.50 /
+	// $15 / $0.25.
+	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", InputPricePerM: 1.25, OutputPricePerM: 10, CacheReadPricePerM: 0.125, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, Efforts: lowToHighEfforts},
+	{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", InputPricePerM: 0.3, OutputPricePerM: 2.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, Efforts: noneToHighEfforts},
+	{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash-Lite", InputPricePerM: 0.1, OutputPricePerM: 0.4, CacheReadPricePerM: 0.01, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, Efforts: noneToHighEfforts, DefaultEffort: EffortNone},
 }
 
 // CatalogModelByID finds a model across every catalogue list under any of its
@@ -246,6 +345,13 @@ func CatalogModelByID(id string) (CatalogModel, bool) {
 // Sources: each vendor's API docs and pricing pages, Hugging Face model cards
 // and configs, OpenRouter's /models and /endpoints, Ollama's library and
 // ollama.com/api/tags, Groq, Together and Fireworks docs — verified 2026-09-28.
+// Effort ladders: the vendors' thinking guides (DeepSeek, Kimi, Z.ai, MiniMax,
+// Qwen Cloud, Mistral), the model cards, and ollama.com/api/show's thinking
+// metadata — verified 2026-10-07. They record what the model takes; a host can
+// name the levels differently (Z.ai defaults GLM-5.2 to max, Ollama's cloud to
+// high), which is why hosts that report their own levels override them. A
+// model that always thinks at one depth (MiniMax M2, Kimi K2.7 Code, R1) or
+// never thinks has no ladder: there is nothing to choose.
 //
 // Prices are the vendor's own API where it serves the model (DeepSeek, Alibaba
 // Qwen Cloud, Moonshot, Z.ai, MiniMax, Mistral, Azure for Phi), else the
@@ -261,13 +367,13 @@ var OpenModels = []CatalogModel{
 	// ── DeepSeek (api.deepseek.com) ─────────────────────────────────────────
 	// Peak-hour prices; off-peak is half. The first-party API serves two ids;
 	// its older names (deepseek-v4-flash, -vision-exp) now route to V4.1 Flash.
-	{ID: "deepseek-flash", Aliases: []string{"deepseek-v4.1-flash", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-v4p1-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"}, Name: "DeepSeek V4.1 Flash", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheReadPricePerM: 0.006, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 393_216},
-	{ID: "deepseek-v4-pro", Aliases: []string{"deepseek-v4-pro-0813", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek-ai/DeepSeek-V4-Pro"}, Name: "DeepSeek V4 Pro", InputPricePerM: 1.32, OutputPricePerM: 3.96, CacheReadPricePerM: 0.044, ContextWindow: 1_048_576, MaxOutputTokens: 393_216},
+	{ID: "deepseek-flash", Aliases: []string{"deepseek-v4.1-flash", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-v4p1-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"}, Name: "DeepSeek V4.1 Flash", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheReadPricePerM: 0.006, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 393_216, Efforts: noneLowHighMaxEfforts, DefaultEffort: EffortHigh},
+	{ID: "deepseek-v4-pro", Aliases: []string{"deepseek-v4-pro-0813", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek-ai/DeepSeek-V4-Pro"}, Name: "DeepSeek V4 Pro", InputPricePerM: 1.32, OutputPricePerM: 3.96, CacheReadPricePerM: 0.044, ContextWindow: 1_048_576, MaxOutputTokens: 393_216, Efforts: noneLowHighMaxEfforts, DefaultEffort: EffortHigh},
 	// Retired first-party; still served elsewhere (OpenRouter prices).
-	{ID: "deepseek-ai/DeepSeek-V4-Flash-0731", Name: "DeepSeek V4 Flash 0731", InputPricePerM: 0.021, OutputPricePerM: 0.32, CacheReadPricePerM: 0.016, ContextWindow: 1_048_576},
-	{ID: "deepseek-ai/DeepSeek-V3.2", Aliases: []string{"deepseek-v3.2-exp"}, Name: "DeepSeek V3.2", InputPricePerM: 0.28, OutputPricePerM: 0.42, CacheReadPricePerM: 0.028, ContextWindow: 163_840},
-	{ID: "deepseek-ai/DeepSeek-V3.1-Terminus", Aliases: []string{"deepseek-v3.1:671b-terminus"}, Name: "DeepSeek V3.1 Terminus", InputPricePerM: 0.27, OutputPricePerM: 1, CacheReadPricePerM: 0.135, ContextWindow: 163_840},
-	{ID: "deepseek-ai/DeepSeek-V3.1", Aliases: []string{"deepseek-chat-v3.1", "deepseek-v3.1:671b"}, Name: "DeepSeek V3.1", InputPricePerM: 0.25, OutputPricePerM: 0.95, CacheReadPricePerM: 0.13, ContextWindow: 163_840},
+	{ID: "deepseek-ai/DeepSeek-V4-Flash-0731", Name: "DeepSeek V4 Flash 0731", InputPricePerM: 0.021, OutputPricePerM: 0.32, CacheReadPricePerM: 0.016, ContextWindow: 1_048_576, Efforts: noneHighMaxEfforts},
+	{ID: "deepseek-ai/DeepSeek-V3.2", Aliases: []string{"deepseek-v3.2-exp"}, Name: "DeepSeek V3.2", InputPricePerM: 0.28, OutputPricePerM: 0.42, CacheReadPricePerM: 0.028, ContextWindow: 163_840, Efforts: onOffEfforts},
+	{ID: "deepseek-ai/DeepSeek-V3.1-Terminus", Aliases: []string{"deepseek-v3.1:671b-terminus"}, Name: "DeepSeek V3.1 Terminus", InputPricePerM: 0.27, OutputPricePerM: 1, CacheReadPricePerM: 0.135, ContextWindow: 163_840, Efforts: onOffEfforts},
+	{ID: "deepseek-ai/DeepSeek-V3.1", Aliases: []string{"deepseek-chat-v3.1", "deepseek-v3.1:671b"}, Name: "DeepSeek V3.1", InputPricePerM: 0.25, OutputPricePerM: 0.95, CacheReadPricePerM: 0.13, ContextWindow: 163_840, Efforts: onOffEfforts},
 	// Not bare "deepseek-r1": that is the 64K original on OpenRouter and an 8B
 	// distill as Ollama's default tag.
 	{ID: "deepseek-ai/DeepSeek-R1-0528", Aliases: []string{"deepseek-r1:671b", "deepseek-r1:671b-0528"}, Name: "DeepSeek R1 0528", InputPricePerM: 0.5, OutputPricePerM: 2.15, CacheReadPricePerM: 0.35, ContextWindow: 163_840},
@@ -276,15 +382,15 @@ var OpenModels = []CatalogModel{
 	// The 3.8 models serve 1M, of which 983K may be input while thinking; the
 	// weights are 262K native, so a self-hosted copy may serve less. Coder
 	// prices are the lowest (≤32K-token prompt) tier.
-	{ID: "qwen3.8-2.4t-a95b", Aliases: []string{"Qwen/Qwen3.8-2.4T-A95B-FP8"}, Name: "Qwen3.8 2.4T-A95B", InputPricePerM: 2, OutputPricePerM: 6, CacheReadPricePerM: 0.25, ContextWindow: 983_000, MaxOutputTokens: 131_072},
-	{ID: "qwen3.8-27b", Aliases: []string{"Qwen/Qwen3.8-27B-FP8", "qwen3.8"}, Name: "Qwen3.8 27B", InputPricePerM: 0.5, OutputPricePerM: 3, CacheReadPricePerM: 0.1, SupportsImages: true, ContextWindow: 983_000, MaxOutputTokens: 131_072},
-	{ID: "Qwen/Qwen3.8-Flash-Next", Aliases: []string{"qwen3.8-flash", "qwen3.8-flash-next:125b-a6b"}, Name: "Qwen3.8 Flash", InputPricePerM: 0.15, OutputPricePerM: 0.47, CacheReadPricePerM: 0.016, SupportsImages: true, ContextWindow: 983_000, MaxOutputTokens: 131_072},
-	{ID: "qwen3.6-35b-a3b", Aliases: []string{"qwen3.6:35b", "qwen3.6"}, Name: "Qwen3.6 35B-A3B", InputPricePerM: 0.375, OutputPricePerM: 2.25, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536},
-	{ID: "qwen3.6-27b", Name: "Qwen3.6 27B", InputPricePerM: 0.6, OutputPricePerM: 3.6, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536},
-	{ID: "qwen3.5-397b-a17b", Name: "Qwen3.5 397B-A17B", InputPricePerM: 0.6, OutputPricePerM: 3.6, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536},
-	{ID: "qwen3.5-122b-a10b", Aliases: []string{"qwen3.5:122b"}, Name: "Qwen3.5 122B-A10B", InputPricePerM: 0.4, OutputPricePerM: 3.2, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536},
-	{ID: "qwen3.5-35b-a3b", Aliases: []string{"qwen3.5:35b"}, Name: "Qwen3.5 35B-A3B", InputPricePerM: 0.25, OutputPricePerM: 2, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536},
-	{ID: "qwen3.5-27b", Name: "Qwen3.5 27B", InputPricePerM: 0.3, OutputPricePerM: 2.4, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536},
+	{ID: "qwen3.8-2.4t-a95b", Aliases: []string{"Qwen/Qwen3.8-2.4T-A95B-FP8"}, Name: "Qwen3.8 2.4T-A95B", InputPricePerM: 2, OutputPricePerM: 6, CacheReadPricePerM: 0.25, ContextWindow: 983_000, MaxOutputTokens: 131_072, Efforts: qwen38ThinkingEfforts, DefaultEffort: EffortXHigh},
+	{ID: "qwen3.8-27b", Aliases: []string{"Qwen/Qwen3.8-27B-FP8", "qwen3.8"}, Name: "Qwen3.8 27B", InputPricePerM: 0.5, OutputPricePerM: 3, CacheReadPricePerM: 0.1, SupportsImages: true, ContextWindow: 983_000, MaxOutputTokens: 131_072, Efforts: qwen38Efforts, DefaultEffort: EffortXHigh},
+	{ID: "Qwen/Qwen3.8-Flash-Next", Aliases: []string{"qwen3.8-flash", "qwen3.8-flash-next:125b-a6b"}, Name: "Qwen3.8 Flash", InputPricePerM: 0.15, OutputPricePerM: 0.47, CacheReadPricePerM: 0.016, SupportsImages: true, ContextWindow: 983_000, MaxOutputTokens: 131_072, Efforts: qwen38Efforts, DefaultEffort: EffortXHigh},
+	{ID: "qwen3.6-35b-a3b", Aliases: []string{"qwen3.6:35b", "qwen3.6"}, Name: "Qwen3.6 35B-A3B", InputPricePerM: 0.375, OutputPricePerM: 2.25, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "qwen3.6-27b", Name: "Qwen3.6 27B", InputPricePerM: 0.6, OutputPricePerM: 3.6, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "qwen3.5-397b-a17b", Name: "Qwen3.5 397B-A17B", InputPricePerM: 0.6, OutputPricePerM: 3.6, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "qwen3.5-122b-a10b", Aliases: []string{"qwen3.5:122b"}, Name: "Qwen3.5 122B-A10B", InputPricePerM: 0.4, OutputPricePerM: 3.2, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "qwen3.5-35b-a3b", Aliases: []string{"qwen3.5:35b"}, Name: "Qwen3.5 35B-A3B", InputPricePerM: 0.25, OutputPricePerM: 2, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "qwen3.5-27b", Name: "Qwen3.5 27B", InputPricePerM: 0.3, OutputPricePerM: 2.4, SupportsImages: true, ContextWindow: 258_000, MaxOutputTokens: 65_536, Efforts: onOffEfforts, DefaultEffort: EffortOn},
 	// Qwen Cloud takes at most 204K input on the coder models.
 	{ID: "qwen3-coder-next", Name: "Qwen3 Coder Next", InputPricePerM: 0.3, OutputPricePerM: 1.5, ContextWindow: 204_800, MaxOutputTokens: 65_536},
 	// "qwen3-coder" is this model on OpenRouter; Ollama's default tag is the 30B.
@@ -297,12 +403,12 @@ var OpenModels = []CatalogModel{
 	// ── Kimi (Moonshot) ─────────────────────────────────────────────────────
 	// Sampling is fixed on the current models; another temperature is refused.
 	// K3's output defaults to 128K; K2.x may use whatever the window leaves.
-	{ID: "kimi-k3", Name: "Kimi K3", InputPricePerM: 3, OutputPricePerM: 15, CacheWritePricePerM: 3, CacheReadPricePerM: 0.3, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 131_072, RejectsSampling: true},
+	{ID: "kimi-k3", Name: "Kimi K3", InputPricePerM: 3, OutputPricePerM: 15, CacheWritePricePerM: 3, CacheReadPricePerM: 0.3, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 131_072, RejectsSampling: true, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
 	{ID: "kimi-k2.7-code", Aliases: []string{"kimi-k2p7-code"}, Name: "Kimi K2.7 Code", InputPricePerM: 0.95, OutputPricePerM: 4, CacheReadPricePerM: 0.19, SupportsImages: true, ContextWindow: 262_144, RejectsSampling: true},
 	{ID: "kimi-k2.7-code-highspeed", Name: "Kimi K2.7 Code Highspeed", InputPricePerM: 1.9, OutputPricePerM: 8, CacheReadPricePerM: 0.38, SupportsImages: true, ContextWindow: 262_144, RejectsSampling: true},
-	{ID: "kimi-k2.6", Aliases: []string{"kimi-k2p6"}, Name: "Kimi K2.6", InputPricePerM: 0.95, OutputPricePerM: 4, CacheReadPricePerM: 0.16, SupportsImages: true, ContextWindow: 262_144, RejectsSampling: true},
+	{ID: "kimi-k2.6", Aliases: []string{"kimi-k2p6"}, Name: "Kimi K2.6", InputPricePerM: 0.95, OutputPricePerM: 4, CacheReadPricePerM: 0.16, SupportsImages: true, ContextWindow: 262_144, RejectsSampling: true, Efforts: onOffEfforts, DefaultEffort: EffortOn},
 	// Retired first-party; still served elsewhere (OpenRouter prices).
-	{ID: "moonshotai/Kimi-K2.5", Name: "Kimi K2.5", InputPricePerM: 0.45, OutputPricePerM: 2.25, CacheReadPricePerM: 0.07, SupportsImages: true, ContextWindow: 262_144},
+	{ID: "moonshotai/Kimi-K2.5", Name: "Kimi K2.5", InputPricePerM: 0.45, OutputPricePerM: 2.25, CacheReadPricePerM: 0.07, SupportsImages: true, ContextWindow: 262_144, Efforts: onOffEfforts, DefaultEffort: EffortOn},
 	{ID: "moonshotai/Kimi-K2-Thinking", Name: "Kimi K2 Thinking", InputPricePerM: 0.6, OutputPricePerM: 2.5, CacheReadPricePerM: 0.15, ContextWindow: 262_144},
 	{ID: "moonshotai/Kimi-K2-Instruct-0905", Aliases: []string{"kimi-k2-0905", "kimi-k2-0905-preview"}, Name: "Kimi K2 0905", InputPricePerM: 0.6, OutputPricePerM: 2.5, ContextWindow: 262_144},
 	{ID: "moonshotai/Kimi-K2-Instruct", Aliases: []string{"kimi-k2"}, Name: "Kimi K2", InputPricePerM: 0.57, OutputPricePerM: 2.3, ContextWindow: 131_072},
@@ -310,24 +416,24 @@ var OpenModels = []CatalogModel{
 	// ── GLM (Z.ai) ──────────────────────────────────────────────────────────
 	// 5.2 and later: 1M, which Ollama's cloud serves as 1,000,000 tokens. GLM-5.3
 	// and 5.3 Flash always think.
-	{ID: "glm-5.3", Aliases: []string{"glm-5p3"}, Name: "GLM-5.3", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 1_000_000, MaxOutputTokens: 131_072},
-	{ID: "glm-5.3-flash", Aliases: []string{"glm-5p3-flash"}, Name: "GLM-5.3 Flash", InputPricePerM: 0.15, OutputPricePerM: 0.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 131_072},
-	{ID: "glm-5.3-flashx", Name: "GLM-5.3 FlashX", InputPricePerM: 0.37, OutputPricePerM: 1.25, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 131_072},
-	{ID: "glm-5.2", Aliases: []string{"glm-5p2"}, Name: "GLM-5.2", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 1_000_000, MaxOutputTokens: 131_072},
-	{ID: "glm-5.1", Name: "GLM-5.1", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 202_752, MaxOutputTokens: 131_072},
-	{ID: "glm-5", Name: "GLM-5", InputPricePerM: 1, OutputPricePerM: 3.2, CacheReadPricePerM: 0.2, ContextWindow: 202_752, MaxOutputTokens: 131_072},
-	{ID: "glm-4.7", Name: "GLM-4.7", InputPricePerM: 0.6, OutputPricePerM: 2.2, CacheReadPricePerM: 0.11, ContextWindow: 202_752, MaxOutputTokens: 131_072},
+	{ID: "glm-5.3", Aliases: []string{"glm-5p3"}, Name: "GLM-5.3", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
+	{ID: "glm-5.3-flash", Aliases: []string{"glm-5p3-flash"}, Name: "GLM-5.3 Flash", InputPricePerM: 0.15, OutputPricePerM: 0.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
+	{ID: "glm-5.3-flashx", Name: "GLM-5.3 FlashX", InputPricePerM: 0.37, OutputPricePerM: 1.25, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
+	{ID: "glm-5.2", Aliases: []string{"glm-5p2"}, Name: "GLM-5.2", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: noneHighMaxEfforts, DefaultEffort: EffortMax},
+	{ID: "glm-5.1", Name: "GLM-5.1", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 202_752, MaxOutputTokens: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "glm-5", Name: "GLM-5", InputPricePerM: 1, OutputPricePerM: 3.2, CacheReadPricePerM: 0.2, ContextWindow: 202_752, MaxOutputTokens: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "glm-4.7", Name: "GLM-4.7", InputPricePerM: 0.6, OutputPricePerM: 2.2, CacheReadPricePerM: 0.11, ContextWindow: 202_752, MaxOutputTokens: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortOn},
 	// Free on Z.ai's API.
-	{ID: "glm-4.7-flash", Name: "GLM-4.7 Flash", ContextWindow: 200_000, MaxOutputTokens: 131_072},
-	{ID: "glm-4.6", Name: "GLM-4.6", InputPricePerM: 0.6, OutputPricePerM: 2.2, CacheReadPricePerM: 0.11, ContextWindow: 202_752, MaxOutputTokens: 131_072},
-	{ID: "glm-4.5", Name: "GLM-4.5", InputPricePerM: 0.6, OutputPricePerM: 2.2, CacheReadPricePerM: 0.11, ContextWindow: 131_072, MaxOutputTokens: 98_304},
-	{ID: "glm-4.5-air", Name: "GLM-4.5 Air", InputPricePerM: 0.2, OutputPricePerM: 1.1, CacheReadPricePerM: 0.03, ContextWindow: 131_072, MaxOutputTokens: 98_304},
+	{ID: "glm-4.7-flash", Name: "GLM-4.7 Flash", ContextWindow: 200_000, MaxOutputTokens: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "glm-4.6", Name: "GLM-4.6", InputPricePerM: 0.6, OutputPricePerM: 2.2, CacheReadPricePerM: 0.11, ContextWindow: 202_752, MaxOutputTokens: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "glm-4.5", Name: "GLM-4.5", InputPricePerM: 0.6, OutputPricePerM: 2.2, CacheReadPricePerM: 0.11, ContextWindow: 131_072, MaxOutputTokens: 98_304, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "glm-4.5-air", Name: "GLM-4.5 Air", InputPricePerM: 0.2, OutputPricePerM: 1.1, CacheReadPricePerM: 0.03, ContextWindow: 131_072, MaxOutputTokens: 98_304, Efforts: onOffEfforts, DefaultEffort: EffortOn},
 
 	// ── MiniMax ─────────────────────────────────────────────────────────────
 	// M3 is 1M first-party (billed double past 512K input), but MiniMax's own
 	// OpenRouter endpoint, Together and Ollama's cloud all serve 512K. The M2
 	// line is 204,800 first-party, 196,608 in the weights' config and on Groq.
-	{ID: "MiniMax-M3", Name: "MiniMax M3", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheReadPricePerM: 0.06, SupportsImages: true, ContextWindow: 524_288},
+	{ID: "MiniMax-M3", Name: "MiniMax M3", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheReadPricePerM: 0.06, SupportsImages: true, ContextWindow: 524_288, Efforts: onOffEfforts, DefaultEffort: EffortOn},
 	{ID: "MiniMax-M2.7", Name: "MiniMax M2.7", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheWritePricePerM: 0.375, CacheReadPricePerM: 0.06, ContextWindow: 196_608},
 	{ID: "MiniMax-M2.7-highspeed", Name: "MiniMax M2.7 Highspeed", InputPricePerM: 0.6, OutputPricePerM: 2.4, CacheWritePricePerM: 0.375, CacheReadPricePerM: 0.06, ContextWindow: 196_608},
 	{ID: "MiniMax-M2.5", Name: "MiniMax M2.5", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheWritePricePerM: 0.375, CacheReadPricePerM: 0.03, ContextWindow: 196_608},
@@ -356,8 +462,8 @@ var OpenModels = []CatalogModel{
 	// the window. Devstral, Magistral and Small 3.2 are retired from Mistral's
 	// API; their weights are still served elsewhere. Not "mistral-medium-3":
 	// Mistral points it at 3.5, OpenRouter at the retired 128K Medium 3.
-	{ID: "mistral-medium-3-5", Aliases: []string{"mistralai/Mistral-Medium-3.5-128B", "mistral-medium-3.5:128b"}, Name: "Mistral Medium 3.5", InputPricePerM: 1.5, OutputPricePerM: 7.5, CacheReadPricePerM: 0.15, SupportsImages: true, ContextWindow: 262_144},
-	{ID: "mistral-small-2603", Aliases: []string{"mistralai/Mistral-Small-4-119B-2603"}, Name: "Mistral Small 4", InputPricePerM: 0.15, OutputPricePerM: 0.6, CacheReadPricePerM: 0.015, SupportsImages: true, ContextWindow: 262_144},
+	{ID: "mistral-medium-3-5", Aliases: []string{"mistralai/Mistral-Medium-3.5-128B", "mistral-medium-3.5:128b"}, Name: "Mistral Medium 3.5", InputPricePerM: 1.5, OutputPricePerM: 7.5, CacheReadPricePerM: 0.15, SupportsImages: true, ContextWindow: 262_144, Efforts: onOffEfforts},
+	{ID: "mistral-small-2603", Aliases: []string{"mistralai/Mistral-Small-4-119B-2603"}, Name: "Mistral Small 4", InputPricePerM: 0.15, OutputPricePerM: 0.6, CacheReadPricePerM: 0.015, SupportsImages: true, ContextWindow: 262_144, Efforts: onOffEfforts},
 	{ID: "mistral-large-2512", Aliases: []string{"mistralai/Mistral-Large-3-675B-Instruct-2512", "mistral-large-3:675b"}, Name: "Mistral Large 3", InputPricePerM: 0.5, OutputPricePerM: 1.5, CacheReadPricePerM: 0.05, SupportsImages: true, ContextWindow: 262_144},
 	{ID: "ministral-14b-2512", Aliases: []string{"mistralai/Ministral-3-14B-Instruct-2512", "ministral-3:14b"}, Name: "Ministral 3 14B", InputPricePerM: 0.2, OutputPricePerM: 0.2, CacheReadPricePerM: 0.02, SupportsImages: true, ContextWindow: 262_144},
 	{ID: "ministral-8b-2512", Aliases: []string{"mistralai/Ministral-3-8B-Instruct-2512", "ministral-3:8b", "ministral-3"}, Name: "Ministral 3 8B", InputPricePerM: 0.15, OutputPricePerM: 0.15, CacheReadPricePerM: 0.015, SupportsImages: true, ContextWindow: 262_144},
@@ -373,11 +479,11 @@ var OpenModels = []CatalogModel{
 	// ── Google Gemma ────────────────────────────────────────────────────────
 	// The Gemini API serves Gemma 4 31B and 26B free only; prices are
 	// OpenRouter's. Gemma 3 has no native tool calling.
-	{ID: "gemma-4-31b-it", Aliases: []string{"gemma4:31b"}, Name: "Gemma 4 31B", InputPricePerM: 0.09, OutputPricePerM: 0.34, CacheReadPricePerM: 0.05, SupportsImages: true, ContextWindow: 262_144},
-	{ID: "gemma-4-26b-a4b-it", Aliases: []string{"gemma4:26b"}, Name: "Gemma 4 26B-A4B", InputPricePerM: 0.09, OutputPricePerM: 0.3, CacheReadPricePerM: 0.05, SupportsImages: true, ContextWindow: 262_144},
-	{ID: "google/gemma-4-12B-it", Aliases: []string{"gemma4:12b"}, Name: "Gemma 4 12B", SupportsImages: true, ContextWindow: 262_144},
-	{ID: "google/gemma-4-E4B-it", Aliases: []string{"gemma4:e4b", "gemma4"}, Name: "Gemma 4 E4B", SupportsImages: true, ContextWindow: 131_072},
-	{ID: "google/gemma-4-E2B-it", Aliases: []string{"gemma4:e2b"}, Name: "Gemma 4 E2B", SupportsImages: true, ContextWindow: 131_072},
+	{ID: "gemma-4-31b-it", Aliases: []string{"gemma4:31b"}, Name: "Gemma 4 31B", InputPricePerM: 0.09, OutputPricePerM: 0.34, CacheReadPricePerM: 0.05, SupportsImages: true, ContextWindow: 262_144, Efforts: onOffEfforts, DefaultEffort: EffortNone},
+	{ID: "gemma-4-26b-a4b-it", Aliases: []string{"gemma4:26b"}, Name: "Gemma 4 26B-A4B", InputPricePerM: 0.09, OutputPricePerM: 0.3, CacheReadPricePerM: 0.05, SupportsImages: true, ContextWindow: 262_144, Efforts: onOffEfforts, DefaultEffort: EffortNone},
+	{ID: "google/gemma-4-12B-it", Aliases: []string{"gemma4:12b"}, Name: "Gemma 4 12B", SupportsImages: true, ContextWindow: 262_144, Efforts: onOffEfforts, DefaultEffort: EffortNone},
+	{ID: "google/gemma-4-E4B-it", Aliases: []string{"gemma4:e4b", "gemma4"}, Name: "Gemma 4 E4B", SupportsImages: true, ContextWindow: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortNone},
+	{ID: "google/gemma-4-E2B-it", Aliases: []string{"gemma4:e2b"}, Name: "Gemma 4 E2B", SupportsImages: true, ContextWindow: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortNone},
 	{ID: "google/gemma-3-27b-it", Aliases: []string{"gemma3:27b"}, Name: "Gemma 3 27B", InputPricePerM: 0.08, OutputPricePerM: 0.45, CacheReadPricePerM: 0.04, SupportsImages: true, ContextWindow: 131_072},
 	{ID: "google/gemma-3-12b-it", Aliases: []string{"gemma3:12b"}, Name: "Gemma 3 12B", InputPricePerM: 0.05, OutputPricePerM: 0.15, SupportsImages: true, ContextWindow: 131_072},
 	{ID: "google/gemma-3-4b-it", Aliases: []string{"gemma3:4b", "gemma3"}, Name: "Gemma 3 4B", InputPricePerM: 0.05, OutputPricePerM: 0.1, SupportsImages: true, ContextWindow: 131_072},
@@ -389,15 +495,15 @@ var OpenModels = []CatalogModel{
 	// ── OpenAI gpt-oss ──────────────────────────────────────────────────────
 	// OpenAI lists but does not serve them; prices are OpenRouter's. Groq and
 	// most hosts cap output at 64K.
-	{ID: "gpt-oss-120b", Aliases: []string{"gpt-oss:120b"}, Name: "gpt-oss-120b", InputPricePerM: 0.15, OutputPricePerM: 0.6, CacheReadPricePerM: 0.075, ContextWindow: 131_072, MaxOutputTokens: 131_072},
-	{ID: "gpt-oss-20b", Aliases: []string{"gpt-oss:20b", "gpt-oss"}, Name: "gpt-oss-20b", InputPricePerM: 0.018, OutputPricePerM: 0.09, ContextWindow: 131_072, MaxOutputTokens: 131_072},
+	{ID: "gpt-oss-120b", Aliases: []string{"gpt-oss:120b"}, Name: "gpt-oss-120b", InputPricePerM: 0.15, OutputPricePerM: 0.6, CacheReadPricePerM: 0.075, ContextWindow: 131_072, MaxOutputTokens: 131_072, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-oss-20b", Aliases: []string{"gpt-oss:20b", "gpt-oss"}, Name: "gpt-oss-20b", InputPricePerM: 0.018, OutputPricePerM: 0.09, ContextWindow: 131_072, MaxOutputTokens: 131_072, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
 
 	// ── NVIDIA Nemotron ─────────────────────────────────────────────────────
 	// Cards allow 1M, but default configs and most hosts serve 262,144; prices
 	// are OpenRouter's (NVIDIA publishes none per token).
-	{ID: "nvidia/nemotron-3-ultra-550b-a55b", Aliases: []string{"nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16", "nemotron-3-ultra"}, Name: "Nemotron 3 Ultra", InputPricePerM: 0.6, OutputPricePerM: 2.4, CacheReadPricePerM: 0.12, ContextWindow: 262_144},
-	{ID: "nvidia/nemotron-3-super-120b-a12b", Aliases: []string{"nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "nemotron-3-super:120b", "nemotron-3-super"}, Name: "Nemotron 3 Super", InputPricePerM: 0.08, OutputPricePerM: 0.45, ContextWindow: 262_144},
-	{ID: "nvidia/nemotron-3-nano-30b-a3b", Aliases: []string{"nvidia/nemotron-nano-3-30b-a3b", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16", "nemotron-3-nano:30b", "nemotron-3-nano"}, Name: "Nemotron 3 Nano 30B", InputPricePerM: 0.05, OutputPricePerM: 0.2, CacheReadPricePerM: 0.03, ContextWindow: 262_144},
+	{ID: "nvidia/nemotron-3-ultra-550b-a55b", Aliases: []string{"nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16", "nemotron-3-ultra"}, Name: "Nemotron 3 Ultra", InputPricePerM: 0.6, OutputPricePerM: 2.4, CacheReadPricePerM: 0.12, ContextWindow: 262_144, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "nvidia/nemotron-3-super-120b-a12b", Aliases: []string{"nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "nemotron-3-super:120b", "nemotron-3-super"}, Name: "Nemotron 3 Super", InputPricePerM: 0.08, OutputPricePerM: 0.45, ContextWindow: 262_144, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	{ID: "nvidia/nemotron-3-nano-30b-a3b", Aliases: []string{"nvidia/nemotron-nano-3-30b-a3b", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16", "nemotron-3-nano:30b", "nemotron-3-nano"}, Name: "Nemotron 3 Nano 30B", InputPricePerM: 0.05, OutputPricePerM: 0.2, CacheReadPricePerM: 0.03, ContextWindow: 262_144, Efforts: onOffEfforts, DefaultEffort: EffortOn},
 	{ID: "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16", Aliases: []string{"nemotron-3-nano:4b"}, Name: "Nemotron 3 Nano 4B", ContextWindow: 262_144},
 	{ID: "nvidia/nemotron-3.5-lightning-30b-a3b", Aliases: []string{"nemotron-3.5-lightning", "nemotron-3.5-lightning:30b"}, Name: "Nemotron 3.5 Lightning", InputPricePerM: 0.08, OutputPricePerM: 0.2, CacheReadPricePerM: 0.04, ContextWindow: 262_144},
 	{ID: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", Aliases: []string{"nemotron3:33b"}, Name: "Nemotron 3 Nano Omni", SupportsImages: true, ContextWindow: 131_072},

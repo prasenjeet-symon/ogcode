@@ -5,6 +5,7 @@ import { useServer } from '../context/server';
 import SessionSidebar from '../components/session-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
 import ModelSelector from '../components/model-selector';
+import EffortSelector from '../components/effort-selector';
 import Logo from '../components/logo';
 import { getVersion } from '../api/client';
 import { projectName } from '../lib/paths';
@@ -224,6 +225,7 @@ function HomeContent() {
                 />
                 <div class="flex items-center gap-2 px-3 pb-2.5 pt-1">
                   <ModelSelector />
+                  <EffortSelector />
                   <div class="flex-1" />
                   <button
                     type="submit"

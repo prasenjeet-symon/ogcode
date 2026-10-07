@@ -81,7 +81,7 @@ func TestCatalogIndexEarlierListWins(t *testing.T) {
 // same normalised id would make the answer depend on list order by accident.
 func TestCatalogHasNoAmbiguousIDs(t *testing.T) {
 	owner := map[string]string{}
-	for _, list := range [][]CatalogModel{AnthropicModels, OpenAIModels, OpenModels, LegacyModels} {
+	for _, list := range [][]CatalogModel{AnthropicModels, OpenAIModels, GoogleModels, OpenModels, LegacyModels} {
 		for _, m := range list {
 			for _, key := range append([]string{m.ID}, m.Aliases...) {
 				k := normalizeModelID(key)
@@ -97,7 +97,7 @@ func TestCatalogHasNoAmbiguousIDs(t *testing.T) {
 // Every catalogued model states the facts the app relies on. A window of 0
 // would read as "unknown" and silently disable the catalogue for that model.
 func TestCatalogEntriesAreComplete(t *testing.T) {
-	for _, list := range [][]CatalogModel{AnthropicModels, OpenAIModels, OpenModels, LegacyModels} {
+	for _, list := range [][]CatalogModel{AnthropicModels, OpenAIModels, GoogleModels, OpenModels, LegacyModels} {
 		for _, m := range list {
 			if m.Name == "" || m.ContextWindow <= 0 {
 				t.Errorf("%s: want a name and a context window, got %q / %d", m.ID, m.Name, m.ContextWindow)

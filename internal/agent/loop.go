@@ -369,6 +369,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	if p != nil {
 		providerID = p.ID()
 	}
+	// The reasoning effort the session chose, when this model takes it here.
+	// Delegated work (task sub-agents) inherits it through ctx.
+	effort := resolveRunEffort(p, sess, modelID)
+	ctx = withRunEffort(ctx, effort)
 
 	compactionThreshold := compactionThresholdTokens(modelContextWindow)
 	// The model's output ceiling (0 = unknown). Sent as the per-request output
@@ -846,6 +850,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// that have no reasoning mode, and models that would need a
 			// configuration ogcode cannot size safely, ignore it.
 			Thinking: true,
+			// The session's chosen depth, already checked against the model
+			// ("" runs it at its default).
+			Effort: effort,
 		}
 
 		// Per-step, not per-run: the proactive check may fire on every step
@@ -4296,6 +4303,8 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 	if label == "" {
 		label = prompt
 	}
+	// The effort is the delegating run's: a sub-agent does part of the user's
+	// own work, at the depth the user asked for it.
 	sess := &session.Session{
 		ID:          session.NewSessionID(),
 		ProjectID:   dir,
@@ -4303,6 +4312,7 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 		Title:       "Task: " + truncateText(label, 60),
 		Model:       model,
 		Provider:    providerID,
+		Effort:      runEffortFrom(ctx),
 		SessionType: "subagent",
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),

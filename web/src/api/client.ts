@@ -38,6 +38,8 @@ export interface Session {
   title: string;
   model?: string;
   provider?: string;
+  /** Reasoning effort the session's turns ask for ('' or absent: the model's default). */
+  effort?: string;
   sessionType?: string;
   permission?: string;
   compactionSummary?: string;
@@ -51,14 +53,14 @@ export function listSessions(directory?: string): Promise<Session[]> {
   return fetchAPI(`/session${dir}`);
 }
 
-export function createSession(directory?: string, model?: string, provider?: string): Promise<Session> {
+export function createSession(directory?: string, model?: string, provider?: string, effort?: string): Promise<Session> {
   return fetchAPI('/session', {
     method: 'POST',
-    body: JSON.stringify({ directory, model, provider }),
+    body: JSON.stringify({ directory, model, provider, effort }),
   });
 }
 
-export function updateSession(id: string, updates: { title?: string; model?: string; provider?: string; permission?: string }): Promise<Session> {
+export function updateSession(id: string, updates: { title?: string; model?: string; provider?: string; effort?: string; permission?: string }): Promise<Session> {
   return fetchAPI(`/session/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),
@@ -262,11 +264,14 @@ export function getMessagesPage(sessionId: string, before?: string, limit?: numb
   return fetchMessagesPage(`/session/${sessionId}/message${pageQuery(before, limit)}`, limit || TRANSCRIPT_PAGE_SIZE);
 }
 
-export function sendPrompt(sessionId: string, content: string, images?: ImagePartData[], model?: string, viewportWidth?: number, viewportHeight?: number, provider?: string): Promise<void> {
+// `effort` is the reasoning effort picked with the model: '' resets the session
+// to the model's default, undefined leaves its stored choice alone.
+export function sendPrompt(sessionId: string, content: string, images?: ImagePartData[], model?: string, viewportWidth?: number, viewportHeight?: number, provider?: string, effort?: string): Promise<void> {
   const body: Record<string, unknown> = { content };
   if (images && images.length > 0) body.images = images;
   if (model) body.model = model;
   if (provider) body.provider = provider;
+  if (effort !== undefined) body.effort = effort;
   if (viewportWidth) body.viewportWidth = viewportWidth;
   if (viewportHeight) body.viewportHeight = viewportHeight;
   return fetchAPI(`/session/${sessionId}/prompt`, {
@@ -710,6 +715,13 @@ export interface ModelInfo {
   // which the loop compacts. Read by the context meter.
   contextWindow?: number;
   compactAtTokens?: number;
+  /** Reasoning-effort levels the model takes on its provider, lowest first;
+   *  absent when it offers no effort picker. */
+  efforts?: string[];
+  /** The level the model runs at when none is chosen ('' or absent: unknown). */
+  defaultEffort?: string;
+  /** Why a model that reasons offers no effort choice here. */
+  effortNote?: string;
 }
 
 export function getModels(): Promise<ModelInfo[]> {
@@ -936,10 +948,11 @@ export function lockPlan(id: string): Promise<Plan> {
   return fetchAPI(`/plans/${id}/lock`, { method: 'POST' });
 }
 
-export function sendPlanPrompt(id: string, content: string, model?: string, viewportWidth?: number, viewportHeight?: number, provider?: string): Promise<void> {
+export function sendPlanPrompt(id: string, content: string, model?: string, viewportWidth?: number, viewportHeight?: number, provider?: string, effort?: string): Promise<void> {
   const body: Record<string, unknown> = { content };
   if (model) body.model = model;
   if (provider) body.provider = provider;
+  if (effort !== undefined) body.effort = effort;
   if (viewportWidth) body.viewportWidth = viewportWidth;
   if (viewportHeight) body.viewportHeight = viewportHeight;
   return fetchAPI(`/plans/${id}/prompt`, {

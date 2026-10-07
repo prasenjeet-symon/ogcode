@@ -58,6 +58,16 @@ export function trackModelSelected(props: {
   });
 }
 
+/** The user picked a reasoning effort for the model. `level` is ogcode's name
+ *  for it ('none' … 'max'). */
+export function trackEffortSelected(props: { model: string; provider: string; level: string }): void {
+  capture('effort_selected', {
+    model: props.model || 'default',
+    provider: props.provider || 'default',
+    level: props.level || 'default',
+  });
+}
+
 /** The user answered a tool-permission prompt. `tool` is the tool id (bash,
  *  write, edit, …) and `response` the outcome — no command or path. */
 export function trackPermissionPromptAnswered(props: {

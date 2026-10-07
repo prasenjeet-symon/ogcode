@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -196,6 +197,13 @@ func (p *OpenAIProvider) RefreshCatalog(ctx context.Context) []ModelInfo {
 			// A cloud endpoint returns a long list — curate instead.
 			fetched[i].ActiveByDefault = !isCloudURL(p.baseURL)
 		}
+		// A local daemon describes its own models, cloud ones included: which
+		// of them think, and at what levels. A cloud endpoint's models are the
+		// catalog's, described below and merged in.
+		if !isCloudURL(p.baseURL) {
+			ollamaShowFill(ctx, ollamaNativeBase(p.baseURL)+"/api/show", fetched,
+				func(m ModelInfo) string { return m.ID }, p.setChatHeaders, false, true)
+		}
 
 		var catalog []ModelInfo
 		if ollamaCatalogEnabled() {
@@ -313,6 +321,70 @@ type oaiModelEntry struct {
 	// Pricing is OpenRouter's per-token USD price; nil where an endpoint sends
 	// none (OpenAI, DeepSeek, Ollama).
 	Pricing *oaiModelPricing `json:"pricing,omitempty"`
+	// Reasoning is OpenRouter's per-model reasoning metadata: the effort levels
+	// it takes, its default, whether reasoning can be turned off. Absent for a
+	// model that does not reason, and on every other endpoint.
+	Reasoning *oaiModelReasoning `json:"reasoning,omitempty"`
+}
+
+// oaiModelReasoning is the reasoning object of an OpenRouter model listing.
+type oaiModelReasoning struct {
+	// SupportedEfforts lists the levels, highest first. JSON null means every
+	// level is taken; a missing field, that the model only switches reasoning on
+	// or off.
+	SupportedEfforts json.RawMessage `json:"supported_efforts"`
+	DefaultEffort    string          `json:"default_effort"`
+	DefaultEnabled   *bool           `json:"default_enabled"`
+	// Mandatory marks a model that always reasons: "none", or turning it off,
+	// is a 400.
+	Mandatory bool `json:"mandatory"`
+}
+
+// openRouterEfforts translates a listing's reasoning object into the levels a
+// session may pick, lowest first, and the default. A model with fewer than two
+// levels offers no choice and gets none.
+func openRouterEfforts(r *oaiModelReasoning) (levels []string, def string) {
+	if r == nil {
+		return nil, ""
+	}
+	switch raw := strings.TrimSpace(string(r.SupportedEfforts)); raw {
+	case "":
+		// No levels: the switch is the only control, and a model that must
+		// reason has none.
+		if !r.Mandatory {
+			levels = []string{EffortNone, EffortOn}
+		}
+	case "null":
+		levels = []string{EffortNone, EffortLow, EffortMedium, EffortHigh}
+	default:
+		var listed []string
+		if err := json.Unmarshal(r.SupportedEfforts, &listed); err != nil {
+			return nil, ""
+		}
+		for _, l := range listed {
+			if l != EffortOn && IsEffort(l) && !slices.Contains(levels, l) {
+				levels = append(levels, l)
+			}
+		}
+	}
+	if r.Mandatory {
+		levels = slices.DeleteFunc(levels, func(l string) bool { return l == EffortNone })
+	}
+	slices.SortFunc(levels, func(a, b string) int {
+		return slices.Index(effortOrder, a) - slices.Index(effortOrder, b)
+	})
+	if len(levels) < 2 {
+		return nil, ""
+	}
+	switch {
+	case slices.Contains(levels, r.DefaultEffort):
+		def = r.DefaultEffort
+	case r.DefaultEnabled != nil && *r.DefaultEnabled && slices.Contains(levels, EffortOn):
+		def = EffortOn
+	case r.DefaultEnabled != nil && !*r.DefaultEnabled && slices.Contains(levels, EffortNone):
+		def = EffortNone
+	}
+	return levels, def
 }
 
 // oaiModelPricing holds per-token prices as OpenRouter sends them: decimal
@@ -421,6 +493,7 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 			info.InputPricePerM = oaiPricePerM(m.Pricing.Prompt)
 			info.OutputPricePerM = oaiPricePerM(m.Pricing.Completion)
 		}
+		info.Efforts, info.DefaultEffort = openRouterEfforts(m.Reasoning)
 		models = append(models, info)
 	}
 	slog.Info("dynamically fetched models from endpoint", "provider", p.id, "count", len(models))
@@ -913,6 +986,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	if p.id == "openai" {
 		shapeForOpenAIModel(&body, req.Thinking)
 	}
+	// The session's chosen effort, in this host's own terms. After the shaping
+	// above, so a level the user picked replaces the model's default — and never
+	// the "none" a tool step forces on GPT-5.4 and later, which offer no levels.
+	p.applyEffort(&body, req)
 	// A model that refuses sampling parameters — Kimi's current models, Claude
 	// Opus 4.7 and later behind a compatible host — fails the whole request
 	// over a temperature it would not have honoured anyway.
@@ -1347,10 +1424,18 @@ type oaiRequest struct {
 	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
 	Temperature   float64           `json:"temperature,omitempty"`
 	MaxTokens     int               `json:"max_tokens,omitempty"`
-	// MaxCompletionTokens and ReasoningEffort are sent only to catalogued OpenAI
-	// models — see shapeForOpenAIModel.
+	// MaxCompletionTokens is sent only to catalogued OpenAI models — see
+	// shapeForOpenAIModel. ReasoningEffort goes to them too, and carries the
+	// session's chosen effort to the other hosts that take one there.
 	MaxCompletionTokens int    `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string `json:"reasoning_effort,omitempty"`
+	// Reasoning, Thinking and EnableThinking carry the effort to hosts that
+	// take it in a field of their own instead — OpenRouter, the thinking switch
+	// of DeepSeek, Kimi, GLM and MiniMax, Qwen Cloud. openai_effort.go sends each
+	// only where it is understood.
+	Reasoning      *oaiReasoning      `json:"reasoning,omitempty"`
+	Thinking       *oaiThinkingSwitch `json:"thinking,omitempty"`
+	EnableThinking *bool              `json:"enable_thinking,omitempty"`
 	// PromptCacheKey routes a conversation's requests to the cache node that
 	// already holds its prefix. Sent only where it is known to be understood —
 	// see sendsPromptCacheKey.

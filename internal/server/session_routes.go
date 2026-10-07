@@ -37,9 +37,14 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Directory string `json:"directory"`
 		Model     string `json:"model,omitempty"`
 		Provider  string `json:"provider,omitempty"`
+		Effort    string `json:"effort,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if !validEffort(input.Effort) {
+		http.Error(w, "unknown effort level", http.StatusBadRequest)
 		return
 	}
 	dir := input.Directory
@@ -54,6 +59,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Title:       "New session",
 		Model:       input.Model,
 		Provider:    input.Provider,
+		Effort:      input.Effort,
 		SessionType: "build",
 		// New sessions start in the stored default mode (Ask unless the user has
 		// chosen Auto somewhere). Setting it here rather than resolving it on read
@@ -71,6 +77,14 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	s.bus.Publish("session.created", sess)
 	writeJSON(w, http.StatusCreated, sess)
+}
+
+// validEffort reports whether level may be stored as a session's effort: one
+// of ogcode's levels, or "" for the model's default. Whether the session's
+// model takes it is decided per turn (agent.resolveRunEffort), since the model
+// can change after the choice is made.
+func validEffort(level string) bool {
+	return level == "" || provider.IsEffort(level)
 }
 
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
@@ -103,10 +117,15 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		Title      *string `json:"title"`
 		Model      *string `json:"model"`
 		Provider   *string `json:"provider"`
+		Effort     *string `json:"effort"`
 		Permission *string `json:"permission"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if update.Effort != nil && !validEffort(*update.Effort) {
+		http.Error(w, "unknown effort level", http.StatusBadRequest)
 		return
 	}
 
@@ -118,6 +137,9 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if update.Provider != nil {
 		sess.Provider = *update.Provider
+	}
+	if update.Effort != nil {
+		sess.Effort = *update.Effort
 	}
 	if update.Permission != nil {
 		sess.Permission = *update.Permission
@@ -509,9 +531,16 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		Provider       string                  `json:"provider,omitempty"`
 		ViewportWidth  int                     `json:"viewportWidth,omitempty"`
 		ViewportHeight int                     `json:"viewportHeight,omitempty"`
+		// Effort is the reasoning effort picked alongside the model; nil leaves
+		// the session's stored choice alone, "" resets it to the default.
+		Effort *string `json:"effort,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if input.Effort != nil && !validEffort(*input.Effort) {
+		http.Error(w, "unknown effort level", http.StatusBadRequest)
 		return
 	}
 
@@ -537,6 +566,14 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		sess.UpdatedAt = session.Now()
 		if err := s.store.Update(sess); err != nil {
 			slog.Error("update session provider", "err", err)
+		}
+	}
+	// And the effort picked with them, which this turn runs at.
+	if input.Effort != nil && sess.Effort != *input.Effort {
+		sess.Effort = *input.Effort
+		sess.UpdatedAt = session.Now()
+		if err := s.store.Update(sess); err != nil {
+			slog.Error("update session effort", "err", err)
 		}
 	}
 

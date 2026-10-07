@@ -101,7 +101,7 @@ var (
 // "not catalogued" — unknown, never free or zero.
 func LookupCatalogModel(id string) (CatalogModel, bool) {
 	catalogOnce.Do(func() {
-		catalogIdx = newCatalogIndex(AnthropicModels, OpenAIModels, OpenModels, LegacyModels)
+		catalogIdx = newCatalogIndex(AnthropicModels, OpenAIModels, GoogleModels, OpenModels, LegacyModels)
 	})
 	return catalogIdx.lookup(id)
 }

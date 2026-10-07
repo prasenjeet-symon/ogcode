@@ -806,9 +806,16 @@ func (s *Server) handlePlanPrompt(w http.ResponseWriter, r *http.Request) {
 		Provider       string `json:"provider,omitempty"`
 		ViewportWidth  int    `json:"viewportWidth,omitempty"`
 		ViewportHeight int    `json:"viewportHeight,omitempty"`
+		// Effort is the reasoning effort picked with the model; nil leaves the
+		// plan session's stored choice alone, "" resets it to the default.
+		Effort *string `json:"effort,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if input.Effort != nil && !validEffort(*input.Effort) {
+		http.Error(w, "unknown effort level", http.StatusBadRequest)
 		return
 	}
 
@@ -835,6 +842,17 @@ func (s *Server) handlePlanPrompt(w http.ResponseWriter, r *http.Request) {
 			p.UpdatedAt = plan.Now()
 			if err := s.planStore.Update(p); err != nil {
 				slog.Error("update plan model", "err", err)
+			}
+		}
+	}
+
+	// The plan session's turns run at the effort picked with the model.
+	if input.Effort != nil {
+		if sess, err := s.store.Get(sessionID); err == nil && sess != nil && sess.Effort != *input.Effort {
+			sess.Effort = *input.Effort
+			sess.UpdatedAt = session.Now()
+			if err := s.store.Update(sess); err != nil {
+				slog.Error("update plan session effort", "err", err)
 			}
 		}
 	}

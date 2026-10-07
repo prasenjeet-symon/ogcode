@@ -25,7 +25,7 @@ func NewAnthropicProvider() *AnthropicProvider {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	model := os.Getenv("ANTHROPIC_MODEL")
 	if model == "" {
-		model = "claude-sonnet-5"
+		model = "claude-sonnet-5-5"
 	}
 	baseURL := os.Getenv("ANTHROPIC_BASE_URL")
 	if baseURL == "" {
@@ -125,6 +125,18 @@ func thinkingConfigFor(model string) *anthropicThinking {
 		return nil
 	}
 	return &anthropicThinking{Type: "adaptive", Display: "summarized"}
+}
+
+// EffortSpec reports the effort levels a model takes on this endpoint: the
+// catalogue's ladder for a Claude model, nothing for anything else. An
+// Anthropic-compatible host serving another vendor's model gets no effort,
+// since its levels — if it has any — are not Claude's.
+func (p *AnthropicProvider) EffortSpec(model string) EffortSpec {
+	m, ok := anthropicCatalogModel(model)
+	if !ok {
+		return EffortSpec{}
+	}
+	return catalogEffortSpec(m)
 }
 
 // isToolResult reports whether a message carries a tool result rather than
@@ -365,8 +377,17 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	messages = appendGuidanceBlock(messages, req.Guidance)
 
 	var thinking *anthropicThinking
+	var outputConfig *anthropicOutputConfig
 	if req.Thinking {
 		thinking = thinkingConfigFor(model)
+		// Effort rides only on the requests that ask for thinking — the agent
+		// loop's — and only at a level the model takes: anything else is a 400
+		// that fails the turn. Like the thinking mode it is part of the cached
+		// prompt, and it holds still for that reason: the loop reads it once per
+		// turn, so it changes only when the user changes it.
+		if req.Effort != "" && p.EffortSpec(model).Allows(req.Effort) {
+			outputConfig = &anthropicOutputConfig{Effort: req.Effort}
+		}
 	}
 	temperature := req.Temperature
 	if thinking != nil {
@@ -396,14 +417,15 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	}
 
 	body := anthropicRequest{
-		Model:       model,
-		MaxTokens:   maxTokens,
-		System:      systemBlocks,
-		Messages:    messages,
-		Tools:       tools,
-		Stream:      true,
-		Temperature: temperature,
-		Thinking:    thinking,
+		Model:        model,
+		MaxTokens:    maxTokens,
+		System:       systemBlocks,
+		Messages:     messages,
+		Tools:        tools,
+		Stream:       true,
+		Temperature:  temperature,
+		Thinking:     thinking,
+		OutputConfig: outputConfig,
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -642,6 +664,15 @@ type anthropicRequest struct {
 	Stream      bool                   `json:"stream"`
 	Temperature float64                `json:"temperature,omitempty"`
 	Thinking    *anthropicThinking     `json:"thinking,omitempty"`
+	// OutputConfig carries the reasoning effort, when the session chose one.
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+// anthropicOutputConfig is the request's output configuration. Effort sets how
+// thoroughly the model works — how much it thinks, and how much it says — and
+// leaving it out runs the model at its own default.
+type anthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // anthropicThinking is the request's thinking configuration. Type is the mode;

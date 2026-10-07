@@ -30,6 +30,8 @@ func toStored(models []provider.ModelInfo) []session.CatalogModel {
 			Collection:      m.Collection,
 			InputPricePerM:  m.InputPricePerM,
 			OutputPricePerM: m.OutputPricePerM,
+			Efforts:         m.Efforts,
+			DefaultEffort:   m.DefaultEffort,
 		})
 	}
 	return out
@@ -50,6 +52,8 @@ func toProvider(rows []session.CatalogModel) []provider.ModelInfo {
 			Collection:      m.Collection,
 			InputPricePerM:  m.InputPricePerM,
 			OutputPricePerM: m.OutputPricePerM,
+			Efforts:         m.Efforts,
+			DefaultEffort:   m.DefaultEffort,
 		})
 	}
 	return out

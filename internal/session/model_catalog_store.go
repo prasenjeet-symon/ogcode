@@ -1,6 +1,8 @@
 package session
 
 import (
+	"strings"
+
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 )
 
@@ -20,6 +22,10 @@ type CatalogModel struct {
 	Collection      string  `json:"collection"`
 	InputPricePerM  float64 `json:"inputPricePerM"`
 	OutputPricePerM float64 `json:"outputPricePerM"`
+	// Efforts and DefaultEffort are the reasoning levels the host reported for
+	// the model (empty when it reported none).
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"defaultEffort,omitempty"`
 }
 
 // GetModelCatalog returns every persisted catalogue entry, across all providers.
@@ -27,7 +33,7 @@ func GetModelCatalog(database *db.DB) ([]CatalogModel, error) {
 	rows, err := database.Query(
 		`SELECT provider_id, model_id, name, active_by_default, supports_images,
 		        context_window, max_output_tokens, collection,
-		        input_price_per_m, output_price_per_m
+		        input_price_per_m, output_price_per_m, efforts, default_effort
 		 FROM model_catalog`,
 	)
 	if err != nil {
@@ -39,15 +45,19 @@ func GetModelCatalog(database *db.DB) ([]CatalogModel, error) {
 	for rows.Next() {
 		var m CatalogModel
 		var active, images int
+		var efforts string
 		if err := rows.Scan(
 			&m.ProviderID, &m.ID, &m.Name, &active, &images,
 			&m.ContextWindow, &m.MaxOutputTokens, &m.Collection,
-			&m.InputPricePerM, &m.OutputPricePerM,
+			&m.InputPricePerM, &m.OutputPricePerM, &efforts, &m.DefaultEffort,
 		); err != nil {
 			return nil, err
 		}
 		m.ActiveByDefault = active == 1
 		m.SupportsImages = images == 1
+		if efforts != "" {
+			m.Efforts = strings.Split(efforts, ",")
+		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -80,11 +90,11 @@ func SetModelCatalog(database *db.DB, providerID string, models []CatalogModel) 
 			`INSERT INTO model_catalog
 			   (provider_id, model_id, name, active_by_default, supports_images,
 			    context_window, max_output_tokens, collection,
-			    input_price_per_m, output_price_per_m, fetched_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			    input_price_per_m, output_price_per_m, efforts, default_effort, fetched_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			providerID, m.ID, m.Name, active, images,
 			m.ContextWindow, m.MaxOutputTokens, m.Collection,
-			m.InputPricePerM, m.OutputPricePerM, now,
+			m.InputPricePerM, m.OutputPricePerM, strings.Join(m.Efforts, ","), m.DefaultEffort, now,
 		); err != nil {
 			return err
 		}

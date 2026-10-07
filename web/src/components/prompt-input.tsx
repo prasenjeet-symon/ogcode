@@ -3,6 +3,7 @@ import { Portal } from 'solid-js/web';
 import { useSession } from '../context/session';
 import { type ImagePartData } from '../api/client';
 import ModelSelector from './model-selector';
+import EffortSelector from './effort-selector';
 import PermissionPrompt from './permission-prompt';
 import PermissionModeToggle from './permission-mode-toggle';
 import { trackKeyboardInset } from '../lib/keyboard';
@@ -563,6 +564,7 @@ export default function PromptInput() {
             </Show>
 
             <ModelSelector />
+            <EffortSelector />
 
             {/* Round action button. While the agent is running it is the
                 work-in-progress indicator: a pause glyph that stops the loop

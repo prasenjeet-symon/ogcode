@@ -86,10 +86,22 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		// meter reads both, so it agrees with what the loop will actually do.
 		ContextWindow   int `json:"contextWindow,omitempty"`
 		CompactAtTokens int `json:"compactAtTokens"`
+		// Efforts are the reasoning-effort levels the model takes on its
+		// provider, lowest first (empty: no effort picker); DefaultEffort is the
+		// one it runs at when none is chosen; EffortNote says why a model that
+		// reasons offers no choice here.
+		Efforts       []string `json:"efforts,omitempty"`
+		DefaultEffort string   `json:"defaultEffort,omitempty"`
+		EffortNote    string   `json:"effortNote,omitempty"`
 	}
 	windowOf := func(modelID string) (int, int) {
 		w, _ := agent.EffectiveContextWindow(s.registry, s.db, modelID)
 		return w, agent.CompactionThreshold(w)
+	}
+	withEffort := func(e ModelEntry) ModelEntry {
+		spec := s.registry.EffortSpec(e.ProviderID, e.ID)
+		e.Efforts, e.DefaultEffort, e.EffortNote = spec.Levels, spec.Default, spec.Note
+		return e
 	}
 
 	var result []ModelEntry
@@ -126,7 +138,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			ContextWindow:   window,
 			CompactAtTokens: compactAt,
 		}
-		result = append(result, entry)
+		result = append(result, withEffort(entry))
 	}
 
 	for _, p := range prefs {
@@ -149,7 +161,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			supportsImages = cap.SupportsImages
 		}
 		window, compactAt := windowOf(p.ID)
-		result = append(result, ModelEntry{
+		result = append(result, withEffort(ModelEntry{
 			ID:              p.ID,
 			Name:            p.DisplayName,
 			ProviderID:      p.ProviderID,
@@ -162,7 +174,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			SupportsImages:  supportsImages,
 			ContextWindow:   window,
 			CompactAtTokens: compactAt,
-		})
+		}))
 	}
 
 	// Enforce a single global default so a new user's model selection is
