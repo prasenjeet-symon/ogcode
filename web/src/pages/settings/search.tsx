@@ -32,6 +32,7 @@ const ICONS = {
 const TABS: Array<{ id: SearchProvider; label: string }> = [
   { id: 'native', label: 'Native' },
   { id: 'tavily', label: 'Tavily' },
+  { id: 'youcom', label: 'You.com' },
 ];
 
 // How the native engine leads. '' keeps the HTTP path in front with Safari
@@ -419,6 +420,24 @@ export default function SearchSettings() {
                 </Show>
                 <LinkAction href="https://app.tavily.com">Get a key at tavily.com</LinkAction>
               </div>
+            </Row>
+          </Show>
+
+          <Show when={provider() === 'youcom'}>
+            <Row
+              label="You.com API key"
+              helper={
+                <>
+                  You.com uses a static key from the server environment — set <Mono>YDC_API_KEY</Mono>{' '}
+                  and it is picked up live, no restart needed. The native engines stay behind it as
+                  fallback, so a missing or rejected key never leaves a query unanswered.
+                </>
+              }
+              hidden={hide('You.com API key', 'ydc credentials key search provider')}
+            >
+              <LinkAction href="https://you.com/platform/api-keys">
+                Get a key at you.com
+              </LinkAction>
             </Row>
           </Show>
         </Show>

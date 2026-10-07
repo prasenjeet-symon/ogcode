@@ -8,11 +8,15 @@ import (
 )
 
 // Search providers. Native is the built-in engine compiled into the binary;
-// Tavily is a third-party API keyed by the user's own token. The value is
-// stored as a string so future providers slot in without a schema change.
+// Tavily is a third-party API keyed by the user's own token. You.com is a
+// third-party API too, but its key is read from the environment (YDC_API_KEY)
+// rather than stored, so the provider column is all the session keeps for it.
+// The value is stored as a string so future providers slot in without a schema
+// change.
 const (
 	SearchProviderNative = "native"
 	SearchProviderTavily = "tavily"
+	SearchProviderYoucom = "youcom"
 )
 
 // Which native engine leads the chain. SearchBrowserNative uses the HTTP path
@@ -43,7 +47,8 @@ const MaskedAPIKey = "__SET__"
 // and its credential.
 type SearchConfig struct {
 	Enabled bool `json:"enabled"`
-	// Provider selects the search backend: "native" (default) or "tavily".
+	// Provider selects the search backend: "native" (default), "tavily", or
+	// "youcom" (keyed by the YDC_API_KEY environment variable).
 	Provider string `json:"provider"`
 	// TavilyAPIKey is the token for the Tavily provider. Masked to MaskedAPIKey
 	// on read so it never reaches the UI in the clear.
@@ -63,7 +68,7 @@ type SearchConfig struct {
 // write so consumers always see a valid config regardless of how the row was
 // populated or what a client sent.
 func (c *SearchConfig) normalise() {
-	if c.Provider != SearchProviderTavily {
+	if c.Provider != SearchProviderTavily && c.Provider != SearchProviderYoucom {
 		c.Provider = SearchProviderNative
 	}
 	c.FetchTopK = clampInt(c.FetchTopK, MinSearchFetchTopK, MaxSearchFetchTopK, DefaultSearchFetchTopK)

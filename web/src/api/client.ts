@@ -1149,7 +1149,7 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 }
 
 // Search Config API
-export type SearchProvider = 'native' | 'tavily';
+export type SearchProvider = 'native' | 'tavily' | 'youcom';
 
 // Which engine leads the native backend: '' = HTTP (the fast default) first
 // with Safari as fallback, 'native' = HTTP only, 'safari' = Safari first.
@@ -1158,7 +1158,7 @@ export type SearchBrowser = '' | 'native' | 'safari';
 export interface SearchConfig {
   enabled: boolean;
   // Which search backend answers web_search/fetch_page: the built-in native
-  // engine, or a third-party provider (Tavily).
+  // engine, or a third-party provider (Tavily, You.com).
   provider: SearchProvider;
   // Tavily API key. On read it is the sentinel '__SET__' when a key is stored
   // (never the real value) or '' when none is. On write, echo '__SET__' back to
