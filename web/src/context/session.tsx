@@ -5,6 +5,7 @@ import {
   type MessageWithParts,
   type ModelInfo,
   type ImagePartData,
+  type ToolPartData,
   listSessions,
   createSession,
   getSession,
@@ -89,6 +90,10 @@ interface SessionContextValue {
    */
   loadOlder: (around?: (merge: () => void) => void) => Promise<boolean>;
   hasRunningTools: () => boolean;
+  /** The tool calls still in flight — running, or pending while the model is
+   *  still writing their arguments — in transcript order. Empty when none are,
+   *  or when the turn they belong to has ended without finishing them. */
+  liveTools: () => ToolPartData[];
   compacted: () => boolean;
   /** Where mid-loop guidance stands for the active session: waiting for the
    *  loop's next iteration, just picked up by it, or nothing in flight. */
@@ -297,7 +302,8 @@ export const SessionProvider: ParentComponent = (props) => {
   // A memo, not a plain function: half a dozen views read it, and every one of
   // them re-ran the whole scan on each change to the transcript — every poll,
   // every page of history loaded — over every tool part held.
-  const hasRunningTools = createMemo(() => messagesHaveRunningTools(messagesRaw()));
+  const liveTools = createMemo(() => messagesLiveTools(messagesRaw()));
+  const hasRunningTools = createMemo(() => liveTools().length > 0);
 
   // The loop ended abnormally and no message carries the reason. Sticky, not
   // transient: a failure the user never saw is the bug this exists to fix, so
@@ -904,6 +910,12 @@ export const SessionProvider: ParentComponent = (props) => {
   // Check if any message in the list has a tool part that is still running or pending.
   // If the last assistant has finished, stale tool statuses are ignored.
   function messagesHaveRunningTools(msgs: MessageWithParts[]): boolean {
+    return messagesLiveTools(msgs).length > 0;
+  }
+
+  // The tool parts still running or pending, in transcript order. If the last
+  // assistant has finished, stale tool statuses are ignored.
+  function messagesLiveTools(msgs: MessageWithParts[]): ToolPartData[] {
     // Only treat tools as stale when the loop was explicitly cancelled or errored.
     // finish="stop" alongside pending tools means execution is still in progress.
     let toolsAreStale = false;
@@ -918,26 +930,26 @@ export const SessionProvider: ParentComponent = (props) => {
         break;
       }
     }
+    const live: ToolPartData[] = [];
+    if (toolsAreStale) return live;
     for (const msg of msgs) {
       if (msg.parts) {
         for (const part of msg.parts) {
           if (part.type === 'tool') {
-            const status = toolStatus(part);
-            if (status === 'running' || status === 'pending') {
-              if (toolsAreStale) continue;
-              return true;
-            }
+            const data = toolData(part);
+            const status = data?.state?.status;
+            if (status === 'running' || status === 'pending') live.push(data!);
           }
         }
       }
     }
-    return false;
+    return live;
   }
 
-  // A tool part's status. The server sends part data as an object, so it is
+  // A tool part's data. The server sends part data as an object, so it is
   // read in place: serializing and re-parsing it — tool output and all — just
   // to look at one field cost more than everything else a poll does.
-  function toolStatus(part: { data: unknown }): string | undefined {
+  function toolData(part: { data: unknown }): ToolPartData | undefined {
     let data: any = part.data;
     if (typeof data === 'string') {
       try {
@@ -946,7 +958,7 @@ export const SessionProvider: ParentComponent = (props) => {
         return undefined;
       }
     }
-    return data?.state?.status;
+    return data ?? undefined;
   }
 
   // Fast poll: 3 s, runs only while the agent loop is active.
@@ -1485,6 +1497,7 @@ export const SessionProvider: ParentComponent = (props) => {
     hasOlder,
     loadOlder,
     hasRunningTools,
+    liveTools,
     compacted,
     guidanceStatus,
     loopError,

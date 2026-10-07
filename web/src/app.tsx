@@ -11,6 +11,7 @@ import { NotificationProvider } from './context/notification';
 import { DesktopNotificationProvider } from './context/desktop-notification';
 import { ThemeProvider } from './context/theme';
 import UpdateNotification from './components/update-notification';
+import PlanModeBanner from './components/plan-mode-banner';
 import GitSyncBanner from './components/git-sync-banner';
 import DesktopNotificationBanner from './components/desktop-notification-banner';
 import ModelSwitchPopup from './components/model-switch-popup';
@@ -28,6 +29,7 @@ import PreviewPage from './pages/preview';
 import SettingsLayout from './pages/settings/layout';
 import GeneralSettings from './pages/settings/general';
 import ModelsSettings from './pages/settings/models';
+import SearchSettings from './pages/settings/search';
 import UsageSettings from './pages/settings/usage';
 import SkillsSettings from './pages/settings/skills';
 import MCPSettings from './pages/settings/mcp';
@@ -71,6 +73,7 @@ export default function App() {
       <Route path="/settings" component={SettingsLayout}>
         <Route path="/" component={GeneralSettings} />
         <Route path="/models" component={ModelsSettings} />
+        <Route path="/search" component={SearchSettings} />
         <Route path="/usage" component={UsageSettings} />
         <Route path="/skills" component={SkillsSettings} />
         <Route path="/mcp" component={MCPSettings} />
@@ -106,6 +109,7 @@ function AppWrapper(props: { children?: any }) {
                           {props.children}
                         </div>
                         <UpdateNotification />
+                        <PlanModeBanner />
                         <GitSyncBanner />
                         <DesktopNotificationBanner />
                         <ModelSwitchPopup />

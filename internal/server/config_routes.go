@@ -199,6 +199,7 @@ func (s *Server) configPayload() map[string]any {
 		"installId":          s.installID,
 		"notesEnabled":       s.notesEnabled.Load(),
 		"devicePanelEnabled": s.devicePanelEnabled.Load(),
+		"planModeEnabled":    s.planModeEnabled.Load(),
 	}
 }
 
@@ -253,8 +254,8 @@ func (s *Server) handleSetSearchConfig(w http.ResponseWriter, r *http.Request) {
 	// The enable toggle is deliberately not handled here — it changes which tools
 	// are registered, so it still needs a restart; searchSwitch is nil when
 	// search was off at startup, which is exactly that case. SetSearchConfig has
-	// normalised incoming (normaliseProvider), so the comparison uses canonical values.
-	if s.searchSwitch != nil && (incoming.Provider != existing.Provider || incoming.TavilyAPIKey != existing.TavilyAPIKey) {
+	// normalised incoming (normalise), so the comparison uses canonical values.
+	if s.searchSwitch != nil && (incoming.Provider != existing.Provider || incoming.TavilyAPIKey != existing.TavilyAPIKey || incoming.Browser != existing.Browser) {
 		s.searchSwitch.Set(buildSearchBackend(&incoming))
 		logSearchProvider("web search: provider switched live", &incoming)
 	}

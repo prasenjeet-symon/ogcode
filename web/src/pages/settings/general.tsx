@@ -1,26 +1,14 @@
-import { Show, For, createMemo, createSignal, onMount, createEffect, type JSX } from 'solid-js';
+import { Show, For, createMemo, createSignal, createEffect, type JSX } from 'solid-js';
 import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { useTheme } from '../../context/theme';
 import {
-  getSearchConfig,
-  setSearchConfig,
-  validateSearchKey,
-  type SearchProvider,
-} from '../../api/client';
-import {
   Group,
   Row,
-  Switch,
   Select,
-  TextField,
-  Button,
-  LinkAction,
   Value,
   StatusChip,
-  Banner,
   Kbd,
-  Mono,
   Spinner,
   CopyButton,
   fieldClass,
@@ -31,7 +19,6 @@ import {
 const ICONS = {
   workspace: 'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
   palette: 'M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42',
-  globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3 7.5 7.03 7.5 12s2.015 9 4.5 9zm-8.716-5.25h17.432M3.284 8.25h17.432',
   keyboard: 'M6.75 3.75h.008v.008H6.75v-.008zM6.75 7.5h.008v.008H6.75V7.5zm0 3.75h.008v.008H6.75v-.008zM10.5 3.75h.008v.008H10.5v-.008zM10.5 7.5h.008v.008H10.5V7.5zm0 3.75h.008v.008H10.5v-.008zM14.25 3.75h.008v.008h-.008v-.008zM14.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM17.25 3.75h.008v.008h-.008v-.008zM17.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM4.5 18.75h15a.75.75 0 00.75-.75v-1.5a.75.75 0 00-.75-.75h-15a.75.75 0 00-.75.75v1.5a.75.75 0 00.75.75z',
   hotkey: 'M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zM12 15.75V18m3.75-3.75V18M4.5 4.5h15a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18V6a1.5 1.5 0 011.5-1.5z',
 };
@@ -74,8 +61,6 @@ export default function GeneralSettings() {
       </Group>
 
       <ThemeGroup hide={hide} />
-
-      <SearchGroups hide={hide} />
 
       <Group
         id="hotkeys"
@@ -254,285 +239,6 @@ function ThemeGroup(props: { hide: Hide }) {
         </Show>
       </Row>
     </Group>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Web search
-// ---------------------------------------------------------------------------
-
-const SEARCH_PROVIDERS: Array<{ value: SearchProvider; label: string }> = [
-  { value: 'native', label: 'Native (built-in)' },
-  { value: 'tavily', label: 'Tavily' },
-];
-
-function SearchGroups(props: { hide: Hide }) {
-  const server = useServer();
-  const [enabled, setEnabled] = createSignal(true);
-  const [provider, setProvider] = createSignal<SearchProvider>('native');
-  const [loading, setLoading] = createSignal(true);
-  const [saving, setSaving] = createSignal(false);
-  const [restartNeeded, setRestartNeeded] = createSignal(false);
-
-  // Tavily credential state. dbKeySet mirrors the server's masked response
-  // ('__SET__' means a key is stored); apiKey holds an unsaved edit; envKeySet
-  // reports a TAVILY_API_KEY set in the server environment.
-  const [dbKeySet, setDbKeySet] = createSignal(false);
-  const [envKeySet, setEnvKeySet] = createSignal(false);
-  const [apiKey, setApiKey] = createSignal('');
-  const [testing, setTesting] = createSignal(false);
-  const [keyStatus, setKeyStatus] = createSignal<{ ok: boolean; msg: string } | null>(null);
-  // Flashed briefly after a provider/key change is applied live (no restart).
-  const [applied, setApplied] = createSignal(false);
-  const flashApplied = () => {
-    setApplied(true);
-    setTimeout(() => setApplied(false), 2200);
-  };
-
-  onMount(async () => {
-    try {
-      const cfg = await getSearchConfig();
-      setEnabled(cfg.enabled);
-      setProvider(cfg.provider ?? 'native');
-      setDbKeySet(cfg.tavilyApiKey === '__SET__');
-      setEnvKeySet(!!cfg.tavilyEnvKeySet);
-    } catch {
-      // defaults stay in place
-    } finally {
-      setLoading(false);
-    }
-  });
-
-  // The key value to send: a freshly typed key wins; otherwise the '__SET__'
-  // sentinel preserves the stored one, and '' when none is stored. So a
-  // provider change (which also calls save) never wipes a saved key.
-  const resolveKey = () => {
-    const typed = apiKey().trim();
-    if (typed !== '') return typed;
-    return dbKeySet() ? '__SET__' : '';
-  };
-
-  // save persists the full config and signals how the change took effect:
-  //   restart — the enable toggle; it changes which tools exist, so it needs one
-  //   live    — a provider/key change; the backend is swapped in place, applied now
-  const save = async (opts: { restart?: boolean; live?: boolean; key?: string }) => {
-    setSaving(true);
-    try {
-      const result = await setSearchConfig({
-        enabled: enabled(),
-        provider: provider(),
-        tavilyApiKey: opts.key ?? resolveKey(),
-      });
-      setDbKeySet(result.tavilyApiKey === '__SET__');
-      if (opts.restart) setRestartNeeded(true);
-      if (opts.live) flashApplied();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggle = async (next: boolean) => {
-    setEnabled(next);
-    try {
-      await save({ restart: true });
-    } catch {
-      setEnabled(!next);
-    }
-  };
-
-  const changeProvider = async (next: string) => {
-    const prev = provider();
-    setProvider(next as SearchProvider);
-    setKeyStatus(null);
-    try {
-      await save({ live: true });
-    } catch {
-      setProvider(prev);
-    }
-  };
-
-  const saveKey = async () => {
-    setKeyStatus(null);
-    try {
-      await save({ live: true });
-      setApiKey('');
-      setKeyStatus({ ok: true, msg: 'Saved — applied now.' });
-    } catch {
-      setKeyStatus({ ok: false, msg: 'Could not save. Is the ogcode server still running?' });
-    }
-  };
-
-  const removeKey = async () => {
-    if (!confirm('Remove the stored Tavily API key from ogcode?')) return;
-    setKeyStatus(null);
-    setApiKey('');
-    try {
-      await save({ live: true, key: '' });
-    } catch {
-      setKeyStatus({ ok: false, msg: 'Could not remove the key.' });
-    }
-  };
-
-  const testKey = async () => {
-    setTesting(true);
-    setKeyStatus(null);
-    try {
-      const r = await validateSearchKey(resolveKey());
-      setKeyStatus(r.ok ? { ok: true, msg: 'Key works — Tavily accepted it.' } : { ok: false, msg: r.error || 'Tavily rejected the key.' });
-    } catch {
-      setKeyStatus({ ok: false, msg: 'Could not reach the server.' });
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  return (
-    <>
-      <Group
-        id="search"
-        title="Web search"
-        icon={ICONS.globe}
-        description="Lets the build and note agents research live information. Search ships inside ogcode — there is nothing to install."
-        action={
-          <Show when={applied()}>
-            <StatusChip tone="ok">Applied</StatusChip>
-          </Show>
-        }
-      >
-        <Row
-          label="Enable web search"
-          helper={
-            <>
-              Adds <Mono>web_search</Mono>, <Mono>fetch_page</Mono> and <Mono>deep_search</Mono> to the
-              agent's toolset. Takes effect after ogcode restarts.
-            </>
-          }
-          hidden={props.hide('Enable web search', 'deep_search web_search fetch_page internet research tools')}
-        >
-          <Show when={!loading()} fallback={<Spinner class="w-4 h-4 text-[color:var(--text-muted)]" />}>
-            <Switch checked={enabled()} disabled={saving()} onChange={toggle} label="Enable web search" />
-          </Show>
-        </Row>
-
-        <Show when={!loading() && enabled()}>
-          <Row
-            label="Search provider"
-            helper={
-              <>
-                Native runs inside ogcode with nothing to install. Tavily routes{' '}
-                <Mono>web_search</Mono> and <Mono>fetch_page</Mono> through your Tavily account,
-                and falls back to native if a call fails. Applies immediately — no restart needed.
-              </>
-            }
-            hidden={props.hide('Search provider', 'tavily native third party engine')}
-          >
-            <Select
-              value={provider()}
-              options={SEARCH_PROVIDERS}
-              disabled={saving()}
-              ariaLabel="Search provider"
-              onChange={changeProvider}
-            />
-          </Row>
-
-          <Show when={provider() === 'tavily'}>
-            <Row
-              label="Tavily API key"
-              helper={
-                <Show
-                  when={dbKeySet()}
-                  fallback={
-                    <>
-                      Paste your <Mono>tvly-…</Mono> key — Tavily uses a static API key, so there
-                      is no sign-in to complete. <Mono>TAVILY_API_KEY</Mono> is used when that
-                      variable is set. Applies immediately — no restart needed.
-                    </>
-                  }
-                >
-                  <>Leave blank to keep the stored key. Applies immediately — no restart needed.</>
-                </Show>
-              }
-              stacked
-              hidden={props.hide('Tavily API key', 'credentials token tvly search provider')}
-            >
-              <div class="flex items-center gap-2 flex-wrap">
-                <div class="flex-1 min-w-[14rem]">
-                  <TextField
-                    password
-                    mono
-                    value={apiKey()}
-                    onInput={setApiKey}
-                    onEnter={saveKey}
-                    disabled={saving()}
-                    ariaLabel="Tavily API key"
-                    placeholder={
-                      dbKeySet()
-                        ? 'leave blank to keep the saved key'
-                        : envKeySet()
-                          ? 'leave blank to use TAVILY_API_KEY'
-                          : 'tvly-…'
-                    }
-                  />
-                </div>
-                <Button onClick={saveKey} disabled={saving()}>{saving() ? 'Saving…' : 'Save'}</Button>
-                <Button
-                  variant="outlined"
-                  onClick={testKey}
-                  disabled={testing() || saving() || (!apiKey().trim() && !dbKeySet() && !envKeySet())}
-                >
-                  {testing() ? 'Testing…' : 'Test key'}
-                </Button>
-              </div>
-              <div class="mt-2 flex items-center gap-3 flex-wrap">
-                <Show when={envKeySet()}>
-                  <StatusChip tone="ok">Key set via TAVILY_API_KEY</StatusChip>
-                </Show>
-                <Show when={dbKeySet()}>
-                  <StatusChip tone="ok">Key stored in ogcode</StatusChip>
-                </Show>
-                <Show when={keyStatus()}>
-                  <span
-                    class="text-micro"
-                    style={{ color: keyStatus()!.ok ? 'var(--success)' : 'var(--danger)' }}
-                  >
-                    {keyStatus()!.msg}
-                  </span>
-                </Show>
-                <Show when={dbKeySet()}>
-                  <LinkAction onClick={removeKey}>Remove stored key</LinkAction>
-                </Show>
-                <LinkAction href="https://app.tavily.com">Get a key at tavily.com</LinkAction>
-              </div>
-            </Row>
-          </Show>
-        </Show>
-
-        <Show when={!loading() && (restartNeeded() || enabled())}>
-          <Row label="Status" stacked hidden={props.hide('Status', 'web search backend running restart')}>
-            <Show
-              when={restartNeeded()}
-              fallback={
-                <Show
-                  when={server.searchRunning()}
-                  fallback={
-                    <Banner tone="danger">
-                      The search backend did not start. Check the server logs, then restart ogcode.
-                    </Banner>
-                  }
-                >
-                  <Banner tone="ok">
-                    Search is active — <Mono>web_search</Mono>, <Mono>fetch_page</Mono> and{' '}
-                    <Mono>deep_search</Mono> are ready.
-                  </Banner>
-                </Show>
-              }
-            >
-              <Banner tone="warn">Restart the server for this change to take effect.</Banner>
-            </Show>
-          </Row>
-        </Show>
-      </Group>
-    </>
   );
 }
 

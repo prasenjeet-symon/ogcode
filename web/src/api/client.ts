@@ -407,6 +407,12 @@ export interface ConfigInfo {
   notesEnabled?: boolean;
   /** Whether the server found the device-panel feature flag on for this install. */
   devicePanelEnabled?: boolean;
+  /**
+   * Whether the server found the plan-mode feature flag on for this install.
+   * Gates only the plan-mode instability warning — plan mode itself is
+   * reachable either way.
+   */
+  planModeEnabled?: boolean;
 }
 
 export function getConfig(): Promise<ConfigInfo> {
@@ -1145,6 +1151,10 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 // Search Config API
 export type SearchProvider = 'native' | 'tavily';
 
+// Which engine leads the native backend: '' = HTTP (the fast default) first
+// with Safari as fallback, 'native' = HTTP only, 'safari' = Safari first.
+export type SearchBrowser = '' | 'native' | 'safari';
+
 export interface SearchConfig {
   enabled: boolean;
   // Which search backend answers web_search/fetch_page: the built-in native
@@ -1154,6 +1164,12 @@ export interface SearchConfig {
   // (never the real value) or '' when none is. On write, echo '__SET__' back to
   // keep the stored key untouched.
   tavilyApiKey: string;
+  // Native-backend tuning: how many pages a deep search extracts, how many
+  // characters are kept per page, and which engine leads. OGCODE_SEARCH_*
+  // environment variables override these when set.
+  fetchTopK: number;
+  pageChars: number;
+  browser: SearchBrowser;
   // True when TAVILY_API_KEY is set in the server's environment (read-only hint).
   tavilyEnvKeySet?: boolean;
   updatedAt?: number;

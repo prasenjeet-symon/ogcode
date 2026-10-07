@@ -131,6 +131,9 @@ export function Row(props: {
   /** Puts the control on its own line beneath the label, for wide controls. */
   stacked?: boolean;
   onClick?: () => void;
+  /** The row opens something below it: the chevron turns to point down while
+   *  open, the way a disclosure marker does. */
+  expanded?: boolean;
   /** Filtered out by the current search. The row stays mounted and simply goes
    *  `hidden`, so a half-typed key survives a search the user then clears. */
   hidden?: boolean;
@@ -188,7 +191,9 @@ export function Row(props: {
         </Show>
         <Show when={props.onClick}>
           <svg
-            class="w-4 h-4 shrink-0 self-center ml-2 text-[color:var(--text-muted)]"
+            class={`w-4 h-4 shrink-0 self-center ml-2 text-[color:var(--text-muted)] transition-transform duration-150 ${
+              props.expanded ? 'rotate-90' : ''
+            }`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"
           >
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />

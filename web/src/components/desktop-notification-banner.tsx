@@ -32,9 +32,9 @@ export default function DesktopNotificationBanner() {
     desktop.permission() === 'default' &&
     location.pathname !== '/onboarding';
 
-  // The git-sync banner occupies the same top-center spot while in plan mode;
-  // drop below it then instead of painting over it.
-  const top = () => (server.mode() === 'plan' ? 'top-16' : 'top-4');
+  // Plan mode stacks two banners above this one — the plan-mode notice at
+  // top-4 and the git-sync banner at top-16 — so drop below both there.
+  const top = () => (server.mode() === 'plan' ? 'top-28' : 'top-4');
 
   return (
     <Show when={visible()}>

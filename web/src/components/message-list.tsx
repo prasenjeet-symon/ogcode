@@ -1,6 +1,6 @@
 import { Show, For, batch, createEffect, createMemo, on, createSignal, onMount, onCleanup } from 'solid-js';
 import { useSession } from '../context/session';
-import MessageItem from './message-item';
+import MessageItem, { summarizeInput } from './message-item';
 import { createChatScroll } from '../lib/chat-scroll';
 import { SavedScroll } from '../lib/scroll-memory';
 import JumpToLatest from './jump-to-latest';
@@ -91,6 +91,30 @@ export default function MessageList() {
   // The newest message the reader has seen. Unread is what is newer than it,
   // so history paged in above never counts as news.
   const [lastSeenId, setLastSeenId] = createSignal('');
+
+  // What the working indicator says. A slow tool call is where the user most
+  // needs to know the agent is not stuck, so with one call in flight the line
+  // names it and what it is working on — "Running bash  npm test" — rather than
+  // a generic "Running tools" that could mean anything, for any length of time.
+  // "Preparing" is the stretch before that: the model is still writing the
+  // call's arguments (a long file for write, say), so nothing is running yet.
+  const working = createMemo((): { label: string; detail: string | null } => {
+    const live = session.liveTools();
+    if (live.length === 0) return { label: 'Thinking', detail: null };
+    const preparing = live.every((t) => t.state?.status === 'pending');
+    if (live.length === 1) {
+      const t = live[0];
+      const name = t.state?.title || t.tool || 'tool';
+      return preparing
+        ? { label: `Preparing ${name}`, detail: null }
+        : { label: `Running ${name}`, detail: summarizeInput(t.tool, t.state?.input) };
+    }
+    const names = [...new Set(live.map((t) => t.state?.title || t.tool).filter(Boolean))];
+    return {
+      label: preparing ? `Preparing ${live.length} tool calls` : `Running ${live.length} tools`,
+      detail: names.join(', ') || null,
+    };
+  });
 
   const visibleMessages = createMemo(() => {
     const activeId = session.activeSession()?.id;
@@ -769,17 +793,22 @@ export default function MessageList() {
 
           {/* Working indicator — a swept label rather than a spinner or avatar,
               so it sits in the flow of the transcript at the exact spot the
-              answer will appear, and says which of the two states we're in. */}
+              answer will appear, and says what the agent is doing right now. */}
           <Show when={session.loading() || session.hasRunningTools()}>
-            <div class="flex items-center gap-2 h-7 animate-fade-in" aria-live="polite">
-              <div class="thinking-dots">
+            <div class="flex items-center gap-2 h-7 min-w-0 animate-fade-in" aria-live="polite">
+              <div class="thinking-dots shrink-0">
                 <span></span>
                 <span></span>
                 <span></span>
               </div>
-              <span class="sweep-text text-meta font-medium">
-                {session.hasRunningTools() ? 'Running tools' : 'Thinking'}
+              <span class="sweep-text text-meta font-medium shrink-0">
+                {working().label}
               </span>
+              <Show when={working().detail}>
+                <span class="text-[color:var(--text-muted)] font-mono text-micro truncate min-w-0">
+                  {working().detail}
+                </span>
+              </Show>
             </div>
           </Show>
 

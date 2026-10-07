@@ -293,7 +293,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	// typed-nil would compare != nil and get dead tools registered against it.
 	var searchBridge search.Backend
 	if searchEnabled {
-		searchBridge = search.BuildBackend(searchCfg.Provider, searchCfg.TavilyAPIKey)
+		searchBridge = search.BuildBackend(searchCfg.Provider, searchCfg.TavilyAPIKey, searchCfg.Browser)
 		toolRegistry.Register(tool.WebSearchTool{Bridge: searchBridge})
 		toolRegistry.Register(tool.FetchPageTool{Bridge: searchBridge})
 	} else {
@@ -318,6 +318,8 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		MaxSteps:        runMaxTurns,
 		Skills:          skillLoader,
 		SearchBridge:    searchBridge,
+		SearchFetchTopK: searchCfg.FetchTopK,
+		SearchPageChars: searchCfg.PageChars,
 		// Same reporter the server wires. Without it indexedFiles stays -1, the
 		// index-status line is omitted, and a headless run in an unindexed
 		// project is left with a prompt that mandates codebase_map and no line

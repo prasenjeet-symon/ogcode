@@ -1,3 +1,35 @@
+# Release Notes — v0.45.0
+
+## Minor: Web search gets a settings page of its own
+
+Everything about how Ogcode searches the web now lives on **Settings → Search**,
+instead of being buried in General. The page opens on two tabs — **Native** and
+**Tavily** — so the provider you are using is explicit rather than implied.
+
+The native knobs are back under **Advanced**: how many pages a search extracts,
+how many characters it keeps from each page, and which engine leads. They persist
+now, so the setting you choose survives a restart, and the environment variables
+(`OGCODE_SEARCH_FETCH_TOP_K`, `OGCODE_SEARCH_PAGE_CHARS`, `OGCODE_SEARCH_BROWSER`)
+still win when they are set. A key you paste for Tavily is stored and shown as
+stored, without a separate test step to trip over.
+
+## Minor: You can see what a running tool is doing
+
+A tool call that is still running no longer shows up as a bare, empty row. The
+transcript now names it while it works — _Running bash_ with the command, or
+_Preparing write_ — and the row shows a clock once it has been going for a couple
+of seconds, so a slow command is visibly slow rather than apparently stuck.
+
+## Minor: Plan mode says it is still moving
+
+Plan mode carries a warning banner now: it is under rapid development and not yet
+stable, and the banner says so plainly, with a link to report what breaks and a
+reminder that Build mode is there if you need it. Dismiss it once and it stays
+dismissed. The banner is the only thing the warning touches — plan mode itself is
+unchanged and still there for you to use.
+
+---
+
 # Release Notes — v0.44.6
 
 ## Patch: The rooms where everyone hangs out reach the app

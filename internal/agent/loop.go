@@ -66,6 +66,12 @@ type LoopRunner struct {
 	// (RunSearchSession) and by web_search and fetch_page. nil when search is
 	// disabled — deep_search is only registered when it is non-nil.
 	SearchBridge search.Backend
+	// SearchFetchTopK and SearchPageChars are the native engine's deep-research
+	// tuning, set from the stored search config. Zero leaves the package default
+	// in effect, and OGCODE_SEARCH_FETCH_TOP_K / OGCODE_SEARCH_PAGE_CHARS
+	// override either way (see tuning).
+	SearchFetchTopK int
+	SearchPageChars int
 	// IndexedFileCount, when set, reports how many files the project index holds
 	// for a directory. It lets the system prompt state up front whether
 	// codebase_map has anything to return, instead of making every session in an
@@ -2497,9 +2503,15 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		part, _ := lr.Store.GetPart(tc.PartID)
 		var toolData session.ToolPartData
 		if part != nil && json.Unmarshal(part.Data, &toolData) == nil {
+			// The input comes from the call as streamed, not from the part. The
+			// part was written when the call opened, and Anthropic (and most
+			// OpenAI-compatible streams) send the arguments only in the deltas
+			// after that, so the part still holds `{}`. Copying it forward left
+			// a slow command showing as a bare spinner — no command, no path —
+			// for as long as it ran, which reads as the agent being stuck.
 			toolData.State = session.ToolState{
 				Status: session.ToolRunning,
-				Input:  toolData.State.Input,
+				Input:  validToolInput(tc.Input),
 				Title:  &tc.Name,
 				Time: session.ToolTime{
 					Start: session.Now(),

@@ -14,9 +14,10 @@ import (
 // The native chain is the owned default and always the last link, so an
 // answerable query is never lost to a third-party outage: a bad Tavily key, an
 // exhausted quota or a network error falls through to it rather than failing
-// the call. OGCODE_SEARCH_BROWSER picks which native engine leads — "native"
-// for the HTTP path alone, "safari" to drive a real browser first — and the
-// default puts the HTTP path in front with Safari behind it.
+// the call. browser picks which native engine leads — "native" for the HTTP
+// path alone, "safari" to drive a real browser first — and the empty string
+// (or any unknown value) puts the HTTP path in front with Safari behind it.
+// OGCODE_SEARCH_BROWSER overrides browser when set.
 //
 // tavilyAPIKey is the stored key; TAVILY_API_KEY overrides it, mirroring the
 // provider-key env overlay so scripted and CI runs can supply one without
@@ -28,11 +29,17 @@ import (
 // prompt they hand the agent names deep_search either way: whichever entry
 // point cannot build a backend is the one whose agent is told about a tool it
 // will never be offered.
-func BuildBackend(provider, tavilyAPIKey string) Backend {
+func BuildBackend(provider, tavilyAPIKey, browser string) Backend {
 	native := NewNativeBackend()
 
+	// The environment wins over the stored choice, so a deployment can pin the
+	// engine without touching config.
+	if env := strings.TrimSpace(os.Getenv("OGCODE_SEARCH_BROWSER")); env != "" {
+		browser = env
+	}
+
 	var nativeChain Backend
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_SEARCH_BROWSER"))) {
+	switch strings.ToLower(strings.TrimSpace(browser)) {
 	case "native":
 		nativeChain = native
 	case "safari":

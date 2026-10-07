@@ -48,12 +48,19 @@ func TestTuning(t *testing.T) {
 		t.Fatalf("no override: got %+v, want defaults", got)
 	}
 
-	// An environment override is honoured, so a deployment can tune the pipeline
-	// without a rebuild.
+	// A configured value from the settings screen (carried on the runner) is the
+	// default, so the database owns the value and the env is only an override.
+	setup := &LoopRunner{SearchFetchTopK: 6, SearchPageChars: 7500}
+	if got := setup.tuning(); got.fetchTopK != 6 || got.pageChars != 7500 {
+		t.Fatalf("configured: got %+v, want {6,7500}", got)
+	}
+
+	// An environment override still beats the configured value, so a deployment
+	// can tune the pipeline without a rebuild.
 	t.Setenv(fetchTopKEnv, "8")
 	t.Setenv(pageCharsEnv, "12000")
-	if got := lr.tuning(); got.fetchTopK != 8 || got.pageChars != 12000 {
-		t.Fatalf("override: got %+v, want {8,12000}", got)
+	if got := setup.tuning(); got.fetchTopK != 8 || got.pageChars != 12000 {
+		t.Fatalf("env over configured: got %+v, want {8,12000}", got)
 	}
 
 	// Out-of-range values are clamped rather than handed to the pipeline.

@@ -22,6 +22,10 @@ interface ServerContextValue {
   // Whether the server resolved the device-panel feature flag as on for this
   // install. Same ownership model as notesEnabled.
   devicePanelEnabled: () => boolean;
+  // Whether the server resolved the plan-mode feature flag as on for this
+  // install. Same ownership model; it gates only the plan-mode instability
+  // warning, never plan mode itself.
+  planModeEnabled: () => boolean;
   // Rolling window of this process's own CPU/memory samples, oldest first, and
   // the context needed to read them (cadence, core count, process uptime).
   resources: () => ResourceSample[];
@@ -62,6 +66,7 @@ export const ServerProvider: ParentComponent = (props) => {
   const [searchRunning, setSearchRunning] = createSignal(false);
   const [notesEnabled, setNotesEnabled] = createSignal(false);
   const [devicePanelEnabled, setDevicePanelEnabled] = createSignal(false);
+  const [planModeEnabled, setPlanModeEnabled] = createSignal(false);
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
   const [resyncTick, setResyncTick] = createSignal(0);
@@ -121,6 +126,7 @@ export const ServerProvider: ParentComponent = (props) => {
       setSearchRunning((config as any).searchRunning ?? false);
       setNotesEnabled(config.notesEnabled ?? false);
       setDevicePanelEnabled(config.devicePanelEnabled ?? false);
+      setPlanModeEnabled(config.planModeEnabled ?? false);
     }).catch(() => { /* ignore */ });
   }
   loadConfig();
@@ -165,6 +171,9 @@ export const ServerProvider: ParentComponent = (props) => {
     } else if (event.type === 'device-panel.changed') {
       // Same contract as notes.changed, for the device panel's flag.
       setDevicePanelEnabled((event.properties as any)?.enabled ?? false);
+    } else if (event.type === 'plan-mode.changed') {
+      // Same contract, for the plan-mode flag that gates the instability warning.
+      setPlanModeEnabled((event.properties as any)?.enabled ?? false);
     } else {
       setLastEvent(event);
       setEventTick((n) => n + 1);
@@ -223,6 +232,7 @@ export const ServerProvider: ParentComponent = (props) => {
     searchRunning,
     notesEnabled,
     devicePanelEnabled,
+    planModeEnabled,
     resources,
     resourceMeta,
     eventTick,

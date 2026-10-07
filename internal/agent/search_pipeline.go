@@ -19,12 +19,13 @@ import (
 )
 
 // Deep-research pipeline tuning. searchResultCount / searchMaxCandidates /
-// searchSynthMaxTokens are internal plumbing; the two knobs below are fixed at
-// the values that read well across queries — there is deliberately no settings
-// control for them. OGCODE_SEARCH_FETCH_TOP_K and OGCODE_SEARCH_PAGE_CHARS let a
-// deployment that wants to dig deeper (or answer cheaper) say so without a
-// rebuild; values outside the bounds are clamped, and an unparseable one is
-// ignored with a warning rather than failing the search.
+// searchSynthMaxTokens are internal plumbing; the two knobs below default to the
+// values that read well across queries and can be overridden per deployment
+// from the settings screen (LoopRunner.SearchFetchTopK / SearchPageChars) or,
+// for a scripted run, the environment. OGCODE_SEARCH_FETCH_TOP_K and
+// OGCODE_SEARCH_PAGE_CHARS take precedence over the configured value; values
+// outside the bounds are clamped, and an unparseable one is ignored with a
+// warning rather than failing the search.
 const (
 	searchResultCount    = 20   // results requested for the query from the bridge
 	searchMaxCandidates  = 24   // cap on unique results fed to the ranker
@@ -49,14 +50,23 @@ type searchTuning struct {
 	pageChars int // per-page character cap fed into synthesis
 }
 
-// tuning resolves the knobs: the built-in defaults, overridden by the
-// environment when it names a usable value. Read per call so a long-lived
-// server picks up an override the same way any other env-configured setting
-// applies, and so tests can drive it with t.Setenv.
+// tuning resolves the knobs: the runner's configured value (or the built-in
+// default when it is unset), overridden by the environment when it names a
+// usable value. Read per call so a long-lived server picks up an override the
+// same way any other env-configured setting applies, and so tests can drive it
+// with t.Setenv.
 func (lr *LoopRunner) tuning() searchTuning {
+	defFetchTopK := lr.SearchFetchTopK
+	if defFetchTopK <= 0 {
+		defFetchTopK = defaultSearchFetchTopK
+	}
+	defPageChars := lr.SearchPageChars
+	if defPageChars <= 0 {
+		defPageChars = defaultSearchPageChars
+	}
 	return searchTuning{
-		fetchTopK: envInt(fetchTopKEnv, defaultSearchFetchTopK, minSearchFetchTopK, maxSearchFetchTopK),
-		pageChars: envInt(pageCharsEnv, defaultSearchPageChars, minSearchPageChars, maxSearchPageChars),
+		fetchTopK: envInt(fetchTopKEnv, defFetchTopK, minSearchFetchTopK, maxSearchFetchTopK),
+		pageChars: envInt(pageCharsEnv, defPageChars, minSearchPageChars, maxSearchPageChars),
 	}
 }
 

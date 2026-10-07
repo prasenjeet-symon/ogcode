@@ -124,6 +124,12 @@ type Server struct {
 	// race.
 	devicePanelEnabled atomic.Bool
 
+	// planModeEnabled is the plan-mode feature-flag decision for this install,
+	// refreshed by the same background goroutine. It gates only the UI's
+	// instability warning, never plan mode itself; /api/config reports it.
+	// atomic so readers and the refresh goroutine never race.
+	planModeEnabled atomic.Bool
+
 	// Track running agent loops so they can be cancelled on abort
 	mu           sync.Mutex
 	running      map[session.SessionID]context.CancelFunc
@@ -494,6 +500,11 @@ func (s *Server) serve(ctx context.Context) error {
 		// reaches every turn (and every sub-agent runner copied from this one).
 		NotesEnabled: &s.notesEnabled,
 		SearchBridge: searchBackend,
+		// The native engine's fetch budget, read from config so the settings
+		// screen can tune it; 0 leaves the package default in place and the
+		// OGCODE_SEARCH_* env vars still override both.
+		SearchFetchTopK: searchCfg.FetchTopK,
+		SearchPageChars: searchCfg.PageChars,
 		// Whether the agent may compact its own context mid-turn is a process-wide
 		// switch (OGCODE_COMPACT_CONTEXT); the loop resolves it once per turn.
 		// Lets the system prompt say up front whether codebase_map has anything
@@ -947,7 +958,7 @@ func fileExists(path string) bool {
 // that the native engines are always the last link, so a Tavily failure falls
 // through rather than losing an answerable query.
 func buildSearchBackend(cfg *session.SearchConfig) search.Backend {
-	return search.BuildBackend(cfg.Provider, cfg.TavilyAPIKey)
+	return search.BuildBackend(cfg.Provider, cfg.TavilyAPIKey, cfg.Browser)
 }
 
 // tavilyKeyFor returns the Tavily key in effect: the environment overrides the

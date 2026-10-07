@@ -30,7 +30,7 @@ function formatDuration(ms: number, precise: boolean): string {
   return `${m}m ${s < 10 ? '0' : ''}${s}s`;
 }
 
-function summarizeInput(tool: string, input: any): string | null {
+export function summarizeInput(tool: string, input: any): string | null {
   if (!input || typeof input !== 'object') return null;
   // Common shapes: file_path, path, command, pattern
   if (input.file_path) return String(input.file_path);
@@ -164,12 +164,14 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     }
   });
 
-  // Total-time readout for deep_search (the one long-running tool). While it runs
-  // we tick a signal every second so the elapsed time updates live; once it
-  // finishes we show the exact total from the persisted start/end timestamps.
+  // Elapsed-time readout. Any tool that is still running ticks a signal every
+  // second so the time climbs live: a slow command with a clock beside it reads
+  // as working, where a bare spinner reads as stuck. deep_search (the one tool
+  // that is slow by design) also keeps its exact total once it finishes, from
+  // the persisted start/end timestamps.
   const [nowTick, setNowTick] = createSignal(Date.now());
   createEffect(() => {
-    if (isDeepSearch() && status() === 'running' && state().time?.start) {
+    if (status() === 'running' && state().time?.start) {
       const id = setInterval(() => setNowTick(Date.now()), 1000);
       onCleanup(() => clearInterval(id));
     }
@@ -185,6 +187,15 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     const ms = elapsedMs();
     if (ms == null || ms < 0) return '';
     return formatDuration(ms, status() === 'completed');
+  };
+  // Other tools show the clock only while running, and only once they have
+  // been at it long enough to wonder about: a sub-second read flashing "0s"
+  // is noise, and a finished call's duration is not something the user asked.
+  const showDuration = (): boolean => {
+    if (isDeepSearch()) return !!durationLabel();
+    if (status() !== 'running') return false;
+    const ms = elapsedMs();
+    return ms != null && ms >= 2000;
   };
 
   const statusColor = () => {
@@ -305,12 +316,12 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
             </span>
           )}
         </Show>
-        <Show when={isDeepSearch() && durationLabel()}>
+        <Show when={showDuration()}>
           <span
             class={`flex items-center gap-1 shrink-0 text-micro font-mono tabular-nums ${
               status() === 'running' ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)]'
             }`}
-            title="Total time for this deep search"
+            title={isDeepSearch() ? 'Total time for this deep search' : 'Running for this long so far'}
           >
             <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
