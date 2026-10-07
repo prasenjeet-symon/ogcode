@@ -68,6 +68,27 @@ function SessionSidebarInner() {
     setDraftTitle('');
   };
 
+  // Focus the rename input by hand: browsers honour the autofocus attribute
+  // only once per page, so later renames opened with focus still on <body>.
+  // Deferred a microtask so the input is in the DOM. An untouched title is
+  // selected for a quick overwrite; an edited one keeps the caret at the end,
+  // since the rows are rebuilt on every session-list change (any
+  // session.updated) and re-selecting would let the next keystroke wipe it.
+  const focusRenameInput = (el: HTMLInputElement, title: string) =>
+    queueMicrotask(() => {
+      el.focus();
+      if (el.value === title) el.select();
+    });
+
+  // Chrome also fires blur when it removes the focused input — on Escape,
+  // after Enter, when the rows are rebuilt — and fires it while the input is
+  // still in the DOM. Checking a microtask later, once the removal is done,
+  // lets only a real blur (a click away) commit.
+  const commitOnBlur = (el: HTMLInputElement, id: string) =>
+    queueMicrotask(() => {
+      if (el.isConnected) commitRename(id);
+    });
+
   const handleNew = async () => {
     const s = await session.newSession();
     navigate(`/session/${s.id}`);
@@ -299,10 +320,11 @@ function SessionSidebarInner() {
                         when={!isEditing()}
                         fallback={
                           <input
+                            ref={(el) => focusRenameInput(el, s.title || '')}
                             type="text"
                             value={draftTitle()}
                             onInput={(e) => setDraftTitle(e.currentTarget.value)}
-                            onBlur={() => commitRename(s.id)}
+                            onBlur={(e) => commitOnBlur(e.currentTarget, s.id)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') { e.preventDefault(); commitRename(s.id); }
                               else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
@@ -310,7 +332,6 @@ function SessionSidebarInner() {
                             onClick={(e) => e.stopPropagation()}
                             onDblClick={(e) => e.stopPropagation()}
                             placeholder="Untitled"
-                            autoFocus
                             class="flex-1 min-w-0 bg-[color:var(--bg-base)] border border-[color:var(--border-default)]
                                    rounded px-1.5 h-5.5 text-ui text-[color:var(--text-primary)]
                                    focus:outline-none focus:border-[color:var(--accent)]"
