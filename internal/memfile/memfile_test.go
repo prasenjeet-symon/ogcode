@@ -23,6 +23,36 @@ func TestSummarySystemPromptCarriesDecisionGuidance(t *testing.T) {
 	}
 }
 
+// The summary is all a later turn learns about this one, so each of the
+// scribe's rules guards a way that record can mislead. Pin them so an edit
+// cannot quietly drop one:
+//   - specifics: a prompt that only said "be concise" let a seven-item proposal
+//     shrink to its count, and recall could no longer say what the items were;
+//   - secrets: tool inputs reach the scribe, and "copy commands verbatim" would
+//     otherwise copy a credential out of one;
+//   - status: tool results do not reach it, so a test command must not read as
+//     a passing test;
+//   - names and headings: the reader was not there, and picks what to read
+//     from the heading outline alone;
+//   - feedback: a correction the developer gave applies to later turns too.
+func TestSummarySystemPromptGuidance(t *testing.T) {
+	rules := map[string][]string{
+		"specifics": {"Reproduce EVERY item of an enumerated set", "Never collapse a set into its count", "verbatim", "never at the cost of a specific", "Record what is still open"},
+		"secrets":   {"Never write a secret into the summary", "overrides every rule above", "<redacted>"},
+		"status":    {"Take outcomes only from the agent's final response", "a test or build command does not mean it passed", "If the response does not say, write that it does not say"},
+		"names":     {"Name what you refer to", "say it is unclear rather than guess"},
+		"headings":  {"Name every H3", "never a generic label"},
+		"feedback":  {"## Developer feedback & preferences"},
+	}
+	for rule, phrases := range rules {
+		for _, want := range phrases {
+			if !strings.Contains(SummarySystemPrompt, want) {
+				t.Errorf("%s rule: SummarySystemPrompt should say %q", rule, want)
+			}
+		}
+	}
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))

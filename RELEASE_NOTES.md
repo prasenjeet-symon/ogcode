@@ -1,3 +1,76 @@
+# Release Notes — v0.46.0
+
+## Minor: Every model gets a reasoning-effort picker
+
+A reasoning model does not always need to think as hard as it can, and letting it
+try costs you time and tokens. Beside the model picker — in the composer, on the
+home screen and in the plan composer — there is now an effort picker. Claude goes
+from low to max, GPT-5.x from none to xhigh, gpt-oss from low to high, some models
+only switch their thinking on or off, and a model with no such control shows no
+picker at all.
+
+Each model's levels come from the catalogue, which now records its ladder and its
+default, or live from the host where the host publishes them — Ollama's thinking
+metadata and OpenRouter's reasoning object. Your pick is remembered per model and
+carried on every prompt, and it is stored on the session, so a turn you resume
+keeps the effort you chose. Sub-agents a task starts inherit it. From the command
+line, `ogcode run --effort <level>` sets it.
+
+The same catalogue pass brings Claude Sonnet 5.5 in as the Anthropic default,
+moves Sonnet 5 to legacy, and adds a Gemini section. GPT-5.4 and later show a note
+where the levels would be, because their tools on Chat Completions are reachable
+only with reasoning off. Mistral is left out of the picker; reasoning turns its
+streamed content into chunk arrays.
+
+## Minor: Reasoning goes back to the hosts that need it
+
+Some hosts refuse a tool turn that arrives without the previous reasoning.
+DeepSeek V4 answers 400 and the turn stalls; Kimi K3, GLM and Qwen Cloud want
+their reasoning returned too. Ogcode now sends it back.
+
+A host that needs it opts in, and for those hosts the previous reasoning is
+attached to each assistant message, taken from the stored reasoning so the history
+is resent byte for byte. The field is named the way each host names it:
+`reasoning_content` for DeepSeek, Z.ai, Moonshot and Qwen Cloud, `reasoning` for
+Ollama and OGX, and nothing for the hosts that neither want nor accept it. Only
+the current model's own reasoning is carried, so the token count reflects what is
+really sent.
+
+## Minor: The turn summary keeps what a later turn needs
+
+The summary written at the end of a turn is the only record of that turn a future
+turn will ever read, and it had been quietly dropping detail. A seven-item
+proposal could come back as "proposed 7 definitions", so the next turn knew the
+proposal existed but not one word of what it said.
+
+The scribe's instructions now keep every item of a list — its name and its value,
+in order, in the original wording — and every identifier, path, command, URL and
+error message verbatim; concision applies to the narration around them. Two rules
+keep that faithfulness honest. A secret that appears in a tool input is redacted
+whatever else the prompt says, and a status is taken only from the agent's own
+account of the outcome — a test command shows that a test was run, not that it
+passed. Headings must name their subject, so the outline a later turn navigates by
+says what each section holds, and a correction or preference from the developer is
+kept in their own words under a section of its own.
+
+## Other changes
+
+- GitHub Models was retired upstream on 2026-07-30 and no longer answers, so it
+  is gone from the provider presets and from the logo belt on the home page. A
+  configuration that still names its URL keeps its "GitHub Models" label rather
+  than becoming an unnamed slot.
+- Renaming a session in the sidebar now focuses the title field on every rename,
+  not only the first one, and a row that rebuilds mid-edit no longer saves a
+  half-typed title or renames twice on Enter.
+- The server, worker and CLI test suites run against a throwaway home now, so a
+  `go test` run no longer migrates the developer's real database, and they send
+  nothing to PostHog.
+- Dead wiring in the worker that built a second provider registry and model
+  catalogue — never called, since each hosted worktree runs a full server — is
+  removed, and the web build carries no type errors.
+
+---
+
 # Release Notes — v0.45.0
 
 ## Minor: Web search gets a settings page of its own
