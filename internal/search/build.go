@@ -6,13 +6,13 @@ import (
 )
 
 // BuildBackend assembles the search backend chain a deep-research run uses.
-// provider is matched against ProviderTavily; anything else — the empty string
-// included — selects the native chain. It is matched here rather than against
-// the session package's copy of the id so this stays a leaf package any entry
-// point can build a backend from.
+// provider is matched against ProviderTavily and ProviderYoucom; anything
+// else — the empty string included — selects the native chain. It is matched
+// here rather than against the session package's copy of the id so this stays
+// a leaf package any entry point can build a backend from.
 //
 // The native chain is the owned default and always the last link, so an
-// answerable query is never lost to a third-party outage: a bad Tavily key, an
+// answerable query is never lost to a third-party outage: a bad key, an
 // exhausted quota or a network error falls through to it rather than failing
 // the call. browser picks which native engine leads — "native" for the HTTP
 // path alone, "safari" to drive a real browser first — and the empty string
@@ -23,6 +23,11 @@ import (
 // provider-key env overlay so scripted and CI runs can supply one without
 // touching stored config. An empty key means no Tavily link at all — the
 // provider selection alone is not enough to build one.
+//
+// The You.com provider takes its key from the environment alone (YDC_API_KEY)
+// — the settings UI stores no credential for it — so selecting provider
+// "youcom" without that variable set resolves to the native chain, the same
+// way an unkeyed Tavily selection does.
 //
 // It takes plain strings rather than a config struct because both the server
 // and the headless CLI build a backend from their own config sources, and the
@@ -48,9 +53,15 @@ func BuildBackend(provider, tavilyAPIKey, browser string) Backend {
 		nativeChain = NewFallbackBackend(native, NewSafariBackend())
 	}
 
-	if strings.EqualFold(strings.TrimSpace(provider), ProviderTavily) {
+	trimmed := strings.ToLower(strings.TrimSpace(provider))
+	if trimmed == ProviderTavily {
 		if key := resolveTavilyKey(tavilyAPIKey); key != "" {
 			return NewFallbackBackend(NewTavilyBackend(key), nativeChain)
+		}
+	}
+	if trimmed == ProviderYoucom {
+		if key := resolveYoucomKey(); key != "" {
+			return NewFallbackBackend(NewYoucomBackend(key), nativeChain)
 		}
 	}
 	return nativeChain
@@ -63,4 +74,11 @@ func resolveTavilyKey(stored string) string {
 		return env
 	}
 	return strings.TrimSpace(stored)
+}
+
+// resolveYoucomKey returns the You.com key in effect. It comes from the
+// environment alone — the settings UI stores no credential for the You.com
+// provider — so the key travels with the deployment, not the database.
+func resolveYoucomKey() string {
+	return strings.TrimSpace(os.Getenv("YDC_API_KEY"))
 }
