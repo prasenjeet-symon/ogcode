@@ -1,3 +1,21 @@
+# Release Notes — v0.47.1
+
+## Patch: The OGX plan shows its models by the names the plan grants
+
+Your Ogcode plan grants a fixed set of models through the OGX gateway, and the
+gateway names them in its own house style — `ogx-deepseek-v4.1-flash`, say, or
+`ogx-glm-5.3-flash`. Settings → Models used to hide those behind a friendlier
+label, which made it hard to tell which line on the plan you were actually
+picking. It now shows the id the gateway serves, exactly as the plan grants it.
+
+The friendlier name has not gone anywhere it was doing real work: an Ollama
+endpoint, or any other silent OpenAI-compatible host, still gets the catalogued
+display name. And the house ids are still recognised by the catalogue, so a plan
+model keeps the context window and the per-token pricing already known for it —
+only the label it is listed under changed.
+
+---
+
 # Release Notes — v0.47.0
 
 ## Minor: The server stops the moment you ask
