@@ -448,11 +448,14 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 	var models []ModelInfo
 	for _, m := range listResp.Data {
 		name := m.Name
-		if name == "" {
-			// Some endpoints (the OGX gateway, a local Ollama) report no
-			// human name, only an id. Prefer the catalogue's curated name
-			// when we recognise the id, so the model shows up as
-			// "DeepSeek V4.1 Flash" rather than "deepseek-v4.1-flash".
+		if name == "" && p.id != OGXProviderID {
+			// Some endpoints (a local Ollama, say) report no human name,
+			// only an id. Prefer the catalogue's curated name when we
+			// recognise the id, so the model shows up as "DeepSeek V4.1
+			// Flash" rather than "deepseek-v4.1-flash". OGX is the
+			// exception: its gateway advertises house ids
+			// ("ogx-deepseek-v4.1-flash") that are what the plan actually
+			// grants, so it keeps the raw id as the name.
 			if cm, ok := LookupCatalogModel(m.ID); ok {
 				name = cm.Name
 			}

@@ -67,7 +67,7 @@ func TestNewOGXProviderRejectsEmptyToken(t *testing.T) {
 // under "ogx", and the default is resolved from the catalogue because the
 // provider is constructed with no model of its own.
 func TestOGXProviderModelsComeFromTheGateway(t *testing.T) {
-	srv := ogxGateway(t, []string{"deepseek-v4.1-flash", "glm-5.3-flash"}, nil)
+	srv := ogxGateway(t, []string{"ogx-deepseek-v4.1-flash", "ogx-glm-5.3-flash"}, nil)
 	t.Setenv("OGX_GATEWAY_URL", srv.URL)
 
 	p, err := NewOGXProvider("tok")
@@ -94,32 +94,28 @@ func TestOGXProviderModelsComeFromTheGateway(t *testing.T) {
 			t.Errorf("model %q collection = %q, want empty so the UI groups by provider", m.ID, m.Collection)
 		}
 	}
-	if p.defaultModel() != "deepseek-v4.1-flash" {
+	if p.defaultModel() != "ogx-deepseek-v4.1-flash" {
 		t.Errorf("default = %q, want the first granted model", p.defaultModel())
 	}
 	for _, m := range list {
-		if m.Default != (m.ID == "deepseek-v4.1-flash") {
+		if m.Default != (m.ID == "ogx-deepseek-v4.1-flash") {
 			t.Errorf("model %q default flag = %v", m.ID, m.Default)
 		}
 	}
 }
 
-// TestDynamicModelsFallBackToCatalogNames pins the naming fix. An endpoint that
-// reports no human name — the OGX gateway, a local Ollama — shows the
-// catalogue's curated name for an id we recognise, and the raw id only when the
-// id is unknown to the catalogue.
+// TestDynamicModelsFallBackToCatalogNames pins the naming fallback for a silent
+// endpoint that is not OGX (a local Ollama, say). It reports no human name, so
+// the model shows the catalogue's curated name for an id we recognise, and the
+// raw id only when the id is unknown to the catalogue.
 func TestDynamicModelsFallBackToCatalogNames(t *testing.T) {
 	srv := ogxGateway(t, []string{
 		"deepseek-v4.1-flash",
 		"glm-5.3-flash",
 		"totally-unknown-model-9",
 	}, nil)
-	t.Setenv("OGX_GATEWAY_URL", srv.URL)
 
-	p, err := NewOGXProvider("tok")
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
+	p := &OpenAIProvider{id: "ollama", baseURL: srv.URL}
 	got := p.RefreshCatalog(context.Background())
 	if len(got) != 3 {
 		t.Fatalf("RefreshCatalog got %d models, want 3: %+v", len(got), got)
@@ -136,6 +132,29 @@ func TestDynamicModelsFallBackToCatalogNames(t *testing.T) {
 		}
 		if m.ID == "" {
 			t.Errorf("model lost its id: %+v", m)
+		}
+	}
+}
+
+// TestOGXProviderShowsRawModelIDs pins the deliberate exception to the naming
+// fallback: the OGX gateway advertises house ids that ARE what the plan grants,
+// so unlike every other silent endpoint it shows the raw id as the name rather
+// than substituting a catalogue name.
+func TestOGXProviderShowsRawModelIDs(t *testing.T) {
+	srv := ogxGateway(t, []string{"ogx-deepseek-v4.1-flash", "ogx-glm-5.3-flash"}, nil)
+	t.Setenv("OGX_GATEWAY_URL", srv.URL)
+
+	p, err := NewOGXProvider("tok")
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	got := p.RefreshCatalog(context.Background())
+	if len(got) != 2 {
+		t.Fatalf("RefreshCatalog got %d models, want 2: %+v", len(got), got)
+	}
+	for _, m := range got {
+		if m.Name != m.ID {
+			t.Errorf("model %q name = %q, want the raw id", m.ID, m.Name)
 		}
 	}
 }

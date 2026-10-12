@@ -367,7 +367,8 @@ var OpenModels = []CatalogModel{
 	// ── DeepSeek (api.deepseek.com) ─────────────────────────────────────────
 	// Peak-hour prices; off-peak is half. The first-party API serves two ids;
 	// its older names (deepseek-v4-flash, -vision-exp) now route to V4.1 Flash.
-	{ID: "deepseek-flash", Aliases: []string{"deepseek-v4.1-flash", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-v4p1-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"}, Name: "DeepSeek V4.1 Flash", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheReadPricePerM: 0.006, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 393_216, Efforts: noneLowHighMaxEfforts, DefaultEffort: EffortHigh},
+	// OGX's gateway mints its own house id, "ogx-" + the name lowercased.
+	{ID: "deepseek-flash", Aliases: []string{"deepseek-v4.1-flash", "ogx-deepseek-v4.1-flash", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-v4p1-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"}, Name: "DeepSeek V4.1 Flash", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheReadPricePerM: 0.006, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 393_216, Efforts: noneLowHighMaxEfforts, DefaultEffort: EffortHigh},
 	{ID: "deepseek-v4-pro", Aliases: []string{"deepseek-v4-pro-0813", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek-ai/DeepSeek-V4-Pro"}, Name: "DeepSeek V4 Pro", InputPricePerM: 1.32, OutputPricePerM: 3.96, CacheReadPricePerM: 0.044, ContextWindow: 1_048_576, MaxOutputTokens: 393_216, Efforts: noneLowHighMaxEfforts, DefaultEffort: EffortHigh},
 	// Retired first-party; still served elsewhere (OpenRouter prices).
 	{ID: "deepseek-ai/DeepSeek-V4-Flash-0731", Name: "DeepSeek V4 Flash 0731", InputPricePerM: 0.021, OutputPricePerM: 0.32, CacheReadPricePerM: 0.016, ContextWindow: 1_048_576, Efforts: noneHighMaxEfforts},
@@ -417,7 +418,7 @@ var OpenModels = []CatalogModel{
 	// 5.2 and later: 1M, which Ollama's cloud serves as 1,000,000 tokens. GLM-5.3
 	// and 5.3 Flash always think.
 	{ID: "glm-5.3", Aliases: []string{"glm-5p3"}, Name: "GLM-5.3", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
-	{ID: "glm-5.3-flash", Aliases: []string{"glm-5p3-flash"}, Name: "GLM-5.3 Flash", InputPricePerM: 0.15, OutputPricePerM: 0.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
+	{ID: "glm-5.3-flash", Aliases: []string{"glm-5p3-flash", "ogx-glm-5.3-flash"}, Name: "GLM-5.3 Flash", InputPricePerM: 0.15, OutputPricePerM: 0.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
 	{ID: "glm-5.3-flashx", Name: "GLM-5.3 FlashX", InputPricePerM: 0.37, OutputPricePerM: 1.25, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
 	{ID: "glm-5.2", Aliases: []string{"glm-5p2"}, Name: "GLM-5.2", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 1_000_000, MaxOutputTokens: 131_072, Efforts: noneHighMaxEfforts, DefaultEffort: EffortMax},
 	{ID: "glm-5.1", Name: "GLM-5.1", InputPricePerM: 1.4, OutputPricePerM: 4.4, CacheReadPricePerM: 0.26, ContextWindow: 202_752, MaxOutputTokens: 131_072, Efforts: onOffEfforts, DefaultEffort: EffortOn},

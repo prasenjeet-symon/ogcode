@@ -154,7 +154,10 @@ func TestRegistryContextWindowTakesTheSmallerKnownFigure(t *testing.T) {
 // different models on different hosts reach none rather than a wrong one.
 func TestCatalogResolvesRealHostSpellings(t *testing.T) {
 	for in, wantID := range map[string]string{
-		// OGX plan ids, and the Ollama cloud names they relay to.
+		// OGX plan ids (the gateway's own house ids and the raw provider ids it
+		// rewrites), and the Ollama cloud names they relay to.
+		"ogx-deepseek-v4.1-flash":    "deepseek-flash",
+		"ogx-glm-5.3-flash":          "glm-5.3-flash",
 		"deepseek-v4.1-flash":        "deepseek-flash",
 		"glm-5.3-flash":              "glm-5.3-flash",
 		"glm-5.3-flash:cloud":        "glm-5.3-flash",
