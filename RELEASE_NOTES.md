@@ -1,3 +1,66 @@
+# Release Notes — v0.47.0
+
+## Minor: The server stops the moment you ask
+
+Pressing Ctrl+C used to leave you watching the cursor for ten seconds. With a UI
+tab open the event stream never goes idle, and shutdown waited it out in full
+before the port came free.
+
+Shutdown now releases the event streams first — a background tab simply
+reconnects to whatever serves next — so the stop finishes as soon as the real
+work does, well inside a three-second grace. The rest of the teardown runs side
+by side: the MCP servers and the analytics flush stop at the same time instead
+of one after the other, and the analytics flush is bounded, so a slow network no
+longer holds the exit. The terminal says what is happening, and if the stop is
+still taking a moment a second Ctrl+C quits at once.
+
+## Minor: A large project waits for your answer before indexing
+
+Ogcode refreshes its project index in the background after each turn. On a
+large tree that is a lot of reading you never asked for, so a project with more
+than `OGCODE_AUTO_INDEX_MAX_FILES` (500 by default) indexable files is no longer
+indexed automatically until you say yes for it. The turn asks — a dialog, once
+per project — and you can change the answer later from Settings → General, where
+the same switch is kept. The manual index button is never gated, so a project
+you want indexed is indexed the moment you ask for it.
+
+## Minor: Search can drive a browser on Windows too
+
+When the deep-search tools come back empty or throttled they fall back to a real
+browser. That fallback existed only on macOS, where it drives your own Safari;
+Windows now has its own, driving a private headless Chrome — or Edge, whichever
+is installed — against a throwaway profile, so a search never touches the
+browser you use. The engine-leads choice on Settings → Search names the one that
+applies to your machine and hides the one that does not: Safari first on macOS,
+Chrome or Edge first on Windows.
+
+## Minor: The Ollama slot lists what your endpoint actually serves
+
+Settings → Models no longer mixes a compiled-in cloud catalogue into the Ollama
+slot. The list is exactly what the endpoint reports — the models you have pulled,
+or a cloud endpoint's own list — so a model that appears there is a model you can
+run. Ollama Cloud is still reachable; it now sits on the OpenAI tab as an ordinary
+OpenAI-compatible endpoint, grouped as "Ollama Cloud".
+
+## Other changes
+
+- Terraform and its siblings are in the code map now: `.tf`, `.tfvars` and
+  `.hcl` files get a real outline, each block named the way it is addressed
+  (`resource "aws_instance" "web"` as `aws_instance.web`). Like the other
+  configuration formats, HCL is outlined but not syntax-checked.
+- The live-preview domain can be set in `ogcode.json` with the `previewDomain`
+  key — the file-config equivalent of `OGCODE_PREVIEW_DOMAIN`. A real environment
+  variable still wins when both are set.
+- Processes the agent starts — shell commands and MCP servers — now run in their
+  own session, so nothing they launch can take over the terminal Ogcode was
+  started from. That was what could leave Ctrl+C aimed at a process group that no
+  longer existed, and Ogcode impossible to stop from its own terminal. A command
+  that needs a terminal now fails at once instead.
+- `GET /api/config` reports the host operating system, so the web UI offers only
+  the search backends the machine can actually run.
+
+---
+
 # Release Notes — v0.46.0
 
 ## Minor: Every model gets a reasoning-effort picker
