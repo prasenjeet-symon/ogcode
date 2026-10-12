@@ -95,6 +95,8 @@ Ogcode detects your provider from the environment. Set at least one:
 
 Settings can also live in `ogcode.json` at the project root (project settings) and `~/.config/ogcode/config.json` (global settings); environment variables override both.
 
+Set `previewDomain` to serve live-service previews under a real wildcard domain — the `ogcode.json` equivalent of the `OGCODE_PREVIEW_DOMAIN` environment variable. See the [remote deployment guide](https://ogcode.in/docs/deployment/).
+
 ```json
 {
   "providers": {

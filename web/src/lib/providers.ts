@@ -133,6 +133,7 @@ export const COMPATIBLE_PRESETS: CompatiblePreset[] = [
   { collection: 'Mistral',  label: 'Mistral AI',    baseURL: 'https://api.mistral.ai/v1',          keyHint: '…',      dot: 'bg-rose-400' },
   { collection: 'SambaNova', label: 'SambaNova',    baseURL: 'https://api.sambanova.ai/v1',        keyHint: '…',      dot: 'bg-fuchsia-400' },
   { collection: 'NVIDIA',   label: 'NVIDIA NIM',    baseURL: 'https://integrate.api.nvidia.com/v1', keyHint: 'nvapi-…', dot: 'bg-lime-400' },
+  { collection: 'Ollama Cloud', label: 'Ollama Cloud', baseURL: 'https://ollama.com/v1', keyHint: 'sk-…', dot: 'bg-sky-400', keysURL: 'https://ollama.com/settings/keys' },
 ];
 
 // Client-side mirror of collectionFromBaseURL (internal/provider/openai.go):

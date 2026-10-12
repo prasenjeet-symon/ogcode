@@ -101,8 +101,12 @@ func TestSearchConfigNormalisesNativeKnobs(t *testing.T) {
 			want: SearchConfig{Enabled: true, FetchTopK: DefaultSearchFetchTopK, PageChars: DefaultSearchPageChars},
 		},
 		"unknown browser collapses": {
-			in:   SearchConfig{Enabled: true, Browser: "chrome"},
+			in:   SearchConfig{Enabled: true, Browser: "firefox"},
 			want: SearchConfig{Enabled: true, Browser: "", FetchTopK: DefaultSearchFetchTopK, PageChars: DefaultSearchPageChars},
+		},
+		"chrome browser preserved": {
+			in:   SearchConfig{Enabled: true, Browser: SearchBrowserChrome},
+			want: SearchConfig{Enabled: true, Browser: SearchBrowserChrome, FetchTopK: DefaultSearchFetchTopK, PageChars: DefaultSearchPageChars},
 		},
 	}
 	for name, tc := range tests {

@@ -978,3 +978,51 @@ func TestAutoIndexEnabled(t *testing.T) {
 		}
 	}
 }
+
+// The file limit defaults to 500, and an unparseable or non-positive override is
+// ignored rather than silently uncapping the guard that protects big projects.
+func TestAutoIndexFileLimit(t *testing.T) {
+	t.Setenv("OGCODE_AUTO_INDEX_MAX_FILES", "")
+	if got := AutoIndexFileLimit(); got != defaultAutoIndexFileLimit {
+		t.Errorf("unset limit = %d, want %d", got, defaultAutoIndexFileLimit)
+	}
+	if defaultAutoIndexFileLimit != 500 {
+		t.Errorf("documented default = %d, want 500", defaultAutoIndexFileLimit)
+	}
+
+	t.Setenv("OGCODE_AUTO_INDEX_MAX_FILES", "250")
+	if got := AutoIndexFileLimit(); got != 250 {
+		t.Errorf("limit = %d, want 250", got)
+	}
+
+	for _, raw := range []string{"0", "-3", "abc", "  "} {
+		t.Setenv("OGCODE_AUTO_INDEX_MAX_FILES", raw)
+		if got := AutoIndexFileLimit(); got != defaultAutoIndexFileLimit {
+			t.Errorf("limit for %q = %d, want %d", raw, got, defaultAutoIndexFileLimit)
+		}
+	}
+}
+
+// IndexableCount stops counting at the limit, so the caller can ask "more than
+// N?" without walking a huge tree to the end.
+func TestIndexableCount(t *testing.T) {
+	files := map[string]string{}
+	for i := 0; i < 12; i++ {
+		files["f"+strconv.Itoa(i)+".go"] = "package main\n"
+	}
+	root := indexTree(t, files)
+	idx := New(root, nil, nil)
+
+	// limit 0 counts every indexable file, the way collectFiles does.
+	if n, err := idx.IndexableCount(0); err != nil || n != 12 {
+		t.Fatalf("IndexableCount(0) = %d, %v; want 12, nil", n, err)
+	}
+	// A limit below the count stops there.
+	if n, err := idx.IndexableCount(5); err != nil || n != 5 {
+		t.Fatalf("IndexableCount(5) = %d, %v; want 5, nil", n, err)
+	}
+	// A limit above the count returns the true count.
+	if n, err := idx.IndexableCount(50); err != nil || n != 12 {
+		t.Fatalf("IndexableCount(50) = %d, %v; want 12, nil", n, err)
+	}
+}

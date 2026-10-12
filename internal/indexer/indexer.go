@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -117,6 +118,40 @@ func AutoIndexEnabled() bool {
 	return true
 }
 
+// autoIndexFileLimitEnv is the process-wide override for AutoIndexFileLimit.
+const autoIndexFileLimitEnv = "OGCODE_AUTO_INDEX_MAX_FILES"
+
+// defaultAutoIndexFileLimit is the number of indexable files at which automatic
+// indexing stops and asks. See AutoIndexFileLimit.
+//
+// Below it a refresh is the background nicety it is meant to be; above it the
+// walk and the model calls it drives are a real cost the user should get to
+// accept once, for that project, rather than pay silently every turn. 500 is
+// where that line sits for a typical source tree.
+const defaultAutoIndexFileLimit = 500
+
+// AutoIndexFileLimit returns how many indexable files a project may hold before
+// automatic indexing pauses for the project's consent. It is process-wide and
+// read per call, like AutoIndexEnabled.
+//
+// OGCODE_AUTO_INDEX_MAX_FILES sets it. Unset or empty keeps the default. A value
+// that will not parse, or is zero or negative, keeps the default and warns — a
+// typo must not read as "never refresh this project". Automatic indexing itself
+// is unaffected: this only decides where it stops to ask. The manual build and
+// `ogcode index` ignore it.
+func AutoIndexFileLimit() int {
+	raw := strings.TrimSpace(os.Getenv(autoIndexFileLimitEnv))
+	if raw == "" {
+		return defaultAutoIndexFileLimit
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		slog.Warn("ignoring unparseable auto-index file limit", "env", autoIndexFileLimitEnv, "value", raw)
+		return defaultAutoIndexFileLimit
+	}
+	return n
+}
+
 // Progress returns the progress tracker for external monitoring.
 func (idx *Indexer) Progress() *ProgressTracker {
 	return idx.progress
@@ -174,7 +209,18 @@ func (idx *Indexer) isExcluded(name string) bool {
 	return false
 }
 
-// collectFiles walks the workspace and returns every file worth indexing.
+// collectFiles returns every indexable file in the workspace, the whole tree.
+// It is collectFilesLimited with no ceiling; see it for what is excluded and
+// why.
+func (idx *Indexer) collectFiles() ([]string, error) {
+	return idx.collectFilesLimited(0)
+}
+
+// collectFilesLimited walks the workspace and returns the files worth indexing,
+// stopping after max of them when max > 0 — enough for a caller that only needs
+// to know whether a project has passed a size threshold. A result of exactly max
+// means "at least max"; it never counts past the ceiling it was given. max <= 0
+// returns the whole tree.
 //
 // What is excluded is decided by the repository first: .gitignore is where a
 // project has already written down which of its files are noise, deliberately
@@ -194,7 +240,7 @@ func (idx *Indexer) isExcluded(name string) bool {
 // An ignored directory is pruned rather than walked into — which is faster, and
 // is what git does, since a directory excluded from above cannot have its
 // contents re-included from below.
-func (idx *Indexer) collectFiles() ([]string, error) {
+func (idx *Indexer) collectFilesLimited(max int) ([]string, error) {
 	var allFiles []string
 	err := filepath.WalkDir(idx.dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -225,6 +271,9 @@ func (idx *Indexer) collectFiles() ([]string, error) {
 		ext := strings.ToLower(filepath.Ext(path))
 		if ext == ".pdf" || ext == ".docx" || IsTextFile(ext) {
 			allFiles = append(allFiles, path)
+			if max > 0 && len(allFiles) >= max {
+				return filepath.SkipAll
+			}
 		}
 		return nil
 	})
@@ -232,6 +281,19 @@ func (idx *Indexer) collectFiles() ([]string, error) {
 		return nil, err
 	}
 	return allFiles, nil
+}
+
+// IndexableCount reports how many files an index run would read in the
+// workspace, counting no more than limit of them. A result of limit or more
+// means "at least limit" — enough for a caller deciding whether a project has
+// passed a size threshold, and far cheaper than walking a large tree to its end
+// on every turn. A limit <= 0 counts every file.
+//
+// It is the same walk an index run does (collectFiles), so the number it returns
+// cannot disagree with what a run would read — excludes, .gitignore and all.
+func (idx *Indexer) IndexableCount(limit int) (int, error) {
+	files, err := idx.collectFilesLimited(limit)
+	return len(files), err
 }
 
 // docItem holds a file path and its extracted page corpora, ready for batching.

@@ -351,7 +351,13 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 		}
 	}
 
-	srv := server.NewWithOptions(startPort, dir, mode, server.Options{OnListen: onListen})
+	// Say what Ctrl+C started, so a stop that takes a moment does not look
+	// like one that did nothing — and say how to skip the wait.
+	onInterrupt := func() {
+		fmt.Println("\nStopping ogcode… (press Ctrl+C again to quit immediately)")
+	}
+
+	srv := server.NewWithOptions(startPort, dir, mode, server.Options{OnListen: onListen, OnInterrupt: onInterrupt})
 	return srv.Serve(context.Background())
 }
 

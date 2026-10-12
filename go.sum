@@ -113,6 +113,8 @@ github.com/tklauser/go-sysconf v0.3.16 h1:frioLaCQSsF5Cy1jgRBrzr6t502KIIwQ0MArYI
 github.com/tklauser/go-sysconf v0.3.16/go.mod h1:/qNL9xxDhc7tx3HSRsLWNnuzbVfh3e7gh/BmM179nYI=
 github.com/tklauser/numcpus v0.11.0 h1:nSTwhKH5e1dMNsCdVBukSZrURJRoHbSEQjdEbY+9RXw=
 github.com/tklauser/numcpus v0.11.0/go.mod h1:z+LwcLq54uWZTX0u/bGobaV34u6V7KNlTZejzM6/3MQ=
+github.com/tree-sitter-grammars/tree-sitter-hcl v1.2.0 h1:jl3v597Dii91OHcHAUrTQaSEK7oODNh6yK8z4H5xXFA=
+github.com/tree-sitter-grammars/tree-sitter-hcl v1.2.0/go.mod h1:NzEB+a6rpv14H4tCrCfzhTorCyvYYb3T9+o/e4d0pdU=
 github.com/tree-sitter/go-tree-sitter v0.25.0 h1:sx6kcg8raRFCvc9BnXglke6axya12krCJF5xJ2sftRU=
 github.com/tree-sitter/go-tree-sitter v0.25.0/go.mod h1:r77ig7BikoZhHrrsjAnv8RqGti5rtSyvDHPzgTPsUuU=
 github.com/tree-sitter/tree-sitter-c v0.24.2 h1:nW+M6BnPUa/fBwks8nqf1NiVvu7nltaC+5bR/lTtJCs=

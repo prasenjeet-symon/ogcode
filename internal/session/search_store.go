@@ -16,12 +16,15 @@ const (
 )
 
 // Which native engine leads the chain. SearchBrowserNative uses the HTTP path
-// alone; SearchBrowserSafari drives a real browser first. The empty string is
-// the built-in ordering — the HTTP path in front with Safari behind it — and is
-// also what an unknown value collapses to.
+// alone; SearchBrowserSafari and SearchBrowserChrome drive a real browser first
+// — Safari on macOS, Chrome or Edge on Windows, so the two are the same slot
+// under the platform's own name. The empty string is the built-in ordering —
+// the HTTP path in front with the browser behind it — and is also what an
+// unknown value collapses to.
 const (
 	SearchBrowserNative = "native"
 	SearchBrowserSafari = "safari"
+	SearchBrowserChrome = "chrome"
 )
 
 // Bounds and defaults for the native deep-research knobs, matching the constants
@@ -53,8 +56,9 @@ type SearchConfig struct {
 	FetchTopK int `json:"fetchTopK"`
 	// PageChars is the per-page character cap fed into synthesis.
 	PageChars int `json:"pageChars"`
-	// Browser selects which native engine leads: "native", "safari", or "" for
-	// the built-in ordering (HTTP first, Safari as the fallback).
+	// Browser selects which native engine leads: "native", "safari" or
+	// "chrome", or "" for the built-in ordering (HTTP first, the browser as the
+	// fallback).
 	Browser   string `json:"browser"`
 	UpdatedAt int64  `json:"updatedAt"`
 }
@@ -68,7 +72,7 @@ func (c *SearchConfig) normalise() {
 	}
 	c.FetchTopK = clampInt(c.FetchTopK, MinSearchFetchTopK, MaxSearchFetchTopK, DefaultSearchFetchTopK)
 	c.PageChars = clampInt(c.PageChars, MinSearchPageChars, MaxSearchPageChars, DefaultSearchPageChars)
-	if c.Browser != SearchBrowserNative && c.Browser != SearchBrowserSafari {
+	if c.Browser != SearchBrowserNative && c.Browser != SearchBrowserSafari && c.Browser != SearchBrowserChrome {
 		c.Browser = ""
 	}
 }

@@ -1,4 +1,4 @@
-import { Show, For, createSignal, createEffect, onMount, type JSX } from 'solid-js';
+import { Show, For, createSignal, createEffect, on, onMount, type JSX } from 'solid-js';
 import { useServer } from '../../context/server';
 import {
   getSearchConfig,
@@ -34,17 +34,34 @@ const TABS: Array<{ id: SearchProvider; label: string }> = [
   { id: 'tavily', label: 'Tavily' },
 ];
 
-// How the native engine leads. '' keeps the HTTP path in front with Safari
-// behind it, which is the sane default; the others pin one engine.
+// How the native engine leads. '' keeps the HTTP path in front with the
+// browser behind it, which is the sane default; the others pin one engine.
+// Each browser is offered only on the machine that can drive it — the server's
+// host: Safari on macOS, Chrome/Edge on Windows.
 const BROWSERS: Array<{ value: SearchBrowser; label: string }> = [
   { value: '', label: 'HTTP first (recommended)' },
   { value: 'native', label: 'HTTP only' },
-  { value: 'safari', label: 'Safari first' },
+  { value: 'safari', label: 'Safari first (macOS only)' },
+  { value: 'chrome', label: 'Chrome or Edge first (Windows only)' },
 ];
 
 export default function SearchSettings() {
   const server = useServer();
   const shell = useShell();
+
+  // Browser search drives a real browser on the machine running the server, so
+  // each browser option belongs only where the server's host can drive it
+  // (osascript on macOS, a Chrome/Edge binary on Windows).
+  const isMac = () => server.os() === 'darwin';
+  const isWindows = () => server.os() === 'windows';
+  // A browser stays listed when it is the stored value, so the select always
+  // has a matching option even if the config arrived from another OS.
+  const browsers = () =>
+    BROWSERS.filter(
+      (b) =>
+        (b.value !== 'safari' || isMac() || browser() === 'safari') &&
+        (b.value !== 'chrome' || isWindows() || browser() === 'chrome'),
+    );
 
   createEffect(() => shell.report({ noun: 'settings' }));
 
@@ -60,6 +77,8 @@ export default function SearchSettings() {
   const [browser, setBrowser] = createSignal<SearchBrowser>('');
   // The knobs past the engine itself stay folded away until asked for.
   const [advanced, setAdvanced] = createSignal(false);
+  // The Safari setup steps stay folded behind "Show me how" until asked for.
+  const [showHow, setShowHow] = createSignal(false);
   const [loading, setLoading] = createSignal(true);
   const [saving, setSaving] = createSignal(false);
   const [restartNeeded, setRestartNeeded] = createSignal(false);
@@ -86,7 +105,17 @@ export default function SearchSettings() {
   createEffect(() => {
     const q = shell.query().trim();
     if (q && matches(q, 'Advanced', 'pages extract characters page length')) setAdvanced(true);
+    if (q && matches(q, 'Show me how', 'safari setup automation permissions apple events javascript macos')) {
+      setShowHow(true);
+    }
   });
+
+  // Choosing Safari opens the setup steps straight away — the two permissions
+  // are what make it work, so they should not be hidden on a fresh selection.
+  // The effect runs on a stored 'safari' loaded from config too.
+  createEffect(on(browser, (b) => {
+    if (b === 'safari') setShowHow(true);
+  }));
 
   onMount(async () => {
     try {
@@ -342,17 +371,57 @@ export default function SearchSettings() {
 
               <Row
                 label="Which engine leads"
-                helper="Safari drives a real browser, which handles JavaScript-heavy pages the HTTP path cannot. Applies after ogcode restarts."
-                hidden={hide('Which engine leads', 'safari browser http engine native')}
+                helper={
+                  isMac()
+                    ? 'Safari drives a real browser, which handles JavaScript-heavy pages the HTTP path cannot. Applies after ogcode restarts.'
+                    : isWindows()
+                      ? 'Chrome — or Edge when Chrome is not installed — drives a real browser, which handles JavaScript-heavy pages the HTTP path cannot. Applies after ogcode restarts.'
+                      : 'The HTTP path fetches pages directly; no browser is involved on this system. Applies after ogcode restarts.'
+                }
+                hidden={hide('Which engine leads', 'safari chrome edge browser http engine native')}
               >
                 <Select
                   value={browser()}
-                  options={BROWSERS}
+                  options={browsers()}
                   disabled={saving()}
                   ariaLabel="Which engine leads"
                   onChange={changeBrowser}
                 />
               </Row>
+
+              <Show when={isMac() && browser() === 'safari'}>
+                <Row
+                  label="Show me how"
+                  helper="Safari needs two permissions on your Mac. Neither one needs a restart."
+                  onClick={() => setShowHow(!showHow())}
+                  expanded={showHow()}
+                  hidden={hide('Show me how', 'safari setup automation permissions apple events javascript macos')}
+                >
+                  <span class="text-meta text-[color:var(--text-tertiary)]">{showHow() ? 'Hide' : 'Show'}</span>
+                </Row>
+
+                <Show when={showHow()}>
+                  <Row
+                    stacked
+                    label="Set up Safari search"
+                    hidden={hide('Set up Safari search', 'safari setup automation permissions apple events javascript macos')}
+                  >
+                    <ol class="list-decimal ml-4 space-y-1.5 text-meta leading-[1.5] text-[color:var(--text-tertiary)]">
+                      <li>
+                        <span class="text-[color:var(--text-secondary)]">Let ogcode control Safari.</span>{' '}
+                        Open System Settings → Privacy &amp; Security → Automation, then tick Safari.
+                        ogcode asks the first time it uses Safari — click OK.
+                      </li>
+                      <li>
+                        <span class="text-[color:var(--text-secondary)]">Allow JavaScript from Apple Events.</span>{' '}
+                        In Safari, open Settings → Advanced and turn on “Show features for web
+                        developers”, then choose Develop → “Allow JavaScript from Apple Events”.
+                        Without it, pages that JavaScript builds come back mostly empty.
+                      </li>
+                    </ol>
+                  </Row>
+                </Show>
+              </Show>
             </Show>
           </Show>
 

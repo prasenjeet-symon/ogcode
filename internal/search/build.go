@@ -15,8 +15,9 @@ import (
 // answerable query is never lost to a third-party outage: a bad Tavily key, an
 // exhausted quota or a network error falls through to it rather than failing
 // the call. browser picks which native engine leads — "native" for the HTTP
-// path alone, "safari" to drive a real browser first — and the empty string
-// (or any unknown value) puts the HTTP path in front with Safari behind it.
+// path alone, "safari" or "chrome" to drive a real browser first (Safari on
+// macOS, Chrome or Edge on Windows) — and the empty string (or any unknown
+// value) puts the HTTP path in front with the browser behind it.
 // OGCODE_SEARCH_BROWSER overrides browser when set.
 //
 // tavilyAPIKey is the stored key; TAVILY_API_KEY overrides it, mirroring the
@@ -42,10 +43,12 @@ func BuildBackend(provider, tavilyAPIKey, browser string) Backend {
 	switch strings.ToLower(strings.TrimSpace(browser)) {
 	case "native":
 		nativeChain = native
-	case "safari":
-		nativeChain = NewFallbackBackend(NewSafariBackend(), native)
+	case "safari", "chrome":
+		// Both name the same slot — "safari" is the macOS spelling, "chrome" the
+		// Windows one — and NewBrowserBackend resolves the slot for the platform.
+		nativeChain = NewFallbackBackend(NewBrowserBackend(), native)
 	default:
-		nativeChain = NewFallbackBackend(native, NewSafariBackend())
+		nativeChain = NewFallbackBackend(native, NewBrowserBackend())
 	}
 
 	if strings.EqualFold(strings.TrimSpace(provider), ProviderTavily) {

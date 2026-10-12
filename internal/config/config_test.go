@@ -329,6 +329,9 @@ func TestProjectFileTemplate_ParsesIntoAUsableConfig(t *testing.T) {
 	if c.Skills.Env == nil {
 		t.Error("template should show skills.env so a skill's credentials have a documented place to go")
 	}
+	if !strings.Contains(projectFileTemplate, `"previewDomain"`) {
+		t.Error("template should show previewDomain so serving previews under a real domain is discoverable")
+	}
 }
 
 // skills.env merges key by key, project-local last, so a secret kept in the
@@ -359,6 +362,33 @@ func TestLoad_SkillEnvMergesPerNameWithProjectWinning(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg.Skills.Env, want) {
 		t.Errorf("skills.env = %v, want %v (merged per name, project wins)", cfg.Skills.Env, want)
+	}
+}
+
+// The preview domain merges like a provider base URL: a project value wins, a
+// global-only value survives.
+func TestLoad_PreviewDomainMergesWithProjectWinning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	globalDir := filepath.Join(home, ".config", "ogcode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(globalDir, "config.json"), `{"previewDomain": "global.example.com"}`)
+
+	project := t.TempDir()
+	writeJSON(t, filepath.Join(project, "ogcode.json"), `{"previewDomain": "project.example.com"}`)
+
+	if got := Load(project).PreviewDomain; got != "project.example.com" {
+		t.Errorf("PreviewDomain = %q, want the project value to win", got)
+	}
+
+	// A project that sets none keeps the global value.
+	other := t.TempDir()
+	writeJSON(t, filepath.Join(other, "ogcode.json"), `{"providers":{}}`)
+	if got := Load(other).PreviewDomain; got != "global.example.com" {
+		t.Errorf("PreviewDomain = %q, want the global value preserved", got)
 	}
 }
 
@@ -401,5 +431,38 @@ func TestApplyEnv_SkipsEmptySkillEnvValues(t *testing.T) {
 
 	if _, ok := os.LookupEnv("OGCODE_TEST_EMPTY_CONFIG"); ok {
 		t.Error("an empty config value must not be exported as a set variable")
+	}
+}
+
+// A preview domain in the config reaches live-service previews the same way an
+// exported one does: ApplyEnv puts it in the environment PreviewDomain reads.
+func TestApplyEnv_ExportsPreviewDomain(t *testing.T) {
+	t.Setenv("OGCODE_PREVIEW_DOMAIN", "")
+	os.Unsetenv("OGCODE_PREVIEW_DOMAIN")
+
+	(&Config{PreviewDomain: "preview.example.com"}).ApplyEnv()
+
+	if got := os.Getenv("OGCODE_PREVIEW_DOMAIN"); got != "preview.example.com" {
+		t.Errorf("OGCODE_PREVIEW_DOMAIN = %q, want the config value exported", got)
+	}
+}
+
+// A real OGCODE_PREVIEW_DOMAIN beats the config file, like every other field.
+func TestApplyEnv_PreviewDomainDoesNotOverrideExistingEnv(t *testing.T) {
+	t.Setenv("OGCODE_PREVIEW_DOMAIN", "from-the-environment")
+
+	(&Config{PreviewDomain: "from-config"}).ApplyEnv()
+
+	if got := os.Getenv("OGCODE_PREVIEW_DOMAIN"); got != "from-the-environment" {
+		t.Errorf("OGCODE_PREVIEW_DOMAIN = %q, want the environment value preserved", got)
+	}
+}
+
+// An unset config field exports nothing, so PreviewDomain keeps its default.
+func TestApplyEnv_SkipsEmptyPreviewDomain(t *testing.T) {
+	os.Unsetenv("OGCODE_PREVIEW_DOMAIN")
+	(&Config{}).ApplyEnv()
+	if _, ok := os.LookupEnv("OGCODE_PREVIEW_DOMAIN"); ok {
+		t.Error("an empty config preview domain must not be exported")
 	}
 }

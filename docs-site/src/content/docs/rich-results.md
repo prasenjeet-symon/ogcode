@@ -44,10 +44,14 @@ The first number is the service's port; the trailing number is the port your Ogc
 
 ## Opening previews from another machine
 
-By default a preview reaches only the machine the browser is on. To open previews from a browser elsewhere, give Ogcode a real domain:
+By default a preview reaches only the machine the browser is on. To open previews from a browser elsewhere, give Ogcode a real domain — the `OGCODE_PREVIEW_DOMAIN` environment variable, or the `previewDomain` key in `ogcode.json`:
 
 ```bash
 OGCODE_PREVIEW_DOMAIN=preview.example.com ogcode serve --port 9595
+```
+
+```json
+{ "previewDomain": "preview.example.com" }
 ```
 
 That needs a wildcard DNS record and, if you serve over HTTPS, a wildcard certificate. See [Remote deployment](/docs/deployment/) for putting it behind a proxy.

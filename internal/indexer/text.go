@@ -24,6 +24,7 @@ var textExtensions = map[string]struct{}{
 	".py": {}, ".rb": {}, ".php": {}, ".sh": {}, ".bash": {}, ".zsh": {},
 	// Config / data
 	".yaml": {}, ".yml": {}, ".json": {}, ".toml": {}, ".ini": {}, ".sql": {},
+	".tf": {}, ".tfvars": {}, ".hcl": {},
 }
 
 var htmlTagRe = regexp.MustCompile(`<[^>]+>`)

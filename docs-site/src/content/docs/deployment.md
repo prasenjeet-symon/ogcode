@@ -201,10 +201,14 @@ ogcode keeps machine-wide state in `~/.ogcode` and **per-project** state in `<pr
 
 When the agent starts a local server while working (a dev server, a dashboard), ogcode can hand you a URL for it. Locally those URLs look like `http://3000.preview.localhost:9595/`. That works because a browser resolves `*.localhost` to the machine the browser runs on — which is why it reaches the server only from its own machine or through an SSH tunnel.
 
-To open previews from a browser on a **different** machine, give ogcode a real domain:
+To open previews from a browser on a **different** machine, give ogcode a real domain — as an environment variable, or the matching `previewDomain` key in `ogcode.json`:
 
 ```bash
 OGCODE_PREVIEW_DOMAIN=preview.example.com ogcode serve --port 9595
+```
+
+```json
+{ "previewDomain": "preview.example.com" }
 ```
 
 Use a **wildcard DNS record** `*.preview.example.com` pointing at the host, and a wildcard TLS certificate for `*.preview.example.com` if the proxy serves HTTPS. Your reverse proxy must forward the original `Host` header to ogcode so it can route `3000.preview.example.com` to the service on port 3000, and it must pass WebSocket upgrades for apps that use them.

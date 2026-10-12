@@ -873,7 +873,7 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 		}
 	}
 
-	// HTML and CSS bind no name field anywhere. Each kind below is unique to
+	// HTML, CSS and HCL bind no name field anywhere. Each kind below is unique to
 	// its grammar, so matching on the kind alone is unambiguous — the same call
 	// the impl_item and Dart cases above make.
 	//
@@ -912,6 +912,13 @@ func namesOf(node *ts.Node, src []byte, kind string) []string {
 		// The signature beside it carries the query itself.
 		if word := strings.Fields(firstLine(node.Utf8Text(src))); len(word) > 0 {
 			return []string{word[0]}
+		}
+	case "block":
+		// An HCL block is a type word followed by zero or more quoted labels,
+		// so it is named the way the tool addresses it: resource
+		// "aws_instance" "web" is aws_instance.web.
+		if name := hclBlockName(node, src); name != "" {
+			return []string{name}
 		}
 	}
 
@@ -1120,6 +1127,31 @@ func cssRuleName(node *ts.Node, src []byte) string {
 		return ""
 	}
 	return collapse(sel.Utf8Text(src))
+}
+
+// hclBlockName names an HCL block the way the tool addresses it: the labels
+// joined by dots when the block takes any, else the block-type word.
+//
+// A block binds no name field, so the kind alone picks it out — the same call
+// cssRuleName makes. `resource "aws_instance" "web"` is aws_instance.web;
+// `variable "region"` is region; `terraform`, which takes no label, is just
+// terraform. The labels come back wrapped in their quotes, so those are trimmed
+// to match every other name the map prints.
+func hclBlockName(node *ts.Node, src []byte) string {
+	var labels []string
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child != nil && child.Kind() == "string_lit" {
+			labels = append(labels, strings.Trim(child.Utf8Text(src), `"`))
+		}
+	}
+	if len(labels) > 0 {
+		return strings.Join(labels, ".")
+	}
+	if id := firstChildOfKind(node, []string{"identifier"}); id != nil {
+		return id.Utf8Text(src)
+	}
+	return ""
 }
 
 // firstDescendantOfKind returns the first node of any of kinds found in a

@@ -294,21 +294,3 @@ func TestOllamaEffortsFromShow(t *testing.T) {
 		}
 	}
 }
-
-// A cloud model listed by both the instance and the catalog keeps what the
-// cloud's /api/show said about it.
-func TestMergeOllamaModelsKeepsCatalogFacts(t *testing.T) {
-	local := []ModelInfo{{ID: "glm-5.2:cloud"}, {ID: "qwen3:8b", Efforts: onOffEfforts}}
-	catalog := []ModelInfo{{ID: "glm-5.2:cloud", ContextWindow: 1_000_000, Efforts: noneHighMaxEfforts, DefaultEffort: EffortHigh}}
-	merged := mergeOllamaModels(local, catalog)
-	if len(merged) != 2 {
-		t.Fatalf("merged %d models, want 2", len(merged))
-	}
-	glm := merged[0]
-	if glm.ContextWindow != 1_000_000 || !slices.Equal(glm.Efforts, noneHighMaxEfforts) || glm.DefaultEffort != EffortHigh {
-		t.Errorf("glm-5.2:cloud lost the catalog's facts: %+v", glm)
-	}
-	if !slices.Equal(merged[1].Efforts, onOffEfforts) {
-		t.Errorf("a local model's own levels must stay: %+v", merged[1])
-	}
-}

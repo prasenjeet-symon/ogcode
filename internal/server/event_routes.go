@@ -63,10 +63,15 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	done := r.Context().Done()
+	// Shutdown releases the stream at once; the browser's EventSource simply
+	// reconnects to whatever serves next.
+	draining := s.draining
 
 	for {
 		select {
 		case <-done:
+			return
+		case <-draining:
 			return
 		case evt, ok := <-ch:
 			if !ok {

@@ -95,6 +95,14 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 // model of its own falls back to the registry default, which can be a different
 // provider entirely.
 //
+// A project that has grown past the configured file limit (AutoIndexFileLimit)
+// does not refresh itself until the user has said yes for it: the count is taken
+// first, and when it is over the limit and the project has not consented, the
+// turn publishes a docindex.consent event and returns without indexing. The
+// consent is per directory and defaults to no (the project is asked); the answer
+// is written by the Settings toggle through handleSetIndexConsent. Manual builds
+// never reach here, so they are unaffected.
+//
 // Skipping when a run is already in flight is deliberate. The running pass is
 // reading the same files and writing the same rows; a second one would only
 // duplicate the model calls and race the first for the rows it is about to
@@ -102,6 +110,31 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) autoIndexDir(dir, model, provider string) {
 	if dir == "" {
 		return
+	}
+
+	patterns := s.excludePatternsFor(dir)
+
+	// Count only as far as the limit plus one — the gate needs to know "over or
+	// not", so a project with a hundred thousand files is not walked to its end
+	// on every turn. A walk that fails is not a project over the limit: index as
+	// usual rather than silently never refreshing.
+	limit := indexer.AutoIndexFileLimit()
+	count, err := indexer.New(dir, s.docindexStore, s.loopRunner).WithExcludes(patterns).IndexableCount(limit + 1)
+	if err != nil {
+		slog.Warn("autoIndex: counting indexable files failed, indexing anyway", "dir", dir, "err", err)
+		count = 0
+	}
+	if count > limit {
+		allowed, cerr := s.docindexStore.AutoIndexAllowed(dir)
+		if cerr != nil {
+			slog.Warn("autoIndex: reading index consent failed, asking", "dir", dir, "err", cerr)
+		}
+		if !allowed {
+			slog.Info("autoIndex: project is over the file limit and has not consented, awaiting an answer",
+				"dir", dir, "files", count, "limit", limit)
+			s.bus.Publish("docindex.consent", map[string]any{"directory": dir, "limit": limit})
+			return
+		}
 	}
 
 	s.docindexMu.Lock()
@@ -112,8 +145,6 @@ func (s *Server) autoIndexDir(dir, model, provider string) {
 	}
 	s.docindexRunning = true
 	s.docindexMu.Unlock()
-
-	patterns := s.excludePatternsFor(dir)
 
 	s.runIndexerInBackground(dir, patterns, model, provider)
 }
@@ -210,6 +241,56 @@ func (s *Server) handleListIndexFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, files)
+}
+
+// indexConsentPayload is the body both consent handlers return, so the Settings
+// toggle reads one shape whether it is loading the switch or has just flipped
+// it. limit and autoIndexEnabled describe the process-wide gate the switch sits
+// behind; the walk is deliberately not run here — the row only needs to show the
+// switch, and the dialog already knows the project is over the limit.
+func (s *Server) indexConsentPayload(dir string, allowed bool) map[string]any {
+	return map[string]any{
+		"directory":        dir,
+		"allowed":          allowed,
+		"limit":            indexer.AutoIndexFileLimit(),
+		"autoIndexEnabled": indexer.AutoIndexEnabled(),
+	}
+}
+
+// handleGetIndexConsent reports whether a project has consented to being indexed
+// automatically once it passes the file limit, and what that limit is.
+func (s *Server) handleGetIndexConsent(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("directory")
+	if dir == "" {
+		dir = s.dir
+	}
+	allowed, err := s.docindexStore.AutoIndexAllowed(dir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.indexConsentPayload(dir, allowed))
+}
+
+// handleSetIndexConsent records a project's answer from the Settings toggle.
+// Body: {directory, allowed}.
+func (s *Server) handleSetIndexConsent(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Directory string `json:"directory"`
+		Allowed   bool   `json:"allowed"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if input.Directory == "" {
+		input.Directory = s.dir
+	}
+	if err := s.docindexStore.SetAutoIndexAllowed(input.Directory, input.Allowed); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.indexConsentPayload(input.Directory, input.Allowed))
 }
 
 // maxDocContentBytes caps what the file viewer will pull into the browser.

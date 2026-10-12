@@ -184,6 +184,8 @@ func (s *Server) routes() http.Handler {
 			r.Get("/excludes", s.handleListExcludes)
 			r.Post("/excludes", s.handleAddExclude)
 			r.Delete("/excludes/{id}", s.handleDeleteExclude)
+			r.Get("/consent", s.handleGetIndexConsent)
+			r.Post("/consent", s.handleSetIndexConsent)
 		})
 
 		// LaTeX compilation and rendering

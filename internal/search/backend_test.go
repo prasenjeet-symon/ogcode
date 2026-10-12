@@ -156,19 +156,27 @@ func TestFallbackBackend_FetchPageFallsBackOnError(t *testing.T) {
 }
 
 // Both errors are kept, because "the site refused us" and "the browser could
-// not be driven" send the user to entirely different fixes.
+// not be driven" send the user to entirely different fixes. Held for each
+// browser sentinel, which is what makes them live on every platform.
 func TestFallbackBackend_FetchPageReportsBothFailures(t *testing.T) {
-	primary := &fakeBackend{err: errors.New("http 403 Forbidden")}
-	secondary := &fakeBackend{err: errSafariUnavailable}
+	for name, browserErr := range map[string]error{
+		"safari":   errSafariUnavailable,
+		"chromium": errChromiumUnavailable,
+	} {
+		t.Run(name, func(t *testing.T) {
+			primary := &fakeBackend{err: errors.New("http 403 Forbidden")}
+			secondary := &fakeBackend{err: browserErr}
 
-	_, err := NewFallbackBackend(primary, secondary).FetchPage(context.Background(), "https://example.com")
-	if err == nil {
-		t.Fatal("expected an error when both paths fail")
-	}
-	for _, want := range []string{"403", "cannot be driven"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, want it to mention %q", err, want)
-		}
+			_, err := NewFallbackBackend(primary, secondary).FetchPage(context.Background(), "https://example.com")
+			if err == nil {
+				t.Fatal("expected an error when both paths fail")
+			}
+			for _, want := range []string{"403", "cannot be driven"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to mention %q", err, want)
+				}
+			}
+		})
 	}
 }
 

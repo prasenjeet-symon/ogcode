@@ -187,55 +187,27 @@ func (p *OpenAIProvider) RefreshCatalog(ctx context.Context) []ModelInfo {
 		return fetched
 
 	case "ollama":
-		// The instance's own /v1/models reports only what has been pulled. The
-		// cloud catalog adds every hosted model, and a signed-in instance
-		// resolves those remotely without a pull — so the picker ends up showing
-		// what is actually usable, not just what happens to be on disk.
+		// The instance's own /v1/models reports exactly what it serves:
+		// locally pulled models, or a cloud endpoint's own list. Nothing is
+		// merged in from outside, so a model absent from the endpoint is
+		// absent from the picker.
 		fetched := p.fetchDynamicModels(ctx)
+		if len(fetched) == 0 {
+			return nil
+		}
 		for i := range fetched {
 			// Local: the user pulled these deliberately, so enable them.
 			// A cloud endpoint returns a long list — curate instead.
 			fetched[i].ActiveByDefault = !isCloudURL(p.baseURL)
 		}
 		// A local daemon describes its own models, cloud ones included: which
-		// of them think, and at what levels. A cloud endpoint's models are the
-		// catalog's, described below and merged in.
+		// of them think, and at what levels.
 		if !isCloudURL(p.baseURL) {
 			ollamaShowFill(ctx, ollamaNativeBase(p.baseURL)+"/api/show", fetched,
 				func(m ModelInfo) string { return m.ID }, p.setChatHeaders, false, true)
 		}
-
-		var catalog []ModelInfo
-		if ollamaCatalogEnabled() {
-			c, err := FetchOllamaCloudCatalog(ctx, p.baseURL)
-			if err != nil {
-				// Undocumented endpoint — a failure here is routine, not
-				// something to surface. The static fallbacks still apply.
-				slog.Debug("ollama cloud catalog unavailable", "err", err)
-			} else {
-				catalog = c
-			}
-		}
-
-		// With nothing pulled locally, every model would arrive disabled and
-		// the user would land on an empty picker. Enable the cheapest few —
-		// the catalog is sorted smallest-first — so the endpoint works out
-		// of the box.
-		if len(fetched) == 0 {
-			for i := range catalog {
-				if i >= ollamaCatalogDefaultActive {
-					break
-				}
-				catalog[i].ActiveByDefault = true
-			}
-		}
-
-		merged := mergeOllamaModels(fetched, catalog)
-		if len(merged) == 0 {
-			return nil
-		}
-		p.storeCatalog(merged)
-		return merged
+		p.storeCatalog(fetched)
+		return fetched
 
 	case OGXProviderID:
 		// The gateway's catalogue is the plan: it reports exactly what the
@@ -477,6 +449,15 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 	for _, m := range listResp.Data {
 		name := m.Name
 		if name == "" {
+			// Some endpoints (the OGX gateway, a local Ollama) report no
+			// human name, only an id. Prefer the catalogue's curated name
+			// when we recognise the id, so the model shows up as
+			// "DeepSeek V4.1 Flash" rather than "deepseek-v4.1-flash".
+			if cm, ok := LookupCatalogModel(m.ID); ok {
+				name = cm.Name
+			}
+		}
+		if name == "" {
 			name = m.ID
 		}
 		info := ModelInfo{
@@ -533,7 +514,6 @@ var openRouterStaticCatalog = []ModelInfo{
 	{ID: "qwen/qwen3.8-27b", Name: "Qwen: Qwen3.8 27B", ProviderID: "openrouter", ActiveByDefault: false, SupportsImages: true},
 }
 
-// ollamaLocalFallback is used when local Ollama is not running or has no models pulled.
 // visionModelHints are substrings of model IDs from known multimodal families.
 // Used to infer image support for dynamically-fetched models (OpenRouter/Ollama)
 // that carry no capability metadata. Conservative by design — unknown models
@@ -554,31 +534,6 @@ func modelNameSuggestsVision(modelID string) bool {
 		}
 	}
 	return false
-}
-
-var ollamaLocalFallback = []ModelInfo{
-	{ID: "qwen3", Name: "Qwen3", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "llama3.1", Name: "Llama 3.1", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "deepseek-coder-v2", Name: "DeepSeek Coder V2", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "mistral", Name: "Mistral", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "codellama", Name: "Code Llama", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "qwen3.5", Name: "Qwen3.5", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 262144},
-	{ID: "qwen3-coder-next", Name: "Qwen3 Coder Next", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ProviderID: "ollama", ActiveByDefault: false, ContextWindow: 1048576},
-}
-
-// ollamaCloudFallback is used when the cloud Ollama endpoint is unreachable:
-// names Ollama's cloud served on 2026-09-28. Windows come from the catalogue.
-var ollamaCloudFallback = []ModelInfo{
-	{ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "glm-5.3-flash", Name: "GLM-5.3 Flash", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "kimi-k2.7-code", Name: "Kimi K2.7 Code", ProviderID: "ollama", ActiveByDefault: true},
-	{ID: "glm-5.3", Name: "GLM-5.3", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "kimi-k3", Name: "Kimi K3", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "deepseek-v4-pro:0813", Name: "DeepSeek V4 Pro", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "minimax-m3", Name: "MiniMax M3", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "gpt-oss:120b", Name: "gpt-oss-120b", ProviderID: "ollama", ActiveByDefault: false},
-	{ID: "mistral-large-3:675b", Name: "Mistral Large 3", ProviderID: "ollama", ActiveByDefault: false},
 }
 
 // Models returns the provider's model catalogue. It is a PURE READ: it never
@@ -618,17 +573,17 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 // staticFallback returns the compiled-in list for this provider, used before any
 // catalogue has been fetched or seeded. It is the same catalogue RefreshCatalog
 // leaves in place on a failed fetch, so a cold start and a failed refresh show
-// the user the same thing. OGX deliberately has none — a planless gateway serves
-// nothing, and a guess at what might work is worse than an empty list.
+// the user the same thing. Ollama and OGX deliberately have none: an Ollama
+// endpoint lists only what it actually serves, and a planless gateway serves
+// nothing — a guess at what might work is worse than an empty list.
 func (p *OpenAIProvider) staticFallback() []ModelInfo {
 	switch p.id {
 	case "openrouter":
 		return openRouterStaticCatalog
 	case "ollama":
-		if isCloudURL(p.baseURL) {
-			return ollamaCloudFallback
-		}
-		return ollamaLocalFallback
+		// Show only what the endpoint actually serves. A cold start before the
+		// first fetch shows nothing rather than a guess at the catalogue.
+		return nil
 	case OGXProviderID:
 		return nil
 	}
@@ -744,6 +699,8 @@ func collectionFromBaseURL(baseURL string) string {
 		return "Together"
 	case strings.Contains(u, "mistral.ai"):
 		return "Mistral"
+	case strings.Contains(u, "ollama.com"):
+		return "Ollama Cloud"
 	}
 	return ""
 }

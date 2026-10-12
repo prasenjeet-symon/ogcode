@@ -20,6 +20,7 @@ require (
 	github.com/refraction-networking/utls v1.8.2
 	github.com/shirou/gopsutil/v4 v4.26.7
 	github.com/spf13/cobra v1.10.2
+	github.com/tree-sitter-grammars/tree-sitter-hcl v1.2.0
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	github.com/tree-sitter/tree-sitter-c v0.24.2
 	github.com/tree-sitter/tree-sitter-c-sharp v0.23.5

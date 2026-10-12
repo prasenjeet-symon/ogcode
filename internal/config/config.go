@@ -1,6 +1,7 @@
 // Package config loads ogcode's optional file-based configuration: provider
-// base URLs and API keys, and the skill sources and permissions, so they can
-// live in a committed/shared file instead of only environment variables.
+// base URLs and API keys, the skill sources and permissions, and the
+// live-preview domain, so they can live in a committed/shared file instead of
+// only environment variables.
 package config
 
 import (
@@ -104,11 +105,23 @@ type MCPAuthConfig struct {
 // MCPConfig holds the named MCP servers ogcode connects to at startup.
 type MCPConfig map[string]MCPServerConfig
 
+// previewDomainEnv is the variable a configured preview domain is exported
+// into. The agent package's PreviewDomain reads it, so a domain set in
+// ogcode.json reaches live-service previews exactly as one exported by the
+// shell does — and, being read once at startup, it stays fixed for the session.
+const previewDomainEnv = "OGCODE_PREVIEW_DOMAIN"
+
 // Config is ogcode's file-based configuration.
 type Config struct {
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
 	Skills    SkillsConfig              `json:"skills,omitempty"`
 	MCP       MCPConfig                 `json:"mcp,omitempty"`
+	// PreviewDomain is the host suffix loopback services are served under —
+	// the file-config equivalent of the OGCODE_PREVIEW_DOMAIN environment
+	// variable, which wins when both are set. Empty keeps the default
+	// *.localhost, which reaches this server only from the machine it runs on;
+	// a real wildcard domain serves previews to a browser anywhere.
+	PreviewDomain string `json:"previewDomain,omitempty"`
 }
 
 // envNames maps each provider ID ogcode knows about to the environment
@@ -148,6 +161,9 @@ func Load(dir string) *Config {
 				existing.APIKey = pc.APIKey
 			}
 			merged.Providers[id] = existing
+		}
+		if c.PreviewDomain != "" {
+			merged.PreviewDomain = c.PreviewDomain
 		}
 		merged.Skills.Paths = appendUnique(merged.Skills.Paths, c.Skills.Paths)
 		merged.Skills.URLs = appendUnique(merged.Skills.URLs, c.Skills.URLs)
@@ -239,8 +255,8 @@ func findProjectFile(dir string) string {
 // projectFileTemplate is what EnsureProjectFile writes for a brand new
 // ogcode.json. Every field is blank or empty — an unset field behaves
 // identically to an absent one everywhere this package is used — but listing
-// all four known providers and the skills section up front makes the file
-// self-documenting to open and edit.
+// all four known providers, the skills section and the preview domain up front
+// makes the file self-documenting to open and edit.
 const projectFileTemplate = `{
   "providers": {
     "anthropic": { "baseUrl": "", "apiKey": "" },
@@ -254,7 +270,8 @@ const projectFileTemplate = `{
     "permissions": {},
     "env": {}
   },
-  "mcp": {}
+  "mcp": {},
+  "previewDomain": ""
 }
 `
 
@@ -303,10 +320,10 @@ func readFile(path string) *Config {
 	return &c
 }
 
-// ApplyEnv exports the config's provider settings and skill requirements as
-// environment variables, for each variable that isn't already set. A real
-// environment variable (or one set earlier from a .env file) always wins over
-// the config file.
+// ApplyEnv exports the config's provider settings, preview domain and skill
+// requirements as environment variables, for each variable that isn't already
+// set. A real environment variable (or one set earlier from a .env file) always
+// wins over the config file.
 //
 // Skills are exported here rather than at load time because the check a skill
 // declares is a plain "is this variable set?" — exporting at startup makes a
@@ -330,6 +347,9 @@ func (c *Config) ApplyEnv() {
 			continue
 		}
 		setIfUnset(name, value)
+	}
+	if c.PreviewDomain != "" {
+		setIfUnset(previewDomainEnv, c.PreviewDomain)
 	}
 }
 

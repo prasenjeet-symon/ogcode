@@ -13,7 +13,9 @@ import (
 )
 
 // previewDomainEnv overrides the domain live-preview services are served under
-// when this server is reached over the internet rather than on localhost.
+// when this server is reached over the internet rather than on localhost. A
+// value set as previewDomain in ogcode.json is exported into it at startup
+// (config.ApplyEnv), so the file and the shell reach PreviewDomain the same way.
 const previewDomainEnv = "OGCODE_PREVIEW_DOMAIN"
 
 // defaultPreviewDomain is the preview host suffix used when nothing overrides

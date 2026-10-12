@@ -173,7 +173,19 @@ type Server struct {
 	stopMu   sync.Mutex
 	stopCh   chan struct{}
 	stopOnce sync.Once
+
+	// draining is closed when shutdown begins, and the live event stream
+	// returns on it. An SSE connection never goes idle, so with a tab open
+	// http.Server.Shutdown waited out its whole timeout on every exit. Set in
+	// serve before the listener serves; nil until then, and a nil channel never
+	// fires, so a handler run outside Serve (tests) is unaffected.
+	draining chan struct{}
 }
+
+// httpShutdownGrace bounds how long shutdown waits for in-flight requests to
+// finish before closing what is left. With the event streams released at once
+// (see draining), what remains is ordinary requests, which finish in far less.
+const httpShutdownGrace = 3 * time.Second
 
 func New(port int, dir string, mode ServerMode) *Server {
 	return NewWithOptions(port, dir, mode, Options{})
@@ -194,6 +206,10 @@ type Options struct {
 	// that one was busy and the bind loop walked past it. The CLI uses it to
 	// record a project's port; leave nil to skip (worker-spawned servers do).
 	OnListen func(port int)
+	// OnInterrupt, when set, is called when a SIGINT or SIGTERM starts the
+	// shutdown. The CLI uses it to tell the terminal what is happening; leave nil
+	// to stay quiet (worker-spawned servers do).
+	OnInterrupt func()
 }
 
 func NewWithOptions(port int, dir string, mode ServerMode, opts Options) *Server {
@@ -684,6 +700,7 @@ func (s *Server) serve(ctx context.Context) error {
 	s.stopMu.Lock()
 	s.stopCh = make(chan struct{})
 	s.stopMu.Unlock()
+	s.draining = make(chan struct{})
 
 	go func() {
 		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -696,20 +713,39 @@ func (s *Server) serve(ctx context.Context) error {
 	stopCh := s.stopCh
 	s.stopMu.Unlock()
 
+	interrupted := false
 	select {
 	case <-ctx.Done():
 	case <-signalCh:
+		interrupted = true
 	case <-stopCh:
+	}
+	if interrupted {
+		if s.opts.OnInterrupt != nil {
+			s.opts.OnInterrupt()
+		}
+		// A second Ctrl+C means now: whatever shutdown is still waiting on is
+		// not worth the user's time. Without this, once the first signal was
+		// taken the process could only be stopped with kill -9.
+		go func() {
+			<-signalCh
+			fmt.Fprintln(os.Stderr, "ogcode: stopped immediately")
+			os.Exit(130)
+		}()
 	}
 	slog.Info("shutting down server...")
 
-	// Graceful shutdown with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Release the event streams first: they never go idle on their own.
+	close(s.draining)
+
+	// Graceful shutdown with timeout, then close whatever did not finish.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownGrace)
 	defer cancel()
 
 	// Shutdown HTTP server (closes all connections and releases port)
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Warn("server shutdown error", "err", err)
+		_ = srv.Close()
 	}
 
 	// Close listener explicitly
@@ -730,19 +766,29 @@ func (s *Server) serve(ctx context.Context) error {
 	}
 
 	// Close MCP server connections (terminates stdio subprocesses and HTTP
-	// sessions). Done after the HTTP server is down so in-flight tool calls
-	// have already been cancelled by the context.
+	// sessions) and flush analytics. Done after the HTTP server is down so
+	// in-flight tool calls have already been cancelled by the context. Both
+	// wait on things outside the process and neither needs the other, so they
+	// run side by side rather than adding up.
+	var closing sync.WaitGroup
 	if s.mcpManager != nil {
-		if err := s.mcpManager.Close(); err != nil {
-			slog.Warn("close mcp manager", "err", err)
-		}
+		closing.Add(1)
+		go func() {
+			defer closing.Done()
+			if err := s.mcpManager.Close(); err != nil {
+				slog.Warn("close mcp manager", "err", err)
+			}
+		}()
 	}
-
-	// Stop PostHog analytics client (flushes queued events)
 	if s.posthogClient != nil {
-		s.posthogClient.Capture("ogcode_server_stopped", posthogDistinctID(), nil)
-		s.posthogClient.Stop()
+		closing.Add(1)
+		go func() {
+			defer closing.Done()
+			s.posthogClient.Capture("ogcode_server_stopped", posthogDistinctID(), nil)
+			s.posthogClient.Stop()
+		}()
 	}
+	closing.Wait()
 
 	// Close database
 	if s.db != nil {
@@ -941,7 +987,12 @@ func openBrowser(url string) {
 	default:
 		return
 	}
-	_ = exec.Command(cmd, args...).Start()
+	c := exec.Command(cmd, args...)
+	if c.Start() == nil {
+		// Reap it: open/xdg-open exit at once, and an unwaited child stays a
+		// zombie for as long as ogcode runs.
+		go func() { _ = c.Wait() }()
+	}
 }
 
 func fileExists(path string) bool {

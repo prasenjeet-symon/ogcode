@@ -17,7 +17,7 @@ import (
 // scrcpyTarget is where the ws-scrcpy Node app listens. It is a separate
 // process on the same machine (started with ~/.android-browser/start.sh, which
 // also starts the emulator); ogcode neither bundles nor spawns it. Overridable
-// for tests via OGCODE_SCRCPY_TARGET (same pattern as OLLAMA_SHOW_URL).
+// for tests via OGCODE_SCRCPY_TARGET.
 func scrcpyTarget() string {
 	if v := os.Getenv("OGCODE_SCRCPY_TARGET"); v != "" {
 		return v

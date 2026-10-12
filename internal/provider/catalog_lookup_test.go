@@ -241,17 +241,14 @@ func TestRegistryLeavesLocallyRunModelsToTheirRuntime(t *testing.T) {
 }
 
 // Every model Ollama's cloud served on 2026-09-28 (ollama.com/api/tags) is
-// catalogued, as is every cloud fallback entry: an uncatalogued one would fall
-// back to the fixed compaction cap however large its real window.
+// catalogued: an uncatalogued one would fall back to the fixed compaction cap
+// however large its real window.
 func TestCatalogCoversOllamaCloud(t *testing.T) {
 	served := []string{
 		"nemotron-3-nano:30b", "gemma4:31b", "glm-5.3-flash", "minimax-m2.7", "nemotron-3-ultra",
 		"kimi-k2.7-code", "glm-5.3", "deepseek-v4-pro:0813", "kimi-k3", "deepseek-v4.1-flash",
 		"gpt-oss:120b", "glm-5.2", "kimi-k2.6", "gpt-oss:20b", "mistral-large-3:675b", "minimax-m3",
 		"nemotron-3-super",
-	}
-	for _, m := range ollamaCloudFallback {
-		served = append(served, m.ID)
 	}
 	for _, id := range served {
 		if _, ok := LookupCatalogModel(id); !ok {

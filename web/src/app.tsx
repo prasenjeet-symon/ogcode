@@ -15,6 +15,7 @@ import PlanModeBanner from './components/plan-mode-banner';
 import GitSyncBanner from './components/git-sync-banner';
 import DesktopNotificationBanner from './components/desktop-notification-banner';
 import ModelSwitchPopup from './components/model-switch-popup';
+import IndexConsentDialog from './components/index-consent-dialog';
 import Home from './pages/home';
 import Chat from './pages/session';
 import PlanList from './pages/plan-list';
@@ -113,6 +114,7 @@ function AppWrapper(props: { children?: any }) {
                         <GitSyncBanner />
                         <DesktopNotificationBanner />
                         <ModelSwitchPopup />
+                        <IndexConsentDialog />
                       </DesktopNotificationProvider>
                     </NotificationProvider>
                   </DocIndexProvider>

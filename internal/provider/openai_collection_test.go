@@ -5,7 +5,7 @@ import "testing"
 // TestCollectionFromBaseURL pins the label behind each endpoint preset the web
 // app offers (COMPATIBLE_PRESETS in web/src/lib/providers.ts), plus the hosts it
 // names by hand: OpenRouter, and GitHub Models, retired but still labelled so a
-// slot saved against it keeps its name.
+// slot saved against it keeps its name. Ollama Cloud is a preset too.
 func TestCollectionFromBaseURL(t *testing.T) {
 	cases := []struct {
 		baseURL string
@@ -19,6 +19,7 @@ func TestCollectionFromBaseURL(t *testing.T) {
 		{"https://api.mistral.ai/v1", "Mistral"},
 		{"https://api.sambanova.ai/v1", "SambaNova"},
 		{"https://integrate.api.nvidia.com/v1", "NVIDIA"},
+		{"https://ollama.com/v1", "Ollama Cloud"},
 		{"https://openrouter.ai/api/v1", "OpenRouter"},
 		{"https://models.inference.ai.azure.com", "GitHub Models"},
 		{"https://api.openai.com/v1", ""},

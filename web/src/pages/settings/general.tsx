@@ -2,9 +2,11 @@ import { Show, For, createMemo, createSignal, createEffect, type JSX } from 'sol
 import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { useTheme } from '../../context/theme';
+import { useDocIndex } from '../../context/docindex';
 import {
   Group,
   Row,
+  Switch,
   Select,
   Value,
   StatusChip,
@@ -21,6 +23,7 @@ const ICONS = {
   palette: 'M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42',
   keyboard: 'M6.75 3.75h.008v.008H6.75v-.008zM6.75 7.5h.008v.008H6.75V7.5zm0 3.75h.008v.008H6.75v-.008zM10.5 3.75h.008v.008H10.5v-.008zM10.5 7.5h.008v.008H10.5V7.5zm0 3.75h.008v.008H10.5v-.008zM14.25 3.75h.008v.008h-.008v-.008zM14.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM17.25 3.75h.008v.008h-.008v-.008zM17.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM4.5 18.75h15a.75.75 0 00.75-.75v-1.5a.75.75 0 00-.75-.75h-15a.75.75 0 00-.75.75v1.5a.75.75 0 00.75.75z',
   hotkey: 'M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zM12 15.75V18m3.75-3.75V18M4.5 4.5h15a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18V6a1.5 1.5 0 011.5-1.5z',
+  index: 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z',
 };
 
 // Defaults, matching session.SearchConfig in Go.
@@ -29,6 +32,7 @@ const DEFAULTS = { primaryColor: '#ff5e1f' };
 export default function GeneralSettings() {
   const server = useServer();
   const shell = useShell();
+  const docIndex = useDocIndex();
 
   createEffect(() => shell.report({ noun: 'settings' }));
 
@@ -61,6 +65,21 @@ export default function GeneralSettings() {
       </Group>
 
       <ThemeGroup hide={hide} />
+
+      <Group id="index" title="Project index" icon={ICONS.index}>
+        <Row
+          label="Index large projects automatically"
+          helper={`Projects with more than ${docIndex.consent()?.limit ?? 500} files wait for your say-so before ogcode indexes them automatically. The manual index button always runs.`}
+          hidden={hide('Index large projects automatically', 'project index automatic', 'consent index')}
+        >
+          <Switch
+            checked={docIndex.consent()?.allowed ?? false}
+            onChange={(v) => docIndex.setConsent(v)}
+            disabled={docIndex.consent()?.autoIndexEnabled === false}
+            label="Index large projects automatically"
+          />
+        </Row>
+      </Group>
 
       <Group
         id="hotkeys"

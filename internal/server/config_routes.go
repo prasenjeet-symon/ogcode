@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -200,8 +201,13 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) configPayload() map[string]any {
 	return map[string]any{
-		"directory":     s.dir,
-		"port":          s.port.Load(),
+		"directory": s.dir,
+		"port":      s.port.Load(),
+		// os is the host the server runs on. The web UI uses it to show the
+		// browser web-search options and their setup guides only where a browser
+		// can actually be driven — Safari search runs osascript on macOS, Chrome
+		// or Edge search runs a headless binary on Windows.
+		"os":            runtime.GOOS,
 		"searchEnabled": s.searchBackend != nil,
 		"searchRunning": s.searchBackend != nil,
 		// installId is the machine's PostHog distinct id — the website's when the

@@ -26,6 +26,10 @@ interface ServerContextValue {
   // install. Same ownership model; it gates only the plan-mode instability
   // warning, never plan mode itself.
   planModeEnabled: () => boolean;
+  // The host OS the server runs on (e.g. "darwin", "linux", "windows").
+  // Safari web search drives osascript on that machine, so this decides the
+  // search settings' Safari option and guide.
+  os: () => string;
   // Rolling window of this process's own CPU/memory samples, oldest first, and
   // the context needed to read them (cadence, core count, process uptime).
   resources: () => ResourceSample[];
@@ -67,6 +71,7 @@ export const ServerProvider: ParentComponent = (props) => {
   const [notesEnabled, setNotesEnabled] = createSignal(false);
   const [devicePanelEnabled, setDevicePanelEnabled] = createSignal(false);
   const [planModeEnabled, setPlanModeEnabled] = createSignal(false);
+  const [os, setOS] = createSignal('');
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
   const [resyncTick, setResyncTick] = createSignal(0);
@@ -127,6 +132,7 @@ export const ServerProvider: ParentComponent = (props) => {
       setNotesEnabled(config.notesEnabled ?? false);
       setDevicePanelEnabled(config.devicePanelEnabled ?? false);
       setPlanModeEnabled(config.planModeEnabled ?? false);
+      setOS(config.os ?? '');
     }).catch(() => { /* ignore */ });
   }
   loadConfig();
@@ -233,6 +239,7 @@ export const ServerProvider: ParentComponent = (props) => {
     notesEnabled,
     devicePanelEnabled,
     planModeEnabled,
+    os,
     resources,
     resourceMeta,
     eventTick,

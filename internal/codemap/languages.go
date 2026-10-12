@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	tsdart "github.com/UserNobody14/tree-sitter-dart/bindings/go"
+	tshcl "github.com/tree-sitter-grammars/tree-sitter-hcl/bindings/go"
 	ts "github.com/tree-sitter/go-tree-sitter"
 	tscs "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
 	tsc "github.com/tree-sitter/tree-sitter-c/bindings/go"
@@ -198,6 +199,11 @@ var registry = map[string]*language{
 // the agent as mistakes to fix. So these languages get a real outline and stay
 // unchecked.
 //
+// HCL is configuration rather than code: Terraform and its siblings validate
+// the schema — whether an attribute exists, whether a value has the right type
+// — not the grammar, and a file that parses cleanly is exactly what the tool
+// expects. So HCL gets a real outline too, and stays unchecked alongside them.
+//
 // .h is read as C++: C++ parses nearly every C header as well, and a C parser
 // fails outright on the classes, namespaces and templates of a C++ one.
 var outlineOnly = map[string]*language{
@@ -215,6 +221,10 @@ var outlineOnly = map[string]*language{
 	".ipp": cpp(),
 	".inl": cpp(),
 	".tpp": cpp(),
+
+	".tf":     hcl(),
+	".tfvars": hcl(),
+	".hcl":    hcl(),
 }
 
 // lookupForOutline returns the language file_map parses path with: any
@@ -443,6 +453,18 @@ func cpp() *language {
 		commentKinds:   []string{"comment"},
 		wrapperKind:    "template_declaration",
 		localScopeKind: "compound_statement",
+	}
+}
+
+// hcl builds an HCL entry, for the same once-per-entry reason as typescript and
+// tsx above. HCL is Terraform and its siblings — Packer, Nomad, Vault — where a
+// file is a list of blocks and a block is named the way the tool addresses it.
+func hcl() *language {
+	return &language{
+		name:         "hcl",
+		newLang:      func() *ts.Language { return ts.NewLanguage(tshcl.Language()) },
+		queryFile:    "queries/hcl.scm",
+		commentKinds: []string{"comment"},
 	}
 }
 

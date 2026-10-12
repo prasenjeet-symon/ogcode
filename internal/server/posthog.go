@@ -98,13 +98,27 @@ func (c *PostHogClient) Capture(event, distinctID string, props map[string]any) 
 	}
 }
 
-// Stop drains the queue and shuts down the worker.
+// posthogStopTimeout bounds how long Stop waits for the queue to drain. Each
+// send may take up to the client's 10 s timeout, so on a slow or absent network
+// an unbounded drain held up quitting for as long as the queue took to fail.
+const posthogStopTimeout = 2 * time.Second
+
+// Stop drains the queue and shuts down the worker, waiting at most
+// posthogStopTimeout; events still unsent then are dropped with the process.
 func (c *PostHogClient) Stop() {
 	if c == nil {
 		return
 	}
 	close(c.stopped)
-	c.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(posthogStopTimeout):
+	}
 }
 
 func (c *PostHogClient) worker() {

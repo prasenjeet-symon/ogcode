@@ -358,17 +358,31 @@ func (m *Manager) Close() error {
 		receiver := m.receiver
 		m.mu.Unlock()
 
-		var errs []string
+		// Close every server at once: each close can wait out its grace
+		// period, and one after another a few slow servers added up to a
+		// shutdown the user sat through.
+		var (
+			errs  []string
+			errMu sync.Mutex
+			wg    sync.WaitGroup
+		)
 		for _, c := range conns {
-			if c.session != nil {
-				if err := c.session.Close(); err != nil {
-					errs = append(errs, err.Error())
+			wg.Add(1)
+			go func(c *serverConn) {
+				defer wg.Done()
+				if c.session != nil {
+					if err := c.session.Close(); err != nil {
+						errMu.Lock()
+						errs = append(errs, err.Error())
+						errMu.Unlock()
+					}
 				}
-			}
-			if c.proc != nil {
-				killProcessTree(c.proc)
-			}
+				if c.proc != nil {
+					killProcessTree(c.proc)
+				}
+			}(c)
 		}
+		wg.Wait()
 		receiver.close()
 		sweepTempImages()
 		if len(errs) > 0 {
@@ -462,8 +476,16 @@ func stdioTransport(sc config.MCPServerConfig) *mcp.CommandTransport {
 		env = append(env, k+"="+v)
 	}
 	cmd.Env = env
-	return &mcp.CommandTransport{Command: cmd}
+	detachFromTerminal(cmd)
+	return &mcp.CommandTransport{Command: cmd, TerminateDuration: stdioTerminateGrace}
 }
+
+// stdioTerminateGrace is how long closing a stdio server waits, after closing
+// its stdin, for it to exit before signalling it (and again after SIGTERM). The
+// SDK's own default is 5 s at each step, so one server that ignores EOF held
+// ogcode's exit for up to 15 s. A server that is going to exit cleanly does so
+// as soon as its input closes.
+const stdioTerminateGrace = time.Second
 
 // httpTransport builds a streamable HTTP transport. When the server has static
 // Headers, they are injected via a custom RoundTripper so the SDK's HTTP client
@@ -519,9 +541,11 @@ func (h headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 // killProcessTree terminates the subprocess and any descendants it spawned.
-// SIGTERM is sent first to allow graceful shutdown; after a short grace period
-// any still-living process is SIGKILLed. On Windows the semantics differ but
-// os/exec does not expose a process-group kill, so we fall back to Kill.
+// An interrupt is sent first to allow graceful shutdown; after a short grace
+// period anything still running is SIGKILLed. On Unix both go to the server's
+// whole process group (see detachFromTerminal), so the node process an npx
+// launcher started does not outlive it; on Windows os/exec exposes no group
+// signal, so they reach the server alone.
 func killProcessTree(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
@@ -532,7 +556,7 @@ func killProcessTree(cmd *exec.Cmd) {
 			_ = c.Close()
 		}
 	}
-	_ = cmd.Process.Signal(os.Interrupt)
+	interruptTree(cmd.Process)
 	done := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
@@ -541,9 +565,12 @@ func killProcessTree(cmd *exec.Cmd) {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		_ = cmd.Process.Kill()
-		<-done
 	}
+	// Then stop whatever is still running: the server itself if it ignored the
+	// interrupt, or a child that outlived it — a shell's background child
+	// ignores SIGINT, and a launcher that exits on it leaves that child behind.
+	killTree(cmd.Process)
+	<-done
 }
 
 // maxToolNameLen is the function-name length cap the Anthropic and OpenAI APIs

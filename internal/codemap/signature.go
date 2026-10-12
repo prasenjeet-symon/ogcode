@@ -63,6 +63,15 @@ func signatureFor(node *ts.Node, src []byte, kind string, names []string, lang *
 		}
 		return capSig(trimOpenBrace(collapse(firstLine(sliceOf(node, src, node.EndByte())))))
 
+	case "block":
+		// An HCL block's signature is its header up to the opening brace — the
+		// type word and its labels, `resource "aws_instance" "web"` — since the
+		// block binds no body field to stop at.
+		if start := firstChildOfKind(node, []string{"block_start"}); start != nil {
+			return capSig(collapse(sliceOf(node, src, start.StartByte())))
+		}
+		return capSig(trimOpenBrace(collapse(firstLine(sliceOf(node, src, node.EndByte())))))
+
 	default:
 		if end, ok := bodyStart(node, lang); ok {
 			// The body is where the slice stops, so the whole signature is safe

@@ -1,9 +1,10 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
 import { createSignal, createEffect, on } from 'solid-js';
 import {
-  type DocSummary, type ModelInfo, type ExcludeEntry, type IndexFile,
+  type DocSummary, type ModelInfo, type ExcludeEntry, type IndexFile, type IndexConsent,
   getDocIndexBuildStatus, buildDocIndex, getIndexedDocs, getIndexFiles, getModels,
   getExcludes, addExclude, deleteExclude,
+  getIndexConsent, setIndexConsent,
 } from '../api/client';
 import { useServer } from './server';
 
@@ -29,9 +30,18 @@ interface DocIndexContextValue {
   addExclude: (pattern: string) => Promise<void>;
   deleteExclude: (id: string) => Promise<void>;
   progress: () => IndexProgress | null;
+  consent: () => IndexConsent | null;
+  setConsent: (allowed: boolean) => Promise<void>;
+  consentRequest: () => { limit: number } | null;
+  dismissConsentRequest: () => void;
 }
 
 const DocIndexContext = createContext<DocIndexContextValue>();
+
+// The project whose auto-index consent prompt the user waved away this session.
+// Dismissal is per project and lasts until reload; granting consent for good is
+// what the Settings toggle does.
+const CONSENT_DISMISSED_KEY = 'ogcode-index-consent-dismissed';
 
 export const DocIndexProvider: ParentComponent = (props) => {
   const server = useServer();
@@ -43,6 +53,10 @@ export const DocIndexProvider: ParentComponent = (props) => {
   const [selectedModelId, setSelectedModelId] = createSignal<string>('');
   const [excludes, setExcludes] = createSignal<ExcludeEntry[]>([]);
   const [progress, setProgress] = createSignal<IndexProgress | null>(null);
+  // This project's auto-index consent, and the in-the-moment prompt the server
+  // raises when a project is over the file limit and has not consented.
+  const [consent, setConsentState] = createSignal<IndexConsent | null>(null);
+  const [consentRequest, setConsentRequest] = createSignal<{ limit: number } | null>(null);
 
   // Load models whenever the directory changes
   createEffect(on(server.directory, () => {
@@ -118,6 +132,42 @@ export const DocIndexProvider: ParentComponent = (props) => {
     }
   }
 
+  async function loadConsent() {
+    const dir = server.directory();
+    if (!dir) return;
+    try {
+      setConsentState(await getIndexConsent(dir));
+    } catch (e) {
+      console.error('docindex: load consent failed:', e);
+    }
+  }
+
+  async function setConsent(allowed: boolean) {
+    const dir = server.directory();
+    if (!dir) return;
+    try {
+      setConsentState(await setIndexConsent(dir, allowed));
+      if (allowed) {
+        setConsentRequest(null);
+        try { window.localStorage.removeItem(CONSENT_DISMISSED_KEY); } catch { /* private mode */ }
+      }
+    } catch (e) {
+      console.error('docindex: set consent failed:', e);
+    }
+  }
+
+  function consentDismissedFor(dir: string): boolean {
+    try { return window.localStorage.getItem(CONSENT_DISMISSED_KEY) === dir; } catch { return false; }
+  }
+
+  function dismissConsentRequest() {
+    const dir = server.directory();
+    if (dir) {
+      try { window.localStorage.setItem(CONSENT_DISMISSED_KEY, dir); } catch { /* private mode */ }
+    }
+    setConsentRequest(null);
+  }
+
   // Poll for progress while building
   let progressTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -191,13 +241,17 @@ export const DocIndexProvider: ParentComponent = (props) => {
 
   // Load when directory changes
   createEffect(on(server.directory, (dir) => {
-    if (dir) refresh();
+    if (dir) {
+      refresh();
+      loadConsent();
+    }
   }));
 
   // Refresh on SSE reconnect; always check build status on reconnect for crash recovery.
   createEffect(on(server.connected, (isConnected) => {
     if (!isConnected) return;
     refresh();
+    loadConsent();
     getDocIndexBuildStatus()
       .then((status) => {
         if (status.running) {
@@ -249,6 +303,19 @@ export const DocIndexProvider: ParentComponent = (props) => {
     }
   }));
 
+  // The server raises this when a project is too large to index automatically
+  // and has not been granted consent. Ignore a prompt aimed at another
+  // directory, and one the user already waved away this session.
+  createEffect(on(server.eventTick, () => {
+    const last = server.lastEvent();
+    if (!last || last.type !== 'docindex.consent') return;
+    const props = last.properties;
+    if (!props) return;
+    const dir = typeof props.directory === 'string' ? props.directory : '';
+    if (dir !== server.directory() || consentDismissedFor(dir)) return;
+    setConsentRequest({ limit: typeof props.limit === 'number' ? props.limit : 0 });
+  }));
+
   const value: DocIndexContextValue = {
     docs,
     files,
@@ -264,6 +331,10 @@ export const DocIndexProvider: ParentComponent = (props) => {
     addExclude: handleAddExclude,
     deleteExclude: handleDeleteExclude,
     progress,
+    consent,
+    setConsent,
+    consentRequest,
+    dismissConsentRequest,
   };
 
   return (

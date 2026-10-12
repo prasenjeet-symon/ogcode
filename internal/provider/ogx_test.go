@@ -104,6 +104,42 @@ func TestOGXProviderModelsComeFromTheGateway(t *testing.T) {
 	}
 }
 
+// TestDynamicModelsFallBackToCatalogNames pins the naming fix. An endpoint that
+// reports no human name — the OGX gateway, a local Ollama — shows the
+// catalogue's curated name for an id we recognise, and the raw id only when the
+// id is unknown to the catalogue.
+func TestDynamicModelsFallBackToCatalogNames(t *testing.T) {
+	srv := ogxGateway(t, []string{
+		"deepseek-v4.1-flash",
+		"glm-5.3-flash",
+		"totally-unknown-model-9",
+	}, nil)
+	t.Setenv("OGX_GATEWAY_URL", srv.URL)
+
+	p, err := NewOGXProvider("tok")
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	got := p.RefreshCatalog(context.Background())
+	if len(got) != 3 {
+		t.Fatalf("RefreshCatalog got %d models, want 3: %+v", len(got), got)
+	}
+
+	want := map[string]string{
+		"deepseek-v4.1-flash":     "DeepSeek V4.1 Flash",
+		"glm-5.3-flash":           "GLM-5.3 Flash",
+		"totally-unknown-model-9": "totally-unknown-model-9",
+	}
+	for _, m := range got {
+		if m.Name != want[m.ID] {
+			t.Errorf("model %q name = %q, want %q", m.ID, m.Name, want[m.ID])
+		}
+		if m.ID == "" {
+			t.Errorf("model lost its id: %+v", m)
+		}
+	}
+}
+
 // TestOGXProviderEmptyCatalogueHasNoFallback is the deliberate difference from
 // every other OpenAI-compatible provider here: a plan that grants nothing yields
 // no models at all, rather than a static catalogue of things the token cannot

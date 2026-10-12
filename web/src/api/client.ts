@@ -418,6 +418,12 @@ export interface ConfigInfo {
    * reachable either way.
    */
   planModeEnabled?: boolean;
+  /**
+   * The host OS the server runs on (e.g. "darwin", "linux", "windows").
+   * Safari web search drives osascript on that machine, so this decides the
+   * search settings' Safari option and guide.
+   */
+  os?: string;
 }
 
 export function getConfig(): Promise<ConfigInfo> {
@@ -1165,8 +1171,9 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 export type SearchProvider = 'native' | 'tavily';
 
 // Which engine leads the native backend: '' = HTTP (the fast default) first
-// with Safari as fallback, 'native' = HTTP only, 'safari' = Safari first.
-export type SearchBrowser = '' | 'native' | 'safari';
+// with a browser as fallback, 'native' = HTTP only, 'safari' = Safari first on
+// macOS, 'chrome' = Chrome or Edge first on Windows.
+export type SearchBrowser = '' | 'native' | 'safari' | 'chrome';
 
 export interface SearchConfig {
   enabled: boolean;
@@ -1353,6 +1360,27 @@ export function addExclude(directory: string, pattern: string): Promise<ExcludeE
 
 export function deleteExclude(id: string): Promise<void> {
   return fetchAPI(`/docindex/excludes/${id}`, { method: 'DELETE' });
+}
+
+// Whether this project may be indexed automatically. A project over the file
+// limit starts disallowed; consent is remembered per project.
+export interface IndexConsent {
+  directory: string;
+  allowed: boolean;
+  limit: number;
+  autoIndexEnabled: boolean;
+}
+
+export function getIndexConsent(directory?: string): Promise<IndexConsent> {
+  const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  return fetchAPI(`/docindex/consent${params}`);
+}
+
+export function setIndexConsent(directory: string, allowed: boolean): Promise<IndexConsent> {
+  return fetchAPI('/docindex/consent', {
+    method: 'POST',
+    body: JSON.stringify({ directory, allowed }),
+  });
 }
 
 // Skills API
