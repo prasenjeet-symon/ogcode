@@ -1155,6 +1155,11 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 	activeToolCalls := make(map[int]string) // index -> callID
 	var lastToolID string
 
+	// Whether this host attaches a per-tool-call extra that must be replayed
+	// (Gemini's thought_signature). Captured only then, so other hosts never
+	// store a blob they would ignore.
+	echoToolExtra := p.EchoesToolExtra()
+
 	// Weak/open models (e.g. many served via Ollama) sometimes emit a tool call
 	// as plain text — a JSON object in the content — instead of via the structured
 	// tool_calls field. That leaves the agent with nothing to execute, so the turn
@@ -1212,12 +1217,16 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 					// New tool call starting
 					activeToolCalls[tc.Index] = tc.ID
 					lastToolID = tc.ID
-					ch <- StreamEvent{
+					start := StreamEvent{
 						Type:       EventToolCallStart,
 						ToolCallID: tc.ID,
 						ToolName:   tc.Function.Name,
 						ToolInput:  []byte(tc.Function.Arguments),
 					}
+					if echoToolExtra {
+						start.ToolExtra = tc.ExtraContent
+					}
+					ch <- start
 				} else if tc.Function.Arguments != "" {
 					// Argument delta. Route by index to the call it belongs to, but
 					// fall back to the most recently started call when the provider
@@ -1546,10 +1555,14 @@ type oaiDelta struct {
 }
 
 type oaiToolCallDelta struct {
-	Index    int              `json:"index"`
-	ID       string           `json:"id,omitempty"`
-	Type     string           `json:"type,omitempty"`
-	Function oaiFunctionDelta `json:"function"`
+	Index int    `json:"index"`
+	ID    string `json:"id,omitempty"`
+	Type  string `json:"type,omitempty"`
+	// ExtraContent is the opaque per-tool-call payload a host attaches and
+	// requires back (Gemini's extra_content/thought_signature). Kept only for
+	// hosts that replay it — see openai_tool_extra.go.
+	ExtraContent json.RawMessage  `json:"extra_content,omitempty"`
+	Function     oaiFunctionDelta `json:"function"`
 }
 
 type oaiFunctionDelta struct {

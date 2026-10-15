@@ -377,6 +377,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// (DeepSeek's reasoning_content and the like). Fixed for the run, so every
 	// step resends the history in the same shape.
 	echoReasoning := provider.EchoesReasoning(p)
+	// Whether this endpoint requires each assistant tool call's own opaque
+	// payload replayed from history — Gemini's extra_content (its
+	// thought_signature). Fixed for the run, like the reasoning echo above.
+	echoToolExtra := provider.EchoesToolExtra(p)
 
 	compactionThreshold := compactionThresholdTokens(modelContextWindow)
 	// The model's output ceiling (0 = unknown). Sent as the per-request output
@@ -717,9 +721,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// compaction (if it ever fires) covers anything older within the session.
 		turnStartIdx := findLastTextUserMessageIndex(messages)
 		if turnStartIdx >= 0 && turnStartIdx < len(messages) {
-			modelMessages = convertMessages(messages[watermark.sliceStart(messages, turnStartIdx):], modelSupportsImages, modelID, echoReasoning)
+			modelMessages = convertMessages(messages[watermark.sliceStart(messages, turnStartIdx):], modelSupportsImages, modelID, echoReasoning, echoToolExtra)
 		} else {
-			modelMessages = convertMessages(messages, modelSupportsImages, modelID, echoReasoning)
+			modelMessages = convertMessages(messages, modelSupportsImages, modelID, echoReasoning, echoToolExtra)
 		}
 		// Skip when this same summary is already carried this turn by the
 		// watermark's prepended message. Proactive compaction sets the watermark
@@ -1288,6 +1292,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					CallID: evt.ToolCallID,
 					Name:   evt.ToolName,
 					Input:  evt.ToolInput,
+					Extra:  evt.ToolExtra,
 				}
 				pendingToolCalls = append(pendingToolCalls, tc)
 
@@ -1315,6 +1320,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				toolData, err := json.Marshal(session.ToolPartData{
 					Tool:   evt.ToolName,
 					CallID: evt.ToolCallID,
+					Extra:  evt.ToolExtra,
 					State: session.ToolState{
 						Status: session.ToolPending,
 						Input:  toolInput,
@@ -1327,6 +1333,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					toolData, _ = json.Marshal(session.ToolPartData{
 						Tool:   evt.ToolName,
 						CallID: evt.ToolCallID,
+						Extra:  evt.ToolExtra,
 						State:  session.ToolState{Status: session.ToolPending, Input: json.RawMessage("{}")},
 					})
 				}
@@ -3139,6 +3146,9 @@ type pendingToolCall struct {
 	CallID string
 	Name   string
 	Input  json.RawMessage
+	// Extra is an opaque per-tool-call payload the host attached and requires
+	// replayed on the assistant message when the call is resent from history.
+	Extra  json.RawMessage
 	Ready  bool
 	PartID session.PartID
 }
@@ -3454,7 +3464,9 @@ func validToolInput(raw json.RawMessage) json.RawMessage {
 // convertMessages turns stored messages into the provider-neutral request
 // history. echoReasoning attaches each assistant message's own reasoning as
 // plain text, for a provider that sends it back (provider.EchoesReasoning).
-func convertMessages(messages []*session.MessageWithParts, modelSupportsImages bool, modelID string, echoReasoning bool) []provider.ModelMessage {
+// echoToolExtra attaches each assistant tool call's own opaque payload, for a
+// provider that requires it replayed (provider.EchoesToolExtra).
+func convertMessages(messages []*session.MessageWithParts, modelSupportsImages bool, modelID string, echoReasoning, echoToolExtra bool) []provider.ModelMessage {
 	var result []provider.ModelMessage
 	for _, m := range messages {
 		// Transcript-only records never reach a model. See MessageInfo.DisplayOnly:
@@ -3526,9 +3538,12 @@ func convertMessages(messages []*session.MessageWithParts, modelSupportsImages b
 		if m.Info.Role == session.RoleAssistant && len(toolCallParts) > 0 {
 			// Assistant message with tool calls: emit as a single message with tool_calls array
 			type oaiToolCall struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
+				ID   string `json:"id"`
+				Type string `json:"type"`
+				// ExtraContent replays the call's own opaque payload where the host
+				// requires it (Gemini's thought_signature).
+				ExtraContent json.RawMessage `json:"extra_content,omitempty"`
+				Function     struct {
 					Name      string `json:"name"`
 					Arguments string `json:"arguments"`
 				} `json:"function"`
@@ -3539,6 +3554,9 @@ func convertMessages(messages []*session.MessageWithParts, modelSupportsImages b
 				call := oaiToolCall{
 					ID:   tc.CallID,
 					Type: "function",
+				}
+				if echoToolExtra {
+					call.ExtraContent = tc.Extra
 				}
 				call.Function.Name = tc.Tool
 				// Arguments must be a JSON string (the OpenAI API expects a string, not a raw object)

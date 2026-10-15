@@ -126,11 +126,6 @@ const (
 	// behind a checkbox the user can tick mid-session, so a refusal expires.
 	safariJSRecheck = 3 * time.Minute
 
-	// safariRenderSettle bounds the extra wait for client-side rendering. It
-	// only applies when the DOM is readable; the served markup has already
-	// settled by the time it starts.
-	safariRenderSettle = 4 * time.Second
-
 	// safariDwellMin and safariDwellJitter are how long the page is left alone
 	// after it finishes loading, before its content is read.
 	//
@@ -299,6 +294,9 @@ func (s *SafariBackend) Search(ctx context.Context, query string, limit int) ([]
 		slog.Info("safari backend: engine returned no results", "engine", e.name, "query", query)
 	}
 
+	if len(failures) == 0 {
+		return nil, nil
+	}
 	return nil, fmt.Errorf("safari: every engine failed (%s)", strings.Join(failures, "; "))
 }
 
@@ -378,17 +376,19 @@ func (s *SafariBackend) loadHTML(ctx context.Context, rawURL, ready string) (str
 	}
 
 	// Settled before waiting, so the poll watches the same document the read
-	// will take.
+	// will take. When useDOM is true, waitForLoad already polls the live
+	// rendered DOM until two consecutive readings match, so a second
+	// waitForRender pass would only duplicate the settle loop. The human-like
+	// dwell is applied on search-engine queries (where ready != "") rather
+	// than arbitrary page fetches.
 	useDOM := s.probeJavaScript(ctx, winID)
 	if err := s.waitForLoad(ctx, winID, ready, useDOM); err != nil {
 		return "", err
 	}
-	if useDOM {
-		// The markup has settled; anything the page draws for itself has not.
-		s.waitForRender(ctx, winID)
-	}
-	if err := sleepCtx(ctx, safariDwell()); err != nil {
-		return "", err
+	if ready != "" {
+		if err := sleepCtx(ctx, safariDwell()); err != nil {
+			return "", err
+		}
 	}
 	return s.readPage(ctx, winID, useDOM)
 }
@@ -523,11 +523,24 @@ func (s *SafariBackend) waitForLoad(ctx context.Context, winID, ready string, us
 
 	// The marker test runs inside AppleScript rather than here: the alternative
 	// is pulling half a megabyte of HTML across an Apple Event on every poll.
-	readyClause := "set hit to 1"
-	if ready != "" {
-		readyClause = fmt.Sprintf("if src contains %s then set hit to 1", osaString(ready))
-	}
-	script := fmt.Sprintf(`tell application "Safari"
+	// When no marker is needed and JavaScript is available, ask JS for
+	// outerHTML.length directly so Safari does not serialise the full DOM string
+	// into AppleScript on every poll tick.
+	var script string
+	if useDOM && ready == "" {
+		script = fmt.Sprintf(`tell application "Safari"
+		set n to 0
+		try
+			set n to (do JavaScript "document.documentElement.outerHTML.length" in current tab of (first window whose id is %s))
+		end try
+		return (n as text) & "|1"
+	end tell`, winID)
+	} else {
+		readyClause := "set hit to 1"
+		if ready != "" {
+			readyClause = fmt.Sprintf("if src contains %s then set hit to 1", osaString(ready))
+		}
+		script = fmt.Sprintf(`tell application "Safari"
 		set n to 0
 		set hit to 0
 		try
@@ -537,6 +550,7 @@ func (s *SafariBackend) waitForLoad(ctx context.Context, winID, ready string, us
 		end try
 		return (n as text) & "|" & (hit as text)
 	end tell`, pageExpr, readyClause)
+	}
 
 	last := -1
 	for {
@@ -721,42 +735,6 @@ func (s *SafariBackend) javascriptAvailable() bool {
 		return true
 	}
 	return s.jsOK || time.Since(s.jsCheckedAt) > safariJSRecheck
-}
-
-// waitForRender waits for the rendered DOM to stop growing.
-//
-// waitForLoad has already established that the served markup is complete, which
-// says nothing about a page that fetches its content afterwards. Two equal
-// readings, bounded by safariRenderSettle: this is a best-effort improvement on
-// reading immediately, so it never returns an error — whatever is there when
-// the budget runs out is what gets read.
-func (s *SafariBackend) waitForRender(ctx context.Context, winID string) {
-	ctx, cancel := context.WithTimeout(ctx, safariRenderSettle)
-	defer cancel()
-
-	script := fmt.Sprintf(`tell application "Safari"
-		set n to 0
-		try
-			set n to (do JavaScript "document.documentElement.outerHTML.length" in current tab of (first window whose id is %s))
-		end try
-		return n as text
-	end tell`, winID)
-
-	last := -1
-	for {
-		out, err := runOSA(ctx, script)
-		if err != nil {
-			return
-		}
-		n, _ := strconv.Atoi(strings.TrimSpace(out))
-		if n > 0 && n == last {
-			return
-		}
-		last = n
-		if err := sleepCtx(ctx, safariPollInterval); err != nil {
-			return
-		}
-	}
 }
 
 // runOSA executes one AppleScript and returns its stdout.

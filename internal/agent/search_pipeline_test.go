@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
@@ -10,13 +12,21 @@ import (
 
 type scriptedSearchProvider struct {
 	events []provider.StreamEvent
+	calls  *atomic.Int32
+	last   *provider.StreamRequest
 }
 
 func (p scriptedSearchProvider) ID() string { return "test" }
 func (p scriptedSearchProvider) Models() []provider.ModelInfo {
 	return []provider.ModelInfo{{ID: "test-model"}}
 }
-func (p scriptedSearchProvider) StreamChat(context.Context, provider.StreamRequest) (<-chan provider.StreamEvent, error) {
+func (p scriptedSearchProvider) StreamChat(_ context.Context, req provider.StreamRequest) (<-chan provider.StreamEvent, error) {
+	if p.calls != nil {
+		p.calls.Add(1)
+	}
+	if p.last != nil {
+		*p.last = req
+	}
 	ch := make(chan provider.StreamEvent, len(p.events))
 	for _, evt := range p.events {
 		ch <- evt
@@ -234,5 +244,111 @@ func TestSearchFetch_SurvivesAPanickingFetch(t *testing.T) {
 
 	if len(pages) != 0 {
 		t.Fatalf("panicking fetches should be dropped, got %d pages", len(pages))
+	}
+}
+
+func TestSplitSearchQuery(t *testing.T) {
+	q, full := splitSearchQuery("go 1.24 release notes\n\nAdditional context: focus on stdlib")
+	if q != "go 1.24 release notes" {
+		t.Errorf("searchQuery = %q, want %q", q, "go 1.24 release notes")
+	}
+	if full != "go 1.24 release notes\n\nAdditional context: focus on stdlib" {
+		t.Errorf("fullQuery = %q", full)
+	}
+
+	q2, full2 := splitSearchQuery("  plain query  ")
+	if q2 != "plain query" || full2 != "plain query" {
+		t.Errorf("plain query split = (%q, %q)", q2, full2)
+	}
+}
+
+func TestSearchRank_ShortCircuitsAndSetsLowEffort(t *testing.T) {
+	var calls atomic.Int32
+	var lastReq provider.StreamRequest
+	p := scriptedSearchProvider{
+		events: []provider.StreamEvent{{Type: provider.EventTextDelta, Text: "2\n1\n"}},
+		calls:  &calls,
+		last:   &lastReq,
+	}
+	lr := &LoopRunner{}
+	tune := searchTuning{fetchTopK: 2, pageChars: 6000}
+
+	// When len(candidates) <= fetchTopK, searchRank must short-circuit without
+	// making an LLM round trip.
+	two := []search.SearchResult{
+		{Title: "One", URL: "https://a.dev/1"},
+		{Title: "Two", URL: "https://b.dev/2"},
+	}
+	picks := lr.searchRank(context.Background(), p, "test-model", "q", two, tune)
+	if len(picks) != 2 || calls.Load() != 0 {
+		t.Fatalf("short-circuit: got %d picks and %d LLM calls, want 2 picks and 0 calls", len(picks), calls.Load())
+	}
+
+	// When len(candidates) > fetchTopK, searchRank calls the LLM with EffortLow
+	// and searchRankMaxTokens.
+	three := append(two, search.SearchResult{Title: "Three", URL: "https://c.dev/3"})
+	picks = lr.searchRank(context.Background(), p, "test-model", "q", three, tune)
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", calls.Load())
+	}
+	if lastReq.Effort != provider.EffortLow {
+		t.Errorf("Effort = %q, want %q", lastReq.Effort, provider.EffortLow)
+	}
+	if lastReq.MaxTokens != searchRankMaxTokens {
+		t.Errorf("MaxTokens = %d, want %d", lastReq.MaxTokens, searchRankMaxTokens)
+	}
+	if len(picks) != 2 || picks[0].Title != "Two" || picks[1].Title != "One" {
+		t.Errorf("ranked picks = %+v, want [Two, One]", picks)
+	}
+}
+
+func TestBuildSourceMaterial_FallbackUsesRankedPicks(t *testing.T) {
+	picks := []search.SearchResult{
+		{Title: "RankedFirst", URL: "https://best.dev/doc", Snippet: "authoritative snippet"},
+	}
+	got := buildSourceMaterial(picks, nil, searchTuning{fetchTopK: 4, pageChars: 6000})
+	if !containsAll(got, "RankedFirst", "https://best.dev/doc", "authoritative snippet") {
+		t.Fatalf("fallback source material missing ranked pick:\n%s", got)
+	}
+}
+
+type fakeFetchBackend struct {
+	fetch func(ctx context.Context, url string) (search.PageContent, error)
+}
+
+func (f fakeFetchBackend) Name() string { return "fake" }
+func (f fakeFetchBackend) Search(context.Context, string, int) ([]search.SearchResult, error) {
+	return nil, nil
+}
+func (f fakeFetchBackend) FetchPage(ctx context.Context, u string) (search.PageContent, error) {
+	return f.fetch(ctx, u)
+}
+
+func TestSearchFetch_CancelsStragglerAfterQuorum(t *testing.T) {
+	lr := &LoopRunner{
+		SearchBridge: fakeFetchBackend{
+			fetch: func(ctx context.Context, u string) (search.PageContent, error) {
+				if u == "https://slow.example/hang" {
+					<-ctx.Done()
+					return search.PageContent{}, ctx.Err()
+				}
+				return search.PageContent{URL: u, Title: u, Text: "ok"}, nil
+			},
+		},
+	}
+	picks := []search.SearchResult{
+		{URL: "https://fast.example/1"},
+		{URL: "https://fast.example/2"},
+		{URL: "https://slow.example/hang"},
+	}
+	start := time.Now()
+	pages := lr.searchFetch(context.Background(), picks)
+	elapsed := time.Since(start)
+
+	if len(pages) != 2 {
+		t.Fatalf("got %d pages, want 2 fast pages", len(pages))
+	}
+	if elapsed >= searchFetchTimeout-time.Second {
+		t.Fatalf("searchFetch waited %v (near full timeout %v) instead of cutting off straggler after quorum", elapsed, searchFetchTimeout)
 	}
 }

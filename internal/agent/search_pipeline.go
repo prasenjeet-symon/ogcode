@@ -29,7 +29,19 @@ import (
 const (
 	searchResultCount    = 20   // results requested for the query from the bridge
 	searchMaxCandidates  = 24   // cap on unique results fed to the ranker
+	searchRankMaxTokens  = 256  // output budget for the ranker (a few line-separated numbers)
 	searchSynthMaxTokens = 4096 // output budget for the final synthesis call
+
+	// searchFetchTimeout bounds Stage 3 as a whole so a single wedged host or
+	// slow browser fallback cannot stall the pipeline for the full per-backend
+	// deadline. Once a quorum of picked pages has arrived, stragglers get the
+	// shorter searchFetchStragglerGrace window to finish before synthesis starts.
+	searchFetchTimeout        = 15 * time.Second
+	searchFetchStragglerGrace = 4 * time.Second
+
+	// searchContextMarker is the separator DeepSearchTool.Execute inserts
+	// between the search query and its optional context field.
+	searchContextMarker = "\n\nAdditional context: "
 
 	defaultSearchFetchTopK = 4    // ranked URLs read in full before synthesis
 	defaultSearchPageChars = 6000 // per-page character cap fed into synthesis
@@ -120,18 +132,19 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model, p
 
 	tune := lr.tuning()
 	today := time.Now().Format("Monday, 2 January 2006")
-	slog.Info("deep search: start", "query", truncateText(query, 80), "model", model,
+	searchQuery, fullQuery := splitSearchQuery(query)
+	slog.Info("deep search: start", "query", truncateText(searchQuery, 80), "model", model,
 		"fetchTopK", tune.fetchTopK, "pageChars", tune.pageChars)
 
-	// Stage 1 — search the query verbatim and collect unique results.
-	candidates := lr.searchGather(ctx, query)
+	// Stage 1 — search the query (without trailing LLM-only context) and collect unique results.
+	candidates := lr.searchGather(ctx, searchQuery)
 	if len(candidates) == 0 {
 		return "No web results were found for this query. The search provider may be rate-limited or blocking automated access — try again shortly or rephrase the query.", nil
 	}
 	slog.Info("deep search: candidates pooled", "count", len(candidates))
 
 	// Stage 2 — let the model rank the results and pick the best URLs.
-	picks := lr.searchRank(ctx, p, model, query, candidates, tune)
+	picks := lr.searchRank(ctx, p, model, fullQuery, candidates, tune)
 	slog.Info("deep search: ranked picks", "count", len(picks))
 
 	// Stage 3 — fetch the chosen pages in parallel.
@@ -139,7 +152,7 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model, p
 	slog.Info("deep search: pages fetched", "count", len(pages))
 
 	// Stage 4 — synthesise a final answer from whatever we managed to fetch.
-	answer, err := lr.searchSynthesize(ctx, p, model, query, today, candidates, pages, tune)
+	answer, err := lr.searchSynthesize(ctx, p, model, fullQuery, today, picks, pages, tune)
 	if err != nil {
 		return "", fmt.Errorf("deep search synthesis: %w", err)
 	}
@@ -180,6 +193,21 @@ func (lr *LoopRunner) resolveSearchProvider(model, providerID string) (provider.
 		}
 	}
 	return p, model
+}
+
+// splitSearchQuery separates the search-engine query from any trailing
+// "Additional context: ..." block appended by DeepSearchTool.Execute. Search
+// engines treat the context block as literal keyword text, which degrades
+// recall or yields zero hits, whereas the LLM ranking and synthesis calls want
+// the full question with context intact.
+func splitSearchQuery(raw string) (searchQuery, fullQuery string) {
+	fullQuery = strings.TrimSpace(raw)
+	if head, _, ok := strings.Cut(raw, searchContextMarker); ok {
+		if q := strings.TrimSpace(head); q != "" {
+			return q, fullQuery
+		}
+	}
+	return fullQuery, fullQuery
 }
 
 // searchGather runs the query verbatim against the bridge and returns the
@@ -290,6 +318,10 @@ const sourceBoundary = `
 // one, but only when it matches a real candidate. On anything unusable it falls
 // back to the top search results so the pipeline always makes progress.
 func (lr *LoopRunner) searchRank(ctx context.Context, p provider.Provider, model, query string, candidates []search.SearchResult, tune searchTuning) []search.SearchResult {
+	if len(candidates) <= tune.fetchTopK {
+		return topResults(candidates, tune.fetchTopK)
+	}
+
 	var sb strings.Builder
 	for i, c := range candidates {
 		// Title as well as snippet: a title carrying a newline could otherwise
@@ -305,7 +337,7 @@ Candidate sources:
 %s
 Pick the %d best sources to read in full to answer the question. Prefer official documentation, primary sources, and authoritative sites over SEO aggregators. Output only their numbers, one per line, most relevant first — just the numbers, nothing else.`, query, sb.String(), tune.fetchTopK)
 
-	out, usage, err := oneShotLLM(ctx, p, model, system, user, 0)
+	out, usage, err := oneShotLLMWithEffort(ctx, p, model, system, user, searchRankMaxTokens, provider.EffortLow)
 	lr.chargeUsage(ctx, providerIDOf(p), model, usage)
 	if err != nil {
 		slog.Warn("deep search: rank failed, using top results", "err", err)
@@ -388,9 +420,31 @@ func isJunkResultHost(raw string) bool {
 }
 
 // searchFetch fetches the chosen pages concurrently, dropping any that fail.
+// Once a quorum of pages has succeeded, stragglers get a short grace window
+// before their context is cancelled so a single hung URL cannot stall the turn.
 func (lr *LoopRunner) searchFetch(ctx context.Context, picks []search.SearchResult) []search.PageContent {
+	if len(picks) == 0 {
+		return nil
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, searchFetchTimeout)
+	defer cancel()
+
 	pages := make([]search.PageContent, len(picks))
 	ok := make([]bool, len(picks))
+	quorum := (len(picks) + 1) / 2
+	var (
+		mu             sync.Mutex
+		succeeded      int
+		stragglerTimer *time.Timer
+	)
+	defer func() {
+		mu.Lock()
+		if stragglerTimer != nil {
+			stragglerTimer.Stop()
+		}
+		mu.Unlock()
+	}()
+
 	var wg sync.WaitGroup
 	for i, c := range picks {
 		wg.Add(1)
@@ -409,13 +463,22 @@ func (lr *LoopRunner) searchFetch(ctx context.Context, picks []search.SearchResu
 						"url", u, "panic", r, "stack", string(debug.Stack()))
 				}
 			}()
-			page, err := lr.SearchBridge.FetchPage(ctx, u)
+			page, err := lr.SearchBridge.FetchPage(fetchCtx, u)
 			if err != nil {
 				slog.Warn("deep search: fetch failed", "url", u, "err", err)
 				return
 			}
 			pages[idx] = page
 			ok[idx] = true
+
+			if len(picks) > 1 {
+				mu.Lock()
+				succeeded++
+				if succeeded == quorum && stragglerTimer == nil {
+					stragglerTimer = time.AfterFunc(searchFetchStragglerGrace, cancel)
+				}
+				mu.Unlock()
+			}
 		}(i, c.URL)
 	}
 	wg.Wait()
@@ -430,10 +493,11 @@ func (lr *LoopRunner) searchFetch(ctx context.Context, picks []search.SearchResu
 }
 
 // searchSynthesize writes the final markdown answer from the fetched pages. If
-// every fetch failed it falls back to synthesising from the search snippets, so
-// the pipeline still returns something useful rather than an empty result.
-func (lr *LoopRunner) searchSynthesize(ctx context.Context, p provider.Provider, model, query, today string, candidates []search.SearchResult, pages []search.PageContent, tune searchTuning) (string, error) {
-	sb := buildSourceMaterial(candidates, pages, tune)
+// every fetch failed it falls back to synthesising from the ranked search
+// snippets, so the pipeline still returns something useful rather than an empty
+// result.
+func (lr *LoopRunner) searchSynthesize(ctx context.Context, p provider.Provider, model, query, today string, picks []search.SearchResult, pages []search.PageContent, tune searchTuning) (string, error) {
+	sb := buildSourceMaterial(picks, pages, tune)
 
 	user := fmt.Sprintf(`Today is %s.
 
@@ -450,13 +514,13 @@ Write the final answer now as plain markdown.`, today, query, sb)
 }
 
 // buildSourceMaterial renders the fetched pages (or, when every fetch failed,
-// the search snippets) as the synthesis call's source block.
+// the ranked search snippets) as the synthesis call's source block.
 //
 // Every field it interpolates came off the network — body, title and snippet
 // alike — so each goes through webText: the separator shape is defused so a page
 // cannot invent a source, titles are collapsed to one line so they cannot open a
 // new frame, and the body is cut on a rune boundary rather than mid-character.
-func buildSourceMaterial(candidates []search.SearchResult, pages []search.PageContent, tune searchTuning) string {
+func buildSourceMaterial(picks []search.SearchResult, pages []search.PageContent, tune searchTuning) string {
 	var sb strings.Builder
 	if len(pages) > 0 {
 		for i, pg := range pages {
@@ -465,7 +529,7 @@ func buildSourceMaterial(candidates []search.SearchResult, pages []search.PageCo
 		}
 		return sb.String()
 	}
-	for i, c := range topResults(candidates, tune.fetchTopK) {
+	for i, c := range topResults(picks, tune.fetchTopK) {
 		fmt.Fprintf(&sb, "\n--- Result %d: %s (%s) ---\n%s\n", i+1,
 			webText(c.Title, 0, true), c.URL, webText(c.Snippet, 0, true))
 	}
@@ -479,6 +543,10 @@ func buildSourceMaterial(candidates []search.SearchResult, pages []search.PageCo
 // (some thinking models emit their whole answer as reasoning). maxTokens of 0
 // leaves the provider default in place.
 func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user string, maxTokens int) (string, *provider.TokenUsage, error) {
+	return oneShotLLMWithEffort(ctx, p, model, system, user, maxTokens, "")
+}
+
+func oneShotLLMWithEffort(ctx context.Context, p provider.Provider, model, system, user string, maxTokens int, effort string) (string, *provider.TokenUsage, error) {
 	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return "", nil, err
@@ -488,6 +556,7 @@ func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user st
 		System:    []string{system},
 		Messages:  []provider.ModelMessage{{Role: "user", Content: userJSON}},
 		MaxTokens: maxTokens,
+		Effort:    effort,
 	}
 	ch, err := p.StreamChat(ctx, req)
 	if err != nil {

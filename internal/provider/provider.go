@@ -448,6 +448,11 @@ type StreamEvent struct {
 	ToolCallID   string          `json:"toolCallId,omitempty"`
 	ToolName     string          `json:"toolName,omitempty"`
 	ToolInput    json.RawMessage `json:"toolInput,omitempty"`
+	// ToolExtra is an opaque, per-tool-call payload the host attached to a
+	// tool call and requires replayed verbatim when that call is resent from
+	// history — Gemini's extra_content (its thought_signature). Captured only
+	// for a host that needs it; see openai_tool_extra.go.
+	ToolExtra    json.RawMessage `json:"toolExtra,omitempty"`
 	FinishReason *string         `json:"finishReason,omitempty"`
 	Usage        *TokenUsage     `json:"usage,omitempty"`
 	Error        string          `json:"error,omitempty"`
@@ -588,6 +593,22 @@ type ReasoningEchoer interface {
 func EchoesReasoning(p Provider) bool {
 	re, ok := p.(ReasoningEchoer)
 	return ok && re.EchoesReasoning()
+}
+
+// ToolExtraEchoer is implemented by providers whose endpoint attaches an opaque
+// payload to each tool call of an assistant message and requires that exact
+// payload back when the message is replayed from history.
+type ToolExtraEchoer interface {
+	// EchoesToolExtra reports whether StreamChat resends each tool call's extra.
+	EchoesToolExtra() bool
+}
+
+// EchoesToolExtra reports whether p needs an assistant tool call's own payload
+// replayed. The stream reader captures it only then, so an opaque blob a
+// provider would ignore is neither carried nor stored.
+func EchoesToolExtra(p Provider) bool {
+	te, ok := p.(ToolExtraEchoer)
+	return ok && te.EchoesToolExtra()
 }
 
 type ModelInfo struct {

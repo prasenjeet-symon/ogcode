@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func TestConvertMessagesEchoesTheModelsOwnReasoning(t *testing.T) {
 		return out
 	}
 
-	got := convertMessages(turn("deepseek-flash"), false, "deepseek-flash", true)
+	got := convertMessages(turn("deepseek-flash"), false, "deepseek-flash", true, false)
 	if want := []string{"", "read the file first", "", "it is the nil check"}; !slices.Equal(echoed(got), want) {
 		t.Errorf("reasoning text = %q, want %q", echoed(got), want)
 	}
@@ -64,13 +65,13 @@ func TestConvertMessagesEchoesTheModelsOwnReasoning(t *testing.T) {
 	}
 
 	none := []string{"", "", "", ""}
-	if got := echoed(convertMessages(turn("deepseek-flash"), false, "deepseek-flash", false)); !slices.Equal(got, none) {
+	if got := echoed(convertMessages(turn("deepseek-flash"), false, "deepseek-flash", false, false)); !slices.Equal(got, none) {
 		t.Errorf("reasoning attached for a provider that does not send it: %q", got)
 	}
-	if got := echoed(convertMessages(turn("deepseek-flash"), false, "deepseek-v4-pro", true)); !slices.Equal(got, none) {
+	if got := echoed(convertMessages(turn("deepseek-flash"), false, "deepseek-v4-pro", true, false)); !slices.Equal(got, none) {
 		t.Errorf("another model's reasoning attached: %q", got)
 	}
-	if got := echoed(convertMessages(turn(""), false, "deepseek-flash", true)); !slices.Equal(got, none) {
+	if got := echoed(convertMessages(turn(""), false, "deepseek-flash", true, false)); !slices.Equal(got, none) {
 		t.Errorf("reasoning of unknown origin attached: %q", got)
 	}
 }
@@ -227,4 +228,43 @@ func TestRunLoopEchoesReasoningToAProviderThatSendsIt(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A Gemini-style host attaches an opaque payload to each assistant tool call
+// and requires it replayed verbatim, so convertMessages puts the stored extra
+// back on the tool call only for a provider that echoes it.
+func TestConvertMessagesEchoesToolExtraForGemini(t *testing.T) {
+	const blob = `{"google":{"thought_signature":"abc"}}`
+	turn := func(extra string) []*session.MessageWithParts {
+		data := `{"tool":"read","callId":"call_1"`
+		if extra != "" {
+			data += `,"extra":` + extra
+		}
+		data += `,"state":{"status":"completed","input":{}}}`
+		return []*session.MessageWithParts{
+			{Info: session.MessageInfo{Role: session.RoleUser}, Parts: []session.Part{
+				{Type: session.PartText, Data: json.RawMessage(`{"text":"fix the bug"}`)},
+			}},
+			{Info: session.MessageInfo{Role: session.RoleAssistant}, Parts: []session.Part{
+				{Type: session.PartTool, Data: json.RawMessage(data)},
+			}},
+		}
+	}
+	toolCalls := func(msgs []provider.ModelMessage) string {
+		for _, m := range msgs {
+			if len(m.ToolCalls) > 0 {
+				return string(m.ToolCalls)
+			}
+		}
+		return ""
+	}
+
+	got := toolCalls(convertMessages(turn(blob), false, "", false, true))
+	if !strings.Contains(got, "extra_content") || !strings.Contains(got, "abc") {
+		t.Errorf("tool call extra not echoed for a Gemini host: %s", got)
+	}
+	none := toolCalls(convertMessages(turn(blob), false, "", false, false))
+	if strings.Contains(none, "extra_content") {
+		t.Errorf("tool call extra attached for a host that does not echo it: %s", none)
+	}
 }

@@ -52,6 +52,7 @@ type ChromiumBackend struct {
 	// profile it is using, so two instances cannot share one.
 	profiles    chan string
 	profileOnce sync.Once
+	profileBase string
 
 	// The liveness probe resolves the browser executable once. Unlike Safari's
 	// Automation grant there is nothing for the user to permit, so a found
@@ -180,8 +181,10 @@ func (s *ChromiumBackend) loadHTML(ctx context.Context, rawURL string) (string, 
 
 	cmd := exec.CommandContext(loadCtx, binary, chromiumArgs(rawURL, dir)...)
 	// Suppress the console window a fresh browser process would otherwise pop
-	// over the server's desktop.
+	// over the server's desktop, and bound pipe drain after termination so a
+	// surviving renderer/GPU child holding stdout open cannot hang cmd.Run().
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -249,6 +252,9 @@ func (s *ChromiumBackend) Search(ctx context.Context, query string, limit int) (
 		slog.Info("chromium backend: engine returned no results", "engine", e.name, "query", query)
 	}
 
+	if len(failures) == 0 {
+		return nil, nil
+	}
 	return nil, fmt.Errorf("chromium: every engine failed (%s)", strings.Join(failures, "; "))
 }
 
@@ -289,6 +295,7 @@ func (s *ChromiumBackend) ensureProfiles() {
 		if err != nil {
 			slog.Warn("web search: could not create a browser profile directory", "err", err)
 		}
+		s.profileBase = base
 		for i := 0; i < chromiumMaxConcurrency; i++ {
 			dir := ""
 			if base != "" {
@@ -301,6 +308,14 @@ func (s *ChromiumBackend) ensureProfiles() {
 			s.profiles <- dir
 		}
 	})
+}
+
+// Close removes the temporary profile directories created for this backend.
+func (s *ChromiumBackend) Close() error {
+	if s.profileBase == "" {
+		return nil
+	}
+	return os.RemoveAll(s.profileBase)
 }
 
 // acquireProfile takes a profile directory, blocking until one is free or the

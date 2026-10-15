@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -162,5 +163,64 @@ func TestTavilyStampsProvider(t *testing.T) {
 	}
 	if b.Name() != ProviderTavily {
 		t.Errorf("Name() = %q, want %q", b.Name(), ProviderTavily)
+	}
+}
+
+func TestTavilyCachesSearchAndPrepopulatesFetchCache(t *testing.T) {
+	var searchCalls, extractCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search":
+			searchCalls.Add(1)
+			_, _ = io.WriteString(w, `{"results":[
+				{"title":"Inline Page","url":"https://a.example/doc","content":"short snippet","raw_content":"# Full Markdown\n\nComplete body from search."},
+				{"title":"Snippet Only","url":"https://b.example/doc","content":"only snippet"}
+			]}`)
+		case "/extract":
+			extractCalls.Add(1)
+			_, _ = io.WriteString(w, `{"results":[{"url":"https://b.example/doc","raw_content":"Extracted body."}],"failed_results":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	b := newTestTavily(srv.URL)
+	ctx := context.Background()
+
+	// First Search hits /search; second identical Search is served from cache.
+	if _, err := b.Search(ctx, "golang", 5); err != nil {
+		t.Fatalf("first Search: %v", err)
+	}
+	if _, err := b.Search(ctx, "golang", 5); err != nil {
+		t.Fatalf("second Search: %v", err)
+	}
+	if got := searchCalls.Load(); got != 1 {
+		t.Fatalf("searchCalls = %d, want 1 (cached)", got)
+	}
+
+	// FetchPage for a URL whose raw_content arrived in /search hits fetchCache
+	// with zero /extract calls.
+	pageA, err := b.FetchPage(ctx, "https://a.example/doc")
+	if err != nil {
+		t.Fatalf("FetchPage inline URL: %v", err)
+	}
+	if !strings.Contains(pageA.Text, "Complete body from search.") || pageA.Title != "Inline Page" {
+		t.Errorf("unexpected cached pageA: %+v", pageA)
+	}
+	if got := extractCalls.Load(); got != 0 {
+		t.Fatalf("extractCalls after inline hit = %d, want 0", got)
+	}
+
+	// FetchPage for a URL without inline raw_content calls /extract once and
+	// caches the result for subsequent fetches.
+	if _, err := b.FetchPage(ctx, "https://b.example/doc"); err != nil {
+		t.Fatalf("first FetchPage extract URL: %v", err)
+	}
+	if _, err := b.FetchPage(ctx, "https://b.example/doc"); err != nil {
+		t.Fatalf("second FetchPage extract URL: %v", err)
+	}
+	if got := extractCalls.Load(); got != 1 {
+		t.Fatalf("extractCalls = %d, want 1 (cached)", got)
 	}
 }

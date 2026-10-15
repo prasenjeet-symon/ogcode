@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,8 +24,10 @@ import (
 // native) so search transparently falls back to the built-in engine rather than
 // going dark.
 type TavilyBackend struct {
-	apiKey string
-	client *http.Client
+	apiKey      string
+	client      *http.Client
+	searchCache *ttlCache[[]SearchResult]
+	fetchCache  *ttlCache[PageContent]
 	// baseURL is the API root, overridable in tests. Defaults to tavilyBaseURL.
 	baseURL string
 }
@@ -57,9 +60,11 @@ const (
 // call (and, via the settings "Test key" action, before that).
 func NewTavilyBackend(apiKey string) *TavilyBackend {
 	return &TavilyBackend{
-		apiKey:  strings.TrimSpace(apiKey),
-		client:  &http.Client{Timeout: tavilyFetchTimeout + 5*time.Second},
-		baseURL: tavilyBaseURL,
+		apiKey:      strings.TrimSpace(apiKey),
+		client:      &http.Client{Timeout: tavilyFetchTimeout + 5*time.Second},
+		searchCache: newTTLCache[[]SearchResult](nativeCacheTTL),
+		fetchCache:  newTTLCache[PageContent](nativeCacheTTL),
+		baseURL:     tavilyBaseURL,
 	}
 }
 
@@ -74,17 +79,23 @@ func (t *TavilyBackend) Search(ctx context.Context, query string, limit int) ([]
 	if limit > tavilyMaxResults {
 		limit = tavilyMaxResults
 	}
+	cacheKey := query + "\x00" + strconv.Itoa(limit)
+	if v, ok := t.searchCache.get(cacheKey); ok {
+		return v, nil
+	}
 
 	reqBody := map[string]any{
-		"query":        query,
-		"max_results":  limit,
-		"search_depth": "basic",
+		"query":               query,
+		"max_results":         limit,
+		"search_depth":        "basic",
+		"include_raw_content": "markdown",
 	}
 	var resp struct {
 		Results []struct {
-			Title   string `json:"title"`
-			URL     string `json:"url"`
-			Content string `json:"content"`
+			Title      string `json:"title"`
+			URL        string `json:"url"`
+			Content    string `json:"content"`
+			RawContent string `json:"raw_content"`
 		} `json:"results"`
 	}
 	if err := t.post(ctx, "/search", reqBody, &resp, tavilySearchTimeout); err != nil {
@@ -97,12 +108,32 @@ func (t *TavilyBackend) Search(ctx context.Context, query string, limit int) ([]
 			continue
 		}
 		out = append(out, SearchResult{Title: r.Title, URL: r.URL, Snippet: r.Content, Provider: ProviderTavily})
+		if raw := strings.TrimSpace(r.RawContent); raw != "" {
+			text, truncated := truncateChars(raw, tavilyPageChars)
+			title := strings.TrimSpace(r.Title)
+			if title == "" {
+				title = titleFromURL(r.URL)
+			}
+			t.fetchCache.set(r.URL, PageContent{
+				URL:       r.URL,
+				Title:     title,
+				Text:      text,
+				Truncated: truncated,
+				Provider:  ProviderTavily,
+			})
+		}
 	}
+	t.searchCache.set(cacheKey, out)
 	return out, nil
 }
 
-// FetchPage returns the readable content of url via POST /extract.
+// FetchPage returns the readable content of url via POST /extract, or from the
+// in-memory cache when a recent Search or FetchPage already retrieved it.
 func (t *TavilyBackend) FetchPage(ctx context.Context, rawURL string) (PageContent, error) {
+	if v, ok := t.fetchCache.get(rawURL); ok {
+		return v, nil
+	}
+
 	reqBody := map[string]any{
 		"urls":          rawURL,
 		"format":        "markdown",
@@ -133,7 +164,9 @@ func (t *TavilyBackend) FetchPage(ctx context.Context, rawURL string) (PageConte
 	// path this is not run through normalizeWhitespace (which would flatten every
 	// paragraph onto one line). Only trim and truncate.
 	text, truncated := truncateChars(strings.TrimSpace(resp.Results[0].RawContent), tavilyPageChars)
-	return PageContent{URL: rawURL, Title: titleFromURL(rawURL), Text: text, Truncated: truncated, Provider: ProviderTavily}, nil
+	page := PageContent{URL: rawURL, Title: titleFromURL(rawURL), Text: text, Truncated: truncated, Provider: ProviderTavily}
+	t.fetchCache.set(rawURL, page)
+	return page, nil
 }
 
 // post sends body as JSON to the Tavily endpoint at path and decodes a 200

@@ -818,23 +818,24 @@ func resolveYahooURL(href string) string {
 // ── extraction ──────────────────────────────────────────────────────────────
 
 // extractReadable pulls the title and readable body text out of an HTML page.
+// It runs Readability first and only parses a second goquery DOM when
+// Readability's title is blank or its body is shorter than readabilityMinChars,
+// avoiding a duplicate full-HTML parse on normal pages.
 func extractReadable(body []byte, pageURL string) (string, string) {
-	doc, docErr := goquery.NewDocumentFromReader(bytes.NewReader(body))
-	docTitle := ""
-	if docErr == nil {
-		docTitle = normalizeWhitespace(doc.Find("title").First().Text())
-	}
-
 	var readTitle, readText string
 	parsed, _ := url.Parse(pageURL)
 	if article, err := readability.FromReader(bytes.NewReader(body), parsed); err == nil {
 		readTitle = normalizeWhitespace(article.Title)
 		readText = normalizeWhitespace(article.TextContent)
 	}
+	if len(readText) >= readabilityMinChars && readTitle != "" {
+		return readTitle, readText
+	}
 
+	doc, docErr := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	title := readTitle
-	if title == "" {
-		title = docTitle
+	if title == "" && docErr == nil {
+		title = normalizeWhitespace(doc.Find("title").First().Text())
 	}
 
 	if len(readText) >= readabilityMinChars || docErr != nil {

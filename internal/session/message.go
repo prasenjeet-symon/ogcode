@@ -262,9 +262,13 @@ const (
 )
 
 type ToolPartData struct {
-	Tool   string    `json:"tool"`
-	CallID string    `json:"callId"`
-	State  ToolState `json:"state"`
+	Tool   string `json:"tool"`
+	CallID string `json:"callId"`
+	// Extra is an opaque per-tool-call payload the host attached and requires
+	// replayed verbatim on the assistant message (Gemini's
+	// extra_content/thought_signature). Empty for every other host.
+	Extra json.RawMessage `json:"extra,omitempty"`
+	State ToolState       `json:"state"`
 }
 
 type ToolState struct {

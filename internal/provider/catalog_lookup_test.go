@@ -190,6 +190,14 @@ func TestCatalogResolvesRealHostSpellings(t *testing.T) {
 		"gemma4:latest":   "google/gemma-4-E4B-it",
 		"devstral:latest": "mistralai/Devstral-Small-2507",
 		"qwen3.8:latest":  "qwen3.8-27b",
+		// Gemini: the flagship, its *-latest pointer, and OpenRouter's spellings
+		// of both.
+		"gemini-4-argon":              "gemini-4-argon",
+		"gemini-pro-latest":           "gemini-4-argon",
+		"google/gemini-pro-latest":    "gemini-4-argon",
+		"gemini-flash-latest":         "gemini-3.8-flash",
+		"~google/gemini-flash-latest": "gemini-3.8-flash",
+		"gemini-flash-lite-latest":    "gemini-3.5-flash-lite",
 		// Ambiguous across hosts: no match beats a wrong window.
 		"deepseek-r1":        "",
 		"deepseek-r1:latest": "",

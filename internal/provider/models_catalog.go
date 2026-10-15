@@ -293,27 +293,38 @@ var OpenAIModels = []CatalogModel{
 //
 // Source: ai.google.dev Gemini API docs — models and per-model pages, pricing,
 // the thinking guide, the OpenAI compatibility page, deprecations and the
-// changelog — verified 2026-10-07. Every model takes text, images, audio and
-// video in a 1,048,576-token window and writes up to 65,536 tokens, thinking
-// included. Prices are the Standard paid tier for prompts up to 200K tokens;
-// 3.6–3.8 Flash are at an introductory price through 2026-12-31 ($1.50 in /
-// $7.50 out / $0.15 cached after). The 2.5 models are open only to projects
-// that used them before 2026-09-18. 3.x deprecated sampling parameters, so they
-// are dropped as for the models that reject them.
+// changelog — verified 2026-10-16. Every model takes text, images, audio and
+// video in a 1,048,576-token window; all but the flagship write up to 65,536
+// tokens, thinking included. Gemini 4 Argon, the flagship reasoning model,
+// writes up to 32,768 (its own API reports the lower cap; OpenRouter advertises
+// 65,536) and caches implicitly only — the explicit cached-content API is not
+// offered for it. Prices are the Standard paid tier for prompts up to 200K
+// tokens; 3.6–3.8 Flash are at an introductory price through 2026-12-31 ($1.50
+// in / $7.50 out / $0.15 cached after), and Gemini 4 Argon rises to $4 in /
+// $20 out / $0.20 cached on 2026-12-01. The 2.5 models are limited to projects
+// that used them before; new projects should start on 3.5 Flash-Lite or 3.8
+// Flash. Gemini 3.7 Flash now answers as 3.8 Flash and 3.5 Flash as 3.6 Flash,
+// and 3.1 Flash-Lite shuts down 2027-05-07. 3.x and later deprecated sampling
+// parameters, so they are dropped as for the models that reject them.
 //
 // Effort is reasoning_effort on the compatible endpoint, mapped onto the
-// model's thinking level. No 3.x model can turn thinking off, and "minimal" is
-// left off the 3.x ladders except where it is the model's own default: Google
-// rejects it outright on several of them, and elsewhere it needs the thought
-// signatures ogcode does not send back. 2.5 Pro cannot turn thinking off; 2.5
-// Flash and Flash-Lite can ("none"). Gemini answers a level a model lacks with a
-// 400, which is why every level here is per model.
+// model's thinking level. 4 Argon and the 3.x models cannot turn thinking off,
+// and "minimal" is left off their ladders except where it is a model's own
+// default: Google rejects it outright on several of them, and elsewhere it
+// needs the thought signatures ogcode does not send back. 2.5 Pro cannot turn
+// thinking off; 2.5 Flash and Flash-Lite can ("none"). Gemini answers a level a
+// model lacks with a 400, which is why every level here is per model.
 var GoogleModels = []CatalogModel{
-	{ID: "gemini-3.8-flash", Name: "Gemini 3.8 Flash", InputPricePerM: 0.75, OutputPricePerM: 3.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	// The flagship reasoning model. Implicit caching only, and its own API caps
+	// output at 32,768 tokens where the rest write 65,536. gemini-pro-latest
+	// points here.
+	{ID: "gemini-4-argon", Aliases: []string{"gemini-pro-latest"}, Name: "Gemini 4 Argon", InputPricePerM: 2, OutputPricePerM: 10, CacheReadPricePerM: 0.1, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 32_768, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortHigh},
+	// gemini-flash-latest points here.
+	{ID: "gemini-3.8-flash", Aliases: []string{"gemini-flash-latest"}, Name: "Gemini 3.8 Flash", InputPricePerM: 0.75, OutputPricePerM: 3.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
 	{ID: "gemini-3.7-flash", Name: "Gemini 3.7 Flash", InputPricePerM: 0.75, OutputPricePerM: 3.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
 	{ID: "gemini-3.6-flash", Name: "Gemini 3.6 Flash", InputPricePerM: 0.75, OutputPricePerM: 3.75, CacheReadPricePerM: 0.075, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
 	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", InputPricePerM: 1.5, OutputPricePerM: 9, CacheReadPricePerM: 0.15, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
-	{ID: "gemini-3.5-flash-lite", Name: "Gemini 3.5 Flash-Lite", InputPricePerM: 0.3, OutputPricePerM: 2.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: minimalToHighEfforts, DefaultEffort: EffortMinimal},
+	{ID: "gemini-3.5-flash-lite", Aliases: []string{"gemini-flash-lite-latest"}, Name: "Gemini 3.5 Flash-Lite", InputPricePerM: 0.3, OutputPricePerM: 2.5, CacheReadPricePerM: 0.03, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: minimalToHighEfforts, DefaultEffort: EffortMinimal},
 	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash-Lite", InputPricePerM: 0.25, OutputPricePerM: 1.5, CacheReadPricePerM: 0.025, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: minimalToHighEfforts, DefaultEffort: EffortMinimal},
 	// The retired gemini-3-pro-preview id now routes here. Prompts over 200K
 	// tokens cost $4 / $18 / $0.40.
