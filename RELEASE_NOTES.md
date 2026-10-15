@@ -1,3 +1,35 @@
+# Release Notes — v0.47.2
+
+## Patch: A Gemini thinking model keeps its footing across tool calls
+
+On a Gemini thinking model, the second turn of a conversation that involved a
+tool call would fail. The model attaches a signed token to each tool call it
+makes and expects that exact token handed back on the next request; Ogcode was
+dropping it, so the follow-up turn was rejected. It is now carried the whole
+way — captured as the reply streams in, kept with the tool call it belongs to,
+and replayed untouched on the next request. Every other provider is unaffected:
+they neither attach the token nor look for it.
+
+## Other changes
+
+- Search is quicker and better aimed: only your query goes to the search engine,
+  not the surrounding instructions; ranking is skipped when there are already
+  few enough candidates; page fetches share a fifteen-second budget and a quorum,
+  so the slowest page no longer holds up the answer; and the summary falls back
+  to the top-ranked pages when it needs to.
+- Tavily fetches a page's content as markdown in the same request and caches it,
+  so a page you settle on is usually already in hand; the built-in reader parses
+  each page once instead of twice.
+- Safari search waits out page rendering only where it matters and polls the page
+  more cheaply while it does.
+- The Windows browser backend tidies up after itself — it reaps its headless
+  process cleanly and removes its temporary profiles — and reports no error when
+  it simply finds nothing.
+- The model catalogue knows the newest Google flagship, Gemini 4 Argon, along
+  with the `-latest` names Google rotates (Gemini Pro, Flash, and Flash-Lite).
+
+---
+
 # Release Notes — v0.47.1
 
 ## Patch: The OGX plan shows its models by the names the plan grants
