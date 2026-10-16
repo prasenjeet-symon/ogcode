@@ -1,3 +1,31 @@
+# Release Notes — v0.47.3
+
+## Patch: Browser-backed search finishes what it starts
+
+Deep research fetches its chosen pages under one shared time budget, and the
+browser fallback was landing on the wrong side of it: the budget expired at the
+same instant an ordinary HTTP fetch timed out, so a page that needed a browser
+to render never got fetched. The window is now wide enough for the fallback to
+render and extract the page.
+
+On macOS that fallback is headless Chromium — Chrome, Chromium, Brave, or Edge,
+whichever is installed — with Safari kept only for a machine that has none of
+them. Search no longer pops open Safari windows or asks for Safari's Automation
+and JavaScript-from-Apple-Events permissions when a Chromium browser is already
+present.
+
+A result is also no longer discarded for looking like a portal homepage when it
+is really technical documentation: `cloud.google.com`, `developers.google.com`
+and their neighbours are kept, while the sign-in, maps, and shopping front doors
+stay filtered out.
+
+## Other changes
+
+- The search backend tidies up after itself: swapping it live and shutting the
+  server down both reap the temporary browser profiles it created.
+
+---
+
 # Release Notes — v0.47.2
 
 ## Patch: A Gemini thinking model keeps its footing across tool calls
