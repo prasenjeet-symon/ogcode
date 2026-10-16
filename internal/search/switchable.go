@@ -27,12 +27,25 @@ func NewSwitchableBackend(b Backend) *SwitchableBackend {
 	return &SwitchableBackend{inner: b}
 }
 
-// Set replaces the active backend. Safe to call concurrently with Search and
-// FetchPage.
+// Set replaces the active backend and releases any resources held by the
+// previous one. Safe to call concurrently with Search and FetchPage.
 func (s *SwitchableBackend) Set(b Backend) {
 	s.mu.Lock()
+	prev := s.inner
 	s.inner = b
 	s.mu.Unlock()
+	if prev != nil && prev != b {
+		_ = closeBackend(prev)
+	}
+}
+
+// Close releases any resources held by the active backend.
+func (s *SwitchableBackend) Close() error {
+	s.mu.Lock()
+	prev := s.inner
+	s.inner = nil
+	s.mu.Unlock()
+	return closeBackend(prev)
 }
 
 func (s *SwitchableBackend) get() Backend {

@@ -138,13 +138,30 @@ func TestURLKeyAndDomain(t *testing.T) {
 }
 
 func TestIsJunkResultHost(t *testing.T) {
-	junk := []string{"https://www.google.us/", "https://google.com/search?q=x", "https://bing.com/", "https://duckduckgo.com/"}
+	junk := []string{
+		"https://www.google.us/",
+		"https://google.com/search?q=x",
+		"https://accounts.google.com/signin",
+		"https://maps.google.com/",
+		"https://translate.google.com/",
+		"https://bing.com/",
+		"https://duckduckgo.com/",
+	}
 	for _, u := range junk {
 		if !isJunkResultHost(u) {
 			t.Errorf("isJunkResultHost(%q) = false, want true", u)
 		}
 	}
-	good := []string{"https://go.dev/doc", "https://github.com/golang/go", "https://stackoverflow.com/q/1"}
+	good := []string{
+		"https://go.dev/doc",
+		"https://github.com/golang/go",
+		"https://stackoverflow.com/q/1",
+		"https://cloud.google.com/docs",
+		"https://developers.google.com/apis",
+		"https://firebase.google.com/docs",
+		"https://support.google.com/chrome",
+		"https://research.google.com/pubs",
+	}
 	for _, u := range good {
 		if isJunkResultHost(u) {
 			t.Errorf("isJunkResultHost(%q) = true, want false", u)

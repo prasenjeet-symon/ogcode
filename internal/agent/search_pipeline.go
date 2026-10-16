@@ -33,11 +33,13 @@ const (
 	searchSynthMaxTokens = 4096 // output budget for the final synthesis call
 
 	// searchFetchTimeout bounds Stage 3 as a whole so a single wedged host or
-	// slow browser fallback cannot stall the pipeline for the full per-backend
-	// deadline. Once a quorum of picked pages has arrived, stragglers get the
-	// shorter searchFetchStragglerGrace window to finish before synthesis starts.
-	searchFetchTimeout        = 15 * time.Second
-	searchFetchStragglerGrace = 4 * time.Second
+	// slow browser fallback cannot stall the pipeline indefinitely, while still
+	// leaving enough headroom after a 15s HTTP timeout (or 30s Tavily timeout)
+	// for the browser fallback (Chromium/Safari) to render and extract the page.
+	// Once a quorum of picked pages has arrived, stragglers get the shorter
+	// searchFetchStragglerGrace window to finish before synthesis starts.
+	searchFetchTimeout        = 45 * time.Second
+	searchFetchStragglerGrace = 8 * time.Second
 
 	// searchContextMarker is the separator DeepSearchTool.Execute inserts
 	// between the search query and its optional context field.
@@ -406,11 +408,39 @@ func firstInt(s string) (int, bool) {
 }
 
 // isJunkResultHost reports whether a result URL is a search-engine or bare
-// portal homepage that carries no article content worth fetching.
+// portal homepage that carries no article content worth fetching. Technical
+// content subdomains under google.com (cloud.google.com, developers.google.com,
+// firebase.google.com, support.google.com, research.google.com, ai.google.dev,
+// etc.) are deliberately preserved.
 func isJunkResultHost(raw string) bool {
 	h := strings.ToLower(domainOf(raw))
-	if strings.HasPrefix(h, "google.") || strings.Contains(h, ".google.") {
+	if strings.HasPrefix(h, "google.") {
 		return true
+	}
+	for _, prefix := range []string{
+		"accounts.google.",
+		"maps.google.",
+		"policies.google.",
+		"consent.google.",
+		"families.google.",
+		"myaccount.google.",
+		"encrypted.google.",
+		"images.google.",
+		"video.google.",
+		"news.google.",
+		"translate.google.",
+		"books.google.",
+		"patents.google.",
+		"scholar.google.",
+		"shopping.google.",
+		"mail.google.",
+		"drive.google.",
+		"docs.google.",
+		"play.google.",
+	} {
+		if strings.HasPrefix(h, prefix) {
+			return true
+		}
 	}
 	switch h {
 	case "bing.com", "duckduckgo.com", "search.yahoo.com":

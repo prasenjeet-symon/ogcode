@@ -2,7 +2,9 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 )
@@ -110,6 +112,31 @@ var _ Backend = (*fallbackBackend)(nil)
 // since this wrapper has no single answer of its own.
 func (f *fallbackBackend) Name() string { return f.primary.Name() }
 
+// Close releases resources held by either half of the fallback chain.
+func (f *fallbackBackend) Close() error {
+	err1 := closeBackend(f.primary)
+	err2 := closeBackend(f.secondary)
+	if err1 != nil {
+		return err1
+	}
+	return err2
+}
+
+// closeBackend releases any resources held by b (such as temporary browser
+// profile directories) if b implements io.Closer.
+func closeBackend(b Backend) error {
+	if c, ok := b.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+// isBrowserUnavailable reports whether err means a browser backend is not
+// installed or cannot be driven on this machine at all.
+func isBrowserUnavailable(err error) bool {
+	return errors.Is(err, errChromiumUnavailable) || errors.Is(err, errSafariUnavailable)
+}
+
 // fallbackLabel builds the attribution for an answer that came from the
 // secondary: the leaf backend that actually produced it, marked as having
 // answered after the primary failed. The leaf is read from the stamp the
@@ -153,11 +180,24 @@ func (f *fallbackBackend) Search(ctx context.Context, query string, limit int) (
 
 	fallbackResults, fallbackErr := f.secondary.Search(ctx, query, limit)
 	if fallbackErr == nil && len(fallbackResults) > 0 {
-		stamp := f.fallbackLabel(fallbackResults[0].Provider)
-		for i := range fallbackResults {
-			fallbackResults[i].Provider = stamp
+		// When the primary is a browser that simply isn't installed on this
+		// machine (e.g. Chromium on a Safari-only Mac) and Safari answers as
+		// the available browser in NewBrowserBackend(), preserve Safari's own
+		// leaf stamp so an outer fallback (or direct browser mode) reads
+		// "safari (native fallback)" or "safari" rather than
+		// "safari (chromium fallback)".
+		if !(isBrowserUnavailable(err) && f.secondary.Name() == ProviderSafari) {
+			stamp := f.fallbackLabel(fallbackResults[0].Provider)
+			for i := range fallbackResults {
+				fallbackResults[i].Provider = stamp
+			}
 		}
 		return fallbackResults, nil
+	}
+	// If the primary browser was not installed at all, surface the secondary's
+	// error rather than the missing-primary sentinel.
+	if isBrowserUnavailable(err) && fallbackErr != nil {
+		return nil, fallbackErr
 	}
 	// Prefer the primary's failure in the report: it is the path that runs
 	// every time, so it is the one worth telling the user about.
@@ -187,11 +227,20 @@ func (f *fallbackBackend) FetchPage(ctx context.Context, url string) (PageConten
 
 	fallbackPage, fallbackErr := f.secondary.FetchPage(ctx, url)
 	if fallbackErr != nil {
+		// When the primary is a browser that is not installed on this machine
+		// (e.g. Chromium in macOS's Chromium -> Safari browser chain), return
+		// the secondary's error directly so an outer fallback wraps one clean
+		// browser failure instead of a nested "chromium: ... (fallback: safari: ...)".
+		if isBrowserUnavailable(err) {
+			return PageContent{}, fallbackErr
+		}
 		// The primary's error describes the ordinary path and is the more
 		// useful of the two; the fallback's is kept alongside it because "both
 		// refused" and "the fallback could not run" are different problems.
 		return PageContent{}, fmt.Errorf("%w (fallback: %v)", err, fallbackErr)
 	}
-	fallbackPage.Provider = f.fallbackLabel(fallbackPage.Provider)
+	if !(isBrowserUnavailable(err) && f.secondary.Name() == ProviderSafari) {
+		fallbackPage.Provider = f.fallbackLabel(fallbackPage.Provider)
+	}
 	return fallbackPage, nil
 }

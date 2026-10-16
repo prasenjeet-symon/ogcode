@@ -277,3 +277,79 @@ func TestFallbackBackend_AttributionComposesNestedChains(t *testing.T) {
 		t.Errorf("provider = %q, want %q", got[0].Provider, "fake (tavily fallback)")
 	}
 }
+
+// On macOS, NewBrowserBackend() is NewFallbackBackend(NewChromiumBackend(),
+// NewSafariBackend()). When no Chromium browser is installed on the machine
+// (errChromiumUnavailable), Safari answers as the available browser: its
+// provider stamp must stay "safari" (not "safari (chromium fallback)"), and if
+// Safari also fails its error must surface cleanly without nested wrapping.
+func TestFallbackBackend_MissingPrimaryBrowserPreservesSafariStampAndError(t *testing.T) {
+	missingChromium := &fakeBackend{name: ProviderChromium, err: errChromiumUnavailable}
+	workingSafari := &fakeBackend{
+		name:    ProviderSafari,
+		results: withProvider(oneResult(), ProviderSafari),
+		page:    PageContent{URL: "https://example.com", Text: "safari body", Provider: ProviderSafari},
+	}
+
+	browser := NewFallbackBackend(missingChromium, workingSafari)
+	res, err := browser.Search(context.Background(), "q", 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if res[0].Provider != ProviderSafari {
+		t.Errorf("search provider = %q, want %q", res[0].Provider, ProviderSafari)
+	}
+
+	page, err := browser.FetchPage(context.Background(), "https://example.com")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if page.Provider != ProviderSafari {
+		t.Errorf("fetch provider = %q, want %q", page.Provider, ProviderSafari)
+	}
+
+	// And when both browsers are unavailable, the outer native -> browser chain
+	// must report a single browser error rather than a nested fallback string.
+	unavailableSafari := &fakeBackend{name: ProviderSafari, err: errSafariUnavailable}
+	bothUnavailable := NewFallbackBackend(missingChromium, unavailableSafari)
+	if _, err := bothUnavailable.Search(context.Background(), "q", 5); !errors.Is(err, errSafariUnavailable) {
+		t.Errorf("search error = %v, want errSafariUnavailable", err)
+	}
+	outer := NewFallbackBackend(&fakeBackend{name: ProviderNative, err: errors.New("http 403 Forbidden")}, bothUnavailable)
+	_, err = outer.FetchPage(context.Background(), "https://example.com")
+	if err == nil {
+		t.Fatal("expected error when native and both browsers fail")
+	}
+	if strings.Count(err.Error(), "fallback:") != 1 {
+		t.Errorf("error = %q, want a single fallback clause rather than nested wrapping", err.Error())
+	}
+}
+
+type closingBackend struct {
+	fakeBackend
+	closed atomic.Int32
+}
+
+func (c *closingBackend) Close() error {
+	c.closed.Add(1)
+	return nil
+}
+
+func TestSwitchableAndFallbackClose(t *testing.T) {
+	b1 := &closingBackend{}
+	b2 := &closingBackend{}
+	chain := NewFallbackBackend(b1, b2)
+
+	sw := NewSwitchableBackend(chain)
+	b3 := &closingBackend{}
+	sw.Set(b3)
+	if b1.closed.Load() != 1 || b2.closed.Load() != 1 {
+		t.Errorf("Set did not close replaced fallback chain: b1=%d b2=%d", b1.closed.Load(), b2.closed.Load())
+	}
+	if err := sw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if b3.closed.Load() != 1 {
+		t.Errorf("Close did not close active backend: b3=%d", b3.closed.Load())
+	}
+}

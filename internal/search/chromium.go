@@ -1,4 +1,4 @@
-//go:build windows
+//go:build darwin || windows
 
 package search
 
@@ -12,10 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -92,10 +92,6 @@ const (
 	// searches to one engine, matching the other backends' pacing.
 	chromiumSearchInterval = 900 * time.Millisecond
 	chromiumSearchJitter   = 2200 * time.Millisecond
-
-	// createNoWindow is the Windows CREATE_NO_WINDOW process flag. Without it
-	// each headless launch flashes a console window on the user's desktop.
-	createNoWindow = 0x08000000
 )
 
 // errChromiumUnavailable reports that the browser could not be driven at all —
@@ -123,15 +119,10 @@ var _ Backend = (*ChromiumBackend)(nil)
 // Name reports the provider name stamped on this backend's results.
 func (s *ChromiumBackend) Name() string { return ProviderChromium }
 
-// NewBrowserBackend names the browser-driven backend for this platform — here,
-// Chrome or Edge driven through Chromium's headless CLI. BuildBackend calls
-// this, so the platform question is asked in one place rather than behind a
-// build tag at every call site.
-func NewBrowserBackend() Backend { return NewChromiumBackend() }
-
 // Available reports whether a Chromium browser can be driven right now. There
-// is no permission to grant on Windows, so the only question is whether Chrome
-// or Edge is installed; the answer is resolved once and kept.
+// is no permission to grant, so the only question is whether a Chromium-based
+// browser (Chrome, Chromium, Brave, or Edge) is installed; the answer is
+// resolved once and kept.
 func (s *ChromiumBackend) Available() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -181,9 +172,9 @@ func (s *ChromiumBackend) loadHTML(ctx context.Context, rawURL string) (string, 
 
 	cmd := exec.CommandContext(loadCtx, binary, chromiumArgs(rawURL, dir)...)
 	// Suppress the console window a fresh browser process would otherwise pop
-	// over the server's desktop, and bound pipe drain after termination so a
+	// over a Windows desktop, and bound pipe drain after termination so a
 	// surviving renderer/GPU child holding stdout open cannot hang cmd.Run().
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	configureChromiumCmd(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -354,6 +345,7 @@ func chromiumArgs(rawURL, profileDir string) []string {
 		"--no-default-browser-check",
 		"--mute-audio",
 		"--hide-scrollbars",
+		"--disable-blink-features=AutomationControlled",
 		fmt.Sprintf("--virtual-time-budget=%d", chromiumVirtualTimeBudget),
 	}
 	if profileDir != "" {
@@ -363,16 +355,15 @@ func chromiumArgs(rawURL, profileDir string) []string {
 }
 
 // findChromium locates a Chromium executable to drive, preferring Chrome over
-// Edge. It checks the usual install locations first — a browser on PATH is
-// unusual on Windows — then falls back to PATH, so an unusual or portable
-// install still works.
+// Chromium, Brave, and Edge. It checks the standard install locations first,
+// then falls back to PATH so a portable or custom install still works.
 func findChromium() string {
 	for _, p := range chromiumCandidates() {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return p
 		}
 	}
-	for _, name := range []string{"chrome.exe", "msedge.exe"} {
+	for _, name := range chromiumLookPathNames(runtime.GOOS) {
 		if p, err := exec.LookPath(name); err == nil {
 			return p
 		}
@@ -380,20 +371,45 @@ func findChromium() string {
 	return ""
 }
 
-// chromiumCandidates lists the installed-browser paths to try, all the Chrome
-// locations before any Edge one so Chrome wins wherever both exist. The roots
-// come from the environment rather than being hard-coded, which covers a 32-bit
-// install on a 64-bit machine (Program Files (x86)) and a per-user install
-// (LocalAppData) as well as the default Program Files.
+// chromiumCandidates lists the installed-browser paths to try on the current
+// OS, ordered so Chrome wins over Chromium, Brave, and Edge wherever several
+// exist.
 func chromiumCandidates() []string {
+	home, _ := os.UserHomeDir()
+	return chromiumCandidatesFor(runtime.GOOS, home, os.Getenv)
+}
+
+func chromiumCandidatesFor(goos, homeDir string, getenv func(string) string) []string {
+	if goos == "darwin" {
+		roots := []string{"/Applications"}
+		if homeDir != "" {
+			roots = append(roots, filepath.Join(homeDir, "Applications"))
+		}
+		relatives := []string{
+			filepath.Join("Google Chrome.app", "Contents", "MacOS", "Google Chrome"),
+			filepath.Join("Chromium.app", "Contents", "MacOS", "Chromium"),
+			filepath.Join("Brave Browser.app", "Contents", "MacOS", "Brave Browser"),
+			filepath.Join("Microsoft Edge.app", "Contents", "MacOS", "Microsoft Edge"),
+		}
+		var out []string
+		for _, rel := range relatives {
+			for _, root := range roots {
+				out = append(out, filepath.Join(root, rel))
+			}
+		}
+		return out
+	}
+
 	roots := []string{
-		os.Getenv("ProgramFiles"),
-		os.Getenv("ProgramFiles(x86)"),
-		os.Getenv("ProgramW6432"),
-		os.Getenv("LocalAppData"),
+		getenv("ProgramFiles"),
+		getenv("ProgramFiles(x86)"),
+		getenv("ProgramW6432"),
+		getenv("LocalAppData"),
 	}
 	relatives := []string{
 		filepath.Join("Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join("Chromium", "Application", "chrome.exe"),
+		filepath.Join("BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
 		filepath.Join("Microsoft", "Edge", "Application", "msedge.exe"),
 	}
 	var out []string
@@ -406,6 +422,13 @@ func chromiumCandidates() []string {
 		}
 	}
 	return out
+}
+
+func chromiumLookPathNames(goos string) []string {
+	if goos == "darwin" {
+		return []string{"google-chrome", "chromium", "brave-browser", "microsoft-edge", "chrome"}
+	}
+	return []string{"chrome.exe", "msedge.exe", "brave.exe"}
 }
 
 // lastLine returns the last non-empty line of s, for surfacing Chromium's

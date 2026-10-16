@@ -161,11 +161,17 @@ func NewSafariBackend() *SafariBackend {
 	}
 }
 
-// NewBrowserBackend names the browser-driven backend for this platform — here,
-// Safari driven through AppleScript. BuildBackend calls this, so the platform
-// question is asked in one place rather than behind a build tag at every call
-// site.
-func NewBrowserBackend() Backend { return NewSafariBackend() }
+// NewBrowserBackend names the browser-driven backend for macOS: a headless
+// Chromium browser (Chrome, Chromium, Brave, or Edge) first, falling back to
+// Safari via AppleScript only when no Chromium browser is installed or when
+// Chromium fails. Driving headless Chromium avoids popping up a Safari window
+// or requiring Safari's Automation and "Allow JavaScript from Apple Events"
+// toggles whenever a Chromium browser is already on the machine.
+func NewBrowserBackend() Backend {
+	return NewFallbackBackend(NewChromiumBackend(), NewSafariBackend())
+}
+
+func configureChromiumCmd(*exec.Cmd) {}
 
 var _ Backend = (*SafariBackend)(nil)
 

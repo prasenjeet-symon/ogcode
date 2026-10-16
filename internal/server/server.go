@@ -790,6 +790,12 @@ func (s *Server) serve(ctx context.Context) error {
 	}
 	closing.Wait()
 
+	if s.searchSwitch != nil {
+		if err := s.searchSwitch.Close(); err != nil {
+			slog.Warn("close search backend", "err", err)
+		}
+	}
+
 	// Close database
 	if s.db != nil {
 		if err := s.db.Close(); err != nil {
