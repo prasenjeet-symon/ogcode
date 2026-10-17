@@ -135,3 +135,57 @@ func TestLLMCompact_NoPriorSummary_LargeWindowKeepsMore(t *testing.T) {
 		t.Errorf("expected 40 recent messages kept (400k window), got %d", len(recent))
 	}
 }
+
+func TestLLMCompact_PreservesTurnPromptWhenFoldedWithWatermarkSummary(t *testing.T) {
+	lr := &LoopRunner{}
+	mock := &captureSummarizerProvider{summary: "MERGED SUMMARY"}
+
+	// Simulate a turn that has already been narrowed by a watermark: index 0 is
+	// the user's turn prompt with the watermark summary folded in, and every
+	// subsequent message in the turn is assistant/tool (no later user message).
+	const originalPrompt = "implement the rate limiter and preserve the original prompt"
+	folded := prependCompactionSummary([]provider.ModelMessage{{
+		Role:    "user",
+		Content: mustJSONString(originalPrompt),
+		Images:  []provider.MessageImage{{MediaType: "image/png", Data: "aW1n"}},
+	}}, "EARLIER WATERMARK SUMMARY")
+
+	msgs := make([]provider.ModelMessage, 0, 21)
+	msgs = append(msgs, folded...)
+	for i := 0; i < 20; i++ {
+		role := "assistant"
+		if i%2 == 1 {
+			role = "tool"
+		}
+		msgs = append(msgs, provider.ModelMessage{
+			Role:    role,
+			Content: mustJSONString(fmt.Sprintf("step %d detail", i)),
+		})
+	}
+
+	addendum, recent := lr.llmCompact(context.Background(), "", mock, "mock-model", msgs, "EARLIER WATERMARK SUMMARY", 0)
+	if !strings.Contains(addendum, "MERGED SUMMARY") {
+		t.Fatalf("expected llmCompact to succeed and return addendum, got %q", addendum)
+	}
+	if len(recent) != 13 { // 1 preserved user prompt + 12 recent assistant/tool messages
+		t.Fatalf("expected 13 messages in recent (user prompt + 12 tail), got %d", len(recent))
+	}
+	if recent[0].Role != "user" {
+		t.Fatalf("recent[0].Role = %q, want user", recent[0].Role)
+	}
+	var lead string
+	if err := json.Unmarshal(recent[0].Content, &lead); err != nil {
+		t.Fatalf("unmarshal recent[0].Content: %v", err)
+	}
+	if lead != originalPrompt {
+		t.Errorf("recent[0] content = %q, want clean original prompt %q", lead, originalPrompt)
+	}
+	if len(recent[0].Images) != 1 || recent[0].Images[0].Data != "aW1n" {
+		t.Errorf("user images lost in llmCompact: %+v", recent[0].Images)
+	}
+}
+
+func mustJSONString(s string) []byte {
+	b, _ := json.Marshal(s)
+	return b
+}

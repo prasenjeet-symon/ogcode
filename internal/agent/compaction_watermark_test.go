@@ -89,6 +89,34 @@ func TestSliceStartNarrowsWithinTheTurn(t *testing.T) {
 	}
 }
 
+func TestSliceTurnKeepsTheTurnPromptAtIndexZero(t *testing.T) {
+	// m0 is an earlier turn; m1 is the current turn's user prompt; m2,m3 are
+	// pre-compaction steps; m4 is the assistant message that called
+	// compact_context; m5 is its tool_result.
+	working := msgs("m0", "m1", "m2", "m3", "m4", "m5")
+	var w compactionWatermark
+
+	// Inactive watermark: sliceTurn is identical to working[turnStart:].
+	uncompacted := w.sliceTurn(working, 1)
+	if len(uncompacted) != 5 || uncompacted[0].Info.ID != "m1" {
+		t.Fatalf("inactive sliceTurn = %d msgs starting at %q, want 5 starting at m1", len(uncompacted), uncompacted[0].Info.ID)
+	}
+
+	// Active watermark at m4: m1 (the original user prompt) must survive at
+	// index 0 while m2 and m3 are dropped ahead of m4, m5.
+	w.set("m4", goodSummary, working)
+	narrowed := w.sliceTurn(working, 1)
+	want := []session.MessageID{"m1", "m4", "m5"}
+	if len(narrowed) != len(want) {
+		t.Fatalf("active sliceTurn len = %d, want %d (%v)", len(narrowed), len(want), want)
+	}
+	for i, id := range want {
+		if narrowed[i].Info.ID != id {
+			t.Errorf("narrowed[%d] = %q, want %q", i, narrowed[i].Info.ID, id)
+		}
+	}
+}
+
 func TestSliceStartIgnoresAStaleWatermark(t *testing.T) {
 	working := msgs("m1", "m2", "m3", "m4", "m5")
 	var w compactionWatermark
@@ -146,6 +174,37 @@ func TestPrependCompactionSummaryIsANoOpWithoutASummary(t *testing.T) {
 	in := []provider.ModelMessage{{Role: "user"}}
 	if out := prependCompactionSummary(in, ""); len(out) != 1 {
 		t.Errorf("got %d messages, want the input untouched", len(out))
+	}
+}
+
+func TestPrependCompactionSummaryPreservesExistingTurnPromptAndImages(t *testing.T) {
+	promptJSON, _ := json.Marshal("fix the login handler and keep its tests green")
+	img := provider.MessageImage{MediaType: "image/png", Data: "YWJj"}
+	in := []provider.ModelMessage{
+		{Role: "user", Content: promptJSON, Images: []provider.MessageImage{img}},
+		{Role: "assistant"},
+		{Role: "tool", ToolCallID: "call_1"},
+	}
+
+	out := prependCompactionSummary(in, goodSummary)
+	if len(out) != len(in) {
+		t.Fatalf("got %d messages, want %d (summary should fold into the opening user prompt)", len(out), len(in))
+	}
+	if len(out[0].Images) != 1 || out[0].Images[0].Data != "YWJj" {
+		t.Errorf("user-attached images were lost during prependCompactionSummary: %+v", out[0].Images)
+	}
+	var text string
+	if err := json.Unmarshal(out[0].Content, &text); err != nil {
+		t.Fatalf("leading content is not a JSON string: %v", err)
+	}
+	if !strings.HasPrefix(text, "fix the login handler and keep its tests green\n\n") {
+		t.Errorf("original user prompt missing from start of leading message: %q", text)
+	}
+	if !strings.Contains(text, goodSummary) {
+		t.Errorf("compaction summary missing from leading message: %q", text)
+	}
+	if got := stripCompactionSummary(text); got != "fix the login handler and keep its tests green" {
+		t.Errorf("stripCompactionSummary = %q, want the clean original user prompt", got)
 	}
 }
 

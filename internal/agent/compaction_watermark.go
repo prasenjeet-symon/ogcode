@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -81,17 +82,51 @@ func (w compactionWatermark) sliceStart(messages []*session.MessageWithParts, tu
 	return turnStart
 }
 
+// sliceTurn returns the current turn's working-set messages as narrowed by the
+// watermark. The turn's opening user message at turnStart is always kept at
+// index 0 so the original user prompt (and any images attached to it) survives
+// compaction; only the intermediate steps between turnStart and the watermark
+// are dropped.
+func (w compactionWatermark) sliceTurn(messages []*session.MessageWithParts, turnStart int) []*session.MessageWithParts {
+	start := w.sliceStart(messages, turnStart)
+	if start <= turnStart {
+		return messages[turnStart:]
+	}
+	out := make([]*session.MessageWithParts, 0, 1+len(messages)-start)
+	out = append(out, messages[turnStart])
+	return append(out, messages[start:]...)
+}
+
 // prependSummary puts the agent's summary in front of the narrowed history as a
 // user message.
 //
-// It has to be a message rather than a system-prompt entry: the narrowed slice
-// begins at the assistant message that called compact_context, and every
-// provider requires the conversation to open with a user turn — ensureStartsWithUser
-// would otherwise drop that assistant message and orphan the tool_result that
-// answers it.
+// When the slice already opens with the turn's user message (kept by sliceTurn
+// so the original user prompt and any attached images survive), the summary is
+// appended to that message's content so the request still opens with a single
+// user turn followed by the watermarked assistant message. When the slice opens
+// with an assistant message, a synthetic user message is prepended so the
+// conversation still opens with a user turn.
 func prependCompactionSummary(messages []provider.ModelMessage, summary string) []provider.ModelMessage {
 	if summary == "" {
 		return messages
+	}
+	if len(messages) > 0 && messages[0].Role == "user" && messages[0].ToolCallID == "" {
+		var existing string
+		if messages[0].Content != nil {
+			_ = json.Unmarshal(messages[0].Content, &existing)
+		}
+		combined := compactionSummaryPreamble + summary
+		if existing != "" {
+			combined = existing + "\n\n" + combined
+		}
+		content, err := json.Marshal(combined)
+		if err != nil {
+			return messages
+		}
+		out := make([]provider.ModelMessage, len(messages))
+		copy(out, messages)
+		out[0].Content = content
+		return out
 	}
 	content, err := json.Marshal(compactionSummaryPreamble + summary)
 	if err != nil {
@@ -100,6 +135,18 @@ func prependCompactionSummary(messages []provider.ModelMessage, summary string) 
 	out := make([]provider.ModelMessage, 0, len(messages)+1)
 	out = append(out, provider.ModelMessage{Role: "user", Content: content})
 	return append(out, messages...)
+}
+
+// stripCompactionSummary removes a trailing or standalone mid-turn compaction
+// summary block from a user message's text, returning the original user prompt.
+func stripCompactionSummary(text string) string {
+	if strings.HasPrefix(text, compactionSummaryPreamble) {
+		return ""
+	}
+	if idx := strings.Index(text, "\n\n"+compactionSummaryPreamble); idx >= 0 {
+		return text[:idx]
+	}
+	return text
 }
 
 // compactionSummaryPreamble labels the summary so the model reads it as its own

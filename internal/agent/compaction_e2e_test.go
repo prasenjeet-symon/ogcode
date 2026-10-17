@@ -128,8 +128,14 @@ func TestRunLoop_CompactContextNarrowsTheNextRequest(t *testing.T) {
 	if err := json.Unmarshal(after[0].Content, &lead); err != nil {
 		t.Fatalf("leading message content is not a JSON string: %v", err)
 	}
+	if !strings.Contains(lead, "do the task") {
+		t.Errorf("the user's original turn prompt was lost during compaction; leading message was:\n%s", lead)
+	}
 	if !strings.Contains(lead, e2eSummary) {
 		t.Error("the agent's summary is missing from the narrowed request")
+	}
+	if strings.Index(lead, "do the task") > strings.Index(lead, e2eSummary) {
+		t.Errorf("original user prompt should precede the compaction summary; got:\n%s", lead)
 	}
 	results := toolResultIDs(after)
 	for _, id := range uses {

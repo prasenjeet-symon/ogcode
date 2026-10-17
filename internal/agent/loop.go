@@ -721,7 +721,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// compaction (if it ever fires) covers anything older within the session.
 		turnStartIdx := findLastTextUserMessageIndex(messages)
 		if turnStartIdx >= 0 && turnStartIdx < len(messages) {
-			modelMessages = convertMessages(messages[watermark.sliceStart(messages, turnStartIdx):], modelSupportsImages, modelID, echoReasoning, echoToolExtra)
+			modelMessages = convertMessages(watermark.sliceTurn(messages, turnStartIdx), modelSupportsImages, modelID, echoReasoning, echoToolExtra)
 		} else {
 			modelMessages = convertMessages(messages, modelSupportsImages, modelID, echoReasoning, echoToolExtra)
 		}
@@ -737,7 +737,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		if prevTurnResponse != "" {
 			modelMessages = prependPreviousResponse(modelMessages, prevTurnResponse)
 		}
-		if watermark.active() {
+		if watermark.active() && (turnStartIdx < 0 || watermark.sliceStart(messages, turnStartIdx) > turnStartIdx) {
 			modelMessages = prependCompactionSummary(modelMessages, watermark.summary)
 		}
 		// Kept out of the cacheable base with the other post-base blocks. It is
@@ -4031,6 +4031,21 @@ func appendGuidanceToUserMessage(messages []provider.ModelMessage, guidance stri
 		messages[i].Content, _ = json.Marshal(content)
 		return
 	}
+	// Last-resort fallback: if the only user message in the slice starts with the
+	// compaction-summary preamble (e.g. an image-only user turn after compaction),
+	// attach the guidance there rather than dropping it.
+	for i, m := range messages {
+		if m.Role != "user" || m.ToolCallID != "" {
+			continue
+		}
+		var content string
+		if m.Content != nil {
+			json.Unmarshal(m.Content, &content)
+		}
+		content += guidanceUserContent(guidance)
+		messages[i].Content, _ = json.Marshal(content)
+		return
+	}
 }
 
 // isContextLengthError returns true when the provider rejects the request because
@@ -4167,8 +4182,15 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, sessionID session.SessionI
 		}
 		// The watermark's synthetic summary message stands for earlier steps and
 		// is already carried by the system addendum; don't duplicate it here.
-		if !strings.HasPrefix(lead, compactionSummaryPreamble) {
-			recent = append([]provider.ModelMessage{messages[0]}, recent...)
+		// Strip any folded compaction summary from the turn prompt so the
+		// original user request (and any attached images) still leads recent.
+		cleanLead := stripCompactionSummary(lead)
+		if cleanLead != "" || len(messages[0].Images) > 0 {
+			first := messages[0]
+			if cleanLead != lead {
+				first.Content, _ = json.Marshal(cleanLead)
+			}
+			recent = append([]provider.ModelMessage{first}, recent...)
 		}
 	}
 
@@ -4197,7 +4219,12 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, sessionID session.SessionI
 		case m.ToolCalls != nil:
 			fmt.Fprintf(&history, "[assistant tool calls]: %s\n\n", string(m.ToolCalls))
 		case content != "":
-			fmt.Fprintf(&history, "[%s]: %s\n\n", m.Role, content)
+			if m.Role == "user" {
+				content = stripCompactionSummary(content)
+			}
+			if content != "" {
+				fmt.Fprintf(&history, "[%s]: %s\n\n", m.Role, content)
+			}
 		}
 	}
 
