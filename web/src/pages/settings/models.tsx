@@ -35,7 +35,6 @@ import {
   type ProviderDef,
 } from '../../lib/providers';
 import { useFeatureFlag } from '../../lib/feature-flags';
-import Logo from '../../components/logo';
 
 // ---------------------------------------------------------------------------
 // Models — one tab per provider.
@@ -310,10 +309,6 @@ export default function ModelsSettings() {
 // none of these models is custom.
 // ---------------------------------------------------------------------------
 
-/** OGLAB's own tile colour. The plan wears it in both themes — the same mark
- *  on the same tile as the OGLAB dashboard — so the two read as one product. */
-const OGLAB_TILE = '#5e6ad2';
-
 const EXTERNAL_ICON = 'M7 17L17 7M9 7h8v8';
 const REFRESH_ICON =
   'M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99';
@@ -561,7 +556,7 @@ function OGXSection(props: {
             keys on that attribute), and this branch has no <Row> to carry it. */}
         <Show when={state() === 'disconnected'}>
           <div data-setting class="px-6 pt-9 pb-8 text-center">
-            <OGXMark class="mx-auto w-11 h-11 rounded-[12px]" />
+            <OGXMark class="mx-auto w-11 h-11" />
             <p class="mt-3.5 text-ui font-semibold text-[color:var(--text-primary)]">Connect your ogcode plan</p>
             <p class="mx-auto mt-1.5 max-w-[26rem] text-meta leading-[1.6] text-[color:var(--text-tertiary)]">
               Two fast models and $2 of tokens every day, for one flat monthly price. Sign in with OGLAB in
@@ -592,7 +587,7 @@ function OGXSection(props: {
               and the one action that changes it — the dashboard on a live
               plan, subscribing without one, reconnecting a revoked link. */}
           <div data-setting class="flex items-start gap-3.5 px-4 py-4 border-b border-[color:var(--border-subtle)] max-sm:flex-wrap">
-            <OGXMark class="w-10 h-10 rounded-[10px]" />
+            <OGXMark class="w-10 h-10" />
             <div class="min-w-0 flex-1 self-center">
               <p class="text-ui font-semibold text-[color:var(--text-primary)] leading-snug">
                 {{ active: 'OGX', noplan: 'No active plan', revoked: 'Connection expired' }[state() as 'active' | 'noplan' | 'revoked']}
@@ -699,17 +694,10 @@ function OGXSection(props: {
   );
 }
 
-/** The plan's mark: ogcode's loop on OGLAB's tile, white in both themes. */
+/** The plan's mark: OGLAB's own logo, the same artwork its dashboard shows.
+ *  The image carries its own rounded tile, so no radius is set here. */
 function OGXMark(props: { class?: string }) {
-  return (
-    <span
-      class={`shrink-0 flex items-center justify-center text-white ${props.class ?? ''}`}
-      style={{ background: OGLAB_TILE }}
-      aria-hidden="true"
-    >
-      <Logo class="w-[58%] h-[58%]" />
-    </span>
-  );
+  return <img src="/oglab-logo.png" alt="" aria-hidden="true" class={`shrink-0 ${props.class ?? ''}`} />;
 }
 
 /** Words that keep the credential rows on screen while searching, so "key" or
@@ -1327,10 +1315,15 @@ function ModelList(props: {
 
 function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () => void; onRemove: () => void }) {
   const hasPrice = () => props.model.inputPricePerM > 0 || props.model.outputPricePerM > 0;
+  // A disabled row steps the text down one token instead of dimming the whole row
+  // with opacity (which composites text toward the background and drops below
+  // WCAG AA). The unchecked switch plus this colour step are the disabled cues.
+  const nameColor = () => props.model.enabled ? 'text-[color:var(--text-primary)]' : 'text-[color:var(--text-secondary)]';
+  const numColor = () => props.model.enabled ? 'text-[color:var(--text-tertiary)]' : 'text-[color:var(--text-muted)]';
   return (
     <div
       class={`group/row flex items-center gap-3 h-8 border-b border-[color:var(--border-subtle)] last:border-b-0
-              hover:bg-[color:var(--bg-hover)]/40 transition-colors ${props.model.enabled ? '' : 'opacity-60'}`}
+              hover:bg-[color:var(--bg-hover)]/40 transition-colors`}
     >
       <button
         type="button"
@@ -1350,7 +1343,7 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
       </button>
 
       <div class="min-w-0 flex-1 flex items-center gap-1.5">
-        <span class="text-meta text-[color:var(--text-primary)] truncate">{props.model.name}</span>
+        <span class={`text-meta ${nameColor()} truncate`}>{props.model.name}</span>
         <Show when={props.model.default}>
           <Tag tone="accent">default</Tag>
         </Show>
@@ -1367,7 +1360,7 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
       </span>
 
       <span
-        class="hidden sm:block shrink-0 w-[3.5rem] text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]"
+        class={`hidden sm:block shrink-0 w-[3.5rem] text-micro font-mono tabular-nums text-right ${numColor()}`}
         title={props.model.contextWindow ? `Context window: ${props.model.contextWindow.toLocaleString()} tokens` : 'Context window unknown'}
       >
         <Show when={props.model.contextWindow} fallback={<span class="text-[color:var(--text-muted)]">—</span>}>
@@ -1376,7 +1369,7 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
       </span>
 
       <span
-        class="shrink-0 w-[7rem] whitespace-nowrap text-micro font-mono tabular-nums text-right text-[color:var(--text-tertiary)]"
+        class={`shrink-0 w-[7rem] whitespace-nowrap text-micro font-mono tabular-nums text-right ${numColor()}`}
         title={props.included && !hasPrice() ? 'Covered by your plan' : 'Input / output price per 1M tokens'}
       >
         <Show when={hasPrice()} fallback={<span class="text-[color:var(--text-muted)]">{props.included || '—'}</span>}>

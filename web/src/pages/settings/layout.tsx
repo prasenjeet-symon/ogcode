@@ -319,7 +319,7 @@ export default function SettingsLayout(props: RouteSectionProps) {
           </nav>
 
           {/* Desk */}
-          <div
+          <main
             ref={deskEl}
             onScroll={() => {
               if (!deskEl) return;
@@ -351,7 +351,7 @@ export default function SettingsLayout(props: RouteSectionProps) {
               </Show>
               {props.children}
             </div>
-          </div>
+          </main>
         </div>
       </div>
     </SettingsShell.Provider>

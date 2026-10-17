@@ -63,11 +63,11 @@ function PlanDetailContent() {
           />
         }
       >
-      <div class="flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
+      <main class="flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
         {/* Header. The tab toggle moves to the far right on phones and the
             ambient pills (model, token, resource, memory) collapse away —
             the tab switch and the two action buttons are what matter. */}
-        <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-4 backdrop-blur-sm" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(17,17,20,0.8)', 'z-index': 100, [ 'padding-top']: 'env(safe-area-inset-top)' }}>
+        <header class="h-12 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-4 backdrop-blur-sm" style={{ background: 'linear-gradient(var(--tint), var(--tint)) color-mix(in srgb, var(--bg-surface) 80%, transparent)', 'z-index': 100, [ 'padding-top']: 'env(safe-area-inset-top)' }}>
           <DrawerToggle drawer="plans" label="Open plans" />
           <div class="flex items-center gap-2 min-w-0 flex-1">
             <Breadcrumb items={breadcrumbs()} />
@@ -192,7 +192,7 @@ function PlanDetailContent() {
             <TaskBoard />
           </div>
         </div>
-      </div>
+      </main>
       </Show>
     </div>
   );

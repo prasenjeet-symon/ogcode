@@ -21,6 +21,7 @@ interface SidebarShellProps {
 // cycles and keeps the closed state free of layout cost.
 export default function SidebarShell(props: SidebarShellProps) {
   const isOpen = () => drawerIsOpen(props.drawer);
+  const label = () => (props.drawer === 'sessions' ? 'Sessions' : 'Plans');
 
   // Close-on-navigation lives in DrawerNavCloser (app.tsx), which mounts once
   // above the router outlet and survives page swaps — a shell here unmounts
@@ -46,7 +47,7 @@ export default function SidebarShell(props: SidebarShellProps) {
   return (
     <>
       {/* Inline on desktop — zero cost, unchanged layout. */}
-      <div class="hidden lg:flex shrink-0">{props.children}</div>
+      <nav class="hidden lg:flex shrink-0" aria-label={label()}>{props.children}</nav>
 
       {/* Scrim — a SIBLING of the drawer, never a child. The drawer carries a
           CSS transform, and a transformed element becomes the containing
@@ -65,9 +66,11 @@ export default function SidebarShell(props: SidebarShellProps) {
       </Show>
 
       {/* Drawer below lg */}
-      <div
+      <nav
         class={`sidebar-drawer lg:hidden ${isOpen() ? 'is-open' : ''}`}
         aria-hidden={!isOpen()}
+        inert={!isOpen()}
+        aria-label={label()}
       >
         <div
           class="sidebar-drawer-viewport"
@@ -79,7 +82,7 @@ export default function SidebarShell(props: SidebarShellProps) {
         >
           {props.children}
         </div>
-      </div>
+      </nav>
     </>
   );
 }

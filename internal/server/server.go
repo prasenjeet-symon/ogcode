@@ -581,6 +581,13 @@ func (s *Server) serve(ctx context.Context) error {
 		toolRegistry.Register(tool.NewProjectMemoryRecallTool(recallFn, memBarrier))
 	}
 
+	// A turn clears its own running marker when it finishes, so any session
+	// still marked running at startup has no turn to clear it: the process
+	// stopped mid-turn. Clear those markers before the UI can read them.
+	if err := s.store.ResetRunningStatuses(); err != nil {
+		slog.Warn("reset running session statuses", "err", err)
+	}
+
 	// Repair any interactive session whose last turn was cut short by a process
 	// that is no longer running. A crash records nothing on the way out, and
 	// what it leaves behind — a turn with no finish reason, a tool call nothing

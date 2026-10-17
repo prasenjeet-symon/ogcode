@@ -83,7 +83,7 @@ function PlanListContent() {
     <div class="flex h-dvh w-full">
       <PlanSidebar />
 
-      <div class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
+      <main class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
         {/* Floating drawer toggle: this page has no header bar, and below lg
             the plan sidebar (plans/notes/docindex navigation) is a drawer —
             without this a phone has no way off the page. Pinned outside the
@@ -266,7 +266,7 @@ function PlanListContent() {
             </div>
           </Show>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
@@ -299,7 +299,7 @@ function CheckRow(props: { ok: boolean; label: string; okDetail: string; warnDet
           when={props.ok}
           fallback={<span class="text-zinc-400">{props.warnDetail}</span>}
         >
-          <span class="text-emerald-500/70">{props.okDetail}</span>
+          <span class="text-emerald-500">{props.okDetail}</span>
         </Show>
       </div>
     </div>

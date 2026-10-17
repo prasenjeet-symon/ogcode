@@ -1,8 +1,10 @@
 import { useNavigate, useLocation } from '@solidjs/router';
 import { useSession } from '../context/session';
 import { useServer } from '../context/server';
-import { createSignal, createMemo, For, Show } from 'solid-js';
+import { createSignal, createMemo, For, Show, onCleanup } from 'solid-js';
 import { deleteSession } from '../api/client';
+import type { Session } from '../api/client';
+import { createSidebarWidth } from '../lib/sidebar-width';
 import Logo from './logo';
 import SidebarShell from './sidebar-shell';
 
@@ -29,6 +31,21 @@ function shortenPath(path: string): string {
   return `${collapsed.startsWith('~') ? '~' : ''}/…/${segments.slice(-2).join('/')}`;
 }
 
+// Pinned sessions are a local preference (there is no server field for them).
+// Stored as a plain list of ids; they keep the newest-first order they arrive in.
+const PIN_STORAGE_KEY = 'ogcode-pinned-sessions';
+
+function loadPinned(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PIN_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr.filter((x) => typeof x === 'string')) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
 // The sidebar itself. Exported wrapped in SidebarShell so every page that
 // renders <SessionSidebar /> gets the drawer behaviour below lg for free.
 export default function SessionSidebar() {
@@ -50,6 +67,41 @@ function SessionSidebarInner() {
   const [collapsed, setCollapsed] = createSignal(false);
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [draftTitle, setDraftTitle] = createSignal('');
+  const [pinned, setPinned] = createSignal<Set<string>>(loadPinned());
+  const [pinnedOpen, setPinnedOpen] = createSignal(true);
+  const sidebar = createSidebarWidth();
+  let searchInput: HTMLInputElement | undefined;
+
+  const togglePin = (e: MouseEvent, id: string) => {
+    e.stopPropagation();
+    setPinned((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        // private mode / quota — the pin still holds for this session
+      }
+      return next;
+    });
+  };
+
+  // ⌘K / Ctrl-K focuses the session search. Nothing else binds it. The shell
+  // renders two copies of this panel (desktop inline + mobile drawer), so the
+  // guard acts only on the visible one — the hidden copy has no offsetParent.
+  const onSearchShortcut = (e: KeyboardEvent) => {
+    if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) return;
+    const el = searchInput;
+    if (!el || !el.offsetParent) return;
+    e.preventDefault();
+    el.focus();
+    el.select();
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', onSearchShortcut);
+    onCleanup(() => window.removeEventListener('keydown', onSearchShortcut));
+  }
 
   const startRename = (s: { id: string; title: string }) => {
     setEditingId(s.id);
@@ -144,7 +196,7 @@ function SessionSidebarInner() {
     startOfToday.setHours(0, 0, 0, 0);
     const dayMs = 86_400_000;
 
-    const list = filtered();
+    const list = filtered().filter((s) => !pinned().has(s.id));
     const buckets = GROUPS.map((g) => ({ label: g.label, items: [] as typeof list }));
     for (const s of list) {
       // Age in calendar days, so "yesterday at 11pm" never reads as "today".
@@ -155,6 +207,119 @@ function SessionSidebarInner() {
     return buckets.filter((b) => b.items.length > 0);
   });
 
+  const pinnedSessions = createMemo(() => filtered().filter((s) => pinned().has(s.id)));
+
+  // One row renderer shared by the Pinned zone and the date groups.
+  const sessionRow = (s: Session) => {
+    const isActive = () => session.activeSession()?.id === s.id;
+    const isEditing = () => editingId() === s.id;
+    const isPinned = () => pinned().has(s.id);
+    return (
+      <div
+        class={`group/row relative flex items-center gap-2 rounded-md h-7 pl-2.5 pr-1.5 text-ui transition-colors
+          ${isActive()
+            ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)] font-medium'
+            : 'text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)]'
+          }`}
+      >
+        {/* Active marker: a rail on the row's edge rather than a dot inline
+            with the title, so titles all start on the same x whether or not
+            the row is selected. */}
+        <Show when={isActive()}>
+          <span aria-hidden="true" class="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-[color:var(--accent)]" />
+        </Show>
+        <Show
+          when={!isEditing()}
+          fallback={
+            <input
+              ref={(el) => focusRenameInput(el, s.title || '')}
+              type="text"
+              value={draftTitle()}
+              onInput={(e) => setDraftTitle(e.currentTarget.value)}
+              onBlur={(e) => commitOnBlur(e.currentTarget, s.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitRename(s.id); }
+                else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onDblClick={(e) => e.stopPropagation()}
+              placeholder="Untitled"
+              class="flex-1 min-w-0 bg-[color:var(--bg-base)] border border-[color:var(--border-default)]
+                     rounded px-1.5 h-5.5 text-ui text-[color:var(--text-primary)]
+                     focus:outline-none focus:border-[color:var(--accent)]"
+            />
+          }
+        >
+          {/* The row itself is not interactive: a button inside it takes the
+              click and the focus, so the row is reachable by keyboard (and
+              announced) without turning the whole div into a control. */}
+          <button
+            type="button"
+            onClick={() => handleSelect(s.id)}
+            onDblClick={() => startRename(s)}
+            title={s.title || 'Untitled'}
+            aria-current={isActive() ? 'true' : undefined}
+            class="flex items-center gap-2 flex-1 min-w-0 h-full text-left cursor-pointer"
+          >
+            <Show when={s.status === 'running' || s.status === 'failed'}>
+              <span
+                role="img"
+                aria-label={s.status === 'failed' ? 'Task failed' : 'Task running'}
+                title={s.status === 'failed' ? 'Task failed' : 'Task running'}
+                class={`w-1.5 h-1.5 rounded-full shrink-0 ${s.status === 'failed' ? 'bg-[color:var(--danger)]' : 'bg-amber-400 animate-pulse'}`}
+              />
+            </Show>
+            <span class="truncate flex-1 min-w-0">{s.title || 'Untitled'}</span>
+          </button>
+          {/* Timestamp and actions share the row end. The time stays put on
+              hover — the actions appear beside it rather than replacing it,
+              so the moment you were reading is not the moment it vanishes. */}
+          <span class={`text-micro tabular-nums shrink-0 ${isActive() ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-label)]'}`}>
+            {formatTime(s.updatedAt)}
+          </span>
+          <span class={`group-hover/row:flex items-center gap-0.5 shrink-0 ${isPinned() ? 'flex' : 'hidden'}`}>
+            <button
+              onClick={(e) => togglePin(e, s.id)}
+              title={isPinned() ? 'Unpin' : 'Pin'}
+              aria-label={isPinned() ? 'Unpin session' : 'Pin session'}
+              class={`w-5 h-5 rounded flex items-center justify-center transition-colors
+                     ${isPinned()
+                       ? 'text-[color:var(--accent)] hover:bg-[color:var(--bg-elevated)]'
+                       : 'text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)]'
+                     }`}
+            >
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5h6l-.9 5.4 2.4 2.4H7.5l2.4-2.4L9 4.5zm3 7.8V19.5" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); startRename(s); }}
+              title="Rename"
+              aria-label="Rename session"
+              class="w-5 h-5 rounded flex items-center justify-center transition-colors
+                     text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)]"
+            >
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => handleDelete(e, s.id)}
+              title="Delete"
+              aria-label="Delete session"
+              class="w-5 h-5 rounded flex items-center justify-center transition-colors
+                     text-[color:var(--text-tertiary)] hover:text-red-400 hover:bg-red-500/10"
+            >
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 7V4a1 1 0 011-1h2a1 1 0 011 1v3" />
+              </svg>
+            </button>
+          </span>
+        </Show>
+      </div>
+    );
+  };
+
   return (
     <Show
       when={!collapsed()}
@@ -163,6 +328,7 @@ function SessionSidebarInner() {
           <button
             onClick={() => setCollapsed(false)}
             title="Expand sidebar"
+            aria-label="Expand sidebar"
             class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92]"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -172,6 +338,7 @@ function SessionSidebarInner() {
           <button
             onClick={handleNew}
             title="New session"
+            aria-label="New session"
             class="w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92]"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -183,6 +350,7 @@ function SessionSidebarInner() {
             <button
               onClick={() => navigate('/notes')}
               title="Notes"
+              aria-label="Notes"
               class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
                 ${location.pathname.startsWith('/notes')
                   ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
@@ -196,7 +364,8 @@ function SessionSidebarInner() {
           </Show>
           <button
             onClick={() => navigate('/docindex')}
-            title="Doc Index"
+            title="Project Index"
+            aria-label="Project Index"
             class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
               ${location.pathname.startsWith('/docindex')
                 ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
@@ -208,21 +377,9 @@ function SessionSidebarInner() {
             </svg>
           </button>
           <button
-            onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
-            title="Skills"
-            class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
-              ${location.pathname.startsWith('/settings/skills')
-                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
-                : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
-              }`}
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            </svg>
-          </button>
-          <button
             onClick={() => navigate('/settings', { state: { from: location.pathname } })}
             title="Settings"
+            aria-label="Settings"
             class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92]"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -232,12 +389,13 @@ function SessionSidebarInner() {
         </div>
       }
     >
-    <div class="w-[260px] shrink-0 border-r border-[color:var(--border-subtle)] flex flex-col" style={{ background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-surface)' }}>
+    <div class="relative shrink-0 border-r border-[color:var(--border-subtle)] flex flex-col" style={{ width: `${sidebar.width()}px`, background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-surface)' }}>
       {/* Header: brand + collapse + new */}
-      <div class="h-11 shrink-0 px-3 flex items-center gap-2">
+      <div class="h-12 shrink-0 px-3 flex items-center gap-2">
         <button
           onClick={() => navigate('/')}
           title="Home"
+          aria-label="Home"
           class="flex items-center gap-2 flex-1 min-w-0 group"
         >
           <span class="w-6 h-6 rounded-md bg-[color:var(--accent)] flex items-center justify-center shadow-sm shadow-[color:var(--accent)]/15 ring-1 ring-white/10 shrink-0 group-hover:shadow-[color:var(--accent)]/25 transition-shadow">
@@ -270,122 +428,70 @@ function SessionSidebarInner() {
       {/* Search */}
       <div class="px-3 pb-2">
         <div class="relative">
-          <svg class="w-3 h-3 text-[color:var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="w-3 h-3 text-[color:var(--text-label)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
+            ref={(el) => { searchInput = el; }}
             type="text"
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
             placeholder="Search sessions"
             aria-label="Search sessions"
-            class="w-full h-7 pl-7 pr-2 bg-[color:var(--bg-base)] border border-transparent
-                   rounded-md text-meta text-[color:var(--text-primary)] placeholder:text-[color:var(--text-muted)]
-                   focus:outline-none focus:border-[color:var(--border-default)] focus:bg-[color:var(--bg-elevated)]
+            class="w-full h-7 pl-7 pr-10 bg-[color:var(--bg-base)] border border-transparent
+                   rounded-md text-meta text-[color:var(--text-primary)] placeholder:text-[color:var(--text-label)]
+                   focus:outline-none focus:border-[color:var(--accent)] focus:bg-[color:var(--bg-elevated)]
                    transition-colors"
           />
+          <Show when={!query()}>
+            <kbd class="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-[10px] font-mono leading-none text-[color:var(--text-label)] bg-[color:var(--bg-elevated)] border border-[color:var(--border-subtle)] rounded px-1 py-px">
+              ⌘K
+            </kbd>
+          </Show>
         </div>
       </div>
 
       {/* Session list */}
       <div class="flex-1 overflow-y-auto px-2 pt-0.5 pb-2">
+        <Show when={pinnedSessions().length > 0}>
+          <div class="mb-1">
+            <button
+              type="button"
+              onClick={() => setPinnedOpen((v) => !v)}
+              class="w-full flex items-center gap-1 px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none hover:text-[color:var(--text-secondary)] transition-colors"
+            >
+              <svg class={`w-2.5 h-2.5 transition-transform ${pinnedOpen() ? '' : '-rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+              <span>Pinned</span>
+            </button>
+            <Show when={pinnedOpen()}>
+              <For each={pinnedSessions()}>{(s) => sessionRow(s)}</For>
+            </Show>
+          </div>
+        </Show>
         <For each={grouped()}>
           {(group) => (
             <div class="mb-1">
-              <div class="px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-muted)] select-none">
+              <div class="px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
                 {group.label}
               </div>
-              <For each={group.items}>
-                {(s) => {
-                  const isActive = () => session.activeSession()?.id === s.id;
-                  const isEditing = () => editingId() === s.id;
-                  return (
-                    <div
-                      onClick={() => !isEditing() && handleSelect(s.id)}
-                      onDblClick={(e) => { e.stopPropagation(); startRename(s); }}
-                      title={s.title || 'Untitled'}
-                      class={`group/row relative flex items-center gap-2 cursor-pointer rounded-md h-7 pl-2.5 pr-1.5 text-ui transition-colors
-                        ${isActive()
-                          ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)] font-medium'
-                          : 'text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)]'
-                        }`}
-                    >
-                      {/* Active marker: a rail on the row's edge rather than a
-                          dot inline with the title, so titles all start on the
-                          same x whether or not the row is selected. */}
-                      <Show when={isActive()}>
-                        <span class="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-[color:var(--accent)]" />
-                      </Show>
-                      <Show
-                        when={!isEditing()}
-                        fallback={
-                          <input
-                            ref={(el) => focusRenameInput(el, s.title || '')}
-                            type="text"
-                            value={draftTitle()}
-                            onInput={(e) => setDraftTitle(e.currentTarget.value)}
-                            onBlur={(e) => commitOnBlur(e.currentTarget, s.id)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') { e.preventDefault(); commitRename(s.id); }
-                              else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            onDblClick={(e) => e.stopPropagation()}
-                            placeholder="Untitled"
-                            class="flex-1 min-w-0 bg-[color:var(--bg-base)] border border-[color:var(--border-default)]
-                                   rounded px-1.5 h-5.5 text-ui text-[color:var(--text-primary)]
-                                   focus:outline-none focus:border-[color:var(--accent)]"
-                          />
-                        }
-                      >
-                        <span class="truncate flex-1 min-w-0">{s.title || 'Untitled'}</span>
-                        {/* Timestamp and row actions occupy the same slot: the
-                            time is ambient information, the actions are what
-                            you want the instant you reach for the row. */}
-                        <span class="text-micro tabular-nums shrink-0 text-[color:var(--text-muted)] group-hover/row:hidden">
-                          {formatTime(s.updatedAt)}
-                        </span>
-                        <span class="hidden group-hover/row:flex items-center gap-0.5 shrink-0">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); startRename(s); }}
-                            title="Rename"
-                            aria-label="Rename session"
-                            class="w-5 h-5 rounded flex items-center justify-center transition-colors
-                                   text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)]"
-                          >
-                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                              <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={(e) => handleDelete(e, s.id)}
-                            title="Delete"
-                            aria-label="Delete session"
-                            class="w-5 h-5 rounded flex items-center justify-center transition-colors
-                                   text-[color:var(--text-tertiary)] hover:text-red-400 hover:bg-red-500/10"
-                          >
-                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 7V4a1 1 0 011-1h2a1 1 0 011 1v3" />
-                            </svg>
-                          </button>
-                        </span>
-                      </Show>
-                    </div>
-                  );
-                }}
-              </For>
+              <For each={group.items}>{(s) => sessionRow(s)}</For>
             </div>
           )}
         </For>
         <Show when={filtered().length === 0}>
-          <div class="px-3 py-10 text-center text-meta text-[color:var(--text-muted)]">
+          <div class="px-3 py-10 text-center text-meta text-[color:var(--text-label)]">
             {query() ? 'No matches' : 'No sessions yet'}
           </div>
         </Show>
       </div>
 
-      {/* Notes nav item — above footer */}
+      {/* Workspace nav — above footer */}
       <div class="shrink-0 px-2 pb-1">
+        <div class="px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
+          Workspace
+        </div>
         <Show when={notesOn()}>
           <button
             type="button"
@@ -393,7 +499,7 @@ function SessionSidebarInner() {
             class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
               ${location.pathname.startsWith('/notes')
                 ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+                : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
               }`}
           >
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -408,7 +514,7 @@ function SessionSidebarInner() {
           class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
             ${location.pathname.startsWith('/docindex')
               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+              : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -423,7 +529,7 @@ function SessionSidebarInner() {
             class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
               ${location.pathname.startsWith('/device')
                 ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+                : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
               }`}
           >
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -438,27 +544,13 @@ function SessionSidebarInner() {
           class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
             ${location.pathname.startsWith('/preview')
               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+              : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
           </svg>
           <span>Preview</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
-          class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
-            ${location.pathname.startsWith('/settings/skills')
-              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
-            }`}
-        >
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 5.74L18 6.75l-.259-1.01a3.375 3.375 0 00-2.455-2.455L14.27 3 14.526 2.01a3.375 3.375 0 012.455-2.455L18 1.25l.259-1.01a3.375 3.375 0 012.455 2.455L21 5.25l1.01-.259a3.375 3.375 0 012.455 2.455z" />
-          </svg>
-          <span>Skills</span>
         </button>
       </div>
 
@@ -468,20 +560,38 @@ function SessionSidebarInner() {
           type="button"
           onClick={() => navigate('/settings', { state: { from: location.pathname } })}
           title="Settings"
-          class="w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92] shrink-0"
+          aria-label="Settings"
+          class="w-7 h-7 rounded-md text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition-all active:scale-[0.92] shrink-0"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
-        <span class="text-micro text-zinc-500 truncate flex-1 font-mono" title={server.directory() || 'unknown'}>
+        <span class="text-micro text-[color:var(--text-label)] truncate flex-1 font-mono" title={server.directory() || 'unknown'}>
           {shortenPath(server.directory()) || '—'}
         </span>
         <span
+          role="img"
           title={server.connected() ? 'Connected' : 'Disconnected'}
+          aria-label={server.connected() ? 'Connected' : 'Disconnected'}
           class={`w-1.5 h-1.5 rounded-full shrink-0 mr-1 ${server.connected() ? 'bg-emerald-400' : 'bg-zinc-600'}`}
         />
       </div>
+      {/* Drag grip: resizes the panel from its right edge. It is a focusable
+          separator, so the panel is also resizable from the keyboard. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuenow={sidebar.width()}
+        aria-valuemin={sidebar.min}
+        aria-valuemax={sidebar.max}
+        tabindex="0"
+        onPointerDown={sidebar.start}
+        onKeyDown={sidebar.nudge}
+        title="Drag to resize"
+        class="absolute top-0 -right-[3px] bottom-0 w-[6px] cursor-col-resize z-10 hidden lg:block hover:bg-[color:var(--accent)]/25 focus-visible:bg-[color:var(--accent)]/40 focus-visible:outline-none transition-colors"
+      />
     </div>
     </Show>
   );

@@ -122,7 +122,7 @@ function TileBody(props: { svc: PreviewService; busy: boolean; onPublish: () => 
           <button
             onClick={() => props.onPublish()}
             disabled={props.busy}
-            class="mt-3 h-8 px-3 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            class="mt-3 h-8 px-3 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {props.busy ? 'Publishing…' : `Preview port ${props.svc.port}`}
           </button>
@@ -362,7 +362,7 @@ export default function PreviewPage() {
     <div class="flex h-dvh w-full">
       <Sidebar />
 
-      <div class="flex-1 flex flex-col overflow-hidden bg-[color:var(--bg-base)]">
+      <main class="flex-1 flex flex-col overflow-hidden bg-[color:var(--bg-base)]">
         {/* ---- Header ---- */}
         <header class="shrink-0 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] pl-2 pr-2 sm:pl-3 sm:pr-2.5 h-12 flex items-center gap-2 sm:gap-3"
                 style={{ [ 'padding-top']: 'env(safe-area-inset-top)' }}>
@@ -562,7 +562,7 @@ export default function PreviewPage() {
             </div>
           </Show>
         </Show>
-      </div>
+      </main>
     </div>
   );
 }

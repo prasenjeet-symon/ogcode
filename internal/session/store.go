@@ -34,13 +34,13 @@ func (s *Store) Get(id SessionID) (*Session, error) {
 	row := s.db.QueryRow(
 		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
-		        time_created, time_updated
+		        time_created, time_updated, status
 		 FROM session WHERE id = ?`, id,
 	)
 	var sess Session
 	var uIn, uOut, uReason, uCacheRead, uCacheWrite int
 	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
-		&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt)
+		&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -55,7 +55,7 @@ func (s *Store) List(directory string) ([]*Session, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
-		        time_created, time_updated
+		        time_created, time_updated, status
 		 FROM session WHERE directory = ? AND session_type NOT IN ('note', 'index', 'search') ORDER BY time_updated DESC`, directory,
 	)
 	if err != nil {
@@ -68,7 +68,7 @@ func (s *Store) List(directory string) ([]*Session, error) {
 		var sess Session
 		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
 		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
-			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status); err != nil {
 			return nil, err
 		}
 		sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
@@ -84,7 +84,7 @@ func (s *Store) ListAll() ([]*Session, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
-		        time_created, time_updated
+		        time_created, time_updated, status
 		 FROM session ORDER BY time_updated DESC`,
 	)
 	if err != nil {
@@ -97,7 +97,7 @@ func (s *Store) ListAll() ([]*Session, error) {
 		var sess Session
 		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
 		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
-			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status); err != nil {
 			return nil, err
 		}
 		sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
@@ -167,6 +167,25 @@ func (s *Store) UpdateCompactionSummary(id SessionID, summary string) error {
 		`UPDATE session SET compaction_summary = ?, time_updated = ? WHERE id = ?`,
 		summary, Now(), id,
 	)
+	return err
+}
+
+// SetStatus records the session's in-flight turn state (StatusRunning,
+// StatusFailed, or "" for idle/clean). It touches only that column, like
+// AddUtilityUsage, so it cannot clobber a concurrent title or model change, and
+// it leaves time_updated alone: this is not a user-visible session change.
+func (s *Store) SetStatus(id SessionID, status string) error {
+	_, err := s.db.Exec(`UPDATE session SET status = ? WHERE id = ?`, status, id)
+	return err
+}
+
+// ResetRunningStatuses clears the running marker from every session. Called
+// once at startup: a turn clears its own marker when it finishes, so a process
+// that stopped mid-turn leaves the marker behind and the session list would
+// show a running dot for a session nothing is running. (Two servers sharing one
+// project DB would clear each other's markers; that is accepted.)
+func (s *Store) ResetRunningStatuses() error {
+	_, err := s.db.Exec(`UPDATE session SET status = '' WHERE status = 'running'`)
 	return err
 }
 

@@ -186,9 +186,9 @@ function DiffRow(props: { line: DiffLine }) {
         : 'var(--text-muted)';
   const textColor = () =>
     k() === 'add'
-      ? '#a7f3d0'
+      ? 'var(--success)'
       : k() === 'del'
-        ? '#fecaca'
+        ? 'var(--danger)'
         : k() === 'note'
           ? 'var(--text-muted)'
           : 'var(--text-secondary)';

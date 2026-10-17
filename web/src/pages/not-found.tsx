@@ -69,7 +69,9 @@ export default function NotFound() {
   return (
     <div class="flex h-dvh w-full">
       <Sidebar />
-      <NotFoundPanel />
+      <main class="flex flex-1 min-w-0">
+        <NotFoundPanel />
+      </main>
     </div>
   );
 }

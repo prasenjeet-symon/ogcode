@@ -38,16 +38,16 @@ function ChatContent() {
           />
         }
       >
-      <div class="page-enter flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
+      <main class="page-enter flex-1 flex flex-col min-w-0 bg-[color:var(--bg-base)]">
         {/* Header. On phones the ambient pills (resource sparkline, token
             breakdown) collapse into what fits; everything keeps the same
             order so muscle memory transfers. */}
-        <header class="h-11 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-3.5 gap-2 backdrop-blur-md overflow-visible" style={{ background: 'linear-gradient(var(--tint), var(--tint)) rgba(15,15,18,0.82)', 'z-index': 100, [ 'padding-top']: 'env(safe-area-inset-top)' }}>
+        <header class="h-11 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-3.5 gap-2 backdrop-blur-md overflow-visible" style={{ background: 'linear-gradient(var(--tint), var(--tint)) color-mix(in srgb, var(--bg-surface) 82%, transparent)', 'z-index': 100, [ 'padding-top']: 'env(safe-area-inset-top)' }}>
           <DrawerToggle drawer="sessions" label="Open sessions" />
           <div class="flex items-baseline gap-2.5 min-w-0 flex-1">
-            <h2 class="text-ui font-medium text-[color:var(--text-primary)] truncate">
+            <h1 class="text-ui font-medium text-[color:var(--text-primary)] truncate">
               {session.activeSession()?.title || 'New session'}
-            </h2>
+            </h1>
             {/* Live state lives next to the title rather than in the transcript
                 header so it stays visible when the user has scrolled away from
                 the tail of the conversation. */}
@@ -84,7 +84,7 @@ function ChatContent() {
 
         {/* Input (the tool-permission prompt now surfaces inside the composer) */}
         <PromptInput />
-      </div>
+      </main>
       </Show>
 
       {/* The agent's question, if it is blocked on one. Rendered above the chat

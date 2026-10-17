@@ -17,9 +17,20 @@ type Session struct {
 	Permission        string       `json:"permission,omitempty"`
 	CompactionSummary string       `json:"compactionSummary,omitempty"`
 	UtilityTokens     *TokenCounts `json:"utilityTokens,omitempty"`
-	CreatedAt         int64        `json:"createdAt"`
-	UpdatedAt         int64        `json:"updatedAt"`
+	// Status is the session's in-flight turn state, shown as a dot in the
+	// session list: StatusRunning while a turn is running, StatusFailed if the
+	// last turn ended in an error, and "" (idle or finished cleanly) otherwise.
+	Status    string `json:"status,omitempty"`
+	CreatedAt int64  `json:"createdAt"`
+	UpdatedAt int64  `json:"updatedAt"`
 }
+
+// Turn-status values stored on Session.Status. Empty means no turn is in
+// flight (idle, or the last turn finished cleanly) and draws no dot.
+const (
+	StatusRunning = "running"
+	StatusFailed  = "failed"
+)
 
 type MessageRole string
 

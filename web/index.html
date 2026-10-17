@@ -8,8 +8,25 @@
        viewport for the keyboard (iOS gets the same effect via the visualViewport
        listener in lib/keyboard.ts). -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#09090b" />
+  <!-- Paint the right theme before the bundle loads. The value mirrors the
+       server-side setting in localStorage; with none yet recorded we fall back
+       to the OS preference. The bundle then reconciles with the server. -->
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem('ogcode-theme-mode');
+        var light = stored === 'light' || (stored !== 'dark' && window.matchMedia('(prefers-color-scheme: light)').matches);
+        var mode = light ? 'light' : 'dark';
+        var root = document.documentElement;
+        root.dataset.theme = mode;
+        root.style.colorScheme = mode;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', light ? '#f8f8fa' : '#09090b');
+      } catch (e) { /* leave the default dark theme in place */ }
+    })();
+  </script>
   <title>ogcode</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <!-- Fetch the UI typeface alongside the bundle rather than after the CSS

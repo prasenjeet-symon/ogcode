@@ -3,6 +3,7 @@ import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { useTheme } from '../../context/theme';
 import { useDocIndex } from '../../context/docindex';
+import type { ThemeMode } from '../../api/client';
 import {
   Group,
   Row,
@@ -147,11 +148,41 @@ const PRESETS = [
   { label: 'Pink', hex: '#ec4899' },
 ];
 
+// The three-way appearance control. Machine-wide, stored on the server.
+const MODES: { value: ThemeMode; label: string; icon: string }[] = [
+  {
+    value: 'light',
+    label: 'Light',
+    icon: 'M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z',
+  },
+  {
+    value: 'dark',
+    label: 'Dark',
+    icon: 'M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z',
+  },
+  {
+    value: 'system',
+    label: 'System',
+    icon: 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25',
+  },
+];
+
 function ThemeGroup(props: { hide: Hide }) {
   const themeCtx = useTheme();
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal('');
   const [draft, setDraft] = createSignal<string | null>(null);
+  const [modeError, setModeError] = createSignal('');
+
+  const selectMode = async (m: ThemeMode) => {
+    if (themeCtx.mode() === m) return;
+    setModeError('');
+    try {
+      await themeCtx.setMode(m);
+    } catch {
+      setModeError('Could not save the theme.');
+    }
+  };
 
   const isValidHex = (s: string) => /^#[0-9a-fA-F]{6}$/.test(s) || /^#[0-9a-fA-F]{3}$/.test(s);
   const current = () => draft() ?? themeCtx.primaryColor();
@@ -179,8 +210,47 @@ function ThemeGroup(props: { hide: Hide }) {
       id="appearance"
       title="Appearance"
       icon={ICONS.palette}
-      description="One colour drives the whole palette. Saved per project directory, so each workspace keeps its own identity."
+      description="Choose a light, dark, or system-following interface. One colour drives the whole palette."
     >
+      <Row
+        label="Theme"
+        helper="Follows your operating system, or pin light or dark. Saved for the whole machine."
+        hidden={props.hide('Theme', 'light dark mode system appearance colour scheme')}
+      >
+        <div
+          role="radiogroup"
+          aria-label="Theme mode"
+          class="inline-flex items-center gap-0.5 rounded-[8px] border border-[color:var(--border-default)] p-0.5"
+        >
+          <For each={MODES}>
+            {(m) => {
+              const active = () => themeCtx.mode() === m.value;
+              return (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={active()}
+                  onClick={() => selectMode(m.value)}
+                  class="inline-flex items-center gap-1.5 rounded-[6px] px-2.5 py-1.5 text-meta font-medium transition-colors"
+                  style={{
+                    background: active() ? 'var(--accent)' : 'transparent',
+                    color: active() ? 'var(--on-primary)' : 'var(--text-secondary)',
+                  }}
+                >
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d={m.icon} />
+                  </svg>
+                  {m.label}
+                </button>
+              );
+            }}
+          </For>
+        </div>
+        <Show when={modeError()}>
+          <p class="mt-2 text-meta" style={{ color: 'var(--danger)' }}>{modeError()}</p>
+        </Show>
+      </Row>
+
       <Row
         label="Accent colour"
         helper="Pick a colour, type a hex value, or start from a preset."

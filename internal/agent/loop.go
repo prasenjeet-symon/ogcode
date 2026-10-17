@@ -165,6 +165,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// Everything this turn spawns (sub-agents, deep search) inherits ctx, so
 	// stamping the session here lets that work charge its tokens back to it.
 	ctx = withUsageSession(ctx, sessionID)
+
+	// Mark the session as running so the session list can show an in-flight
+	// indicator; the loop.done defer below clears it (or marks it failed). A
+	// no-op without a store (headless paths, tests).
+	lr.setSessionStatus(sessionID, session.StatusRunning)
+
 	agent := GetAgent(agentName)
 	// Read MaxSteps into a local; never mutate the shared LoopRunner field. A
 	// deep_search call runs a nested RunLoop concurrently with the parent loop,
@@ -207,6 +213,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// no stated reason. Carry the text so it has something to show.
 	exitReason := "error"
 	defer func() {
+		// The turn is over: a clean finish (stop, length, aborted, step_limit)
+		// clears the running marker, while an error or panic leaves it failed.
+		// This defer runs after the panic-recovery defer, so exitReason already
+		// reads "panic" by the time it is checked.
+		if runErr != nil || exitReason == "error" || exitReason == "panic" {
+			lr.setSessionStatus(sessionID, session.StatusFailed)
+		} else {
+			lr.setSessionStatus(sessionID, "")
+		}
 		payload := map[string]string{
 			"sessionId": string(sessionID),
 			"reason":    exitReason,
@@ -2948,6 +2963,25 @@ func providerIDOf(p provider.Provider) string {
 		return ""
 	}
 	return p.ID()
+}
+
+// setSessionStatus records the session's in-flight turn state and announces it
+// so an open session list patches the row live. Like recordUtilityCounts the
+// value lives on the session row, not a message, so no message.updated carries
+// it. A no-op without a store.
+func (lr *LoopRunner) setSessionStatus(sessionID session.SessionID, status string) {
+	if lr.Store == nil {
+		return
+	}
+	if err := lr.Store.SetStatus(sessionID, status); err != nil {
+		slog.Warn("set session status", "status", status, "err", err)
+		return
+	}
+	if lr.Bus != nil {
+		if sess, gerr := lr.Store.Get(sessionID); gerr == nil && sess != nil {
+			lr.Bus.Publish("session.updated", sess)
+		}
+	}
 }
 
 // recordUtilityCounts adds already-converted counts to the session's utility

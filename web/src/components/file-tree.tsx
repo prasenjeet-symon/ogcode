@@ -237,12 +237,12 @@ function FolderGlyph(props: { open: boolean }) {
     <Show
       when={props.open}
       fallback={
-        <svg class="w-[13px] h-[13px] shrink-0 text-[#7d8590]" viewBox="0 0 16 16" fill="currentColor">
+        <svg class="w-[13px] h-[13px] shrink-0 text-[color:var(--text-muted)]" viewBox="0 0 16 16" fill="currentColor">
           <path d="M1.75 2.5A1.75 1.75 0 000 4.25v7.5C0 12.716.784 13.5 1.75 13.5h12.5A1.75 1.75 0 0016 11.75v-6A1.75 1.75 0 0014.25 4H7.81l-1.2-1.2a1.75 1.75 0 00-1.238-.513H1.75z" />
         </svg>
       }
     >
-      <svg class="w-[13px] h-[13px] shrink-0 text-[#9aa4b0]" viewBox="0 0 16 16" fill="currentColor">
+      <svg class="w-[13px] h-[13px] shrink-0 text-[color:var(--text-secondary)]" viewBox="0 0 16 16" fill="currentColor">
         <path d="M1.75 2.5h3.622c.464 0 .909.184 1.237.513L7.81 4.22h4.44c.966 0 1.75.784 1.75 1.75v.53H4.6a1.75 1.75 0 00-1.68 1.257L1.2 13.5A1.75 1.75 0 010 11.75v-7.5C0 3.284.784 2.5 1.75 2.5z" />
         <path d="M4.6 7.75h10.4a1 1 0 01.958 1.288l-1.2 4A1.75 1.75 0 0113.07 14.3H2.4a1 1 0 01-.958-1.288l1.482-4.95A1 1 0 014.6 7.75z" />
       </svg>

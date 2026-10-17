@@ -238,7 +238,7 @@ export default function AskUserDialog() {
                                   } ${on() ? 'border-[color:var(--accent)] bg-[color:var(--accent)]' : 'border-[color:var(--border-default)]'}`}
                                 >
                                   <Show when={on()}>
-                                    <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                                    <svg class="w-3 h-3 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                                       <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                                     </svg>
                                   </Show>
@@ -293,7 +293,7 @@ export default function AskUserDialog() {
                   <button
                     type="button"
                     onClick={() => setPos((i) => Math.min(total() - 1, i + 1))}
-                    class="h-8 px-4 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-white hover:opacity-90 transition"
+                    class="h-8 px-4 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:opacity-90 transition"
                   >
                     Next
                   </button>
@@ -302,7 +302,7 @@ export default function AskUserDialog() {
                   <button
                     type="button"
                     onClick={submit}
-                    class="h-8 px-4 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-white hover:opacity-90 transition"
+                    class="h-8 px-4 rounded-lg text-[12px] font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:opacity-90 transition"
                   >
                     {total() > 1 ? 'Submit answers' : 'Submit'}
                   </button>

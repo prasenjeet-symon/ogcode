@@ -157,7 +157,7 @@ function HomeContent() {
     <div class="flex h-dvh w-full">
       <SessionSidebar />
 
-      <div class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
+      <main class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
         {/* Dot grid texture */}
         <div class="pointer-events-none absolute inset-0 bg-grid opacity-40" />
 
@@ -347,7 +347,7 @@ function HomeContent() {
             </div>
           </footer>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

@@ -209,7 +209,7 @@ export default function NotesPage() {
     <div class="flex h-dvh w-full">
       <Sidebar />
 
-      <div class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
+      <main class="page-enter flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
 
         {/* Header. On phones the search drops under the title row rather than
             squeezing beside it. */}
@@ -233,7 +233,7 @@ export default function NotesPage() {
               onClick={handleNewNote}
               disabled={creatingManual()}
               class="h-8 px-3 flex items-center gap-1.5 rounded-md text-[12px] font-medium
-                     bg-[color:var(--accent)] text-white disabled:opacity-50 hover:opacity-90 transition"
+                     bg-[color:var(--accent)] text-[color:var(--on-primary)] disabled:opacity-50 hover:opacity-90 transition"
             >
               <Show when={creatingManual()} fallback={
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
@@ -295,7 +295,7 @@ export default function NotesPage() {
             </For>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

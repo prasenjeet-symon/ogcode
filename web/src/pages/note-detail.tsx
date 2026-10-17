@@ -185,7 +185,7 @@ export default function NoteDetailPage() {
     <div class="flex h-dvh w-full">
       <Sidebar />
 
-      <div class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
+      <main class="flex-1 flex flex-col overflow-hidden relative bg-[color:var(--bg-base)]">
         <Show when={notFound()}>
           <div class="flex-1 flex items-center justify-center text-zinc-500 text-[14px]">
             Note not found.{' '}
@@ -292,7 +292,7 @@ export default function NoteDetailPage() {
                 <button
                   onClick={handleSave}
                   disabled={saving()}
-                  class="shrink-0 h-7 px-3 rounded-md text-[11px] font-medium bg-[color:var(--accent)] text-white disabled:opacity-50 hover:opacity-90 transition"
+                  class="shrink-0 h-7 px-3 rounded-md text-[11px] font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] disabled:opacity-50 hover:opacity-90 transition"
                 >
                   {saving() ? 'Saving…' : 'Save'}
                 </button>
@@ -510,7 +510,7 @@ export default function NoteDetailPage() {
             </Show>
           </div>
         </Show>
-      </div>
+      </main>
     </div>
   );
 }

@@ -65,6 +65,9 @@ func (s *Server) routes() http.Handler {
 		r.Post("/theme", s.handleSetTheme)
 		r.Delete("/theme/{directory}", s.handleDeleteTheme)
 
+		r.Get("/appearance", s.handleGetAppearance)
+		r.Post("/appearance", s.handleSetAppearance)
+
 		r.Get("/search/config", s.handleGetSearchConfig)
 		r.Post("/search/config", s.handleSetSearchConfig)
 		r.Post("/search/config/validate", s.handleValidateSearchKey)

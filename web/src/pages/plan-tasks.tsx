@@ -694,7 +694,7 @@ export default function PlanTasksPage() {
       {/* ── header ── */}
       <header
         class="h-13 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-4 gap-3"
-        style={{ background: 'linear-gradient(var(--tint),var(--tint)) rgba(17,17,20,0.9)', 'z-index': 100 }}
+        style={{ background: 'linear-gradient(var(--tint),var(--tint)) color-mix(in srgb, var(--bg-surface) 90%, transparent)', 'z-index': 100 }}
       >
         <Breadcrumb items={breadcrumbs()} />
         <div class="flex-1" />

@@ -4,6 +4,7 @@ import { useServer } from '../context/server';
 import type { Plan } from '../api/client';
 import { createSignal, createMemo, For, Show } from 'solid-js';
 import SidebarShell from './sidebar-shell';
+import { createSidebarWidth } from '../lib/sidebar-width';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -48,6 +49,7 @@ function PlanSidebarInner() {
   const [query, setQuery] = createSignal('');
   const [collapsed, setCollapsed] = createSignal(false);
   const [archiveFilter, setArchiveFilter] = createSignal<'active' | 'archived'>('active');
+  const sidebar = createSidebarWidth();
 
   const handleNew = async () => {
     const p = await plan.newPlan();
@@ -100,6 +102,7 @@ function PlanSidebarInner() {
           <button
             onClick={() => setCollapsed(false)}
             title="Expand sidebar"
+            aria-label="Expand sidebar"
             class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -109,6 +112,7 @@ function PlanSidebarInner() {
           <button
             onClick={handleNew}
             title="New plan"
+            aria-label="New plan"
             class="w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -120,6 +124,7 @@ function PlanSidebarInner() {
             <button
               onClick={() => navigate('/notes')}
               title="Notes"
+              aria-label="Notes"
               class={`w-8 h-8 rounded-lg flex items-center justify-center transition
                 ${location.pathname.startsWith('/notes')
                   ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
@@ -134,6 +139,7 @@ function PlanSidebarInner() {
           <button
             onClick={() => navigate('/docindex')}
             title="Project Index"
+            aria-label="Project Index"
             class={`w-8 h-8 rounded-lg flex items-center justify-center transition
               ${location.pathname.startsWith('/docindex')
                 ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
@@ -145,21 +151,9 @@ function PlanSidebarInner() {
             </svg>
           </button>
           <button
-            onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
-            title="Skills"
-            class={`w-8 h-8 rounded-lg flex items-center justify-center transition
-              ${location.pathname.startsWith('/settings/skills')
-                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
-                : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
-              }`}
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            </svg>
-          </button>
-          <button
             onClick={() => navigate('/settings', { state: { from: location.pathname } })}
             title="Settings"
+            aria-label="Settings"
             class="w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -169,7 +163,7 @@ function PlanSidebarInner() {
         </div>
       }
     >
-    <div class="w-[260px] shrink-0 border-r border-[color:var(--border-subtle)] flex flex-col" style={{ background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-surface)' }}>
+    <div class="relative shrink-0 border-r border-[color:var(--border-subtle)] flex flex-col" style={{ width: `${sidebar.width()}px`, background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-surface)' }}>
       {/* Header: brand + collapse + new */}
       <div class="h-12 shrink-0 px-3 flex items-center gap-2">
         <button
@@ -187,6 +181,7 @@ function PlanSidebarInner() {
         <button
           onClick={handleNew}
           title="New plan"
+          aria-label="New plan"
           class="w-7 h-7 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -196,6 +191,7 @@ function PlanSidebarInner() {
         <button
           onClick={() => setCollapsed(true)}
           title="Collapse sidebar"
+          aria-label="Collapse sidebar"
           class="w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -207,7 +203,7 @@ function PlanSidebarInner() {
       {/* Search */}
       <div class="px-3 pb-2">
         <div class="relative">
-          <svg class="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="w-3.5 h-3.5 text-[color:var(--text-label)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
@@ -215,9 +211,10 @@ function PlanSidebarInner() {
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
             placeholder="Search plans"
+            aria-label="Search plans"
             class="w-full h-8 pl-8 pr-2 bg-[color:var(--bg-base)] border border-transparent
-                   rounded-md text-[12px] text-zinc-200 placeholder-zinc-600
-                   focus:outline-none focus:border-[color:var(--border-default)] focus:bg-[color:var(--bg-elevated)]
+                   rounded-md text-[12px] text-zinc-200 placeholder:text-[color:var(--text-label)]
+                   focus:outline-none focus:border-[color:var(--accent)] focus:bg-[color:var(--bg-elevated)]
                    transition"
           />
         </div>
@@ -228,13 +225,15 @@ function PlanSidebarInner() {
         <div class="flex rounded-lg border border-[color:var(--border-default)] overflow-hidden">
           <button
             onClick={() => setArchiveFilter('active')}
-            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'active' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-500 hover:text-zinc-300'}`}
+            aria-pressed={archiveFilter() === 'active'}
+            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'active' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-[color:var(--text-label)] hover:text-[color:var(--text-secondary)]'}`}
           >
             Active
           </button>
           <button
             onClick={() => setArchiveFilter('archived')}
-            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'archived' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-500 hover:text-zinc-300'}`}
+            aria-pressed={archiveFilter() === 'archived'}
+            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'archived' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-[color:var(--text-label)] hover:text-[color:var(--text-secondary)]'}`}
           >
             Archive
             <Show when={archivedCount() > 0}>
@@ -258,9 +257,19 @@ function PlanSidebarInner() {
               }
               return { icon: 'dot', color: 'text-zinc-500' };
             };
+            // The status glyph carries real meaning, so it is announced rather
+            // than left as decoration inside the row button.
+            const statusLabel = () => {
+              switch (statusBadge().icon) {
+                case 'lock': return 'Locked';
+                case 'pulse': return 'Breakdown in progress';
+                case 'check': return 'Breakdown complete';
+                case 'x': return 'Breakdown failed';
+                default: return 'Draft';
+              }
+            };
             return (
               <div
-                onClick={() => handleSelect(p.id)}
                 class={`group relative cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition
                   ${isActive()
                     ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
@@ -268,11 +277,18 @@ function PlanSidebarInner() {
                   }`}
               >
                 <div class="flex items-center gap-2">
-                  <Show when={isActive()}>
-                    <span class="w-1 h-1 rounded-full bg-[color:var(--accent)] shrink-0" />
-                  </Show>
-                  <span class="truncate flex-1 min-w-0">{p.title || 'Untitled plan'}</span>
-                  <span class={`shrink-0 ${statusBadge().color}`}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(p.id)}
+                    title={p.title || 'Untitled plan'}
+                    aria-current={isActive() ? 'true' : undefined}
+                    class="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer"
+                  >
+                    <Show when={isActive()}>
+                      <span aria-hidden="true" class="w-1 h-1 rounded-full bg-[color:var(--accent)] shrink-0" />
+                    </Show>
+                    <span class="truncate flex-1 min-w-0">{p.title || 'Untitled plan'}</span>
+                    <span class={`shrink-0 ${statusBadge().color}`} role="img" aria-label={statusLabel()}>
                     <Show when={statusBadge().icon === 'lock'}>
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -292,12 +308,14 @@ function PlanSidebarInner() {
                       </svg>
                     </Show>
                   </span>
-                  <span class={`text-[10.5px] tabular-nums shrink-0 transition max-md:hidden ${isActive() ? 'text-zinc-500' : 'text-zinc-600'} group-hover:opacity-0`}>
+                  </button>
+                  <span class={`text-[10.5px] tabular-nums shrink-0 transition max-md:hidden ${isActive() ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-label)]'} group-hover:opacity-0`}>
                     {formatTime(p.updatedAt)}
                   </span>
                   <button
                     onClick={(e) => handleDelete(e, p.id)}
                     title="Delete"
+                    aria-label="Delete plan"
                     class="absolute right-1.5 w-6 h-6 rounded
                            opacity-0 group-hover:opacity-100
                            text-zinc-500 hover:text-red-400 hover:bg-red-500/10
@@ -313,14 +331,15 @@ function PlanSidebarInner() {
           }}
         </For>
         <Show when={filtered().length === 0}>
-          <div class="px-3 py-10 text-center text-[12px] text-zinc-600">
+          <div class="px-3 py-10 text-center text-[12px] text-[color:var(--text-label)]">
             {query() ? 'No matches' : archiveFilter() === 'archived' ? 'No archived plans' : 'No active plans'}
           </div>
         </Show>
       </div>
 
-      {/* Notes nav item — above footer */}
+      {/* Workspace nav — above footer */}
       <div class="shrink-0 px-2 pb-1">
+        <div class="px-2.5 pb-1 text-[10.5px] font-medium uppercase tracking-wider text-[color:var(--text-label)]">Workspace</div>
         <Show when={notesOn()}>
           <button
             type="button"
@@ -328,7 +347,7 @@ function PlanSidebarInner() {
           class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
             ${location.pathname.startsWith('/notes')
               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+              : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -343,13 +362,13 @@ function PlanSidebarInner() {
           class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
             ${location.pathname.startsWith('/docindex')
               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+              : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
           </svg>
-          <span>Doc Index</span>
+          <span>Project Index</span>
         </button>
         <Show when={deviceOn()}>
           <button
@@ -358,7 +377,7 @@ function PlanSidebarInner() {
             class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
               ${location.pathname.startsWith('/device')
                 ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-                : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+                : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
               }`}
           >
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -373,27 +392,13 @@ function PlanSidebarInner() {
           class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
             ${location.pathname.startsWith('/preview')
               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
+              : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
           </svg>
           <span>Preview</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate('/settings/skills', { state: { from: location.pathname } })}
-          class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
-            ${location.pathname.startsWith('/settings/skills')
-              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
-              : 'text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)]/50'
-            }`}
-        >
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-          </svg>
-          <span>Skills</span>
         </button>
       </div>
 
@@ -403,20 +408,37 @@ function PlanSidebarInner() {
           type="button"
           onClick={() => navigate('/settings', { state: { from: location.pathname } })}
           title="Settings"
-          class="w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition shrink-0"
+          aria-label="Settings"
+          class="w-7 h-7 rounded-md text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)] flex items-center justify-center transition shrink-0"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
-        <span class="text-[11px] text-zinc-500 truncate flex-1 font-mono" title={server.directory() || 'unknown'}>
+        <span class="text-[11px] text-[color:var(--text-label)] truncate flex-1 font-mono" title={server.directory() || 'unknown'}>
           {shortenPath(server.directory()) || '—'}
         </span>
         <span
+          role="img"
           title={server.connected() ? 'Connected' : 'Disconnected'}
+          aria-label={server.connected() ? 'Connected' : 'Disconnected'}
           class={`w-1.5 h-1.5 rounded-full shrink-0 mr-1 ${server.connected() ? 'bg-emerald-400' : 'bg-zinc-600'}`}
         />
       </div>
+      {/* Resize grip — a focusable separator so the panel resizes by keyboard too. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuenow={sidebar.width()}
+        aria-valuemin={sidebar.min}
+        aria-valuemax={sidebar.max}
+        tabindex="0"
+        onPointerDown={sidebar.start}
+        onKeyDown={sidebar.nudge}
+        title="Drag to resize"
+        class="absolute top-0 -right-[3px] bottom-0 w-[6px] cursor-col-resize z-10 hidden lg:block hover:bg-[color:var(--accent)]/25 focus-visible:bg-[color:var(--accent)]/40 focus-visible:outline-none transition-colors"
+      />
     </div>
     </Show>
   );

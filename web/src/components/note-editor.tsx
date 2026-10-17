@@ -782,7 +782,7 @@ export default function NoteEditor(props: NoteEditorProps) {
               </div>
               <div class="px-3 py-2 border-t border-[color:var(--border-subtle)] flex items-center gap-2">
                 <button
-                  class="flex-1 px-3 py-1.5 text-[12px] font-medium bg-[color:var(--accent)] text-white rounded-md hover:opacity-90 transition"
+                  class="flex-1 px-3 py-1.5 text-[12px] font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] rounded-md hover:opacity-90 transition"
                   onMouseDown={e => { e.preventDefault(); applyResult(); }}
                 >
                   Apply

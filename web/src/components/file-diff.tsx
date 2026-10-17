@@ -95,7 +95,7 @@ function DiffRow(props: { row: Row }) {
   const gutter = () => (t() === 'add' ? '+' : t() === 'del' ? '−' : ' ');
   const gutterColor = () =>
     t() === 'add' ? 'var(--success)' : t() === 'del' ? 'var(--danger)' : 'var(--text-muted)';
-  const textColor = () => (t() === 'add' ? '#a7f3d0' : t() === 'del' ? '#fecaca' : 'var(--text-secondary)');
+  const textColor = () => (t() === 'add' ? 'var(--success)' : t() === 'del' ? 'var(--danger)' : 'var(--text-secondary)');
   return (
     <div class="flex" style={{ background: bg() }}>
       <span class="select-none w-5 shrink-0 text-center" style={{ color: gutterColor() }}>{gutter()}</span>

@@ -43,6 +43,8 @@ export interface Session {
   sessionType?: string;
   permission?: string;
   compactionSummary?: string;
+  /** In-flight turn state: 'running', 'failed', or absent when idle/clean. */
+  status?: string;
   utilityTokens?: TokenCounts;
   createdAt: number;
   updatedAt: number;
@@ -790,6 +792,24 @@ export function setTheme(primaryColor: string, directory?: string): Promise<Them
 
 export function deleteTheme(directory: string): Promise<void> {
   return fetchAPI(`/theme/${encodeURIComponent(directory)}`, { method: 'DELETE' });
+}
+
+// Appearance API — the machine-wide light/dark choice.
+export type ThemeMode = 'dark' | 'light' | 'system';
+
+export interface Appearance {
+  mode: ThemeMode;
+}
+
+export function getAppearance(): Promise<Appearance> {
+  return fetchAPI('/appearance');
+}
+
+export function setAppearance(mode: ThemeMode): Promise<Appearance> {
+  return fetchAPI('/appearance', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
 }
 
 // Mode API

@@ -431,7 +431,10 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
         </div>
       </div>
       <pre
+        tabindex="0"
+        aria-label={`${props.label} block`}
         class={`text-micro text-[color:var(--text-secondary)] font-mono leading-[1.6] p-2.5 overflow-y-auto
+          focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[color:var(--accent)]
           ${wrap() ? 'whitespace-pre-wrap break-words overflow-x-hidden' : 'whitespace-pre overflow-x-auto'}`}
         style={{ 'max-height': `${props.maxHeight}px` }}
       >

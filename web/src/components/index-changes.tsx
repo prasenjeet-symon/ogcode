@@ -105,7 +105,7 @@ function statusOf(f: GitFileStatus): { letter: string; title: string; color: str
   if (f.x === '?' || f.y === '?') return { letter: 'U', title: 'Untracked', color: 'var(--success)' };
   if (f.x === 'A') return { letter: 'A', title: 'Added', color: 'var(--success)' };
   if (f.x === 'D' || f.y === 'D') return { letter: 'D', title: 'Deleted', color: 'var(--danger)' };
-  if (f.x === 'R') return { letter: 'R', title: 'Renamed', color: '#58a6ff' };
+  if (f.x === 'R') return { letter: 'R', title: 'Renamed', color: 'var(--color-blue-400)' };
   return { letter: 'M', title: 'Modified', color: 'var(--warning)' };
 }
 

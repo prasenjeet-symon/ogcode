@@ -126,6 +126,24 @@ func rgbaStr(r, g, b uint8, a float64) string {
 	return fmt.Sprintf("rgba(%d, %d, %d, %.2f)", r, g, b, a)
 }
 
+// on-primary crossover: white gives 1.05/(L+0.05), near-black gives (L+0.05)/0.05;
+// they are equal at L = 0.17913. Below it white contrasts more, above it black does.
+const onPrimaryCrossover = 0.17913
+
+// onPrimaryFor returns the label colour to draw on top of the given accent hex:
+// whichever of near-black/near-white contrasts MORE with it, so a filled button,
+// checkbox or badge always clears WCAG AA (4.5:1) on an accent the user chose.
+func onPrimaryFor(accentHex string) string {
+	r, g, b, err := parseHex(accentHex)
+	if err != nil {
+		return "#ffffff"
+	}
+	if relativeLuminance(r, g, b) > onPrimaryCrossover {
+		return "#0a0a0b"
+	}
+	return "#ffffff"
+}
+
 // deriveTheme computes a full palette from a single hex primary color.
 func deriveTheme(primaryHex, directory string) Theme {
 	r, g, b, err := parseHex(primaryHex)
@@ -172,12 +190,8 @@ func deriveTheme(primaryHex, directory string) Theme {
 	// accent-ring: primary at 35% opacity for focus rings
 	accentRing := rgbaStr(r, g, b, 0.35)
 
-	// on-primary: white or dark text depending on contrast
-	lum := relativeLuminance(r, g, b)
-	onPrimary := "#ffffff"
-	if lum > 0.45 {
-		onPrimary = "#0a0a0b"
-	}
+	// on-primary: the label colour drawn on top of the accent.
+	onPrimary := onPrimaryFor(accent)
 
 	// glow: primary at 12% for background accents (like the home page gradient)
 	glow := rgbaStr(r, g, b, 0.12)
@@ -212,6 +226,11 @@ func (s *Server) handleGetTheme(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// No theme saved yet — return defaults
 		t = deriveTheme("#ff5e1f", directory)
+	} else {
+		// on_primary is a cached derivation of accent; rows written before the
+		// crossover rule changed would keep a failing label colour, so recompute
+		// it from the stored accent on every read rather than trusting the column.
+		t.OnPrimary = onPrimaryFor(t.Accent)
 	}
 	writeJSON(w, http.StatusOK, t)
 }

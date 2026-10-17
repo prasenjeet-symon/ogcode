@@ -75,6 +75,14 @@
   --text-ui--line-height: 1.5;
   --text-chat: 0.9375rem;
   --text-chat--line-height: 1.65;
+
+  /* Override Tailwind's zinc-500/zinc-600 text steps. The stock values
+     (#71717b / #52525c) are tuned for mid-gray surfaces; on this app's
+     near-black backgrounds they read at 3.96:1 and 2.57:1, failing WCAG AA.
+     These lifted values clear 4.5:1 on the darkest surface they sit on
+     (--bg-elevated #161619) while keeping the same visual rank. */
+  --color-zinc-500: #86868f;
+  --color-zinc-600: #808088;
 }
 
 /* ============================================================
@@ -93,18 +101,22 @@
   --border-default: #2a2a30;
   --border-strong:  #3a3a42;
 
-  /* Text: warm-cool zinc progression */
+  /* Text: warm-cool zinc progression — every step clears WCAG AA (>= 4.5:1)
+     on the darkest surface it sits on (--bg-elevated #161619). */
   --text-primary:   #ededef;
   --text-secondary: #9d9da6;
-  --text-tertiary:  #6b6b76;
-  --text-muted:     #4a4a55;
+  --text-tertiary:  #8b8b94;
+  --text-muted:     #808088;
+  /* --text-label: the legible floor for small UI text (group labels, timestamps,
+     inactive nav rows) — ~5.3:1 on --bg-surface. */
+  --text-label:     #86868f;
 
   /* Accent: ogcode brand orange (#FF5E1F) — the single saturated color */
   --accent:         #ff5e1f;
   --accent-hover:   #f54500;
   --accent-soft:    rgba(255, 94, 31, 0.12);
   --accent-ring:    rgba(255, 94, 31, 0.35);
-  --on-primary:     #ffffff;
+  --on-primary:     #0a0a0b;
   --glow:           rgba(255, 94, 31, 0.12);
   --tint:           rgba(255, 94, 31, 0.05);
 
@@ -122,6 +134,14 @@
   --status-progress-soft:   rgba(242, 201, 76, 0.14);
   --status-completed-soft:  rgba(255, 94, 31, 0.16);
   --status-failed-soft:     rgba(235, 87, 87, 0.14);
+
+  /* Content surfaces — code blocks, inline code and links. Tokenized so the
+     dark and light themes share one set of rules (see [data-theme="light"].) */
+  --code-bg:        #0d0d10;
+  --code-fg:        #e4e4e7;
+  --doc-fg:         #d4d4d8;
+  --link:           #ffb38a;
+  --link-hover:     #ffc9a8;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -148,6 +168,109 @@
   --spring-bounce: 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
 
   color-scheme: dark;
+}
+
+/* ============================================================
+   Light theme — opt-in via [data-theme="light"] on <html>.
+   Every hardcoded Tailwind color utility (text-zinc-400, bg-red-500/10,
+   border-emerald-500 …) resolves to a --color-* variable, so remapping
+   the palette here flips the whole UI in one place — no per-class rules.
+   The accent (ogcode orange) and --on-primary stay put: they are brand,
+   not surface.
+   ============================================================ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-base:        #f8f8fa;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #ffffff;
+  --bg-overlay:     #f0f0f3;
+  --bg-hover:       #e9e9ee;
+
+  --border-subtle:  #ededf0;
+  --border-default: #dedee4;
+  --border-strong:  #c5c5cd;
+
+  --text-primary:   #16161a;
+  --text-secondary: #494952;
+  --text-tertiary:  #67676f;
+  --text-muted:     #6f6f78;
+  --text-label:     #67676f;
+
+  /* Accent stays brand orange; only the derived tints soften. */
+  --accent-hover:   #e14a00;
+  --accent-soft:    rgba(255, 94, 31, 0.12);
+  --accent-ring:    rgba(255, 94, 31, 0.30);
+  --glow:           rgba(255, 94, 31, 0.10);
+  --tint:           rgba(255, 94, 31, 0.04);
+
+  --success:        #0f7a52;
+  --warning:        #b45309;
+  --danger:         #d1242f;
+  --reasoning:      #6d28d9;
+
+  --status-pending:    #6b7280;
+  --status-progress:   #a16207;
+  --status-completed:  #e14a00;
+  --status-failed:     #d1242f;
+  --status-pending-soft:    rgba(107, 114, 128, 0.12);
+  --status-progress-soft:   rgba(161, 98, 7, 0.14);
+  --status-completed-soft:  rgba(225, 74, 0, 0.14);
+  --status-failed-soft:     rgba(209, 36, 47, 0.12);
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 2px 8px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.08);
+  --shadow-glow: 0 0 16px -4px rgba(255, 94, 31, 0.28);
+
+  /* Content surfaces — see the dark values in :root above. */
+  --code-bg:        #f4f4f6;
+  --code-fg:        #24292f;
+  --doc-fg:         #3f3f46;
+  --link:           #c2410c;
+  --link-hover:     #9a3412;
+
+  /* Zinc ramp inverted: the app's utilities assume light-on-dark steps, so on
+     a light surface a low zinc index has to read dark. */
+  --color-zinc-50:  #18181b;
+  --color-zinc-100: #1c1c20;
+  --color-zinc-200: #26262b;
+  --color-zinc-300: #3a3a42;
+  --color-zinc-400: #52525b;
+  --color-zinc-500: #6b6b75;
+  --color-zinc-600: #7c7c86;
+  --color-zinc-700: #9a9aa4;
+  --color-zinc-800: #d3d3da;
+  --color-zinc-900: #e7e7ec;
+  --color-zinc-950: #f5f5f7;
+
+  /* Semantic palettes remapped for legibility on white: the dark ramp's
+     300/400 text steps become inks, the 800–950 tints become pale washes. */
+  --color-red-300: #b91c1c;
+  --color-red-400: #dc2626;
+  --color-red-800: #fecaca;
+  --color-red-900: #fecaca;
+  --color-red-950: #fef2f2;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-amber-400: #b45309;
+  --color-amber-500: #b45309;
+  --color-amber-900: #fef3c7;
+  --color-amber-950: #fffbeb;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #047857;
+  --color-emerald-500: #059669;
+  --color-emerald-900: #d1fae5;
+  --color-green-400: #15803d;
+  --color-blue-300: #1d4ed8;
+  --color-blue-400: #2563eb;
+  --color-sky-400: #0284c7;
+  --color-cyan-400: #0e7490;
+  --color-teal-400: #0d9488;
+  --color-violet-400: #7c3aed;
+  --color-indigo-400: #4f46e5;
+  --color-rose-400: #e11d48;
+  --color-orange-400: #c2410c;
 }
 
 html, body, #root {
@@ -239,11 +362,11 @@ button:not(:disabled):active,
   border-radius: 999px;
 }
 *:hover::-webkit-scrollbar-thumb {
-  background: #2a2a30;
+  background: var(--border-default);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a42 !important;
+  background: var(--border-strong) !important;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-corner {
@@ -253,7 +376,7 @@ button:not(:disabled):active,
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a2a30 transparent;
+  scrollbar-color: var(--border-default) transparent;
 }
 
 /* ============================================================
@@ -576,14 +699,14 @@ textarea.auto-resize {
   border-radius: 5px;
   font-size: 0.86em;
   font-family: var(--font-mono);
-  color: #e4e4e7;
+  color: var(--code-fg);
   overflow-wrap: anywhere;
   word-break: break-word;
   display: inline;
 }
 
 .prose-chat pre {
-  background: #0d0d10;
+  background: var(--code-bg);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   padding: 12px 14px;
@@ -599,7 +722,7 @@ textarea.auto-resize {
   border: none;
   padding: 0;
   font-size: inherit;
-  color: #e4e4e7;
+  color: var(--code-fg);
   white-space: pre;
 }
 
@@ -717,14 +840,14 @@ textarea.auto-resize {
 }
 
 .prose-chat a {
-  color: #ffb38a;
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
   transition: color var(--spring-sm);
 }
 .prose-chat a:hover {
-  color: #ffc9a8;
+  color: var(--link-hover);
 }
 
 .prose-chat table {
@@ -1008,7 +1131,7 @@ textarea.auto-resize {
 
 /* Page images — rendered PDF pages displayed inline */
 .latex-pages {
-  background: #2a2a2e;
+  background: var(--bg-overlay);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -1039,7 +1162,7 @@ textarea.auto-resize {
   word-break: break-word;
   max-height: 300px;
   overflow-y: auto;
-  background: #0d0d10;
+  background: var(--code-bg);
   border-top: 1px solid var(--border-default);
 }
 
@@ -1168,7 +1291,9 @@ textarea.auto-resize {
   background: color-mix(in srgb, var(--reasoning) 9%, transparent);
 }
 .reasoning-count {
-  color: color-mix(in srgb, var(--reasoning) 55%, transparent);
+  /* 82% keeps this small text at >= 4.5:1 on --bg-base; the previous 55%
+     mix composited to ~2.9:1 and failed WCAG AA. */
+  color: color-mix(in srgb, var(--reasoning) 82%, transparent);
 }
 .reasoning-body {
   border-left: 2px solid color-mix(in srgb, var(--reasoning) 22%, transparent);
@@ -1857,7 +1982,7 @@ body.drawer-open {
   padding: 1.75rem 2.25rem 4rem;
   font-size: 0.9375rem;
   line-height: 1.7;
-  color: #d4d4d8;
+  color: var(--doc-fg);
   letter-spacing: -0.003em;
   overflow-wrap: break-word;
 }
@@ -1920,11 +2045,11 @@ body.drawer-open {
 }
 .md-doc strong { color: var(--text-primary); font-weight: 620; }
 .md-doc a {
-  color: #ffb38a;
+  color: var(--link);
   text-decoration: none;
 }
 .md-doc a:hover {
-  color: #ffc9a8;
+  color: var(--link-hover);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -1978,10 +2103,10 @@ body.drawer-open {
   border-radius: 5px;
   background: var(--bg-overlay);
   border: 1px solid var(--border-subtle);
-  color: #e4e4e7;
+  color: var(--code-fg);
 }
 .md-doc pre {
-  background: #0d0d10;
+  background: var(--code-bg);
   border: 1px solid var(--border-default);
   border-radius: 10px;
   padding: 0.875rem 1rem;
@@ -1996,7 +2121,7 @@ body.drawer-open {
   border-radius: 0;
   background: none;
   font-size: inherit;
-  color: #e4e4e7;
+  color: var(--code-fg);
   white-space: pre;
 }
 .md-doc blockquote {
@@ -2142,4 +2267,92 @@ body.drawer-open {
   padding: 0.375rem 0.75rem;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------
+   Light-mode syntax highlighting
+   The dark theme is the imported github-dark-dimmed stylesheet.
+   These overrides restate GitHub's light theme, keyed to the same
+   token groups; they win by order and specificity over the @import.
+   ------------------------------------------------------------ */
+:root[data-theme="light"] .hljs {
+  color: #24292f;
+  background: #f4f4f6;
+}
+:root[data-theme="light"] .hljs-doctag,
+:root[data-theme="light"] .hljs-keyword,
+:root[data-theme="light"] .hljs-meta .hljs-keyword,
+:root[data-theme="light"] .hljs-template-tag,
+:root[data-theme="light"] .hljs-template-variable,
+:root[data-theme="light"] .hljs-type,
+:root[data-theme="light"] .hljs-variable.language_ {
+  color: #cf222e;
+}
+:root[data-theme="light"] .hljs-title,
+:root[data-theme="light"] .hljs-title.class_,
+:root[data-theme="light"] .hljs-title.class_.inherited__,
+:root[data-theme="light"] .hljs-title.function_ {
+  color: #8250df;
+}
+:root[data-theme="light"] .hljs-attr,
+:root[data-theme="light"] .hljs-attribute,
+:root[data-theme="light"] .hljs-literal,
+:root[data-theme="light"] .hljs-meta,
+:root[data-theme="light"] .hljs-number,
+:root[data-theme="light"] .hljs-operator,
+:root[data-theme="light"] .hljs-variable,
+:root[data-theme="light"] .hljs-selector-attr,
+:root[data-theme="light"] .hljs-selector-class,
+:root[data-theme="light"] .hljs-selector-id {
+  color: #0550ae;
+}
+:root[data-theme="light"] .hljs-regexp,
+:root[data-theme="light"] .hljs-string,
+:root[data-theme="light"] .hljs-meta .hljs-string {
+  color: #0a3069;
+}
+:root[data-theme="light"] .hljs-built_in,
+:root[data-theme="light"] .hljs-symbol {
+  color: #953800;
+}
+:root[data-theme="light"] .hljs-comment,
+:root[data-theme="light"] .hljs-code,
+:root[data-theme="light"] .hljs-formula {
+  color: #6e7781;
+}
+:root[data-theme="light"] .hljs-name,
+:root[data-theme="light"] .hljs-quote,
+:root[data-theme="light"] .hljs-selector-tag,
+:root[data-theme="light"] .hljs-selector-pseudo {
+  color: #116329;
+}
+:root[data-theme="light"] .hljs-subst {
+  color: #24292f;
+}
+:root[data-theme="light"] .hljs-section {
+  color: #0550ae;
+}
+:root[data-theme="light"] .hljs-bullet {
+  color: #735c0f;
+}
+:root[data-theme="light"] .hljs-emphasis {
+  color: #24292f;
+  font-style: italic;
+}
+:root[data-theme="light"] .hljs-strong {
+  color: #24292f;
+  font-weight: 600;
+}
+:root[data-theme="light"] .hljs-addition {
+  color: #116329;
+  background: #dafbe1;
+}
+:root[data-theme="light"] .hljs-deletion {
+  color: #82071e;
+  background: #ffebe9;
+}
+
+/* GitHub-style note callout reads as blue on the light surface too. */
+:root[data-theme="light"] .md-alert-note {
+  --md-alert: #0969da;
 }
