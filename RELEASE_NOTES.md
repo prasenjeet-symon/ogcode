@@ -1,3 +1,66 @@
+# Release Notes — v0.48.0
+
+## Minor: The interface comes in light and dark
+
+Ogcode now has a light interface alongside the dark one it has always worn, and
+a Theme control in Settings → General to choose between them. The three options
+are Light, Dark, and System; System follows your operating system and switches
+live as your machine does, so a laptop that dims itself in the evening takes the
+app with it. Whatever you pick applies to the whole machine — every browser tab
+and every window — because the choice is kept by the server, not by one tab. The
+page paints in the right theme before the app loads, so a light window opens
+light instead of flashing dark first.
+
+The light theme is a real one, not an inversion. Text, code, diffs, file trees,
+and the coloured chips all carry their own light values, so a review of a change
+reads as clearly on white as it did on black.
+
+## Minor: The sidebar tells you what a session is doing
+
+A session in the sidebar used to lead with a small dot coloured by its model
+provider — useful once, and never again. That dot now reports the session's own
+state instead: it pulses while a task is running, turns red when a task has
+failed, and is absent when there is nothing to report. One glance down the list
+shows which of your sessions is still working without you opening any of them.
+
+The state is tracked by the server rather than guessed by the page, so it stays
+right across a reload, and a session that a crash left mid-run is no longer
+shown as running forever.
+
+## Minor: The sidebar is yours to size
+
+Both sidebars are now resizable — drag the edge, or focus it and nudge it with
+the arrow keys — and the width you set is remembered. Long session titles get
+the room they need without stealing it from the conversation, and the sidebar
+returns at the same width next time you open the app.
+
+You can also pin the sessions you return to most. Pinned sessions sit in their
+own group at the top of the list, above the by-date groups, so the handful you
+keep coming back to stay put while everything else ages out from under them.
+
+## Minor: The app is readable and reachable
+
+A pass over the whole interface to make it work for more people. A filled
+accent button now derives its label colour from the accent you choose — dark
+text on a pale accent, white on a deep one — so the label stays readable
+whatever colour scheme you have set, instead of assuming white will always
+work. The lighter greys that had drifted below a comfortable contrast on the
+dark background were lifted, and the light theme was built to the same standard
+from the start.
+
+The change reaches further than colour: each page now names its main region so
+screen readers can jump straight to the content, the navigation and its mobile
+drawer announce themselves and step out of the way correctly when hidden,
+read-only code blocks can be focused and read from the keyboard, and the
+sidebar's resize grip is a proper separator that reports its position. The
+sections, headings, and controls carry the labels they were missing.
+
+## Other changes
+
+- The OGX tab in Settings → Models shows the OG Lab mark.
+
+---
+
 # Release Notes — v0.47.4
 
 ## Patch: Compaction keeps the prompt you started the turn with
