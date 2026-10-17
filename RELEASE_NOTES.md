@@ -1,3 +1,25 @@
+# Release Notes — v0.47.4
+
+## Patch: Compaction keeps the prompt you started the turn with
+
+When a turn folded its context with `compact_context`, the message the turn
+opened with — what you asked for, and any image you attached — could fall out of
+the model's view. The summary took its place. Everything the agent did after
+that point was working from a digest of your request instead of the request
+itself.
+
+The fold now keeps your original prompt, images included, at the head of what
+is sent, with the summary folded in beneath it. If the turn is compacted again
+later, the summary is stripped back out first, so your words stay the words you
+wrote rather than being summarised a second time.
+
+## Other changes
+
+- The guidance you send mid-run still reaches the model on an image-only
+  prompt, where there is no text to append it to.
+
+---
+
 # Release Notes — v0.47.3
 
 ## Patch: Browser-backed search finishes what it starts
