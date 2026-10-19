@@ -124,6 +124,8 @@
   --warning:        #f5a623;
   --danger:         #e5484d;
   --reasoning:      #a78bfa;
+  --match-skill:    #a78bfa;
+  --match-mcp:      #38bdf8;
 
   /* Status palette — Linear-aligned, desaturated for scanability */
   --status-pending:    #8a8f98;
@@ -208,6 +210,8 @@
   --warning:        #b45309;
   --danger:         #d1242f;
   --reasoning:      #6d28d9;
+  --match-skill:    #6d28d9;
+  --match-mcp:      #0369a1;
 
   --status-pending:    #6b7280;
   --status-progress:   #a16207;
@@ -2355,4 +2359,186 @@ body.drawer-open {
 /* GitHub-style note callout reads as blue on the light surface too. */
 :root[data-theme="light"] .md-alert-note {
   --md-alert: #0969da;
+}
+
+/* ---- Agent plan pill (a forward-looking "where I'm heading" signal) ---- */
+.intent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 360px;
+  height: 30px;
+  padding: 0 10px 0 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-ring);
+}
+.intent-pill:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.intent-pill:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+.intent-pill .ico {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+.intent-pill .txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.intent-pill .count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  padding-left: 6px;
+  border-left: 1px solid var(--border-strong);
+  margin-left: 1px;
+}
+.intent-pill .chev {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-muted);
+  transition: transform .16s ease;
+}
+.intent-pill.is-open .chev {
+  transform: rotate(180deg);
+}
+.intent-pill.is-done {
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+.intent-pill.is-done .ico {
+  color: var(--success);
+}
+@media (max-width: 640px) {
+  .intent-pill { max-width: 150px; }
+}
+
+.intent-pop {
+  width: 340px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 13px 14px 11px;
+  box-shadow: 0 20px 48px -14px rgba(0, 0, 0, .62), 0 2px 10px rgba(0, 0, 0, .4);
+  animation: pop .16s ease both;
+}
+.intent-pop.is-phone {
+  width: calc(100vw - 16px);
+}
+@keyframes pop {
+  from { opacity: 0; transform: translateY(-4px) scale(.99); }
+}
+.intent-pop .pop-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-default);
+  padding: 0 2px 9px;
+  margin-bottom: 6px;
+}
+.intent-pop .pop-t {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.intent-pop .pop-c {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.intent-pop .step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 5px 2px;
+}
+.intent-pop .glyph {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+.intent-pop .lbl {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.42;
+}
+/* Per-step matcher counts — a dot for the kind, a number for how many. */
+.intent-pop .mch {
+  flex: none;
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 1px;
+}
+.intent-pop .m {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+  padding: 0 5px 0 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+.intent-pop .m .d {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--match-skill);
+}
+.intent-pop .m.mcp .d {
+  background: var(--match-mcp);
+}
+.intent-pop .s-pending .lbl {
+  color: var(--text-secondary);
+}
+.intent-pop .s-done .glyph {
+  color: var(--success);
+}
+.intent-pop .s-done .lbl {
+  color: var(--text-muted);
+}
+.intent-pop .s-active .glyph {
+  color: var(--accent);
+}
+.intent-pop .s-active .lbl {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.intent-pop .s-active .dot {
+  animation: pulse 1.55s ease-in-out infinite;
+  transform-origin: 12px 12px;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .28; }
+}
+.intent-pop .s-dropped .lbl {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--border-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  .intent-pop .dot { animation: none; }
+  .intent-pop { animation: none; }
 }

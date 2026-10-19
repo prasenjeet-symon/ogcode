@@ -94,7 +94,11 @@ func TestIsIPv6PathFailure(t *testing.T) {
 	yes := map[string]error{
 		"EHOSTUNREACH to an IPv6 peer": opErr(v6Remote, syscall.EHOSTUNREACH),
 		"ENETUNREACH to an IPv6 peer":  opErr(v6Remote, syscall.ENETUNREACH),
-		"wrapped by the stream layer":  fmt.Errorf("stream read failed: %w", opErr(v6Remote, syscall.EHOSTUNREACH)),
+		// The same teardown second-hand: the carrier or the edge resets the
+		// flow when the temporary source address goes away, so the client sees
+		// a reset from an IPv6 peer rather than an errno of its own.
+		"ECONNRESET to an IPv6 peer":  opErr(v6Remote, syscall.ECONNRESET),
+		"wrapped by the stream layer": fmt.Errorf("stream read failed: %w", opErr(v6Remote, syscall.EHOSTUNREACH)),
 	}
 	for name, err := range yes {
 		if !isIPv6PathFailure(err) {
@@ -105,11 +109,9 @@ func TestIsIPv6PathFailure(t *testing.T) {
 	no := map[string]error{
 		// The same errno over IPv4 says nothing about IPv6.
 		"EHOSTUNREACH to an IPv4 peer": opErr(v4Remote, syscall.EHOSTUNREACH),
-		// A peer that resets the connection is not an address-family problem,
-		// and counting it would fall back to IPv4 for an unrelated reason.
-		"ECONNRESET to an IPv6 peer": opErr(v6Remote, syscall.ECONNRESET),
-		"EOF":                        io.ErrUnexpectedEOF,
-		"no address at all":          &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.EHOSTUNREACH)},
+		"ECONNRESET to an IPv4 peer":   opErr(v4Remote, syscall.ECONNRESET),
+		"EOF":                          io.ErrUnexpectedEOF,
+		"no address at all":            &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.EHOSTUNREACH)},
 	}
 	for name, err := range no {
 		if isIPv6PathFailure(err) {
@@ -167,10 +169,9 @@ func TestNoteIPv6FailureIgnoresUnrelated(t *testing.T) {
 	resetIPv6Fallback(t)
 
 	v4 := &net.TCPAddr{IP: net.ParseIP("104.18.2.1"), Port: 443}
-	v6 := &net.TCPAddr{IP: net.ParseIP("2606:4700::1"), Port: 443}
 	for _, err := range []error{
 		&net.OpError{Op: "read", Net: "tcp", Addr: v4, Err: os.NewSyscallError("read", syscall.EHOSTUNREACH)},
-		&net.OpError{Op: "read", Net: "tcp", Addr: v6, Err: os.NewSyscallError("read", syscall.ECONNRESET)},
+		&net.OpError{Op: "read", Net: "tcp", Addr: v4, Err: os.NewSyscallError("read", syscall.ECONNRESET)},
 		io.ErrUnexpectedEOF,
 		errors.New("stream read failed: provider closed the connection mid-response"),
 	} {

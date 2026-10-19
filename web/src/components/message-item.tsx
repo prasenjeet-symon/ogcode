@@ -42,6 +42,29 @@ export function summarizeInput(tool: string, input: any): string | null {
   if (input.pattern) return String(input.pattern);
   if (input.query) return String(input.query);
   if (input.url) return String(input.url);
+  if (tool === 'update_intent' && Array.isArray(input.steps) && input.steps.length > 0) {
+    const steps = input.steps.filter((s: any) => s && typeof s.step === 'string');
+    if (steps.length > 0) {
+      const norm = (raw: any): 'pending' | 'active' | 'done' | 'dropped' | '' => {
+        const v = String(raw ?? '').trim().toLowerCase();
+        if (v === 'done' || v === 'complete' || v === 'completed' || v === 'finished' || v === 'closed' || v === 'resolved') return 'done';
+        if (v === 'dropped' || v === 'canceled' || v === 'cancelled' || v === 'skipped' || v === 'abandoned' || v === 'removed') return 'dropped';
+        if (v === 'active' || v === 'in_progress' || v === 'in-progress' || v === 'inprogress' || v === 'started' || v === 'current' || v === 'working' || v === 'running') return 'active';
+        if (v === 'pending' || v === 'todo' || v === 'queued' || v === 'open' || v === 'planned' || v === 'next') return 'pending';
+        return '';
+      };
+      const done = steps.filter((s: any) => norm(s.status) === 'done').length;
+      const closed = steps.every((s: any) => {
+        const st = norm(s.status);
+        return st === 'done' || st === 'dropped';
+      });
+      const cur =
+        steps.find((s: any) => norm(s.status) === 'active') ??
+        steps.find((s: any) => norm(s.status) === 'pending');
+      const label = closed ? 'Plan complete' : (cur ? String(cur.step).trim() : 'Plan updated');
+      return `${label} (${done}/${steps.length})`;
+    }
+  }
   // The skill tool's only argument. Checked last so a tool with both a name and
   // a more specific field still summarizes by the specific one.
   if (input.name) return String(input.name);
@@ -86,15 +109,20 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   // File-editing tools render a GitHub-style before/after diff instead of raw input.
   const isFileEdit = () => tool() === 'edit' || tool() === 'write';
 
-  // Agent housekeeping tools (codebase_map, file_map, compact_context): the
-  // maps' dense labeled tree/outline output is how the agent orients itself in
-  // the codebase, and compact_context's is the agent's note to itself about
-  // what it condensed — neither is something the user reads. Keep the
-  // collapsed status row, but never offer disclosure into input/output. These
-  // rows show a magic-wand glyph rather than the usual checkmark: what the tool
-  // did was quietly optimise the agent's own context, not hand back a result.
+  // Agent housekeeping tools (codebase_map, file_map, compact_context,
+  // update_intent): the maps' dense labeled tree/outline output is how the
+  // agent orients itself in the codebase, compact_context's is the agent's
+  // note to itself about what it condensed, and update_intent's is the echoed
+  // plan + closing nudge — none is something the user reads in raw JSON. Keep
+  // the collapsed status row, but never offer disclosure into input/output.
+  // These rows show a magic-wand glyph rather than the usual checkmark: what
+  // the tool did was quietly maintain the agent's own state, not hand back a
+  // result.
   const isAgentNavTool = () =>
-    tool() === 'codebase_map' || tool() === 'file_map' || tool() === 'compact_context';
+    tool() === 'codebase_map' ||
+    tool() === 'file_map' ||
+    tool() === 'compact_context' ||
+    tool() === 'update_intent';
   const fileDiff = createMemo((): { oldText: string; newText: string; mode: 'create' | 'edit' | 'overwrite'; omitted: boolean } | null => {
     if (!isFileEdit()) return null;
     const input = state().input || {};

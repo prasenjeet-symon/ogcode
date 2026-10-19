@@ -16,10 +16,13 @@ const maxSkillFiles = 10
 
 // SkillTool loads one skill's instructions into the agent's context.
 //
-// The system prompt lists every available skill by name and description; this
-// tool is how the agent gets from that listing to the actual instructions. The
-// separation is the whole point of the feature: descriptions are cheap enough
-// to re-send on every step, bodies are not.
+// A skill's instructions can run to thousands of tokens and the prompt is
+// re-sent on every step of every turn, so bodies stay on disk and the agent pulls
+// the one it needs. A session that runs the intent matcher never needs a menu:
+// stating a plan names the skills fitted to its steps, and the listing is refused
+// there so a turn cannot spend context on every skill it will not use. An agent
+// with no matcher (and no <available_skills> block) can still get the menu from a
+// bare call.
 type SkillTool struct {
 	Loader *skill.Loader
 }
@@ -29,17 +32,16 @@ func NewSkillTool(l *skill.Loader) SkillTool { return SkillTool{Loader: l} }
 func (SkillTool) ID() string { return "skill" }
 
 func (SkillTool) Description() string {
-	return "Load a skill's full instructions into your context. The skills available to you are listed by name and description in your system prompt under <available_skills> — this tool returns the body behind one of those names, along with the paths of any files that ship with it. Call it when the task in front of you matches a skill's description, before doing the work that skill describes."
+	return "Load one skill's full instructions into your context — the skill's body and the paths of any files it ships with — before doing the work that skill describes. Call it with the name of the skill you need: one of the skills listed for you, or one the user names. Do not call it with no name to ask for the full list."
 }
 
 func (SkillTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
-		"required": ["name"],
 		"properties": {
 			"name": {
 				"type": "string",
-				"description": "The skill's name, exactly as listed in <available_skills> in your system prompt."
+				"description": "The skill to load."
 			}
 		}
 	}`)
@@ -53,22 +55,40 @@ func (t SkillTool) Execute(ctx context.Context, args json.RawMessage, tctx Conte
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 	name := strings.TrimSpace(input.Name)
-	if name == "" {
-		return Result{}, fmt.Errorf("name is required")
-	}
 	if t.Loader == nil {
 		return Result{Title: "Skill", Output: "No skills are configured in this project."}, nil
 	}
 
 	reg := t.Loader.Load(tctx.SessionDir)
+	if name == "" {
+		// The matcher is the discovery path in an interactive session: it names
+		// the skills fitted to the plan's steps. A full listing would spend
+		// context on every skill the turn will not use, so the build agent is
+		// refused it rather than invited to it.
+		if tctx.IntentMatcher {
+			return Result{
+				Title:  "Skills",
+				Output: "Skills are not listed here. State your plan with update_intent and the matcher names the skills that fit your steps — load one of those by name. Load a skill directly only when the user named it themselves.",
+			}, nil
+		}
+		// A bare call stays the fallback for an agent with no matcher and no
+		// <available_skills> block, which has no other way to learn the names.
+		return Result{Title: "Skills", Output: renderSkillList(reg)}, nil
+	}
 	s, ok := reg.Get(name)
 	if !ok {
 		// Name the alternatives rather than just failing: the model reached for
 		// this because a skill looked relevant, and the usual cause is a
-		// near-miss on the name.
+		// near-miss on the name. A matcher session has no listing to name from
+		// — its names came from the matcher — so it points back at that instead
+		// of enumerating the set.
+		output := fmt.Sprintf("No skill named %q. %s", name, availableList(reg))
+		if tctx.IntentMatcher {
+			output = fmt.Sprintf("No skill named %q. Use the name exactly as the plan matcher gave it.", name)
+		}
 		return Result{
 			Title:  "Skill: " + name,
-			Output: fmt.Sprintf("No skill named %q. %s", name, availableList(reg)),
+			Output: output,
 		}, nil
 	}
 
@@ -158,6 +178,27 @@ func renderSkill(s skill.Skill) string {
 	}
 	b.WriteString("</skill_files>\n</skill_content>")
 	return b.String()
+}
+
+// renderSkillList is the answer to a bare call: the menu of skills the agent
+// could load. Descriptions are collapsed onto one line each so a multi-line
+// frontmatter value cannot turn the list into prose the model misreads.
+func renderSkillList(reg *skill.Registry) string {
+	visible := reg.Visible()
+	if len(visible) == 0 {
+		return "No skills are available in this project."
+	}
+	var b strings.Builder
+	b.WriteString("Skills available in this project. Call this tool again with a name to load one.\n")
+	for _, s := range visible {
+		desc := strings.Join(strings.Fields(s.Description), " ")
+		if desc == "" {
+			b.WriteString("- " + s.Name + "\n")
+			continue
+		}
+		b.WriteString("- " + s.Name + " — " + desc + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // availableList names the skills the agent could have meant.

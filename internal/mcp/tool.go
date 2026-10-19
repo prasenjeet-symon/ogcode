@@ -40,7 +40,59 @@ func newMCPTool(id, server string, t *mcp.Tool, session *mcp.ClientSession) tool
 		slog.Info("mcp: removed schema keywords a model provider may reject",
 			"server", server, "tool", id, "keywords", strings.Join(stripped, ","))
 	}
-	return mcpTool{id: id, server: server, spec: t, session: session, params: params}
+	return mcpTool{
+		id:         id,
+		server:     server,
+		serverDesc: serverDescription(session),
+		spec:       t,
+		session:    session,
+		params:     params,
+	}
+}
+
+// maxServerDescriptionChars caps the handshake text captured per MCP server so
+// a server that returns multi-kilobyte instructions cannot bloat the intent
+// router's catalogue.
+const maxServerDescriptionChars = 400
+
+// serverDescription extracts a compact human-readable summary of an MCP server
+// from its initialize handshake (ServerInfo.Title, ServerInfo.Description, and
+// Instructions). Returns "" when the session is nil or the server advertised
+// no descriptive metadata.
+func serverDescription(session *mcp.ClientSession) string {
+	if session == nil {
+		return ""
+	}
+	init := session.InitializeResult()
+	if init == nil {
+		return ""
+	}
+	var parts []string
+	if info := init.ServerInfo; info != nil {
+		title := strings.TrimSpace(info.Title)
+		if title == "" {
+			title = strings.TrimSpace(info.Name)
+		}
+		desc := strings.TrimSpace(info.Description)
+		switch {
+		case title != "" && desc != "" && !strings.EqualFold(title, desc):
+			parts = append(parts, title+" — "+desc)
+		case desc != "":
+			parts = append(parts, desc)
+		case title != "":
+			parts = append(parts, title)
+		}
+	}
+	if instr := strings.TrimSpace(init.Instructions); instr != "" {
+		// Collapse whitespace so multi-line instructions fit on one compact line.
+		instr = strings.Join(strings.Fields(instr), " ")
+		parts = append(parts, instr)
+	}
+	out := strings.Join(parts, ". ")
+	if len(out) > maxServerDescriptionChars {
+		out = strings.TrimSpace(out[:maxServerDescriptionChars]) + "…"
+	}
+	return out
 }
 
 // rawToolSchema serialises an MCP tool's InputSchema. The SDK stores it as any
@@ -68,17 +120,26 @@ func NewTool(id, server string, t *mcp.Tool, session *mcp.ClientSession) tool.To
 // tool.ToolDef. It is immutable after construction; the live session is held by
 // reference so Close on the Manager invalidates all tools at once.
 type mcpTool struct {
-	id      string
-	server  string
-	spec    *mcp.Tool
-	session *mcp.ClientSession
+	id         string
+	server     string
+	serverDesc string
+	spec       *mcp.Tool
+	session    *mcp.ClientSession
 	// params is the tool's input schema as offered to a model: the server's own
 	// schema with provider-hostile keywords removed. Computed at construction.
 	params json.RawMessage
 }
 
-func (mt mcpTool) ID() string          { return mt.id }
-func (mt mcpTool) Description() string { return mt.spec.Description }
+func (mt mcpTool) ID() string                   { return mt.id }
+func (mt mcpTool) Description() string          { return mt.spec.Description }
+func (mt mcpTool) MCPServer() string            { return mt.server }
+func (mt mcpTool) MCPServerDescription() string { return mt.serverDesc }
+func (mt mcpTool) MCPToolName() string {
+	if mt.spec != nil && mt.spec.Name != "" {
+		return mt.spec.Name
+	}
+	return mt.id
+}
 
 // Parameters returns the input schema the host's tool registry hands to the
 // model — sanitised at construction, see newMCPTool. Empty only for a tool

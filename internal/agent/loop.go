@@ -170,6 +170,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// indicator; the loop.done defer below clears it (or marks it failed). A
 	// no-op without a store (headless paths, tests).
 	lr.setSessionStatus(sessionID, session.StatusRunning)
+	// The plan describes the turn in flight, so it starts empty: whatever the
+	// last turn left is cleared here, and the agent sets a new one if it has
+	// steps worth stating. A no-op without a store (headless paths, tests).
+	lr.setSessionIntent(sessionID, nil)
 
 	agent := GetAgent(agentName)
 	// Read MaxSteps into a local; never mutate the shared LoopRunner field. A
@@ -301,18 +305,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	agentMDContent := LoadAgentMD(workDir)
 	memoryMDContent := LoadMemoryMD(workDir)
 
-	// Skills are resolved once per turn, alongside AGENT.md and MEMORY.md, and
-	// the same list is used for every step of it. Only agents holding the tool
-	// pay for the scan — for the rest the listing would name a call they were
-	// never offered.
+	// Config-driven ask/deny rules have to be in the session's ruleset before the
+	// first skill call, or the default catch-all Allow answers for them. Seeding
+	// is idempotent, so repeating it per turn is free and never clobbers an
+	// "always allow" the user has since granted. Only agents holding the tool pay
+	// for the scan.
 	var visibleSkills []skill.Skill
 	if lr.Skills != nil && agent.HasTool("skill") {
 		reg := lr.Skills.Load(workDir)
 		visibleSkills = reg.Visible()
-		// Config-driven ask/deny rules have to be in the session's ruleset
-		// before the first skill call, or the default catch-all Allow answers
-		// for them. Seeding is idempotent, so repeating it per turn is free and
-		// never clobbers an "always allow" the user has since granted.
 		if lr.Permissions != nil {
 			lr.Permissions.EnsureRules(string(sessionID), skillPermissionRules(reg))
 		}
@@ -469,6 +470,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	//
 	// A tool REMOVED between resolve and call stays on the list and fails at
 	// execution with a tool-level error the agent recovers from (see executeTool).
+	//
+	// The wire list is also narrower than the allowlist for the build agent. Its
+	// Tools carry the "mcp_*" glob, but a concrete MCP tool is offered only once
+	// the intent matcher has named it for this turn's plan, so it begins a turn
+	// knowing no MCP tool at all. turnTools holds that set with its own version,
+	// and a suggestion landing mid-turn re-resolves on it exactly as a registry
+	// move does. Every other agent's wire list is its allowlist unchanged.
 	// Whether the external-knowledge section is emitted. The agent's own toolset
 	// cannot answer this: every code-facing agent lists deep_search, but the tool
 	// is registered only when a search backend was built, which is a setting and
@@ -489,26 +497,44 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// so it is resolved once per turn and the two stay in step.
 	askUserOffered := agent.canAskUser() && PermissionGatingEnabled(ctx) &&
 		lr.Questions != nil && lr.Tools.Get("ask_user") != nil
-	toolIDs := append([]string{}, agent.Tools...)
+	// update_intent is offered to the interactive build agent alone: the plan it
+	// writes is rendered as a pill in the session header, which a headless task
+	// session has no one to see. Resolved once per turn and used for both the
+	// tool on the wire and the system entry below, so the two stay in step.
+	intentOffered := agent.canUpdateIntent() && lr.Tools.Get("update_intent") != nil
+	allowIDs := append([]string{}, agent.Tools...)
 	if compactContextOffered {
-		toolIDs = append(toolIDs, "compact_context")
+		allowIDs = append(allowIDs, "compact_context")
 	}
 	if askUserOffered {
-		toolIDs = append(toolIDs, "ask_user")
+		allowIDs = append(allowIDs, "ask_user")
+	}
+	if intentOffered {
+		allowIDs = append(allowIDs, "update_intent")
 	}
 	// The agent as this turn actually sees it. executeTool checks its Tools as an
-	// allowlist, so it must match what was offered on the wire. toolIDs is
-	// turn-constant (only the registry behind it moves), so this is resolved once.
+	// allowlist, so it must cover every tool that can reach the wire — including
+	// an MCP tool the matcher suggests later in the turn. allowIDs is turn-constant
+	// (only the registry behind it moves), so this is resolved once.
 	effectiveAgent := agent
-	effectiveAgent.Tools = toolIDs
+	effectiveAgent.Tools = allowIDs
+
+	// The wire list: the allowlist minus the MCP glob for the build agent, plus
+	// whatever the matcher names for the plan as the turn goes on.
+	turnTools := newTurnToolset(allowIDs, intentOffered)
+	// One routing budget for the whole turn: a restated plan must not become one
+	// more completion every time the agent touches its list.
+	intentFind := newIntentFinder()
 
 	var providerTools []provider.ToolDefinition
 	var toolsGen uint64
+	var toolsVersion = turnTools.version
 	resolveTools := func() {
-		// Read the generation BEFORE expanding, so a change landing between the
-		// two is caught on the next step rather than silently missed.
+		// Read both counters BEFORE expanding, so a change landing between the
+		// read and the expand is caught on the next step rather than silently missed.
 		toolsGen = lr.Tools.Generation()
-		resolved := lr.Tools.ForAgent(toolIDs)
+		toolsVersion = turnTools.version
+		resolved := lr.Tools.ForAgent(turnTools.wireIDs())
 		next := make([]provider.ToolDefinition, 0, len(resolved))
 		for _, t := range resolved {
 			next = append(next, provider.ToolDefinition{
@@ -706,11 +732,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// is later orphaned and deleted, GetMessage returns nil and it's skipped.
 		newMessageIDs = append(newMessageIDs, assistantID)
 
-		// Re-resolve the toolset only when the registry actually moved — an MCP
-		// server finishing its dial, or a user toggling one in settings. Every
-		// other step reuses the identical array, keeping the cached prompt prefix
-		// intact. See the resolve above for why this is a gate and not a snapshot.
-		if lr.Tools.Generation() != toolsGen {
+		// Re-resolve the toolset when the registry moved — an MCP server finishing
+		// its dial, or a user toggling one in settings — or when the matcher offered a
+		// new tool for this turn's plan. Every other step reuses the identical array,
+		// keeping the cached prompt prefix intact. See the resolve above for why this
+		// is a gate and not a snapshot.
+		if lr.Tools.Generation() != toolsGen || turnTools.version != toolsVersion {
 			before := len(providerTools)
 			resolveTools()
 			slog.Info("toolset changed mid-turn, re-resolved",
@@ -765,11 +792,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		if askUserOffered {
 			systemPrompts = appendSystemEntry(systemPrompts, agent, askUserPrompt())
 		}
-		// Out here rather than in entry [0] for the same reason: the user can
-		// add or edit a skill while the session is open, and the cached prefix
-		// must stay byte-identical across the whole session.
-		if guidance := skillGuidancePrompt(visibleSkills); guidance != "" {
-			systemPrompts = appendSystemEntry(systemPrompts, agent, guidance)
+		// Same gate as the tool on the wire: a section naming update_intent would
+		// be an instruction an agent without the tool could never follow.
+		if intentOffered {
+			systemPrompts = appendSystemEntry(systemPrompts, agent, updateIntentPrompt())
+		}
+		// Every other agent discovers skills from this listing; the build agent
+		// gets them from the intent matcher instead, so it never carries one.
+		if !intentOffered {
+			if guidance := skillGuidancePrompt(visibleSkills); guidance != "" {
+				systemPrompts = appendSystemEntry(systemPrompts, agent, guidance)
+			}
 		}
 		// The server's own origin is fixed for the session, but it is appended
 		// here rather than folded into entry [0] so the cached prefix never
@@ -1472,16 +1505,24 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				// most exposed connection on the machine, and it was costing a
 				// whole turn and a manual Resume.
 				//
-				// Retry only while the response is still empty. Nothing has been
-				// shown or stored yet, so re-dispatching cannot duplicate visible
-				// work; the request is byte-identical, so the prompt cache makes it
-				// nearly free. Once any output exists the replay WOULD duplicate
-				// it, and those keep the resumable error the user can act on.
+				// Retry while the response has produced no TEXT and no tool call,
+				// even if it has produced reasoning. A reasoning model streams its
+				// thinking first, so a socket that dies mid-turn usually dies with a
+				// thought block on screen and nothing else — the exact shape of the
+				// failure users report. That reasoning is not part of the request
+				// history, so replaying cannot duplicate it in the retried
+				// completion, and the abandoned assistant message (parts included,
+				// via the part table's ON DELETE CASCADE) is deleted before the
+				// re-dispatch, so the discarded block disappears rather than sitting
+				// orphaned. The request itself is byte-identical, so the prompt
+				// cache makes the replay nearly free.
+				//
+				// Once text exists the replay WOULD duplicate visible output, and
+				// those keep the resumable error the user can act on.
 				if midStreamRetries < maxMidStreamRetries &&
 					isTransientError(streamEventErr(evt)) &&
-					streamTextPart == nil && streamReasoningPart == nil &&
-					len(pendingToolCalls) == 0 &&
-					currentText.Len() == 0 && currentReasoning.Len() == 0 {
+					streamTextPart == nil && len(pendingToolCalls) == 0 &&
+					currentText.Len() == 0 {
 					midStreamRetries++
 					slog.Info("stream died before producing output, re-dispatching",
 						"session", sessionID, "step", step, "attempt", midStreamRetries, "err", evt.Error)
@@ -1522,14 +1563,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// a model that chose to say nothing, and it handed the user the identical
 		// manual Resume this fix exists to remove.
 		//
-		// Guarded on the same emptiness test, so a truncated-but-partial response
-		// still surfaces rather than being silently replayed.
+		// Guarded on the same test as the EventError path — no text, no tool
+		// call — so a truncated-but-partial response still surfaces rather than
+		// being silently replayed, while a thought block that never turned into
+		// an answer is discarded and retried.
 		if !retryStream && finishReason == "" &&
 			!(streamCtx.Err() != nil && ctx.Err() == nil) &&
 			midStreamRetries < maxMidStreamRetries &&
-			streamTextPart == nil && streamReasoningPart == nil &&
-			len(pendingToolCalls) == 0 &&
-			currentText.Len() == 0 && currentReasoning.Len() == 0 {
+			streamTextPart == nil && len(pendingToolCalls) == 0 &&
+			currentText.Len() == 0 {
 			midStreamRetries++
 			slog.Info("stream closed without producing anything, re-dispatching",
 				"session", sessionID, "step", step, "attempt", midStreamRetries)
@@ -1750,7 +1792,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// model calling something it was never given, and compact_context is
 			// added per step for agents that accumulate read context. Passing the
 			// static agent here would reject every compaction as a disallowed tool.
-			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, workDir, modelSupportsImages, modelID, providerID, pressure)
+			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, turnTools, intentFind, workDir, modelSupportsImages, modelID, providerID, pressure)
 			if aborted {
 				exitReason = "aborted"
 				return ctx.Err()
@@ -1791,6 +1833,29 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					slog.Info("in-turn context compacted", "session", sessionID, "step", step,
 						"messagesInWorkingSet", len(messages), "summaryChars", len(summary))
 				}
+			}
+			// update_intent: the tool only validates, so the loop writes the plan
+			// the agent just stated. Keyed off the tool's own success marker, never
+			// off the call having been made — a rejected list leaves the plan the
+			// user is reading untouched.
+			for _, tc := range readyCalls {
+				if tc.Name != "update_intent" {
+					continue
+				}
+				if ok, _ := toolResults[tc.CallID].Metadata["intentSet"].(bool); !ok {
+					slog.Info("update_intent did not take effect", "session", sessionID, "step", step)
+					continue
+				}
+				intent, perr := tool.ParseIntentArgs(tc.Input)
+				if perr != nil {
+					continue
+				}
+				// The matcher ran over this block inside executeReadyToolCalls and
+				// filed what it paired with each step on this turn's finder.
+				// Stamping it on here rather than there is what makes a restated
+				// plan — which spends no new routing call — keep its steps' counts.
+				intentFind.annotate(&intent)
+				lr.setSessionIntent(sessionID, &intent)
 			}
 		}
 
@@ -2475,6 +2540,9 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 			ModelSupportsImages: modelSupportsImages,
 			Model:               model,
 			Provider:            providerID,
+			// Derived rather than threaded through: the effective agent holds
+			// update_intent exactly when this turn runs the matcher.
+			IntentMatcher: a.HasTool("update_intent"),
 		}
 		// Honor cancellation at the dispatch boundary. Several built-in tools do
 		// bounded local work and don't check ctx themselves, so a mid-loop abort
@@ -2514,7 +2582,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 // executeReadyToolCalls runs every ready call and returns each one's result
 // keyed by call ID, so the caller can act on what a tool actually did rather
 // than on the fact that it was invoked.
-func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, workDir string, modelSupportsImages bool, modelID, providerID string, pressure *readPressure) (results map[string]tool.Result, loopAborted bool) {
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, turnTools *turnToolset, intentFind *intentFinder, workDir string, modelSupportsImages bool, modelID, providerID string, pressure *readPressure) (results map[string]tool.Result, loopAborted bool) {
 	if len(readyCalls) > 1 {
 		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
 	}
@@ -2616,6 +2684,45 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		pressure.observe(execInfos[i].tc.Name, &execInfos[i].result)
 	}
 	pressure.endStep()
+
+	// Line the plan the agent just stated up with the skills and MCP tools that
+	// could carry each step out, and fold the suggestion into the tool result the
+	// agent reads next. This runs here, not where the plan is persisted, for the
+	// same reason the read-pressure reminder above does: the model-facing history
+	// is rebuilt from the STORED output, so a note added after the store write is
+	// a note the model never sees.
+	//
+	// Only the LAST successful update_intent in the block is routed, in reverse
+	// walk order. A block may legally carry several (the tool is meant to travel
+	// alone, but nothing enforces it), and only the final plan is the one the
+	// agent works from; routing the superseded ones would spend a completion per
+	// stray call to describe a plan that no longer exists.
+	for i := len(execInfos) - 1; i >= 0; i-- {
+		if toolCtx.Err() != nil {
+			break
+		}
+		if execInfos[i].err != nil || execInfos[i].tc.Name != "update_intent" {
+			continue
+		}
+		if ok, _ := execInfos[i].result.Metadata["intentSet"].(bool); !ok {
+			continue
+		}
+		intent, perr := tool.ParseIntentArgs(execInfos[i].tc.Input)
+		if perr != nil {
+			continue
+		}
+		hint, mcpIDs := lr.suggestIntentTools(toolCtx, sessionID, modelID, providerID, agent, workDir, intent.Steps, intentFind)
+		if hint != "" {
+			execInfos[i].result.Output += hint
+		}
+		// Offer the matched MCP tools for the rest of the turn, so the model can
+		// call what the hint just named. This only touches this turn's wire list;
+		// the agent's own allowlist already covers them.
+		for _, id := range mcpIDs {
+			turnTools.offer(id)
+		}
+		break
+	}
 
 	results = make(map[string]tool.Result, len(execInfos))
 	for _, info := range execInfos {
@@ -2984,6 +3091,30 @@ func (lr *LoopRunner) setSessionStatus(sessionID session.SessionID, status strin
 	}
 }
 
+// setSessionIntent records the agent's plan for the current turn and announces
+// it so an open session header patches live. Like setSessionStatus the value
+// lives on the session row, not on a message, so no message.updated carries it.
+//
+// Its own event type rather than session.updated: the plan can change several
+// times within a turn, and routing each change through session.updated would
+// make the client re-run its debounced token refresh every time. A no-op without
+// a store.
+func (lr *LoopRunner) setSessionIntent(sessionID session.SessionID, intent *session.SessionIntent) {
+	if lr.Store == nil {
+		return
+	}
+	if err := lr.Store.SetIntent(sessionID, intent); err != nil {
+		slog.Warn("set session intent", "err", err)
+		return
+	}
+	if lr.Bus != nil {
+		lr.Bus.Publish("intent.changed", map[string]any{
+			"sessionId": string(sessionID),
+			"intent":    intent,
+		})
+	}
+}
+
 // recordUtilityCounts adds already-converted counts to the session's utility
 // totals and announces the change. AddUtilityUsage ignores an all-zero delta.
 func (lr *LoopRunner) recordUtilityCounts(sessionID session.SessionID, tc session.TokenCounts) {
@@ -3101,9 +3232,15 @@ func isSafeVerdict(up string) bool {
 	return t == "SAFE"
 }
 
+// skillListPattern is the permission pattern for a bare `skill` call — one that
+// names no skill and so lists them instead. It has to be distinct from every
+// skill name and from the catch-all "*": an "always allow" for a single skill
+// must not silently permit the listing, and vice versa.
+const skillListPattern = "skill listing"
+
 // permissionPattern extracts the resource a tool call acts on, for ruleset
 // matching and UI display: the target path for write/edit, the command for bash,
-// otherwise "*".
+// the skill name for a skill load, and otherwise "*".
 func permissionPattern(tc pendingToolCall) string {
 	switch tc.Name {
 	case "write", "edit", "read":
@@ -3123,13 +3260,18 @@ func permissionPattern(tc pendingToolCall) string {
 	case "skill":
 		// The pattern is the skill being loaded, so a rule — configured, or
 		// granted by an "always allow" reply — applies to that one skill rather
-		// than to every skill at once.
+		// than to every skill at once. A bare call lists the skills instead of
+		// loading one, and gets its own pattern rather than the catch-all.
 		var in struct {
 			Name string `json:"name"`
 		}
-		if json.Unmarshal(tc.Input, &in) == nil && in.Name != "" {
-			return in.Name
+		if json.Unmarshal(tc.Input, &in) != nil {
+			break
 		}
+		if name := strings.TrimSpace(in.Name); name != "" {
+			return name
+		}
+		return skillListPattern
 	}
 	return "*"
 }
@@ -3803,6 +3945,12 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
 		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
+
+		// HOWTO.md pointer: what the file is and when to open it, plus the
+		// authoring rules for an agent that can write. Nothing is loaded and no
+		// existence check is made, so the section stays constant and editing
+		// HOWTO.md never rewrites entry [0].
+		prompt += "\n\n" + howToMDPrompt(canWriteFiles)
 
 		// Project notes: appended only when the notes feature is on. The agent
 		// definitions themselves carry no notes text, so an off flag leaves not a

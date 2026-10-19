@@ -74,3 +74,5 @@ demo-recording/
 # personal to a checkout, and it is re-sent in full on every model request, so a
 # committed one becomes every contributor's per-turn token cost as well as ours.
 MEMORY.md
+# Frozen pre-prune snapshots of the same file, kept beside it for reference.
+/MEMORY-ARCHIVE.md

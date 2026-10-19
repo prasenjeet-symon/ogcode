@@ -473,6 +473,17 @@ func (a *Agent) canHostPublicFiles() bool { return a.ID == "build" }
 // manager — this is the outer of the two conditions, not a substitute for them.
 func (a *Agent) canAskUser() bool { return a.ID == "build" }
 
+// canUpdateIntent reports whether this agent states a forward-looking plan for
+// the turn through the update_intent tool.
+//
+// Like canAskUser, this is an agent id rather than a capability check, and for
+// the same reason: the plan is read by the intent matcher to suggest skills and
+// MCP tools, and only the interactive build session both shows a plan (the
+// header pill) and runs that matcher. TaskAgent shares BuildAgent's toolset but
+// runs headless in a disposable worktree, and the sub-agent is headless too, so
+// a plan there would reach nobody and drive no suggestions.
+func (a *Agent) canUpdateIntent() bool { return a.ID == "build" }
+
 // promptRole maps an agent to the role string the shared prompt sections switch
 // on. TaskAgent is the headless variant of BuildAgent and shares its prompt, so
 // it shares its role; every other agent's id is already its role.

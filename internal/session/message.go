@@ -20,9 +20,14 @@ type Session struct {
 	// Status is the session's in-flight turn state, shown as a dot in the
 	// session list: StatusRunning while a turn is running, StatusFailed if the
 	// last turn ended in an error, and "" (idle or finished cleanly) otherwise.
-	Status    string `json:"status,omitempty"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	Status string `json:"status,omitempty"`
+	// Intent is the forward-looking plan for the current turn: the steps the
+	// agent is working through, each with a status. Written by the update_intent
+	// tool and cleared when the next turn starts, so it describes the turn in
+	// flight rather than the session's history.
+	Intent    *SessionIntent `json:"intent,omitempty"`
+	CreatedAt int64          `json:"createdAt"`
+	UpdatedAt int64          `json:"updatedAt"`
 }
 
 // Turn-status values stored on Session.Status. Empty means no turn is in
@@ -31,6 +36,58 @@ const (
 	StatusRunning = "running"
 	StatusFailed  = "failed"
 )
+
+// Intent-step statuses stored on IntentStep.Status. A step is pending until the
+// agent starts it, active while it is being worked, done once it is finished,
+// and dropped when it is no longer needed.
+const (
+	IntentPending = "pending"
+	IntentActive  = "active"
+	IntentDone    = "done"
+	IntentDropped = "dropped"
+)
+
+// ValidIntentStatus reports whether s is one of the recognised IntentStep
+// statuses.
+func ValidIntentStatus(s string) bool {
+	switch s {
+	case IntentPending, IntentActive, IntentDone, IntentDropped:
+		return true
+	}
+	return false
+}
+
+// SessionIntent is the agent's forward-looking plan for the current turn: an
+// ordered list of the steps it means to take, each with a status. The whole list
+// is replaced on every update_intent call (last write wins), so it always
+// describes what remains as the agent understands it now.
+type SessionIntent struct {
+	Steps []IntentStep `json:"steps"`
+}
+
+// IntentStep is one item of a SessionIntent.
+type IntentStep struct {
+	Step   string `json:"step"`
+	Status string `json:"status"` // one of the Intent* constants
+	// Description says what the step actually involves — the files, the library,
+	// the command. It is never shown to the user: a matcher reads it to suggest
+	// the skills and MCP tools likely to help with the step. Optional, so a plan
+	// written before the field existed still parses.
+	Description string `json:"description,omitempty"`
+	// MatchedSkills and MatchedMCPs count what the turn's plan matcher paired
+	// with this step: skills it could load, MCP servers whose tools it could
+	// call. Zero means nothing matched — or that the step was never routed,
+	// which is what a step with no description gets. Written by the agent loop
+	// from the routing answer, never by the tool the agent calls.
+	MatchedSkills int `json:"matchedSkills,omitempty"`
+	MatchedMCPs   int `json:"matchedMCPs,omitempty"`
+	// MatchedSkillNames and MatchedMCPNames name what those counts stand for, so
+	// the plan chip can say which skill or MCP server a count is about on hover.
+	// They are the routed, capped set — one entry per counted match, in the
+	// order the matcher named them. Absent when nothing matched.
+	MatchedSkillNames []string `json:"matchedSkillNames,omitempty"`
+	MatchedMCPNames   []string `json:"matchedMCPNames,omitempty"`
+}
 
 type MessageRole string
 

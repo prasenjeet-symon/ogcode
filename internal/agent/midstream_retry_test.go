@@ -24,6 +24,9 @@ type resetProvider struct {
 	// emitBeforeReset sends a text delta before failing, so the reset arrives
 	// with visible output already on screen.
 	emitBeforeReset bool
+	// emitReasoningBeforeReset sends a thought delta before failing — the shape
+	// a reasoning model leaves behind when the socket dies mid-thought.
+	emitReasoningBeforeReset bool
 	// silentClose ends the stream by closing the channel with no events at all —
 	// what a clean FIN mid-response looks like, as opposed to an RST.
 	silentClose bool
@@ -51,6 +54,11 @@ func (m *resetProvider) StreamChat(ctx context.Context, req provider.StreamReque
 			}
 		}
 		if failing {
+			if m.emitReasoningBeforeReset {
+				if !send(provider.StreamEvent{Type: provider.EventReasoning, Text: "thinking about the layout"}) {
+					return
+				}
+			}
 			if m.emitBeforeReset {
 				if !send(provider.StreamEvent{Type: provider.EventTextDelta, Text: "partial answer"}) {
 					return
@@ -169,6 +177,40 @@ func TestMidStreamReset_RetriesWhenNothingWasProduced(t *testing.T) {
 	}
 	if assistants[0].Error != nil {
 		t.Errorf("the surviving message should carry no error, got %q", *assistants[0].Error)
+	}
+}
+
+// A reasoning model streams its thinking first, so this is the shape the
+// reported failure actually had: a thought block on screen, then the socket
+// dies before a single token of the answer. Reasoning is not replayed in the
+// request history, and the message carrying it is deleted whole (its parts
+// cascade), so the re-dispatch duplicates nothing the user will see twice.
+func TestMidStreamReset_RetriesWhenOnlyReasoningWasProduced(t *testing.T) {
+	p := &resetProvider{resetsBeforeSuccess: 1, emitReasoningBeforeReset: true}
+	err, assistants, store := runResetScript(t, p)
+
+	if err != nil {
+		t.Fatalf("a reset after reasoning but before any answer should be recovered, got: %v", err)
+	}
+	if p.calls != 2 {
+		t.Errorf("expected the request to be re-dispatched once (2 calls), got %d", p.calls)
+	}
+	if len(assistants) != 1 {
+		t.Fatalf("expected exactly 1 assistant message, got %d — the abandoned attempt was not cleaned up", len(assistants))
+	}
+	if assistants[0].Error != nil {
+		t.Errorf("the surviving message should carry no error, got %q", *assistants[0].Error)
+	}
+	// The half-finished thought from the abandoned attempt must not linger:
+	// it belongs to a message that no longer exists.
+	parts, err := store.GetParts(assistants[0].ID)
+	if err != nil {
+		t.Fatalf("get parts: %v", err)
+	}
+	for _, part := range parts {
+		if part.Type == session.PartReasoning {
+			t.Fatal("the abandoned reasoning part survived the retry")
+		}
 	}
 }
 

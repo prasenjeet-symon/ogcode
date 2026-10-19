@@ -82,6 +82,93 @@ func TestMemoryMDPrompt_RecordsOnlyVerifiedFacts(t *testing.T) {
 	}
 }
 
+// The MEMORY.md section is what decides which file a piece of knowledge goes
+// into. Without the split it names, procedures keep accumulating in MEMORY.md
+// while HOWTO.md stays empty.
+func TestMemoryMDPromptNamesTheHowToSplit(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		if p := memoryMDPrompt(canWrite, true); !strings.Contains(p, "Ordered procedures belong in `HOWTO.md`") {
+			t.Errorf("MEMORY.md section does not send procedures to HOWTO.md (canWrite=%v)", canWrite)
+		}
+	}
+}
+
+// MEMORY.md is re-read every turn, so it takes facts a future session needs
+// before acting — never a narrative of what one session did. The shapes named
+// are the whole list: an entry that fits none of them does not belong.
+func TestMemoryMDPromptSavesFactsNotSessionNarratives(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		p := memoryMDPrompt(canWrite, true)
+		for _, want := range []string{
+			"A line must be a fact a future session needs before acting",
+			"a gotcha with its fix",
+			"an invariant and the file or test that pins it",
+			"a canonical value (path, env var, version, exact command)",
+			"a decision and why",
+			"A record of what one session happened to do does not earn a place",
+			"anything the code already says",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("MEMORY.md section missing %q (canWrite=%v)", want, canWrite)
+			}
+		}
+	}
+}
+
+// HOWTO.md is a pointer, not a payload: every project-scoped agent is told what
+// the file is and when to open it, and no agent is given an index of it.
+func TestHowToMDPrompt_CommonSection(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		prompt := howToMDPrompt(canWrite)
+		for _, want := range []string{
+			"## HOWTO.md — Project Procedures",
+			"`HOWTO.md` at the project root",
+			"Open it when the",
+			"when no heading matches",
+			"`Verified:`",
+			"`Touches:`",
+			"`Done when:`",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("HOWTO.md section missing %q (canWrite=%v)", want, canWrite)
+			}
+		}
+	}
+}
+
+// The writable branch is the only place the authoring rules reach the agent, so
+// every field of an entry and the read-before-writing dedupe are pinned here.
+func TestHowToMDPrompt_WritableRecordsEntries(t *testing.T) {
+	prompt := howToMDPrompt(true)
+	for _, want := range []string{
+		"### Adding an entry",
+		"record it before you finish",
+		"already answers it",
+		"creating it at the project root if it does not exist",
+		"update it in place, never a second copy",
+		"Name the heading for the task, not the tool",
+		"about 30 lines",
+		"Verified: <date> @ <version from `ogcode version`>",
+		"Touches: <paths or services the steps write to>",
+		"Done when: <the check that says it worked>",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("writable HOWTO.md section missing %q", want)
+		}
+	}
+}
+
+// A read-only agent cannot write the file, so it is not handed authoring rules
+// it could never carry out.
+func TestHowToMDPrompt_ReadOnlyCarriesNoAuthoringRules(t *testing.T) {
+	readOnly := howToMDPrompt(false)
+	for _, unwanted := range []string{"### Adding an entry", "Verified: <date>", "record it before you finish"} {
+		if strings.Contains(readOnly, unwanted) {
+			t.Errorf("read-only HOWTO.md section carries %q", unwanted)
+		}
+	}
+}
+
 func TestMarkdownCapabilitiesPrompt(t *testing.T) {
 	prompt := markdownCapabilitiesPrompt(true, false)
 	if !strings.Contains(prompt, "Mermaid diagrams") {

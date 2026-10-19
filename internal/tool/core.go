@@ -36,6 +36,7 @@ func RegisterCoreTools(r *Registry, docIndex *docindex.Store) {
 	r.Register(ViewImageTool{})
 	r.Register(LatexToPdfTool{})
 	r.Register(NewCompactContextTool())
+	r.Register(NewUpdateIntentTool())
 	r.Register(ReadPdfPageTool{})
 	r.Register(NewPdfIndexTool(docIndex))
 	r.Register(ReadDocxPageTool{})

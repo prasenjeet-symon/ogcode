@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -749,9 +751,57 @@ func TestPermissionPattern_UsesTheSkillName(t *testing.T) {
 	if got := permissionPattern(tc); got != "git-release" {
 		t.Errorf("permissionPattern = %q, want the skill name", got)
 	}
+	// A call with no name (or a whitespace-only name, which SkillTool.Execute
+	// trims to empty) lists the skills instead of loading one, so it takes the
+	// listing's own pattern — an "always allow" for a single skill must not
+	// silently cover the listing.
+	if got := permissionPattern(pendingToolCall{Name: "skill", Input: []byte(`{}`)}); got != skillListPattern {
+		t.Errorf("permissionPattern = %q, want %q", got, skillListPattern)
+	}
+	if got := permissionPattern(pendingToolCall{Name: "skill", Input: []byte(`{"name":"   "}`)}); got != skillListPattern {
+		t.Errorf("permissionPattern(whitespace name) = %q, want %q", got, skillListPattern)
+	}
 	// A malformed call falls back to the catch-all rather than to a pattern
 	// derived from garbage.
-	if got := permissionPattern(pendingToolCall{Name: "skill", Input: []byte(`{}`)}); got != "*" {
+	if got := permissionPattern(pendingToolCall{Name: "skill", Input: []byte(`{`)}); got != "*" {
 		t.Errorf("permissionPattern = %q, want *", got)
+	}
+}
+
+// The whole design rests on HOWTO.md being a pointer: anything read from the
+// file into the prompt is re-sent on every step and goes stale the moment the
+// file is edited. A body paste or a heading index reintroduced here must fail.
+func TestStaticSystemPromptNeverInlinesHowToMD(t *testing.T) {
+	dir := t.TempDir()
+	body := "## SentinelProbeHeading\n\nSENTINEL-HOWTO-BODY\n"
+	if err := os.WriteFile(filepath.Join(dir, "HOWTO.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt := staticSystemPrompt(BuildAgent, dir, true, "", "", "anthropic", true, true)
+	if strings.Contains(prompt, "SENTINEL-HOWTO-BODY") {
+		t.Error("static system prompt inlined the body of HOWTO.md")
+	}
+	if strings.Contains(prompt, "SentinelProbeHeading") {
+		t.Error("static system prompt inlined a heading from HOWTO.md")
+	}
+	if !strings.Contains(prompt, "## HOWTO.md — Project Procedures") {
+		t.Error("static system prompt is missing the HOWTO.md pointer")
+	}
+}
+
+// The pointer is gated on projectScoped (HasTool("codebase_map")): the agents
+// that read the user's tree get it; the utility agents that operate elsewhere
+// never see a section about a project file they cannot reach.
+func TestBuildSystemPrompt_HowToMDReachesOnlyProjectScopedAgents(t *testing.T) {
+	for _, a := range codeFacingAgents() {
+		if p := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0, true); !strings.Contains(p, "## HOWTO.md — Project Procedures") {
+			t.Errorf("%s: project-scoped prompt is missing the HOWTO.md section", a.Name)
+		}
+	}
+	for _, a := range []Agent{IndexAgent, SearchAgent} {
+		if p := buildSystemPrompt(a, "/tmp/test", true, "", "", 0, 0, true); strings.Contains(p, "## HOWTO.md") {
+			t.Errorf("%s: utility prompt carries the project HOWTO.md section", a.Name)
+		}
 	}
 }

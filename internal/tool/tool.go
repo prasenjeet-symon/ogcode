@@ -19,6 +19,15 @@ type ToolDef interface {
 	Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error)
 }
 
+// MCPToolInfo is an optional interface implemented by tools adapted from an
+// external MCP server, exposing the owning server's name, handshake summary,
+// and raw tool name so the intent router can group MCP tools by server.
+type MCPToolInfo interface {
+	MCPServer() string
+	MCPServerDescription() string
+	MCPToolName() string
+}
+
 // Context is passed to every tool execution.
 type Context struct {
 	SessionID  session.SessionID
@@ -41,6 +50,12 @@ type Context struct {
 	// than one provider (a plan model by both OGX and an OpenAI-compatible
 	// endpoint), so the id alone does not identify one.
 	Provider string
+	// IntentMatcher is true when this turn runs the plan matcher: the steps the
+	// agent states with update_intent are matched against the skills and MCP
+	// tools it holds, and the result names the ones that fit. A tool that would
+	// otherwise enumerate every candidate (the skill listing) uses it to stay
+	// quiet instead of spending context on what the matcher already narrowed.
+	IntentMatcher bool
 }
 
 // PermissionRequest is sent when a tool needs user approval.

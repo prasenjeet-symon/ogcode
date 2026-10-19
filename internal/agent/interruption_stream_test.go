@@ -31,6 +31,17 @@ func TestClassifyInterruption_StreamReadFailures(t *testing.T) {
 			wantResumable: true,
 		},
 		{
+			// ERANGE from the local write: the request never left the machine,
+			// so the provider is not at fault and a Resume re-sends on a fresh
+			// connection. Without this case it fell into the generic bucket and
+			// told the user the loop could not recover, saying nothing about the
+			// network filter that actually refused the write.
+			name:          "write rejected by the local network layer",
+			err:           `send request: Post "https://ogx.ogcode.in/v1/chat/completions": write tcp 192.0.2.49:49173->104.21.52.233:443: write: result too large`,
+			wantReason:    session.InterruptNetwork,
+			wantResumable: true,
+		},
+		{
 			name:          "over-long SSE line is the provider's shape, not a blip",
 			err:           "stream read failed: provider sent a single SSE line larger than 16 MB",
 			wantReason:    session.InterruptFatal,

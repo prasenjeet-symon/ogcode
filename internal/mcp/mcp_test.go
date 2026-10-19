@@ -23,7 +23,14 @@ import (
 func startTestServer(t *testing.T) *sdkmcp.ClientSession {
 	t.Helper()
 	c1, s1 := sdkmcp.NewInMemoryTransports()
-	srv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test", Version: "1"}, nil)
+	srv := sdkmcp.NewServer(&sdkmcp.Implementation{
+		Name:        "test",
+		Title:       "Test Echo Service",
+		Description: "In-memory test MCP server",
+		Version:     "1",
+	}, &sdkmcp.ServerOptions{
+		Instructions: "Use echo to verify connectivity.",
+	})
 	srv.AddTool(&sdkmcp.Tool{
 		Name:        "echo",
 		Description: "echo back the input text",
@@ -84,6 +91,16 @@ func TestMCPTool_AdaptsAndCalls(t *testing.T) {
 	}
 	if adapter.Description() != "echo back the input text" {
 		t.Errorf("Description: got %q", adapter.Description())
+	}
+	info, ok := adapter.(tool.MCPToolInfo)
+	if !ok {
+		t.Fatalf("adapter does not implement tool.MCPToolInfo")
+	}
+	if info.MCPServer() != "test" || info.MCPToolName() != "echo" {
+		t.Errorf("MCPToolInfo = (%q, %q), want (test, echo)", info.MCPServer(), info.MCPToolName())
+	}
+	if !strings.Contains(info.MCPServerDescription(), "Test Echo Service") || !strings.Contains(info.MCPServerDescription(), "Use echo to verify connectivity.") {
+		t.Errorf("MCPServerDescription = %q, want title and instructions", info.MCPServerDescription())
 	}
 	// Parameters must be valid JSON (the InputSchema re-marshalled).
 	var schema map[string]any
