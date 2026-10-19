@@ -117,6 +117,16 @@ func classifyInterruption(err error, step int) *session.Interruption {
 			Detail:    "The provider sent one SSE line too large to read — it emits whole tool calls in a single chunk. Ask for a smaller response, or use a provider that streams in deltas.",
 			Step:      step,
 		}
+	case strings.Contains(lower, "result too large"):
+		// ERANGE from the local socket write: the request never left this machine
+		// because a network extension on the host refused to forward it. The
+		// provider is not at fault, and a Resume re-sends on a fresh connection.
+		return &session.Interruption{
+			Reason:    session.InterruptNetwork,
+			Resumable: true,
+			Detail:    "This machine's network layer refused to send the request — VPN, TUN or content-filtering software on the host is the usual cause. Resuming retries on a fresh connection; if it keeps happening, exclude the provider's host from that software.",
+			Step:      step,
+		}
 	case strings.Contains(lower, "connection reset") || strings.Contains(lower, "eof") ||
 		strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") ||
 		strings.Contains(lower, "refused") || strings.Contains(lower, "no such host") ||

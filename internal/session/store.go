@@ -34,13 +34,14 @@ func (s *Store) Get(id SessionID) (*Session, error) {
 	row := s.db.QueryRow(
 		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
-		        time_created, time_updated, status
+		        time_created, time_updated, status, intent
 		 FROM session WHERE id = ?`, id,
 	)
 	var sess Session
 	var uIn, uOut, uReason, uCacheRead, uCacheWrite int
+	var intentRaw string
 	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
-		&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status)
+		&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status, &intentRaw)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -48,6 +49,7 @@ func (s *Store) Get(id SessionID) (*Session, error) {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
 	sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
+	sess.Intent = parseIntent(intentRaw)
 	return &sess, nil
 }
 
@@ -55,7 +57,7 @@ func (s *Store) List(directory string) ([]*Session, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
-		        time_created, time_updated, status
+		        time_created, time_updated, status, intent
 		 FROM session WHERE directory = ? AND session_type NOT IN ('note', 'index', 'search') ORDER BY time_updated DESC`, directory,
 	)
 	if err != nil {
@@ -67,11 +69,13 @@ func (s *Store) List(directory string) ([]*Session, error) {
 	for rows.Next() {
 		var sess Session
 		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
+		var intentRaw string
 		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
-			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status); err != nil {
+			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status, &intentRaw); err != nil {
 			return nil, err
 		}
 		sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
+		sess.Intent = parseIntent(intentRaw)
 		sessions = append(sessions, &sess)
 	}
 	return sessions, nil
@@ -84,7 +88,7 @@ func (s *Store) ListAll() ([]*Session, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
-		        time_created, time_updated, status
+		        time_created, time_updated, status, intent
 		 FROM session ORDER BY time_updated DESC`,
 	)
 	if err != nil {
@@ -96,11 +100,13 @@ func (s *Store) ListAll() ([]*Session, error) {
 	for rows.Next() {
 		var sess Session
 		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
+		var intentRaw string
 		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
-			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status); err != nil {
+			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status, &intentRaw); err != nil {
 			return nil, err
 		}
 		sess.UtilityTokens = utilityTokens(uIn, uOut, uReason, uCacheRead, uCacheWrite)
+		sess.Intent = parseIntent(intentRaw)
 		sessions = append(sessions, &sess)
 	}
 	return sessions, rows.Err()
@@ -186,6 +192,41 @@ func (s *Store) SetStatus(id SessionID, status string) error {
 // project DB would clear each other's markers; that is accepted.)
 func (s *Store) ResetRunningStatuses() error {
 	_, err := s.db.Exec(`UPDATE session SET status = '' WHERE status = 'running'`)
+	return err
+}
+
+// parseIntent rebuilds the session's current-turn plan from the stored JSON,
+// returning nil for an empty or unreadable value so a session with no plan
+// marshals without the field.
+func parseIntent(raw string) *SessionIntent {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var intent SessionIntent
+	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
+		return nil
+	}
+	if len(intent.Steps) == 0 {
+		return nil
+	}
+	return &intent
+}
+
+// SetIntent records the agent's plan for the current turn. A nil intent (or one
+// with no steps) clears the column. It touches only that column and leaves
+// time_updated alone, like SetStatus, so it cannot clobber a concurrent title or
+// model change.
+func (s *Store) SetIntent(id SessionID, intent *SessionIntent) error {
+	raw := ""
+	if intent != nil && len(intent.Steps) > 0 {
+		b, err := json.Marshal(intent)
+		if err != nil {
+			return fmt.Errorf("marshal intent: %w", err)
+		}
+		raw = string(b)
+	}
+	_, err := s.db.Exec(`UPDATE session SET intent = ? WHERE id = ?`, raw, id)
 	return err
 }
 

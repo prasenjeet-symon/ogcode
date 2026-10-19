@@ -466,19 +466,28 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		}
 	}()
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", strings.TrimRight(p.baseURL, "/")+"/messages", bytes.NewReader(jsonBody))
+	// buildRequest renders the request from the still-in-memory body: a send
+	// consumes it, so a retry needs a request of its own.
+	buildRequest := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(reqCtx, "POST", strings.TrimRight(p.baseURL, "/")+"/messages", bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-api-key", p.apiKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+		if p.usesExtendedCacheTTL() {
+			req.Header.Set("anthropic-beta", extendedCacheTTLBeta)
+		}
+		return req, nil
+	}
+
+	httpReq, err := buildRequest()
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", p.apiKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-	if p.usesExtendedCacheTTL() {
-		httpReq.Header.Set("anthropic-beta", extendedCacheTTLBeta)
-	}
-
-	resp, err := streamHTTPClient.Do(httpReq)
+	resp, err := sendStreamingRequest(streamHTTPClient, httpReq, buildRequest)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
@@ -500,8 +509,14 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 }
 
 func (p *AnthropicProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent, cancel context.CancelFunc) {
-	defer body.Close()
+	// The order is load-bearing, because deferred calls run last in, first out:
+	// cancel, then close the body, and only then close the channel. The consumer
+	// wakes on the channel close and may start the next completion immediately;
+	// with the body still open its reservation would still be held, and a gateway
+	// that caps completions in flight (OGX answers 429 "too many completions in
+	// flight") would fail the call that the agent was entitled to make.
 	defer close(ch)
+	defer body.Close()
 	defer cancel()
 
 	// Idle watchdog: if the stream goes silent for streamIdleTimeout, cancel the

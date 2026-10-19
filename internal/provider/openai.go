@@ -993,13 +993,24 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		}
 	}()
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(jsonBody))
+	// buildRequest renders the request from the still-in-memory body. A send
+	// consumes the body, so every attempt that must reach the wire again — a
+	// rate-limit retry, or the fresh-connection retry on a locally rejected
+	// write — needs a request of its own.
+	buildRequest := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, err
+		}
+		req.ContentLength = int64(len(jsonBody))
+		p.setChatHeaders(req)
+		return req, nil
+	}
+
+	httpReq, err := buildRequest()
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	httpReq.ContentLength = int64(len(jsonBody))
-
-	p.setChatHeaders(httpReq)
 
 	client := streamHTTPClient
 
@@ -1030,7 +1041,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	retryDelays := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
 	for attempt := 0; ; attempt++ {
 		var reqErr error
-		resp, reqErr = client.Do(httpReq)
+		resp, reqErr = sendStreamingRequest(client, httpReq, buildRequest)
 		if reqErr != nil {
 			return nil, fmt.Errorf("send request: %w", reqErr)
 		}
@@ -1065,12 +1076,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 			return nil, ctx.Err()
 		case <-time.After(delay):
 		}
-		httpReq, err = http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(jsonBody))
+		httpReq, err = buildRequest()
 		if err != nil {
 			return nil, fmt.Errorf("create retry request: %w", err)
 		}
-		httpReq.ContentLength = int64(len(jsonBody))
-		p.setChatHeaders(httpReq)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -1136,8 +1145,14 @@ func (p *OpenAIProvider) idleTimeout() time.Duration {
 }
 
 func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent, cancel context.CancelFunc, toolNames map[string]bool) {
-	defer body.Close()
+	// The order is load-bearing, because deferred calls run last in, first out:
+	// cancel, then close the body, and only then close the channel. The consumer
+	// wakes on the channel close and may start the next completion immediately;
+	// with the body still open its reservation would still be held, and a gateway
+	// that caps completions in flight (OGX answers 429 "too many completions in
+	// flight") would fail the call that the agent was entitled to make.
 	defer close(ch)
+	defer body.Close()
 	defer cancel()
 
 	// Idle watchdog: if the stream goes silent for streamIdleTimeout, cancel the

@@ -2,6 +2,7 @@ import { createContext, useContext, type ParentComponent } from 'solid-js';
 import { createSignal, createMemo, createEffect, on, onMount, onCleanup, batch } from 'solid-js';
 import {
   type Session,
+  type SessionIntent,
   type MessageWithParts,
   type ModelInfo,
   type ImagePartData,
@@ -1471,6 +1472,26 @@ export const SessionProvider: ParentComponent = (props) => {
         if (activeSession()?.id === id) setActiveSession(fresh);
       }).catch(() => { /* transient — keep the cached record */ });
     }, 150);
+  }));
+
+  // --- Intent (the agent's plan for the current turn) ---
+  // Separate from session.updated on purpose: the intent changes on every
+  // update_intent call, and the debounced re-read above would refetch the whole
+  // row each time. The event carries the new plan, so patch it straight in.
+  let lastProcessedIntentTick = 0;
+  createEffect(on(server.eventTick, (tick) => {
+    if (tick === lastProcessedIntentTick) return;
+    lastProcessedIntentTick = tick;
+    const last = server.lastEvent();
+    if (!last || last.type !== 'intent.changed') return;
+    const p = (last.properties as any) || {};
+    const id = p.sessionId as string | undefined;
+    if (!id) return;
+    const intent = (p.intent as SessionIntent | null) ?? null;
+    setSessions((list) => list.map((s) => (s.id === id ? { ...s, intent } : s)));
+    if (activeSession()?.id === id) {
+      setActiveSession((s) => (s ? { ...s, intent } : s));
+    }
   }));
 
   // --- Tool permission prompts ---

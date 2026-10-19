@@ -25,9 +25,9 @@ import (
 // file a single poisoned turn can write to, so the forgery would outlive the
 // turn that planted it and be re-read at the top of every turn after.
 //
-// The skill package already reached this conclusion for the shorter fields it
-// interpolates (see escapeXML in prompt_builder.go and collapseSpace in
-// skill.go). This is the same rule applied to whole documents.
+// The skill package reached the same conclusion for the shorter fields it
+// interpolates (see collapseSpace in skill.go). This is that rule applied to
+// whole documents.
 
 // mdWrapperTag matches an opening or closing wrapper tag for either block, in
 // any case, with or without attributes.
@@ -80,7 +80,7 @@ func renderMDBlock(tag, relPath, content string, limit int) (block string, used 
 // file can close its block early or open one it was not given.
 //
 // It rewrites only the "<" of those specific tags, rather than escaping the
-// document the way escapeXML does for a skill's one-line description. A
+// whole document. A
 // project's AGENT.md is prose and code — generics, shell redirection, HTML in a
 // fenced block — and escaping every "<" in it would hand the model a document
 // full of &lt; where the author wrote code. The four sequences that can actually

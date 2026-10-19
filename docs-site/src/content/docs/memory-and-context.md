@@ -14,6 +14,8 @@ Two files at the project root are loaded into every session, and both count as d
 
 Both are read in full by default. If yours grow very large, you can cap their size, but most projects never need to.
 
+A third file, **`HOWTO.md`**, records procedures the project has verified — ordered steps plus the check that says they worked. It is **not** loaded into the prompt: the agent is told the file exists and opens it when a task looks like one it already covers, so it can grow without costing every request. Record an entry at the end of a turn that ran the procedure end to end.
+
 ## Recall across turns and sessions
 
 After a turn, Ogcode writes a short structured summary of what happened and indexes it. The agent can search those summaries later, so a decision made last week is still discoverable without you repeating it — it is not a replay of the whole transcript, just the useful parts.

@@ -192,6 +192,30 @@ var streamHTTPClient = &http.Client{
 	},
 }
 
+// sendStreamingRequest issues req and, when the local socket refuses to take
+// the bytes, retries it once on a fresh connection.
+//
+// This is the one transport failure where a re-send is unambiguously safe: a
+// write the kernel rejected never reached the provider, so there is no work to
+// duplicate. It is also one a backoff cannot help — the broken thing is this
+// socket, not the path's health — so the retry is immediate. Rebuilding the
+// request is what makes it possible at all, since net/http consumes the body on
+// the first attempt; the idle pool is dropped first so the retry cannot land on
+// another socket the same interceptor is holding.
+func sendStreamingRequest(client *http.Client, req *http.Request, rebuild func() (*http.Request, error)) (*http.Response, error) {
+	resp, err := client.Do(req)
+	if err == nil || !isLocalWriteFailure(err) {
+		return resp, err
+	}
+	slog.Warn("local write rejected, retrying on a fresh connection", "err", err)
+	client.CloseIdleConnections()
+	retry, rerr := rebuild()
+	if rerr != nil {
+		return nil, fmt.Errorf("rebuild request after local write failure: %w", rerr)
+	}
+	return client.Do(retry)
+}
+
 // forceIPv4Env names the environment variable that decides whether provider
 // streams may use IPv6. It has three positions rather than two: unset leaves
 // IPv6 in use with the automatic fallback below armed, a truthy value pins IPv4
@@ -255,14 +279,23 @@ func useIPv4() bool {
 // isIPv6PathFailure reports whether err is the local IPv6 path giving out under
 // a connection to an IPv6 peer, as opposed to any other way a stream can die.
 //
-// The signature is an unreachable-class errno on a socket whose REMOTE address
-// is IPv6. That is what the kernel reports when the route to the peer is gone,
-// and — the case that motivated this — when the temporary IPv6 source address
-// the socket was bound to is rotated out from under an established connection.
-// A peer that resets the connection says nothing about the address family, so
-// it is deliberately not counted here.
+// The signature is an unreachable-class errno, or a reset, on a socket whose
+// REMOTE address is IPv6. The unreachable class is what the kernel reports when
+// the route to the peer is gone, and — the case that motivated this — when the
+// temporary IPv6 source address the socket was bound to is rotated out from
+// under an established connection.
+//
+// A reset is included because on this class of network it is the same failure
+// arriving second-hand: when the temporary source address is withdrawn, the
+// carrier NAPT or the edge tears the flow down and the client is handed
+// "read: connection reset by peer" from an IPv6 peer instead of an errno of
+// its own. A reset is not PROOF of an address-family problem, so it is only a
+// strike — the fallback still needs ipv6FallbackStrikes of them, and narrowing
+// to IPv4 on a host that has it costs nothing but a new connection.
 func isIPv6PathFailure(err error) bool {
-	if !errors.Is(err, syscall.EHOSTUNREACH) && !errors.Is(err, syscall.ENETUNREACH) {
+	if !errors.Is(err, syscall.EHOSTUNREACH) &&
+		!errors.Is(err, syscall.ENETUNREACH) &&
+		!errors.Is(err, syscall.ECONNRESET) {
 		return false
 	}
 	var opErr *net.OpError
@@ -276,6 +309,23 @@ func isIPv6PathFailure(err error) bool {
 	// To4 returns non-nil for IPv4 and for v4-mapped addresses, both of which
 	// travel over the IPv4 path and prove nothing about IPv6.
 	return addr.IP.To4() == nil
+}
+
+// isLocalWriteFailure reports whether err is the local socket refusing the
+// request bytes, rather than the network failing on the way to the peer.
+//
+// ERANGE ("result too large") is what identifies it. The kernel's own TCP stack
+// does not answer a socket write with that errno; a network extension sitting on
+// the socket — a VPN TUN, a fake-IP resolver, a content filter — can hand it
+// back for a write it will not forward (golang/go#79706 reproduces the class in
+// C, so it is not Go's). The op is pinned to write because the same errno means
+// something else entirely on a read.
+func isLocalWriteFailure(err error) bool {
+	if !errors.Is(err, syscall.ERANGE) {
+		return false
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "write"
 }
 
 // noteIPv6Failure records a stream death that looks like the IPv6 path failing,

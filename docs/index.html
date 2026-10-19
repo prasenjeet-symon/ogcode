@@ -3444,6 +3444,434 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   #product .pr-f:hover .pr-speed img { transform: scale(1.02); }
 }
 
+/* ── section: skills & MCP ── */
+/* #skills — "Your whole stack. Not your whole context." A plain-English
+   turn sits in the middle of the connected workspace. Only the tools this
+   task needs are lit, checked and wired in; the rest stay visibly available
+   but idle. The answer lands underneath, and a lean context rail closes the
+   panel. No counts, no plumbing: the stage sells precise selection and a
+   small context. Every selector is scoped to #skills; classes are prefixed
+   sk-. */
+#skills .sec-head { max-width: 900px; }
+
+/* ── Stage: the connected workspace ───────────────────────────────── */
+#skills .sk-stage {
+  --sk-flow: 600px;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  min-height: clamp(500px, 42vw, 560px);
+  padding: clamp(28px, 3.4vw, 42px) clamp(18px, 3vw, 40px);
+  background:
+    radial-gradient(40% 46% at 50% 50%, rgba(255, 94, 31, .16), rgba(255, 94, 31, 0) 72%),
+    radial-gradient(70% 80% at 50% 50%, rgba(255, 94, 31, .05), rgba(255, 94, 31, 0) 78%),
+    linear-gradient(180deg, rgba(255, 255, 255, .015), rgba(255, 255, 255, 0) 26%),
+    var(--bg);
+}
+/* The site's own dot grain continues through the stage; the mask fades it
+   out at the edges so the eye still lands on the conversation. */
+#skills .sk-grid {
+  position: absolute; inset: 0;
+  background-image: radial-gradient(rgba(255,255,255,.035) 1px, transparent 1.3px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(72% 72% at 50% 50%, #000 28%, transparent 78%);
+  mask-image: radial-gradient(72% 72% at 50% 50%, #000 28%, transparent 78%);
+  pointer-events: none;
+}
+#skills .sk-halo {
+  position: absolute; left: 50%; top: 50%;
+  width: min(640px, 66%); aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,94,31,.13), rgba(255,94,31,0) 66%);
+  pointer-events: none;
+}
+/* A single quiet orbit behind the chips gives the ring a shape without
+   drawing a diagram: it fades out at the top and bottom edges. */
+#skills .sk-ring {
+  position: absolute; left: 50%; top: 50%;
+  width: min(980px, 87%); height: min(520px, 88%);
+  transform: translate(-50%, -50%);
+  border: 1px dashed rgba(240, 227, 222, .11);
+  border-radius: 50%;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 36%, #000 64%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 36%, #000 64%, transparent);
+  pointer-events: none;
+}
+
+/* Tool chips orbit the conversation. --x / --y are percentages of the
+   stage, --d desyncs the float, --c tints a chip's icon like an app tile. */
+#skills .sk-orbit { position: absolute; inset: 0; z-index: 1; }
+#skills .sk-node {
+  position: absolute; left: var(--x); top: var(--y);
+  translate: -50% -50%;
+  rotate: -1.1deg;
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 40px; padding: 0 16px 0 6px;
+  border: 1px solid rgba(240, 227, 222, .15); border-radius: 999px;
+  background: rgba(30, 28, 27, .92);
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, .5),
+    0 1px 0 rgba(255, 255, 255, .04),
+    inset 0 1px 0 rgba(255, 255, 255, .06);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  color: var(--text);
+  font: 500 13px/1 var(--font);
+  white-space: nowrap;
+  animation: sk-float 7s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+/* The side chips hug the conversation instead of the stage edge, so the
+   composition stays tight on wide screens and never overlaps the card. */
+#skills .sk-node.sk-l, #skills .sk-node.sk-r { translate: 0 -50%; }
+#skills .sk-node.sk-l { left: auto; right: calc(50% + var(--sk-flow) / 2 + 20px); }
+#skills .sk-node.sk-r { left: calc(50% + var(--sk-flow) / 2 + 20px); }
+/* Side chips are wired into the conversation: a hairline bridges the gap to
+   the card and a small pulse travels along it, so the ring reads as one
+   system rather than a row of unrelated logos. */
+#skills .sk-node.sk-l::before, #skills .sk-node.sk-r::before {
+  content: "";
+  position: absolute; top: 50%;
+  width: 20px; height: 1px;
+  background: linear-gradient(90deg, rgba(255, 112, 56, .5), rgba(255, 112, 56, .05));
+}
+#skills .sk-node.sk-l::before { left: 100%; }
+#skills .sk-node.sk-r::before {
+  right: 100%;
+  background: linear-gradient(270deg, rgba(255, 112, 56, .5), rgba(255, 112, 56, .05));
+}
+#skills .sk-node.sk-l::after, #skills .sk-node.sk-r::after {
+  content: "";
+  position: absolute; top: 50%;
+  width: 4px; height: 4px; margin-top: -2px;
+  border-radius: 50%;
+  background: var(--brand-ink);
+  box-shadow: 0 0 8px rgba(255, 112, 56, .9);
+  opacity: 0;
+}
+#skills .sk-node.sk-l::after {
+  left: 100%;
+  animation: sk-wire-in 5.2s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+#skills .sk-node.sk-r::after {
+  right: 100%;
+  animation: sk-wire-out 5.2s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+@keyframes sk-wire-in {
+  0%, 44%   { opacity: 0; transform: translateX(0); }
+  54%       { opacity: .95; }
+  82%       { opacity: .95; transform: translateX(16px); }
+  92%, 100% { opacity: 0; transform: translateX(20px); }
+}
+@keyframes sk-wire-out {
+  0%, 44%   { opacity: 0; transform: translateX(0); }
+  54%       { opacity: .95; }
+  82%       { opacity: .95; transform: translateX(-16px); }
+  92%, 100% { opacity: 0; transform: translateX(-20px); }
+}
+#skills .sk-g {
+  --c: var(--dim);
+  display: inline-grid; place-items: center;
+  width: 28px; height: 28px;
+  border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(158deg, color-mix(in srgb, var(--c) 30%, #201e1d), color-mix(in srgb, var(--c) 7%, #161514));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14);
+  color: color-mix(in srgb, var(--c) 72%, #fff);
+  font: 600 11px/1 var(--mono);
+  letter-spacing: .01em;
+}
+#skills .sk-g svg { width: 15px; height: 15px; }
+/* Skills read warm, MCP servers carry their own accent: one toolbox. */
+#skills .sk-g.is-skill { --c: var(--brand-ink); }
+
+/* The stack is all connected, but only the tools this task needs are lit and
+   wired in. Everything else recedes: available, not loaded. */
+#skills .sk-node.sk-pick {
+  border-color: rgba(255, 112, 56, .44);
+  background: linear-gradient(180deg, rgba(44, 31, 26, .96), rgba(29, 27, 26, .94));
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, .55),
+    0 0 26px rgba(255, 94, 31, .14),
+    inset 0 1px 0 rgba(255, 255, 255, .07);
+  color: var(--bright);
+}
+#skills .sk-node.sk-idle {
+  opacity: .5;
+  filter: saturate(.35);
+  animation: none;
+  border-color: rgba(240, 227, 222, .10);
+  color: var(--dim);
+}
+#skills .sk-node.sk-idle::before, #skills .sk-node.sk-idle::after { display: none; }
+#skills .sk-node.sk-idle .sk-g { opacity: .75; }
+#skills .sk-sel {
+  position: absolute; top: -7px; right: -7px;
+  display: grid; place-items: center;
+  width: 17px; height: 17px;
+  border: 2px solid var(--bg); border-radius: 50%;
+  background: var(--brand-ink); color: #1b1512;
+  box-shadow: 0 0 12px rgba(255, 94, 31, .55);
+}
+#skills .sk-sel svg { width: 9px; height: 9px; }
+#skills .sk-sr {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+/* A quiet key so the dim/bright split reads as selection, not a broken UI. */
+#skills .sk-legend {
+  position: absolute; left: clamp(16px, 2vw, 24px); bottom: 15px; z-index: 3;
+  display: flex; align-items: center; gap: 14px;
+  font: 500 9.5px/1 var(--mono);
+  letter-spacing: .11em; text-transform: uppercase; color: var(--dim);
+}
+#skills .sk-legend span { display: inline-flex; align-items: center; gap: 6px; }
+#skills .sk-legend i { width: 6px; height: 6px; border-radius: 50%; }
+#skills .sk-legend .on { background: var(--brand-ink); box-shadow: 0 0 8px rgba(255, 112, 56, .8); }
+#skills .sk-legend .off { border: 1px solid rgba(240, 227, 222, .32); }
+@keyframes sk-float {
+  0%, 100% { transform: translateY(-3px); }
+  50%      { transform: translateY(3px); }
+}
+
+/* ── The conversation: the ask, then the answer ───────────────────── */
+#skills .sk-flow {
+  position: relative; z-index: 2;
+  display: grid; justify-items: center;
+  width: min(var(--sk-flow), 100%);
+}
+/* The turn and the answer share one surface, so the stage reads as a
+   session that happened rather than two connected boxes. */
+#skills .sk-thread {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid transparent; border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.012)) padding-box,
+    linear-gradient(180deg, #1c1b1a, #171615) padding-box,
+    linear-gradient(180deg, rgba(255,112,56,.46), rgba(240,227,222,.12) 30%, rgba(240,227,222,.06)) border-box;
+  box-shadow:
+    0 34px 80px rgba(0, 0, 0, .6),
+    0 0 90px rgba(255, 94, 31, .12),
+    inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+#skills .sk-ask { width: 100%; }
+#skills .sk-ask-top {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 6px 12px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, .022);
+}
+#skills .sk-ask-lbl {
+  display: inline-flex; align-items: center; gap: 7px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
+}
+#skills .sk-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(62, 207, 142, .14);
+}
+#skills .sk-ask-meta { font: 400 11px/1 var(--mono); color: var(--muted); }
+#skills .sk-prompt {
+  position: relative;
+  padding: 20px 24px 21px 46px;
+  font-size: clamp(18px, 1.75vw, 21px);
+  line-height: 1.4; letter-spacing: -.017em;
+  color: var(--bright);
+  text-wrap: balance;
+}
+#skills .sk-prompt::before {
+  content: "";
+  position: absolute; left: 24px; top: 25px; bottom: 27px;
+  width: 2px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--brand-ink), rgba(255, 112, 56, 0));
+}
+
+/* The answer: the same session, doing the work. */
+#skills .sk-reply {
+  width: 100%;
+  padding: 16px 18px 18px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.004));
+}
+#skills .sk-reply-top { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+#skills .sk-ava {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; flex: none;
+  border-radius: 7px; background: var(--brand);
+}
+#skills .sk-ava svg { width: 15px; height: 15px; display: block; }
+#skills .sk-reply-name {
+  font-size: 12.5px; font-weight: 600; letter-spacing: -.01em;
+  color: var(--bright);
+}
+#skills .sk-reply-tag {
+  margin-left: auto;
+  font: 400 10.5px/1 var(--mono);
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+#skills .sk-reply-line {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+  font-size: 16px; line-height: 1.4; letter-spacing: -.012em;
+  color: var(--bright);
+}
+#skills .sk-ok {
+  display: inline-grid; place-items: center;
+  width: 19px; height: 19px; flex: none;
+  border-radius: 50%;
+  background: rgba(62, 207, 142, .15);
+  color: var(--ok);
+}
+#skills .sk-ok svg { width: 11px; height: 11px; }
+#skills .sk-res { display: grid; gap: 6px; }
+#skills .sk-res-row {
+  display: flex; align-items: center; gap: 10px;
+  min-width: 0;
+  padding: 6px 10px 6px 7px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: rgba(255, 255, 255, .028);
+  font-size: 13px; line-height: 1.25; color: var(--muted);
+}
+#skills .sk-res-row .sk-g { width: 22px; height: 22px; flex: none; border-radius: 6px; }
+#skills .sk-res-row .sk-g svg { width: 13px; height: 13px; }
+#skills .sk-res-row b { font-weight: 500; color: var(--text); }
+#skills .sk-res-row .ck { width: 14px; height: 14px; flex: none; margin-left: auto; color: var(--ok); }
+
+/* The context rail: a short solid load, then the rest of the stack stays out.
+   No number, no scale — just a visibly small footprint. */
+#skills .sk-ctx {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 7px 10px;
+  padding: 11px 18px 12px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, .012);
+}
+#skills .sk-ctx-lbl {
+  font: 500 10px/1 var(--mono);
+  letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
+}
+#skills .sk-ctx-rail {
+  flex: 1 1 70px; min-width: 54px; height: 7px;
+  border-radius: 4px; overflow: hidden;
+  background: repeating-linear-gradient(90deg, rgba(240, 227, 222, .13) 0 3px, transparent 3px 7px);
+}
+#skills .sk-ctx-rail i {
+  display: block; width: 15%; height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--brand-ink), rgba(255, 112, 56, .55));
+  box-shadow: 0 0 12px rgba(255, 94, 31, .45);
+}
+#skills .sk-ctx-note {
+  font: 400 10.5px/1 var(--mono);
+  letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Fact visuals: the same two ideas at a glance — three picks among many, and
+   a context rail that stays mostly empty. */
+#skills .sk-fact-vis {
+  display: flex; align-items: center;
+  height: 24px; margin-bottom: 16px;
+}
+#skills .sk-fact-vis .ico { color: var(--brand-ink); }
+#skills .sk-mini { display: flex; align-items: center; gap: clamp(3px, .35vw, 5px); }
+#skills .sk-mini i {
+  display: grid; place-items: center;
+  width: clamp(18px, 1.9vw, 24px); aspect-ratio: 1;
+  border: 1px dashed rgba(240, 227, 222, .22); border-radius: 6px;
+  background: rgba(255, 255, 255, .02);
+  color: transparent;
+  font: 600 9px/1 var(--mono); font-style: normal; letter-spacing: 0;
+}
+#skills .sk-mini i.on {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--c) 52%, transparent);
+  background: linear-gradient(158deg, color-mix(in srgb, var(--c) 26%, #201e1d), color-mix(in srgb, var(--c) 6%, #161514));
+  color: color-mix(in srgb, var(--c) 82%, #fff);
+  box-shadow: 0 0 0 3px rgba(255, 112, 56, .05), inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+#skills .sk-mini-ctx { display: flex; align-items: center; gap: 9px; width: min(230px, 100%); }
+#skills .sk-mini-ctx .lbl {
+  font: 500 9.5px/1 var(--mono);
+  letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
+}
+#skills .sk-mini-ctx .rail {
+  position: relative; flex: 1; height: 8px;
+  border-radius: 4px; overflow: hidden;
+  background: repeating-linear-gradient(90deg, rgba(240, 227, 222, .16) 0 3px, transparent 3px 7px);
+}
+#skills .sk-mini-ctx .rail i {
+  display: block; width: 15%; height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--brand-ink), rgba(255, 112, 56, .55));
+  box-shadow: 0 0 10px rgba(255, 94, 31, .5);
+}
+
+@media (max-width: 1100px) and (min-width: 901px) {
+  #skills .sk-stage { --sk-flow: 500px; min-height: 540px; }
+}
+@media (max-width: 900px) {
+  #skills .sk-stage {
+    display: flex; flex-direction: column; justify-content: center;
+    min-height: 0; gap: 28px;
+    padding: 34px 20px 32px;
+  }
+  #skills .sk-grid, #skills .sk-halo, #skills .sk-ring { display: none; }
+  #skills .sk-legend { display: none; }
+  #skills .sk-node.sk-idle { opacity: .5; }
+  #skills .sk-orbit {
+    position: static;
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 8px 10px;
+    max-width: 520px; margin-inline: auto;
+  }
+  #skills .sk-node {
+    height: 36px; padding: 0 13px 0 5px; font-size: 12.5px;
+  }
+  #skills .sk-g { width: 26px; height: 26px; }
+  #skills .sk-node,
+  #skills .sk-node.sk-l,
+  #skills .sk-node.sk-r {
+    position: static; translate: none; rotate: 0deg;
+    transform: none; animation: none;
+  }
+  #skills .sk-node::before, #skills .sk-node::after,
+  #skills .sk-node.sk-l::before, #skills .sk-node.sk-l::after,
+  #skills .sk-node.sk-r::before, #skills .sk-node.sk-r::after { display: none; }
+  #skills .sk-flow { width: 100%; max-width: 560px; }
+}
+@media (max-width: 600px) {
+  #skills .sk-ask-top { padding: 10px 14px; }
+  #skills .sk-prompt { padding: 17px 16px 18px 38px; }
+  #skills .sk-prompt::before { left: 17px; top: 22px; bottom: 24px; }
+  #skills .sk-orbit {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-items: center;
+    gap: 7px 8px;
+  }
+  #skills .sk-node { height: 34px; padding: 0 11px 0 5px; font-size: 12px; }
+  #skills .sk-g { width: 24px; height: 24px; }
+  #skills .sk-reply { padding: 14px 14px 15px; }
+  #skills .sk-reply-line { font-size: 14.5px; }
+  #skills .sk-res-row { font-size: 12.5px; padding: 5px 8px 5px 6px; }
+  #skills .sk-ctx { padding: 10px 14px 11px; gap: 7px 8px; }
+  #skills .sk-ctx-note { font-size: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #skills .sk-node { animation: none; }
+  #skills .sk-node::after { animation: none; }
+}
+
 /* ── section: review ── */
 /* Layout: 1/3 points column + 2/3 diff stage, split by the shared 1px cell lines. */
 #review .rv-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
@@ -4099,6 +4527,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 
     <nav class="nav-menu" aria-label="Primary">
       <a href="#product">Product</a>
+      <a href="#skills">Skills &amp; MCP</a>
       <a href="#models">Models</a>
       <a href="#cost">Cost</a>
       <a href="/ogx/">OGX</a>
@@ -4123,6 +4552,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       <div class="nav-sheet" id="navSheet" hidden>
         <nav aria-label="Menu">
           <a class="sheet-link" href="#product">Product <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
+          <a class="sheet-link" href="#skills">Skills &amp; MCP <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
           <a class="sheet-link" href="#models">Models <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
           <a class="sheet-link" href="#cost">Cost <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
           <a class="sheet-link" href="/ogx/">OGX <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
@@ -5062,6 +5492,116 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
     </div>
   </div>
 </section>
+
+<!-- ══ Skills & MCP ═══════════════════════════════════════════ -->
+<section class="sec" id="skills" aria-labelledby="skills-title">
+  <div class="frame">
+    <div class="sec-head reveal">
+      <h2 class="h2" id="skills-title">Your whole stack.<br><span class="hl">Not your whole context.</span></h2>
+      <p class="sub">Figma, Linear, GitHub, Postgres, Playwright — and the way your team works, in one conversation. Each turn loads only the skill and MCP server it needs — no more — so the context stays small, the tokens stay low, and the answer stays sharp.</p>
+    </div>
+
+    <div class="box sk-box reveal d1">
+      <i class="cn tl"></i><i class="cn tr"></i><i class="cn bl"></i><i class="cn br"></i>
+
+      <div class="sk-stage">
+        <span class="sk-halo" aria-hidden="true"></span>
+        <span class="sk-ring" aria-hidden="true"></span>
+        <span class="sk-grid" aria-hidden="true"></span>
+        <p class="sk-legend" aria-hidden="true">
+          <span><i class="on"></i>in this task</span>
+          <span><i class="off"></i>available</span>
+        </p>
+
+        <ul class="sk-orbit" role="list" aria-label="Your connected stack; the tools used for this task are marked">
+          <li class="sk-node sk-pick" style="--x:34%;--y:8%;--d:-1.2s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#2EAD33" aria-hidden="true">PW</span>Playwright<span class="sk-sr"> — in this task</span></li>
+          <li class="sk-node sk-pick" style="--x:66%;--y:8%;--d:-.4s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#A259FF" aria-hidden="true">F</span>Figma<span class="sk-sr"> — in this task</span></li>
+          <li class="sk-node sk-r sk-idle" style="--y:36%;--d:-2.8s"><span class="sk-g" style="--c:#5E6AD2" aria-hidden="true">L</span>Linear</li>
+          <li class="sk-node sk-r sk-pick" style="--y:64%;--d:-1.6s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#E6EDF3" aria-hidden="true">GH</span>GitHub<span class="sk-sr"> — in this task</span></li>
+          <li class="sk-node sk-idle" style="--x:66%;--y:92%;--d:-4.2s"><span class="sk-g" style="--c:#4A90E2" aria-hidden="true">PG</span>Postgres</li>
+          <li class="sk-node sk-idle" style="--x:34%;--y:92%;--d:-3.5s"><span class="sk-g is-skill" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span>Release checklist</li>
+          <li class="sk-node sk-l sk-idle" style="--y:64%;--d:-.9s"><span class="sk-g is-skill" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/></svg></span>Code review</li>
+          <li class="sk-node sk-l sk-idle" style="--y:36%;--d:-5.1s"><span class="sk-g" style="--c:#8B7CF6" aria-hidden="true">SE</span>Sentry</li>
+        </ul>
+
+        <div class="sk-flow">
+          <div class="sk-thread" role="img" aria-label="One prompt typed in plain English: polish the onboarding flow, run the tests, and open a pull request. Only the three tools this task needs — Figma, Playwright and GitHub — are loaded into the context. The assistant answers that all three are done: the latest Figma flow pulled, all 14 Playwright tests green, and pull request 412 open on GitHub.">
+            <div class="sk-ask">
+              <div class="sk-ask-top">
+                <span class="sk-ask-lbl"><i class="sk-dot"></i>whole stack connected</span>
+                <span class="sk-ask-meta">acme/web</span>
+              </div>
+              <p class="sk-prompt">Polish the onboarding flow, run the tests, and open a PR.</p>
+            </div>
+
+            <div class="sk-reply">
+              <div class="sk-reply-top">
+                <span class="sk-ava" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none"><path d="M54 32A22 22 0 0 0 32 10A22 22 0 0 0 10 32A22 22 0 0 0 32 54A13 13 0 0 0 43 33" stroke="#fff" stroke-width="8" stroke-linecap="round"/></svg></span>
+                <span class="sk-reply-name">ogcode</span>
+                <span class="sk-reply-tag">just now</span>
+              </div>
+              <p class="sk-reply-line"><span class="sk-ok" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span>Done — all three, in one pass.</p>
+              <ul class="sk-res" role="list">
+                <li class="sk-res-row"><span class="sk-g" style="--c:#A259FF" aria-hidden="true">F</span><span><b>Figma</b> — latest flow pulled</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
+                <li class="sk-res-row"><span class="sk-g" style="--c:#2EAD33" aria-hidden="true">PW</span><span><b>Playwright</b> — 14 tests green</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
+                <li class="sk-res-row"><span class="sk-g" style="--c:#E6EDF3" aria-hidden="true">GH</span><span><b>GitHub</b> — PR #412 opened</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
+              </ul>
+            </div>
+
+            <div class="sk-ctx" role="img" aria-label="A lean context: only the skills and servers this task needs are loaded; the rest of the stack stays out.">
+              <span class="sk-ctx-lbl">context</span>
+              <span class="sk-ctx-rail" aria-hidden="true"><i></i></span>
+              <span class="sk-ctx-note">only this task</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cells cells-3 sk-facts">
+        <div class="cell">
+          <div class="reveal">
+            <div class="sk-fact-vis" aria-hidden="true">
+              <span class="sk-mini">
+                <i class="on" style="--c:#A259FF">F</i>
+                <i></i>
+                <i></i>
+                <i class="on" style="--c:#2EAD33">PW</i>
+                <i></i>
+                <i></i>
+                <i class="on" style="--c:#E6EDF3">GH</i>
+                <i></i>
+              </span>
+            </div>
+            <h3 class="h3">The right tool, every time</h3>
+            <p class="p">Each turn loads the exact skill and MCP server it needs. The rest stay connected, but out of the context.</p>
+          </div>
+        </div>
+        <div class="cell">
+          <div class="reveal d1">
+            <div class="sk-fact-vis" aria-hidden="true">
+              <span class="sk-mini-ctx">
+                <span class="lbl">context</span>
+                <span class="rail"><i></i></span>
+              </span>
+            </div>
+            <h3 class="h3">A lean context, by design</h3>
+            <p class="p">Only the relevant tools are loaded, so the model reads a short, focused prompt: fewer tokens per turn, faster answers and lower cost.</p>
+          </div>
+        </div>
+        <div class="cell">
+          <div class="reveal d2">
+            <div class="sk-fact-vis" aria-hidden="true">
+              <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H14a4 4 0 0 0 0-8H9a4 4 0 0 1 0-8h6.5"/></svg></span>
+            </div>
+            <h3 class="h3">Your team's playbook, built in</h3>
+            <p class="p">The way your team reviews, tests and ships — written down once, followed every time, on every repo.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="sec" id="review" aria-labelledby="review-title">
   <div class="frame">
     <div class="sec-head reveal">

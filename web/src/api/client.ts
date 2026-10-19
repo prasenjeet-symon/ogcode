@@ -45,9 +45,30 @@ export interface Session {
   compactionSummary?: string;
   /** In-flight turn state: 'running', 'failed', or absent when idle/clean. */
   status?: string;
+  /** The plan the agent is working through this turn (absent when it set none). */
+  intent?: SessionIntent | null;
   utilityTokens?: TokenCounts;
   createdAt: number;
   updatedAt: number;
+}
+
+/** The agent's forward-looking plan for the current turn. */
+export interface SessionIntent {
+  steps: IntentStep[];
+}
+
+export interface IntentStep {
+  step: string;
+  /** 'pending' | 'active' | 'done' | 'dropped'. */
+  status: string;
+  /** How many skills the plan matcher paired with this step (absent = none). */
+  matchedSkills?: number;
+  /** How many MCP servers the plan matcher paired with this step (absent = none). */
+  matchedMCPs?: number;
+  /** The skill names behind matchedSkills, for the hover label. */
+  matchedSkillNames?: string[];
+  /** The MCP server names behind matchedMCPs, for the hover label. */
+  matchedMCPNames?: string[];
 }
 
 export function listSessions(directory?: string): Promise<Session[]> {

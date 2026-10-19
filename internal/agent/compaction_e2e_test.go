@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -216,6 +215,10 @@ func runCompactionScriptFull(t *testing.T, summary string, registerTool bool, tw
 
 	tools := tool.NewRegistry()
 	tools.Register(noopGrepTool{})
+	// Every real build turn carries update_intent (core register), and it is the
+	// only channel that surfaces an MCP tool on the wire. Without it here the
+	// harness would drive a build agent stripped of a capability it always has.
+	tools.Register(tool.NewUpdateIntentTool())
 	if registerTool {
 		tools.Register(tool.NewCompactContextTool())
 	}
@@ -400,10 +403,12 @@ func TestCompactContextEnabledDefaultsToOn(t *testing.T) {
 // are part of the cached prompt prefix on every provider — on Anthropic they LEAD
 // it (tools → system → messages), so any churn there invalidates the
 // cache_control'd system block and the entire message history along with it.
+//
+// The array must also carry no MCP tool: those are registered and reachable in
+// principle, yet offered only once the matcher names one for a plan step.
 func TestRunLoop_ToolsetIsIdenticalAcrossStepsWhenRegistryIsUnchanged(t *testing.T) {
 	_, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
-		// Several glob-matched tools, so map-iteration order would be visible if
-		// ForAgent ever stopped sorting.
+		// Several glob-matched tools, so any per-step expansion would be visible.
 		for i := 0; i < 12; i++ {
 			lr.Tools.Register(noopNamedTool{fmt.Sprintf("mcp_srv_%02d", i)})
 		}
@@ -412,8 +417,9 @@ func TestRunLoop_ToolsetIsIdenticalAcrossStepsWhenRegistryIsUnchanged(t *testing
 	if len(toolLists) < 2 {
 		t.Fatalf("need at least 2 steps to compare, got %d", len(toolLists))
 	}
-	if !containsString(toolLists[0], "mcp_srv_00") {
-		t.Fatalf("mcp_* did not expand; this test would prove nothing: %v", toolLists[0])
+	// Non-vacuous: the turn does carry tools, just not the MCP ones.
+	if !containsString(toolLists[0], "compact_context") || !containsString(toolLists[0], "grep") {
+		t.Fatalf("expected the turn's own tools on the wire, got %v", toolLists[0])
 	}
 
 	want := strings.Join(toolLists[0], ",")
@@ -422,32 +428,35 @@ func TestRunLoop_ToolsetIsIdenticalAcrossStepsWhenRegistryIsUnchanged(t *testing
 			t.Errorf("step %d differs from step 0 with an unchanged registry\n  step 0: %s\n  step %d: %s",
 				step, want, step, got)
 		}
-	}
-
-	var mcps []string
-	for _, id := range toolLists[0] {
-		if strings.HasPrefix(id, "mcp_") {
-			mcps = append(mcps, id)
+		// Registered and reachable in principle, yet none may appear before the
+		// matcher names it for a plan step.
+		for _, id := range tools {
+			if strings.HasPrefix(id, "mcp_") {
+				t.Errorf("step %d offered MCP tool %q before the matcher named it: %v", step, id, tools)
+			}
 		}
-	}
-	if !sort.StringsAreSorted(mcps) {
-		t.Errorf("expanded MCP tools are not sorted: %v", mcps)
 	}
 }
 
 // The availability half. A pure snapshot would have been wrong: mid-loop guidance
 // does not start a new turn, so a user steering a working agent keeps feeding the
-// same RunLoop — and a turn can run to 30,000 steps. The case that actually bites
-// is enabling an MCP server *because* the agent needs it right now. So a real
-// registry change must be picked up mid-turn, exactly once.
+// same RunLoop — and a turn can run to 30,000 steps. A tool that is named on the
+// wire and whose registration lands between two steps must be picked up mid-turn,
+// exactly once.
+//
+// A bare MCP registration deliberately must NOT arrive this way: MCP tools reach
+// the wire only through turnToolset.offer, when the matcher names them for a plan
+// step.
 func TestRunLoop_ToolsetPicksUpARegistryChangeMidTurn(t *testing.T) {
-	const lateTool = "mcp_late_arrival"
+	const lateTool = "deep_search"
 
 	_, toolLists := runCompactionScriptFull(t, e2eSummary, true, func(lr *LoopRunner) {
 		lr.Tools.Register(noopNamedTool{"mcp_early"})
 		// Overrides the harness's grep with one that registers a tool the first
-		// time it runs — a deterministic stand-in for an MCP server finishing its
-		// dial between two steps. The script calls grep on steps 1 and 2.
+		// time it runs — a deterministic stand-in for a registration landing between
+		// two steps. The script calls grep on steps 1 and 2. lateTool is a real
+		// codingAgentTools id the harness leaves unregistered, so it is absent at
+		// turn start yet inside the allowlist.
 		lr.Tools.Register(&registeringGrepTool{reg: lr.Tools, id: lateTool})
 	})
 
@@ -462,8 +471,18 @@ func TestRunLoop_ToolsetPicksUpARegistryChangeMidTurn(t *testing.T) {
 		t.Errorf("a tool registered mid-turn never reached the agent: final step had %v", last)
 	}
 	// And the earlier tools must survive the re-resolve.
-	if !containsString(last, "mcp_early") {
-		t.Errorf("re-resolve dropped a pre-existing tool: %v", last)
+	for _, id := range []string{"grep", "compact_context"} {
+		if !containsString(last, id) {
+			t.Errorf("re-resolve dropped %q: %v", id, last)
+		}
+	}
+	// A plain MCP registration is not enough to reach the wire.
+	for step, tools := range toolLists {
+		for _, id := range tools {
+			if strings.HasPrefix(id, "mcp_") {
+				t.Errorf("step %d offered MCP tool %q without the matcher naming it: %v", step, id, tools)
+			}
+		}
 	}
 }
 

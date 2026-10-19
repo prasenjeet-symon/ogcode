@@ -260,7 +260,7 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 		base += "This project has no MEMORY.md file yet, so there is no <memory-md> tag above. MEMORY.md is a project's persistent, cross-session knowledge base that survives across conversations, unlike chat history.\n\n"
 	}
 
-	base += "It holds durable, project-specific knowledge — decisions and why, conventions, architecture, gotchas, and facts like config values, versions, and build/test commands. It is re-read at the start of every turn. Keep it concise; it is not for behavioral rules (those belong in AGENT.md) or anything obvious from the code."
+	base += "A line must be a fact a future session needs before acting: a gotcha with its fix (tried X → got Y → do Z instead), an invariant and the file or test that pins it, a canonical value (path, env var, version, exact command), or a decision and why. A record of what one session happened to do does not earn a place, nor does anything the code already says. **Ordered procedures belong in `HOWTO.md`, not here**; behavioural rules belong in `AGENT.md`. It is re-read at the start of every turn, so every line is a per-step cost."
 
 	// MEMORY.md is re-read at the start of every turn, so an unchecked inference
 	// written here reads as established fact to every later session. The update
@@ -270,8 +270,7 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 
 ### How to maintain MEMORY.md
 - Use the edit tool for targeted updates; use write only to restructure or first create the file.
-- Record a fact the moment it proves out — a project-specific build/test failure and its fix, an assumption about the code that turned out wrong, an approach you tried and backed out — as one line ("tried X → got Y → do Z instead"). Skip anything a future session could read straight from the code.
-- Write down only what you have seen hold, and say how you know it when that is not obvious — the command or file that showed it. An inference you have not checked is marked "(unverified)" or left out: later sessions read this file as ground truth.
+- Write down only what you have seen hold, and name the command or file that showed it when that is not obvious. An unchecked inference is marked "(unverified)" or left out — later sessions read this file as ground truth.
 - Before adding, check it isn't already recorded and update in place. Do this on your own initiative, before your final answer; that answer reports on the task, and mentions the memory update in one line at most.`
 		if !hasContent {
 			base += "\n- There is no MEMORY.md yet — create one in the project root with the write tool once there is knowledge worth recording."
@@ -286,6 +285,51 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 	}
 
 	return base
+}
+
+// howToMDPrompt returns the HOWTO.md pointer. It carries no content from the
+// file: discovery happens through the ordinary file tools, so the section is a
+// constant that never takes part in the per-turn rebuild of entry [0].
+//
+// The two branches mirror memoryMDPrompt. Every project-scoped agent is told
+// what the file is and when to open it; only an agent that can write is told how
+// to record an entry, because this prose is the only place the authoring rules
+// reach the agent.
+func howToMDPrompt(canWriteFiles bool) string {
+	base := `## HOWTO.md — Project Procedures
+
+` + "`HOWTO.md`" + ` at the project root records procedures this project has verified — ordered
+steps that were actually run, plus the check that says they worked. Open it when the
+task in front of you looks like one it may already cover; when no heading matches, it
+has nothing for this task and you are done with it.
+
+Each entry is a ` + "`## `" + ` heading naming a task, then ` + "`Verified:`" + `, ` + "`Touches:`" + `, the steps,
+and ` + "`Done when:`" + `. Follow the steps for the task a heading names, subject to the rules
+above.`
+
+	if !canWriteFiles {
+		return base
+	}
+
+	return base + `
+
+### Adding an entry
+
+When a turn ran a procedure end to end and it worked, record it before you finish —
+unless the ` + "`Makefile`" + `, ` + "`--help`" + ` or the file tree already answers it. Read ` + "`HOWTO.md`" + `
+first, creating it at the project root if it does not exist; if an entry already
+covers the task, update it in place, never a second copy.
+
+Name the heading for the task, not the tool, and record the path that worked rather
+than the one you planned. Keep it to about 30 lines:
+
+Verified: <date> @ <version from ` + "`ogcode version`" + `>
+Touches: <paths or services the steps write to>
+
+1. <exact commands, ordered; one clause wherever the order matters>
+2. ...
+
+Done when: <the check that says it worked>`
 }
 
 // markdownCapabilitiesPrompt returns the markdown output section that agents
@@ -1027,6 +1071,32 @@ Do not call it on a short turn, or when the material still in context is what yo
 Leave out the raw file contents you have already drawn conclusions from — that is the weight you are trying to shed. Keep the conclusions, drop the transcript.
 
 If you find afterwards that the summary is missing something, read it again rather than guessing. That costs one call; guessing costs correctness.`
+}
+
+// updateIntentPrompt returns the guidance for stating a forward-looking plan
+// with update_intent. The transcript is retrospective — a tool row appears only
+// once the work is done — so without a plan the user can only infer where a turn
+// is heading from a pile of finished actions. Emitted only when the tool is
+// actually on the wire (build sessions), like the other per-turn sections, so an
+// agent reading it can always act on it.
+func updateIntentPrompt() string {
+	return `## Saying where you are heading
+
+The user watching your transcript sees each action only once it is done, so the plan in your head never reaches them — they cannot tell what you are about to do from what you have already done. State it up front instead, with update_intent.
+
+**The first tool call of every turn is update_intent** — before any read, grep, bash, skill or other call, and before you have looked anything up. State the plan you are starting from, marking the first step active, even when it is rough; refine it as you learn. The call does more than show the user where you are going: it runs the matcher that compares your steps against the skills and MCP tools you hold, and its result is the only place the relevant ones are named. A turn that opens with work never gets that match.
+
+Call it again only when the plan changes: you start a step, you finish one, or one turns out not to be needed. Send the complete list every time — the call replaces the plan, so a step you leave out is gone. The tool echoes the plan back to you; copy that list and change only what moved, so a step you already finished stays finished.
+
+**Never call "skill" with no name to see what is available.** A full skill list is context you do not need: the matcher already compares your steps against every skill you hold and names the ones that fit. Load a skill by name only when the matcher names it, or when the user does.
+
+**Call it on its own.** A block carrying update_intent carries no other call — no read, no bash, no edit beside it. The work the plan describes goes in the next block, so the user sees the direction before the first action lands, and anything the plan's result points at is available for that work instead of arriving after the block that would have used it.
+
+Keep each step's label to a few words and the list to a handful; it is a map of the turn, not a script of it. A step may also carry a description — a sentence or two on what the step actually involves: the file types, the library, the command. The user never sees it; a matcher reads it to suggest the skills and MCP tools that could carry the step out, so write it to name the concrete things the step touches rather than to restate the label. A description that says "do the thing" gives the matcher nothing to work with.
+
+Keep it honest. A step you have finished is done, and a step you have abandoned is dropped. A step left pending, or left active after you have moved past it, tells the user something untrue about where you are — and an abandoned plan nobody has marked up reads as worse than no plan at all. Nothing closes the plan for you, so this includes the last step: make one final update_intent call, marking where you actually got to, before the message that ends the turn. A step still active once you have stopped reads as work you are still doing.
+
+Do not also narrate the steps in prose: the update_intent call is the narration, and a sentence repeating what the plan already shows is noise.`
 }
 
 // askUserPrompt returns the guidance for asking the user a question. It is

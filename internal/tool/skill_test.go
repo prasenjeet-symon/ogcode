@@ -177,26 +177,87 @@ func TestSkillTool_SkillWithoutRequirementsLoads(t *testing.T) {
 	}
 }
 
-func TestSkillTool_RequiresAName(t *testing.T) {
-	tool := NewSkillTool(skill.NewLoader(skill.Config{}))
-	if _, err := tool.Execute(context.Background(), json.RawMessage(`{"name":"  "}`), Context{SessionDir: t.TempDir()}); err == nil {
-		t.Error("expected an error for a blank name")
+// A bare call still lists the skills for an agent with no matcher and no
+// <available_skills> block — the one case that has no other way to learn the
+// names. A session that runs the matcher is refused it, tested below.
+func TestSkillTool_ListsSkillsWhenCalledWithoutAName(t *testing.T) {
+	project := skillProject(t, map[string]string{
+		"git-release": "---\nname: git-release\ndescription: tag a release\n---\nbody\n",
+		"excel":       "---\nname: excel\ndescription: read spreadsheets\n---\nbody\n",
+	})
+	res, err := NewSkillTool(skill.NewLoader(skill.Config{})).Execute(context.Background(), json.RawMessage(`{}`), Context{SessionDir: project})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"git-release — tag a release", "excel — read spreadsheets"} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("listing is missing %q:\n%s", want, res.Output)
+		}
+	}
+
+	// A truly empty listing cannot be reached through Execute: the loader
+	// always includes the embedded skills. Pin the pure function instead.
+	if got := renderSkillList(skill.NewRegistry(skill.Rules{})); got != "No skills are available in this project." {
+		t.Errorf("an empty registry did not say so: %q", got)
 	}
 }
 
-// The tool is described to the model in terms of the prompt block it reads the
-// names from; a description that does not connect the two leaves it guessing at
-// what to pass.
+// The tool is a loader, not a discovery path: the plan states what the agent
+// intends and the matcher names the skills that fit, so a description
+// advertising a bare listing would send the model the wrong way.
 func TestSkillTool_DescriptionMatchesBehaviour(t *testing.T) {
 	desc := SkillTool{}.Description()
-	for _, want := range []string{"available_skills", "system prompt"} {
+	for _, gone := range []string{"list the skills", "see what is available", "available_skills", "system prompt"} {
+		if strings.Contains(desc, gone) {
+			t.Errorf("description still advertises the listing (%q): %s", gone, desc)
+		}
+	}
+	for _, want := range []string{"with the name of the skill", "Do not call it with no name"} {
 		if !strings.Contains(desc, want) {
-			t.Errorf("description should mention %q: %s", want, desc)
+			t.Errorf("description is missing %q: %s", want, desc)
 		}
 	}
 	var params map[string]any
 	if err := json.Unmarshal(SkillTool{}.Parameters(), &params); err != nil {
 		t.Fatalf("parameters are not valid JSON schema: %v", err)
+	}
+	// name stays optional so a bare call reaches the refusal below as a
+	// readable answer rather than a decode error.
+	if _, ok := params["required"]; ok {
+		t.Error("name is required — a bare call must reach the refusal, not fail to parse")
+	}
+}
+
+// A session that runs the intent matcher must not be able to enumerate every
+// skill: the matcher names the ones fitted to the plan's steps, and a full
+// listing would spend context on all the others. The refusal points the agent
+// back at the plan instead of leaving it to guess.
+func TestSkillTool_MatcherSessionRefusesAListing(t *testing.T) {
+	project := skillProject(t, map[string]string{
+		"git-release": "---\nname: git-release\ndescription: tag a release\n---\nbody\n",
+	})
+	res, err := NewSkillTool(skill.NewLoader(skill.Config{})).Execute(context.Background(), json.RawMessage(`{}`), Context{SessionDir: project, IntentMatcher: true})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, leaked := range []string{"git-release", "tag a release", "excel"} {
+		if strings.Contains(res.Output, leaked) {
+			t.Errorf("the listing leaked into a matcher session (%q): %s", leaked, res.Output)
+		}
+	}
+	for _, want := range []string{"update_intent", "matcher"} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("refusal is missing %q: %s", want, res.Output)
+		}
+	}
+
+	// An unknown name in a matcher session must not become a list either.
+	unknown, err := NewSkillTool(skill.NewLoader(skill.Config{})).Execute(context.Background(), json.RawMessage(`{"name":"git-releas"}`), Context{SessionDir: project, IntentMatcher: true})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(unknown.Output, "Available skills") || strings.Contains(unknown.Output, "tag a release") {
+		t.Errorf("an unknown name enumerated the skills: %s", unknown.Output)
 	}
 }
 
