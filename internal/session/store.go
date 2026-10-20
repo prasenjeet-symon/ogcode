@@ -246,7 +246,7 @@ func (s *Store) CreateMessage(msg *MessageInfo) error {
 		`INSERT INTO message (id, session_id, data, time_created) VALUES (?, ?, ?, ?)`,
 		msg.ID, msg.SessionID, string(data), msg.CreatedAt,
 	)
-	return err
+	return markDeleted(err)
 }
 
 func (s *Store) UpdateMessage(msg *MessageInfo) error {
@@ -449,7 +449,7 @@ func (s *Store) CreatePart(part *Part) error {
 		`INSERT INTO part (id, message_id, session_id, data, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?)`,
 		part.ID, part.MessageID, part.SessionID, string(data), part.CreatedAt, part.UpdatedAt,
 	)
-	return err
+	return markDeleted(err)
 }
 
 func (s *Store) UpdatePart(part *Part) error {

@@ -134,7 +134,11 @@ type Server struct {
 	mu           sync.Mutex
 	running      map[session.SessionID]context.CancelFunc
 	runningToken map[session.SessionID]uint64 // prevents goroutine from deleting a newer cancel
-	nextToken    uint64
+	// runningDone is closed when the loop goroutine for a session exits. A
+	// session delete cancels the loop and waits on this before removing the
+	// session row, so the loop can never keep writing to a row that is gone.
+	runningDone map[session.SessionID]chan struct{}
+	nextToken   uint64
 
 	// loopControls holds the LoopControl for each running agent loop, keyed by
 	// session ID. It lets the guidance endpoint push mid-loop instructions and
@@ -213,7 +217,7 @@ type Options struct {
 }
 
 func NewWithOptions(port int, dir string, mode ServerMode, opts Options) *Server {
-	s := &Server{dir: dir, mode: mode, opts: opts, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64), loopControls: make(map[session.SessionID]*agent.LoopControl)}
+	s := &Server{dir: dir, mode: mode, opts: opts, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64), runningDone: make(map[session.SessionID]chan struct{}), loopControls: make(map[session.SessionID]*agent.LoopControl)}
 	s.port.Store(int32(port))
 	return s
 }

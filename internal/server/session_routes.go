@@ -15,6 +15,10 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
+// loopStopTimeout bounds how long deleting a session waits for its cancelled
+// agent loop to exit before removing the row anyway.
+const loopStopTimeout = 5 * time.Second
+
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	directory := r.URL.Query().Get("directory")
 	if directory == "" {
@@ -164,15 +168,30 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := session.SessionID(chi.URLParam(r, "sessionID"))
 
-	// Abort any running agent loop for this session before deleting
+	// Abort any running agent loop for this session before deleting, and wait
+	// for it to exit: the loop writes messages and parts as it runs, so deleting
+	// the row underneath it would fail every write with a foreign-key error while
+	// the turn kept streaming and executing tools. Cancelling first and waiting on
+	// the loop's done channel keeps the same-process case clean. A loop that
+	// overruns the grace period is logged and the delete proceeds; its late writes
+	// are rejected by the FK instead of resurrecting the row.
 	s.mu.Lock()
+	done := s.runningDone[id]
 	if cancel, ok := s.running[id]; ok {
 		cancel()
 		delete(s.running, id)
 		delete(s.runningToken, id)
 		delete(s.loopControls, id)
+		delete(s.runningDone, id)
 	}
 	s.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(loopStopTimeout):
+			slog.Warn("timed out waiting for agent loop before deleting session", "session", id)
+		}
+	}
 
 	// Finalize any note that was being generated for this session
 	if n, noteErr := s.noteStore.GetBySessionID(string(id)); noteErr == nil && n != nil && n.Status == note.StatusGenerating {

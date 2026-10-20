@@ -284,6 +284,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
 	}
+	if sess == nil {
+		// The session was deleted before the turn began. Without this guard the
+		// loop runs a full step only to fail its first message insert.
+		return session.ErrSessionDeleted
+	}
 
 	// Warn if the agent name doesn't match the session type — catches accidental
 	// mismatches at call sites (breakdown intentionally differs, so not a hard error).
@@ -607,6 +612,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			slog.Info("agent loop cancelled", "session", sessionID, "step", step)
 			exitReason = "aborted"
 			return ctx.Err()
+		}
+
+		// A session deleted by another writer takes its messages and parts with
+		// it. Without this check the loop streams a whole step, fails every write
+		// on the cascade, still executes tools, and only dies at the next step's
+		// message insert — burning tokens and running side effects for a
+		// transcript that no longer exists.
+		if lr.sessionDeleted(sessionID) {
+			slog.Warn("session deleted while the turn was running; stopping", "session", sessionID, "step", step)
+			exitReason = "aborted"
+			return session.ErrSessionDeleted
 		}
 
 		// Drain any mid-loop guidance that was injected since the last iteration.
@@ -1177,6 +1193,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		var lastTextFlush time.Time
 		const textFlushInterval = 300 * time.Millisecond
 
+		// sessionLost is set when a part insert reports that the session's
+		// cascade is gone. The provider keeps streaming, so the consume loop
+		// checks it and stops instead of logging one failure per chunk.
+		sessionLost := false
+
 		// Streaming reasoning part: same pattern — accumulate deltas into one part
 		// instead of creating a new Part per thinking chunk.
 		var streamReasoningPart *session.Part
@@ -1226,6 +1247,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				UpdatedAt: session.Now(),
 			}
 			if err := lr.Store.CreatePart(part); err != nil {
+				if errors.Is(err, session.ErrSessionDeleted) {
+					sessionLost = true
+				}
 				slog.Error("create reasoning part", "err", err)
 				return nil
 			}
@@ -1279,6 +1303,16 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				return ctx.Err()
 			}
 
+			// A part insert already told us the cascade is gone. Stop before the
+			// event's tool call can join the ready list — nothing it produces could
+			// be persisted, and its side effects must not land on a deleted session.
+			if sessionLost {
+				slog.Warn("session deleted while streaming; stopping the turn", "session", sessionID, "step", step)
+				exitReason = "aborted"
+				go drainStreamEvents(streamCh)
+				return session.ErrSessionDeleted
+			}
+
 			// Check for mid-loop guidance cancellation: the stream child context
 			// was cancelled but the loop context is still alive. Stop consuming
 			// events so the loop can proceed to the next iteration and drain the
@@ -1315,6 +1349,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 						UpdatedAt: session.Now(),
 					}
 					if err := lr.Store.CreatePart(newTextPart); err != nil {
+						if errors.Is(err, session.ErrSessionDeleted) {
+							sessionLost = true
+						}
 						slog.Error("create streaming text part", "err", err)
 					} else {
 						streamTextPart = newTextPart
@@ -1395,6 +1432,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					UpdatedAt: session.Now(),
 				}
 				if err := lr.Store.CreatePart(toolPart); err != nil {
+					if errors.Is(err, session.ErrSessionDeleted) {
+						sessionLost = true
+					}
 					slog.Error("create tool part", "err", err)
 				}
 				tc.PartID = toolPart.ID
@@ -1763,6 +1803,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// the tool calls are partial (the model was interrupted mid-generation) and
 		// the user wants the loop to act on the guidance immediately, not execute
 		// a half-formed tool call first.
+		// The session can also disappear between the stream ending and the tools
+		// starting. Check again here so no tool side effect lands on a transcript
+		// that is already gone.
+		if sessionLost || lr.sessionDeleted(sessionID) {
+			slog.Warn("session deleted before tool execution; stopping the turn", "session", sessionID, "step", step)
+			exitReason = "aborted"
+			return session.ErrSessionDeleted
+		}
+
 		var readyCalls []pendingToolCall
 		if streamCancelledByGuidance && len(pendingToolCalls) > 0 {
 			slog.Info("skipping tool execution after guidance-cancelled stream", "session", sessionID, "step", step, "pendingToolCalls", len(pendingToolCalls))
@@ -1886,6 +1935,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			return nil
 		}
 
+		// Tool execution can outlast the session too. Stop before writing a
+		// result message the cascade would reject.
+		if lr.sessionDeleted(sessionID) {
+			slog.Warn("session deleted during tool execution; stopping the turn", "session", sessionID, "step", step)
+			exitReason = "aborted"
+			return session.ErrSessionDeleted
+		}
+
 		// Create a user message with tool results so the next LLM iteration sees
 		// them, and fold it into the working set.
 		if resultID := lr.writeToolResultMessage(sessionID, assistantID, pendingToolCalls); resultID != "" {
@@ -1915,6 +1972,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 func drainStreamEvents(ch <-chan provider.StreamEvent) {
 	for range ch {
 	}
+}
+
+// sessionDeleted reports whether the session row has disappeared. Store.Get
+// returns (nil, nil) for a missing row, which is the only signal an external
+// delete leaves: the cascade removes the messages and parts silently.
+func (lr *LoopRunner) sessionDeleted(sessionID session.SessionID) bool {
+	sess, err := lr.Store.Get(sessionID)
+	return err == nil && sess == nil
 }
 
 // writeToolResultMessage creates the user message that carries the executed tool

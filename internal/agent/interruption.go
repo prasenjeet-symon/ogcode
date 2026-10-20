@@ -67,6 +67,16 @@ func classifyInterruption(err error, step int) *session.Interruption {
 				Detail:    "The provider failed on its own side. Resuming retries the same request.",
 				Step:      step,
 			}
+		case apiErr.IsMalformedBody():
+			// The gateway's terse 400 for a body it could not read: over its
+			// 4 MiB cap, or not valid JSON. The body would be identical on a
+			// resume, so the fix is to change what is sent.
+			return &session.Interruption{
+				Reason:    session.InterruptFatal,
+				Resumable: false,
+				Detail:    "The gateway could not read the request body — it is over the 4 MiB limit or malformed. Retry with fewer or smaller attachments; resuming unchanged would send the same body.",
+				Step:      step,
+			}
 		case apiErr.IsImageRejection():
 			// A 400 because the model doesn't accept images — not a malformed
 			// request. Resume strips tool-result images (convertMessages skips
@@ -92,6 +102,19 @@ func classifyInterruption(err error, step int) *session.Interruption {
 	}
 
 	lower := strings.ToLower(err.Error())
+
+	if errors.Is(err, session.ErrSessionDeleted) {
+		// The session row is gone, so there is nothing to resume into. Saying
+		// "server error" here invited the user to press Resume on a transcript
+		// that no longer exists.
+		return &session.Interruption{
+			Reason:    session.InterruptFatal,
+			Resumable: false,
+			Detail:    "This session was deleted while the turn was running, so the turn was stopped. Start a new session to continue.",
+			Step:      step,
+		}
+	}
+
 	switch {
 	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "429") || strings.Contains(lower, "quota"):
 		return &session.Interruption{

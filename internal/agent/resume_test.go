@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -324,6 +325,9 @@ func TestClassifyInterruption(t *testing.T) {
 		{"malformed request", &provider.APIError{StatusCode: http.StatusBadRequest, Body: "unknown field"}, session.InterruptFatal, false},
 		{"image rejection", &provider.APIError{StatusCode: http.StatusBadRequest, Body: "this model does not support image input"}, session.InterruptModelCapability, true},
 		{"vision rejection", &provider.APIError{StatusCode: http.StatusBadRequest, Body: "model lacks vision modality"}, session.InterruptModelCapability, true},
+		{"deleted session", fmt.Errorf("create assistant message: %w", session.ErrSessionDeleted), session.InterruptFatal, false},
+		{"oversized body", fmt.Errorf("send request: %w", provider.ErrRequestTooLarge), session.InterruptFatal, false},
+		{"gateway unreadable body", &provider.APIError{StatusCode: http.StatusBadRequest, Body: `{"error":"invalid request body"}`}, session.InterruptFatal, false},
 		{"dropped connection", errors.New("read tcp: connection reset by peer"), session.InterruptNetwork, true},
 		{"unrecognised", errors.New("something nobody predicted"), session.InterruptServerError, true},
 	} {

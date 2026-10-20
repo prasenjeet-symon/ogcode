@@ -181,6 +181,8 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 		ctx = agent.WithServerURL(ctx, serverURL)
 	}
 
+	done := make(chan struct{})
+
 	s.mu.Lock()
 	if old, ok := s.running[sessionID]; ok {
 		old()
@@ -190,6 +192,7 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 	token := s.nextToken
 	s.running[sessionID] = cancel
 	s.runningToken[sessionID] = token
+	s.runningDone[sessionID] = done
 	s.loopControls[sessionID] = lc
 	s.mu.Unlock()
 
@@ -200,8 +203,14 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 				delete(s.running, sessionID)
 				delete(s.runningToken, sessionID)
 				delete(s.loopControls, sessionID)
+				if s.runningDone[sessionID] == done {
+					delete(s.runningDone, sessionID)
+				}
 			}
 			s.mu.Unlock()
+			// Closed unconditionally and outside the lock: a delete waiting on
+			// this loop must be released even when a newer loop replaced it.
+			close(done)
 		}()
 		if err := s.loopRunner.RunLoop(ctx, sessionID, agentName, viewportWidth, viewportHeight); err != nil {
 			slog.Error("agent loop error", "session", sessionID, "err", err)
