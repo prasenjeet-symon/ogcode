@@ -7,8 +7,11 @@ import EffortSelector from './effort-selector';
 import PermissionPrompt from './permission-prompt';
 import PermissionModeToggle from './permission-mode-toggle';
 import { trackKeyboardInset } from '../lib/keyboard';
+import { prepareImageAttachment } from '../lib/images';
 
-// Maximum image file size: 10 MB
+// Largest file the picker accepts. This is a decode limit, not a send limit:
+// prepareImageAttachment downscales and re-encodes every attachment, so what
+// leaves the composer is a few hundred KB regardless of the source size.
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
@@ -27,20 +30,6 @@ interface Draft {
 
 function isAcceptedType(type: string): boolean {
   return ACCEPTED_IMAGE_TYPES.includes(type);
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      // result is "data:image/jpeg;base64,...."
-      const result = reader.result as string;
-      const commaIdx = result.indexOf(',');
-      resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : '');
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 export default function PromptInput() {
@@ -162,12 +151,14 @@ export default function PromptInput() {
         continue;
       }
       try {
-        const base64 = await fileToBase64(file);
-        if (!base64) continue;
+        const prepared = await prepareImageAttachment(file);
+        if (!prepared.data) continue;
         newImages.push({
-          mediaType: file.type,
-          data: base64,
+          mediaType: prepared.mediaType,
+          data: prepared.data,
           name: file.name,
+          // Thumbnail stays the original object URL — already decoded on
+          // screen, and the downscaled copy is only for the model.
           previewUrl: URL.createObjectURL(file),
         });
       } catch (e) {
