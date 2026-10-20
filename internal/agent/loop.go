@@ -96,6 +96,14 @@ type LoopRunner struct {
 	// tokens somewhere the user is not working. Inheriting them keeps the
 	// refresh on the same endpoint as the turn that triggered it.
 	AutoIndex func(dir, model, provider string)
+	// TurnResources, when set, reports what the process consumed while one turn
+	// ran — resident memory, CPU, goroutines — to telemetry. It is called once
+	// where the turn starts and returns the finisher the loop defers for the end
+	// of the turn: this package owns no sampler, and collection is suspended
+	// while nothing watches it, so beginning and ending have to be one call.
+	// Only turns a user asked for are reported (turnResourceAgents). nil (CLI,
+	// tests) records nothing.
+	TurnResources func(agentID string) func()
 	// Permissions gates mutating tool calls (bash/write/edit) behind user
 	// approval. nil disables gating entirely (CLI, tests). Even when set, a loop
 	// only prompts when its context carries WithPermissionGating — so headless
@@ -176,6 +184,14 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	lr.setSessionIntent(sessionID, nil)
 
 	agent := GetAgent(agentName)
+	// Report what this turn cost the process, once it ends. The finisher is
+	// deferred rather than called at each return point so every exit — a clean
+	// finish, a step limit, an abort, an error — reports the same figure.
+	if lr.TurnResources != nil && turnResourceAgents[agent.ID] {
+		if end := lr.TurnResources(agent.ID); end != nil {
+			defer end()
+		}
+	}
 	// Read MaxSteps into a local; never mutate the shared LoopRunner field. A
 	// deep_search call runs a nested RunLoop concurrently with the parent loop,
 	// so writing lr.MaxSteps here would be a data race.
@@ -2261,6 +2277,18 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 		}
 		slog.Info("writeTurnMemory: turn summary written and indexed", "session", sessionID, "path", path)
 	}()
+}
+
+// turnResourceAgents are the agents whose turn is one unit of work the user
+// asked for, and so the only ones that report resource use. Every other
+// RunLoop runs inside one of these — a sub-agent, a memory recall, a deep
+// search, or the indexer's own turn — and counting those would charge a single
+// user turn several times over.
+var turnResourceAgents = map[string]bool{
+	"build": true,
+	"plan":  true,
+	"note":  true,
+	"task":  true,
 }
 
 // autoIndexTurn refreshes the project index for a just-finished turn, on a

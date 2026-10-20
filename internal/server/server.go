@@ -552,6 +552,41 @@ func (s *Server) serve(ctx context.Context) error {
 			}
 			return len(paths)
 		},
+		// Report the resources a turn consumed — resident memory, CPU,
+		// goroutines — as one analytics event per turn the user asked for.
+		// The sampler collects only while a watcher is held, so the turn holds
+		// one for its own length: BeginTurn here, EndTurn in the finisher the
+		// loop defers. Without that, the figures would cover only whatever a
+		// browser happened to be watching, not the turn itself.
+		TurnResources: func(agentID string) func() {
+			client := s.posthogClient
+			if client == nil || s.resources == nil {
+				return nil
+			}
+			start := s.resources.BeginTurn()
+			return func() {
+				st := s.resources.EndTurn(start)
+				// The install id, not posthogDistinctID: the web reports under the
+				// install id, and a resource figure is only useful joined to the
+				// person whose turns it came from. os and arch are merged by
+				// Capture.
+				client.Capture("ogcode_turn_resources", s.installID, map[string]any{
+					"agent":           agentID,
+					"duration_ms":     st.DurationMS,
+					"covered_ms":      st.CoveredMS,
+					"samples":         st.Samples,
+					"rss_mb":          st.RSSMB,
+					"peak_rss_mb":     st.PeakRSSMB,
+					"go_heap_mb":      st.GoHeapMB,
+					"cpu_pct":         st.CPUAvgPercent,
+					"cpu_pct_peak":    st.CPUMaxPercent,
+					"goroutines":      st.Goroutines,
+					"peak_goroutines": st.PeakGoroutines,
+					"cores":           st.Cores,
+					"host_ram_mb":     st.HostRAMMB,
+				})
+			}
+		},
 		// Refresh the project index after a completed turn, so codebase_map does
 		// not fall behind the files the session just added or edited. Gated on the
 		// same env switch that turns it off, read here so the decision is the

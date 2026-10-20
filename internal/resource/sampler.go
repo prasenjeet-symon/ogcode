@@ -11,6 +11,7 @@ package resource
 
 import (
 	"context"
+	"math"
 	"os"
 	"runtime"
 	"runtime/metrics"
@@ -18,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/process"
 )
 
@@ -64,6 +66,33 @@ type Snapshot struct {
 	Samples  []Sample `json:"samples"`
 }
 
+// TurnStats folds the samples taken during one turn into a single figure, for
+// callers that want one row per turn rather than a time series. Memory is in
+// megabytes, rounded to a tenth.
+type TurnStats struct {
+	DurationMS int64 `json:"durationMs"`
+	// CoveredMS is how much of the turn was actually measured. The sampler
+	// keeps a four-minute window, so a longer turn reports only the samples
+	// still retained, and a turn shorter than two ticks reports none.
+	CoveredMS int64 `json:"coveredMs"`
+	Samples   int   `json:"samples"`
+
+	RSSMB     float64 `json:"rssMb"`     // last reading
+	PeakRSSMB float64 `json:"peakRssMb"` // highest over the turn
+	GoHeapMB  float64 `json:"goHeapMb"`  // last reading
+
+	// CPUAvgPercent and CPUMaxPercent are top-style: 100 is one core fully
+	// saturated, so both can legitimately exceed 100 on a multi-core machine.
+	CPUAvgPercent float64 `json:"cpuAvgPercent"`
+	CPUMaxPercent float64 `json:"cpuMaxPercent"`
+
+	Goroutines     int `json:"goroutines"` // last reading
+	PeakGoroutines int `json:"peakGoroutines"`
+
+	Cores     int     `json:"cores"`
+	HostRAMMB float64 `json:"hostRamMb"` // physical memory on this machine
+}
+
 const (
 	metricHeapObjects = "/memory/classes/heap/objects:bytes"
 	metricTotal       = "/memory/classes/total:bytes"
@@ -76,6 +105,10 @@ type Sampler struct {
 	interval time.Duration
 	retain   int
 	started  time.Time
+	// hostRAM is the machine's physical memory in bytes, read once at
+	// construction — it is what turns an RSS figure into a share of the
+	// machine. Zero when it could not be read.
+	hostRAM uint64
 
 	// proc and metricBuf are touched only by the Run goroutine. gopsutil's
 	// Process carries the CPU baseline between calls and is not safe for
@@ -120,6 +153,9 @@ func NewSampler(interval time.Duration, retain int) *Sampler {
 		if createMS, err := p.CreateTime(); err == nil && createMS > 0 {
 			s.started = time.UnixMilli(createMS)
 		}
+	}
+	if vm, err := mem.VirtualMemory(); err == nil && vm != nil {
+		s.hostRAM = vm.Total
 	}
 	return s
 }
@@ -260,3 +296,67 @@ func (s *Sampler) Latest() (Sample, bool) {
 	}
 	return s.samples[len(s.samples)-1], true
 }
+
+// BeginTurn starts measuring a turn and returns the instant to hand back to
+// EndTurn. Run suspends collection while nothing is watching, so a turn has to
+// hold a watcher for its whole length or there is nothing to summarise.
+func (s *Sampler) BeginTurn() time.Time {
+	s.AddWatcher()
+	return time.Now()
+}
+
+// EndTurn releases the watcher BeginTurn took and folds the samples taken since
+// into one summary. Concurrent turns are expected — the server shares a single
+// runner — and each gets the window it overlapped, because these figures
+// describe the whole process rather than any one turn's share of it.
+func (s *Sampler) EndTurn(start time.Time) TurnStats {
+	defer s.RemoveWatcher()
+
+	stats := TurnStats{
+		DurationMS: time.Since(start).Milliseconds(),
+		Cores:      runtime.NumCPU(),
+		HostRAMMB:  roundMB(s.hostRAM),
+	}
+	from := start.UnixMilli()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var last, peak Sample
+	for _, sample := range s.samples {
+		if sample.At < from {
+			continue
+		}
+		stats.Samples++
+		stats.CPUAvgPercent += sample.CPUPercent
+		last = sample
+		if sample.CPUPercent > peak.CPUPercent {
+			peak.CPUPercent = sample.CPUPercent
+		}
+		if sample.RSS > peak.RSS {
+			peak.RSS = sample.RSS
+		}
+		if sample.Goroutines > peak.Goroutines {
+			peak.Goroutines = sample.Goroutines
+		}
+	}
+	if stats.Samples == 0 {
+		return stats
+	}
+	stats.CPUAvgPercent = roundPct(stats.CPUAvgPercent / float64(stats.Samples))
+	stats.CPUMaxPercent = roundPct(peak.CPUPercent)
+	stats.CoveredMS = last.At - from
+	stats.RSSMB = roundMB(last.RSS)
+	stats.PeakRSSMB = roundMB(peak.RSS)
+	stats.GoHeapMB = roundMB(last.HeapInUse)
+	stats.Goroutines = last.Goroutines
+	stats.PeakGoroutines = peak.Goroutines
+	return stats
+}
+
+// roundMB keeps a byte figure to a tenth of a megabyte. Telemetry is read as a
+// trend, and six significant digits of a sampling estimate are noise.
+func roundMB(n uint64) float64 {
+	return math.Round(float64(n)/(1<<20)*10) / 10
+}
+
+func roundPct(p float64) float64 { return math.Round(p*10) / 10 }
