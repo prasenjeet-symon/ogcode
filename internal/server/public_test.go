@@ -72,17 +72,15 @@ func TestServe_PublicDir(t *testing.T) {
 	})
 
 	t.Run("auto-creates public dir at startup", func(t *testing.T) {
-		// Remove the pre-seeded dir and start a fresh server: ensurePublicDir
-		// should recreate it.
-		if err := os.RemoveAll(filepath.Join(dir, "public")); err != nil {
-			t.Fatalf("remove public dir: %v", err)
-		}
-		srv2 := NewWithOptions(0, dir, ModeBuild, Options{Loopback: true, NoBrowser: true})
+		// A fresh project dir with no public/: ensurePublicDir should create it.
+		// It needs its own dir because one server per project is now enforced.
+		dir2 := t.TempDir()
+		srv2 := NewWithOptions(0, dir2, ModeBuild, Options{Loopback: true, NoBrowser: true})
 		ctx2, cancel2 := context.WithCancel(context.Background())
 		done2 := make(chan error, 1)
 		go func() { done2 <- srv2.Serve(ctx2) }()
 		waitUp(t, srv2)
-		if _, err := os.Stat(filepath.Join(dir, "public")); err != nil {
+		if _, err := os.Stat(filepath.Join(dir2, "public")); err != nil {
 			t.Fatalf("public dir not auto-created: %v", err)
 		}
 		cancel2()
@@ -91,7 +89,7 @@ func TestServe_PublicDir(t *testing.T) {
 
 	// HEAD is mapped explicitly (chi does not auto-map HEAD onto Get routes);
 	// the agent/UI probing a public asset with HEAD must get headers, not 405.
-	// (The auto-create subtest above removed the seeded dir, so re-seed.)
+	// Re-seed defensively: the subtests above must not leave the dir half-built.
 	t.Run("HEAD returns headers not 405", func(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, "public"), 0o755); err != nil {
 			t.Fatalf("recreate public dir: %v", err)

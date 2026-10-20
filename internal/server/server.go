@@ -255,6 +255,16 @@ func (s *Server) Port() int {
 }
 
 func (s *Server) serve(ctx context.Context) error {
+	// One server per project directory: two instances share .ogcode/ogcode.db,
+	// and each only knows its own running loops, so one deleting a session the
+	// other is running would strand that turn writing to a deleted row. The lock
+	// is taken before anything opens the database and released when serve returns.
+	lock, err := acquireProjectLock(s.dir)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
 	dbPath := filepath.Join(s.dir, ".ogcode", "ogcode.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
@@ -660,6 +670,7 @@ func (s *Server) serve(ctx context.Context) error {
 	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); ok {
 		s.port.Store(int32(tcpAddr.Port))
 	}
+	lock.setPort(int(s.port.Load()))
 	// Report the port actually bound (post-walk) so the CLI can remember it for
 	// this project. Fired before serving begins; nil for callers that don't care.
 	if s.opts.OnListen != nil {
