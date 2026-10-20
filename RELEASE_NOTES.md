@@ -1,3 +1,58 @@
+# Release Notes — v0.50.0
+
+## Minor: Read every part of a file you need in one call
+
+An agent that had found five places to look in a file used to spend five
+calls reading them. Each call returned one window, and each of those windows
+was sent back to the model again on the next step of the turn.
+
+`read` now takes `ranges`, a list of `{start_line, end_line}` windows. One
+entry is one region; several read every hit at once, in the order asked, each
+under its own `file:start-end` heading and with the same numbered lines an
+`edit` copies from. The ranges a `file_map` prints and the lines a search
+found can be read together. The byte budget spans the whole call, so no window
+can spend another's, and a window that got no room is named rather than
+quietly dropped.
+
+The top-level `start_line`/`end_line` pair is no longer a second spelling of
+the same thing. It is refused by name rather than ignored, because an argument
+that is silently dropped reads the file from the top and says nothing about
+doing so, and an ignored `end_line` reads past the line that was meant.
+Combining `ranges` with `offset`/`limit` is refused for the same reason: they
+are two ways of placing a window, and only one of them can be meant.
+
+## Minor: A turn reports what it cost the machine
+
+Ogcode reports a handful of events so the project can tell how it is being
+used. One that was missing is the most direct question you can ask of an agent
+doing real work on your machine: what did that turn cost?
+
+Every turn you asked for — a build, a plan, a note, a task — now reports a
+resource event when it ends: how long it took, how much of that was measured,
+the process's resident memory and its peak, average and peak CPU, goroutine
+counts, and the cores and memory of the machine. Collection stops while
+nothing watches it, so the turn holds a measurement for its own length, and
+the figure is reported whichever way the turn returns — a clean finish, a
+step limit, an abort, or an error. Work that runs inside a turn, such as a
+sub-agent or a memory recall, is not counted separately, so one turn is one
+row.
+
+The values describe the whole process rather than one turn's share of it, and
+they carry counts and durations only — never the content of your work.
+
+## Other changes
+
+- The `file_map` description, the `memory_map` header and the codemap
+  renderer all name the `ranges` form, so an agent is told how to read a
+  window everywhere it is told to read one.
+- A truncated read now ends by naming the form that would have read more of
+  the file at once — the moment a caller decides whether to read again.
+- `HOWTO.md` records the install command that keeps the gateway secret out of
+  `make`'s echoed recipe, and the benchmark recipe for an offline run with a
+  reused code index.
+
+---
+
 # Release Notes — v0.49.0
 
 ## Minor: One server per project directory
