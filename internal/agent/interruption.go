@@ -103,6 +103,14 @@ func classifyInterruption(err error, step int) *session.Interruption {
 
 	lower := strings.ToLower(err.Error())
 
+	if errors.Is(err, provider.ErrRequestTooLarge) {
+		return &session.Interruption{
+			Reason:    session.InterruptFatal,
+			Resumable: false,
+			Detail:    "The request body is over the gateway's 4 MiB limit. Remove or shrink image attachments and send again; resuming would send the same oversized body.",
+			Step:      step,
+		}
+	}
 	if errors.Is(err, session.ErrSessionDeleted) {
 		// The session row is gone, so there is nothing to resume into. Saying
 		// "server error" here invited the user to press Resume on a transcript

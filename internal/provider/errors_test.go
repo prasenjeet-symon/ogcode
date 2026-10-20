@@ -1,10 +1,65 @@
 package provider
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestAPIError_IsMalformedBody pins the gateway's terse 400 phrasing: only a
+// 400 carrying it is the unreadable-body error, so no other 400 is rewritten as
+// a size hint the user would act on wrongly.
+func TestAPIError_IsMalformedBody(t *testing.T) {
+	cases := []struct {
+		name string
+		code int
+		body string
+		want bool
+	}{
+		{"gateway unreadable body", 400, `{"error":"invalid request body"}`, true},
+		{"other 400", 400, `{"error":"model not found"}`, false},
+		{"same text on 500", 500, `{"error":"invalid request body"}`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := &APIError{StatusCode: c.code, Body: c.body}
+			if got := e.IsMalformedBody(); got != c.want {
+				t.Errorf("IsMalformedBody(%d, %q) = %v, want %v", c.code, c.body, got, c.want)
+			}
+		})
+	}
+}
+
+// TestCheckBodyFits pins the outgoing OGX size guard: the gateway rejects a
+// body over 4 MiB with an opaque 400, so the provider refuses first, with an
+// error naming the limit and the usual cause. Every other provider (and a body
+// exactly at the limit) is left alone.
+func TestCheckBodyFits(t *testing.T) {
+	ogx := &OpenAIProvider{id: OGXProviderID}
+	if err := ogx.checkBodyFits(ogxMaxRequestBytes); err != nil {
+		t.Errorf("body at the limit refused: %v", err)
+	}
+	err := ogx.checkBodyFits(ogxMaxRequestBytes + 1)
+	if !errors.Is(err, ErrRequestTooLarge) {
+		t.Fatalf("over-limit body = %v, want ErrRequestTooLarge", err)
+	}
+	if !strings.Contains(err.Error(), "MiB") {
+		t.Errorf("error %q does not name the limit", err)
+	}
+
+	other := &OpenAIProvider{id: "openai", baseURL: "https://api.openai.com/v1"}
+	if err := other.checkBodyFits(ogxMaxRequestBytes * 2); err != nil {
+		t.Errorf("non-OGX provider refused: %v", err)
+	}
+
+	// The gateway host is recognised even when the provider id is not ogx.
+	byHost := &OpenAIProvider{id: "custom", baseURL: "https://ogx.ogcode.in/v1"}
+	if err := byHost.checkBodyFits(ogxMaxRequestBytes + 1); !errors.Is(err, ErrRequestTooLarge) {
+		t.Errorf("ogx host over-limit body = %v, want ErrRequestTooLarge", err)
+	}
+}
 
 func TestAPIError_Error(t *testing.T) {
 	e := &APIError{Provider: "anthropic", StatusCode: 429, Body: "slow down"}

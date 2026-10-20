@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -8,6 +9,11 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrRequestTooLarge marks a request refused before it was sent because its
+// body exceeds the endpoint's limit. Resending the same conversation would
+// produce the same oversized body, so it is never worth a retry.
+var ErrRequestTooLarge = errors.New("request body too large")
 
 // APIError is a structured error returned by a provider when the LLM API responds
 // with a non-2xx status. It carries the HTTP status code and any Retry-After hint
@@ -59,6 +65,17 @@ func (e *APIError) IsImageRejection() bool {
 		return false
 	}
 	return IsImageRejectionMessage(e.Body)
+}
+
+// IsMalformedBody reports the gateway's terse 400 for a body it could not
+// read: over its size cap, or not valid JSON. The body it sends back is
+// exactly {"error":"invalid request body"}, which says nothing actionable on
+// its own.
+func (e *APIError) IsMalformedBody() bool {
+	if e.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	return strings.Contains(strings.ToLower(e.Body), "invalid request body")
 }
 
 // IsImageRejectionMessage reports whether a message/body indicates the model

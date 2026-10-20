@@ -978,6 +978,9 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
+	if err := p.checkBodyFits(len(jsonBody)); err != nil {
+		return nil, err
+	}
 
 	url := strings.TrimRight(p.baseURL, "/") + "/chat/completions"
 	slog.Info("streaming chat request", "provider", p.id, "model", model, "url", url, "body_bytes", len(jsonBody))
@@ -1097,6 +1100,28 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	// endpoint's attention while the body is being drained.
 	go p.streamEvents(&budgetBody{ReadCloser: resp.Body, release: release}, ch, reqCancel, toolNames)
 	return ch, nil
+}
+
+// isOGX reports whether this provider reaches OG Lab's gateway, by id or by
+// hostname — a custom OpenAI-compatible slot can point straight at it.
+func (p *OpenAIProvider) isOGX() bool {
+	return p.id == OGXProviderID || strings.Contains(strings.ToLower(p.baseURL), "ogx.ogcode.in")
+}
+
+// ogxMaxRequestBytes is the gateway's cap on an inbound completion body
+// (oglab's internal/router/chat.go maxChatBodyBytes). A body over it is
+// refused with a terse 400 before any model sees it.
+const ogxMaxRequestBytes = 4 << 20
+
+// checkBodyFits refuses a marshalled request the gateway would reject for
+// size. It says what to do instead of leaving the user with "invalid request
+// body", which is all the gateway itself can say.
+func (p *OpenAIProvider) checkBodyFits(n int) error {
+	if !p.isOGX() || n <= ogxMaxRequestBytes {
+		return nil
+	}
+	return fmt.Errorf("%w: this request is %.1f MiB, over the gateway's %d MiB limit — remove or shrink image attachments and retry",
+		ErrRequestTooLarge, float64(n)/(1<<20), ogxMaxRequestBytes>>20)
 }
 
 // isOpenRouter reports whether this provider's endpoint is OpenRouter. The gate
