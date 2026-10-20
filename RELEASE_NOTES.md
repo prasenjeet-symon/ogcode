@@ -1,3 +1,89 @@
+# Release Notes — v0.49.0
+
+## Minor: One server per project directory
+
+Two `ogcode serve` processes pointed at the same project used to open the same
+database and write to it at the same time. Neither process knew about the
+other, so the damage surfaced far from its cause: a turn that failed partway
+through on a foreign key, a session that disappeared while an agent was still
+streaming into it, a message written into the transcript of a session somebody
+else had just deleted. There was no message that named the real problem.
+
+A server now takes an exclusive lock on `<dir>/.ogcode/server.lock` before it
+opens the database. The second `ogcode serve` on a directory that is already
+served exits immediately with a message naming the process that holds it and
+the address it answers on, so the mistake is one line of output instead of an
+evening of confusing symptoms. The lock file is only there to be found; the
+operating system's lock is the authority, so a leftover file from a server that
+crashed refuses nothing.
+
+## Minor: A deleted session ends its turn
+
+Deleting a session while an agent was working in it left the turn running with
+nowhere to write. Each write failed on the same constraint, the loop tried
+again on the next step, and the transcript showed a run of errors that had
+nothing to do with the work the agent was doing.
+
+The store now recognises the one failure that means "this session is gone" and
+reports it as exactly that, and the loop checks for it at every point that
+writes — before a step, before a tool runs, before a tool's result is saved,
+and when a part is inserted mid-stream. A deleted session stops its turn
+cleanly instead of failing every write in it. Deleting a session from the UI
+now also waits for that turn to finish, up to five seconds, before the row is
+removed, so the common case does not race at all. An interrupted run that
+ended this way says the session was deleted rather than offering to resume work
+whose session no longer exists.
+
+## Minor: An oversized request is refused before the gateway refuses it
+
+The OGX gateway accepts a request body of up to 4 MiB, and a conversation
+carrying several screenshots overran it. The gateway's answer was a bare
+`400 invalid request body`, which told you nothing about the cause, and the app
+offered to resume a request that would fail again exactly the same way.
+
+The provider now measures a request before sending it and refuses an oversized
+one itself, naming the size, the limit and the attachments that pushed it over
+(usually images, so the message says to remove or shrink them). The gateway's
+opaque 400 is recognised as the same condition if it does arrive, and both are
+treated as final: no retry, no resume offer, because neither would succeed. The
+usual way to hit the cap — attaching large screenshots — is now handled at the
+source, below.
+
+## Minor: Attached images are downscaled when you attach them
+
+An image used to be sent to the provider at whatever size it arrived in. Those
+pixels were billed on the turn that attached them and billed again every time
+the turn was replayed to the model, and a few large ones were enough to reach
+the request limit above. Most of that detail was thrown away by the provider
+anyway: every one of them normalises an image down to something smaller before
+it looks at it.
+
+The composer now prepares an image the moment it is attached. Its long edge is
+capped at 1024 pixels — below the point where the providers begin discarding
+pixels, so what is uploaded is what is billed and what is seen — and it is
+re-encoded as JPEG for a JPEG source and WebP otherwise, at a quality that
+keeps screenshot text legible. An image that is already small enough is passed
+through untouched, byte for byte, so a small PNG or an animated GIF keeps
+everything it had, and anything that cannot be decoded or re-encoded is sent as
+it was. The 10 MB limit is now only what the picker accepts.
+
+The saving is not just upload bytes: a 4000×3000 photograph arrives at about
+170 KB instead of several megabytes, a large screenshot loses around half its
+billed image tokens, and the transcript stores the small version rather than
+the original.
+
+## Other changes
+
+- 46 Go skills from `samber/cc-skills-golang` are installed under
+  `.agents/skills` — benchmarking, CLI layout, concurrency, context, database
+  access, error handling, gopls, gRPC, lint, naming, observability,
+  performance, project layout and more — pinned in `skills-lock.json`.
+- `HOWTO.md` records the procedure for defragmenting `MEMORY.md`: snapshot
+  first, regroup by topic, re-measure, prove no fact was lost, archive the old
+  copy.
+
+---
+
 # Release Notes — v0.48.0
 
 ## Minor: The interface comes in light and dark
