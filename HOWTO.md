@@ -10,7 +10,7 @@ and canonical values live in `AGENT.md` and `MEMORY.md`, not here.
 
 ## Cut a release
 
-Verified: 2026-10-20 @ v0.49.0
+Verified: 2026-10-20 @ v0.50.0
 Touches: `internal/version/version.go`, `web/package.json`, `web/package-lock.json`, `RELEASE_NOTES.md`, git tags
 
 1. Bump the version in all four entries: `internal/version/version.go:18` `Version` as `vX.Y.Z`
