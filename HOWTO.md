@@ -211,16 +211,18 @@ readable, and the compose field is text-only.
 
 ## Install ogcode on a host
 
-Verified: 2026-10-19 @ v0.48.0 — migrated from MEMORY.md, not re-run
-Touches: `/usr/local/bin`, the Homebrew tap, `%LOCALAPPDATA%`, the Go module cache
+Verified: 2026-10-20 @ v0.49.0-1-g7705e0a-dirty
+Touches: `/usr/local/bin`, `~/.local/bin`, the Homebrew tap, `%LOCALAPPDATA%`, the Go module cache
 
 1. macOS/Linux: `curl -fsSL https://ogcode.in/install.sh | sh` → installs to `/usr/local/bin`.
 2. Homebrew: `brew install prasenjeet-symon/tap/ogcode`.
 3. Windows: `install.ps1`, or winget.
 4. `go install github.com/prasenjeet-symon/ogcode@latest` works, but gives no CGO control — the
    swift tree-sitter binding and libmupdf are cgo, so it is the least suitable channel.
-5. For a local build from a checkout use `make install` (web bundle first, then the server, then
-   an ad-hoc codesign on macOS); `make build` alone leaves the binary in the repo root.
+5. For a local build from a checkout: `make -s install OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)`
+   — web bundle first, then the CGO server, then an ad-hoc codesign on macOS. `-s` stops make echoing the
+   secret, and the newline must be stripped or the gateway HMAC 401s. `make build` alone leaves the binary
+   in the repo root.
 
 Done when: `ogcode version` prints a version string (there is no `--version` flag).
 
@@ -303,3 +305,24 @@ Touches: `MEMORY.md`, `MEMORY-ARCHIVE.md`
 
 Done when: the token diff shows no lost span beyond deliberate corrections, `grep '^## ' MEMORY.md` lists no
 repeated topic, and the archive carries the new snapshot.
+
+## Run the agent benchmark offline with a reused code index
+
+Verified: 2026-10-20 @ v0.49.0-1-g7705e0a-dirty
+Touches: `~/Downloads/work/ogcode-bench/{index-backup,runs,RESULTS.md}` (outside this repo)
+
+1. `cd ~/Downloads/work/ogcode-bench` — the harness is not in the ogcode tree and is not under git.
+2. Build the index backup once per template commit:
+   `./benchmark.py backup-index --from indexbuild` → `index-backup/ogcode.db` (sqlite backup API) +
+   `index-backup/index.json` (`template_commit`, page count). Every `run` restores this instead of
+   indexing; `--rebuild-index` forces `ogcode index` from the template source instead.
+3. Run: `./benchmark.py run --agent {ogcode,opencode} --label smoke --time-limit 90`. The run's env puts
+   both arms behind an allowlist CONNECT proxy — only `ollama.com:443` tunnels; every other host is
+   `403` and logged as `DENY <target>` in `runs/<id>/egress.log`, summarised into `run.json.egress`.
+4. Read the setup block: `index: restored, 0.0s, 306 pages` and `egress: … proxied_model: true`.
+   `proxied_model: false` means the model call escaped the proxy — the run is not comparable.
+5. `./benchmark.py report` → `RESULTS.md`; runs whose label starts `smoke` are skipped.
+
+Done when: the setup line says `restored` with a non-zero page count, `proxied_model: true`, and the
+blocked list holds no host the agent needs. Bump the backup (`backup-index`) whenever the template repo
+moves; a stale backup is refused by commit, not silently reused.
