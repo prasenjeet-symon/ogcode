@@ -283,3 +283,23 @@ Touches: `/tmp/oglab-router-linux-amd64`, the oglab box's `/usr/local/bin/oglab-
 Done when: the box's `sha256sum` equals step 1's hash, `/healthz` answers 200, and the public
 `https://ogx.ogcode.in/v1/models` returns the same 401 JSON through Cloudflare. A signed SSE probe
 against a real model must show intact `data:` frames and no gzip.
+
+## Defragment MEMORY.md
+
+Verified: 2026-10-20 @ v0.48.0-dirty
+Touches: `MEMORY.md`, `MEMORY-ARCHIVE.md`
+
+1. `cp MEMORY.md /tmp/MEMORY.pre-defrag.md` first — `MEMORY.md` is gitignored, so there is no undo.
+2. Regroup to one section per topic: split a grab-bag section by subject, and merge facts on one subject
+   that sit in three places (install/version facts were scattered across three sections). Reword only what
+   repeats; carry every bullet's facts across.
+3. Re-measure while you are in there — `wc -c MEMORY.md AGENT.md HOWTO.md` — and correct the sizes line.
+4. Prove nothing was dropped with a small `python3` script: collect every backticked span and every numeric
+   literal from old and new and diff them. Each surviving difference must be a deliberate correction or a
+   line-wrap artifact of the old file, not a lost fact.
+5. Append the snapshot to `MEMORY-ARCHIVE.md` as
+   `## Snapshot <date> — MEMORY.md immediately before the defragmentation pass (<size>, <lines> lines)`,
+   then the raw file.
+
+Done when: the token diff shows no lost span beyond deliberate corrections, `grep '^## ' MEMORY.md` lists no
+repeated topic, and the archive carries the new snapshot.
