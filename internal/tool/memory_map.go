@@ -67,7 +67,7 @@ func NewMemoryMapTool(store *memfile.Store) MemoryMapTool {
 func (t MemoryMapTool) ID() string { return "memory_map" }
 
 func (t MemoryMapTool) Description() string {
-	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. Every conversation (session) is shown as a SINGLE line: its tag ending in \"/\", the number of turns inside it, and a sample of topic labels drawn from across all its turns. Labels are separated by semicolons. Each tag names exactly one conversation. To look inside a conversation, call again with subdir set to its tag (e.g. \"ses01M269J\") — the call then lists that conversation's summaries as one line each: file name and topic labels. Use this to find which conversation holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, start_line, end_line) pulls just that section."
+	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. Every conversation (session) is shown as a SINGLE line: its tag ending in \"/\", the number of turns inside it, and a sample of topic labels drawn from across all its turns. Labels are separated by semicolons. Each tag names exactly one conversation. To look inside a conversation, call again with subdir set to its tag (e.g. \"ses01M269J\") — the call then lists that conversation's summaries as one line each: file name and topic labels. Use this to find which conversation holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) pulls just that section."
 }
 
 func (t MemoryMapTool) Parameters() json.RawMessage {
@@ -361,7 +361,7 @@ func renderMemoryMap(entries []*memfile.Entry, label string, flat bool, subdir s
 		var b strings.Builder
 		if flat {
 			fmt.Fprintf(&b, "%s in %s, newest first.\n", turnNoun(len(entries)), scopeName(subdir))
-			fmt.Fprintf(&b, "Summaries live in %s. Each line below is one summary file, then its topics after \"—\", separated by \";\". Call file_map on a summary for its heading outline with line ranges, then read(path, start_line=N, end_line=M) for just that section.\n\n", memoryDirOf(entries))
+			fmt.Fprintf(&b, "Summaries live in %s. Each line below is one summary file, then its topics after \"—\", separated by \";\". Call file_map on a summary for its heading outline with line ranges, then read(path, ranges=[{\"start_line\":N,\"end_line\":M}]) for just that section.\n\n", memoryDirOf(entries))
 			renderFlat(entries, &b, rung.fileCap)
 		} else {
 			fmt.Fprintf(&b, "%s in %s.\n", turnNoun(len(entries)), label)

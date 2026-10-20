@@ -36,7 +36,7 @@ func Render(fm *FileMap) string {
 		return b.String()
 	}
 
-	b.WriteString("jump to any range with: read(path, start_line=N, end_line=M)\n\n")
+	b.WriteString("jump to any range with: read(path, ranges=[{\"start_line\":N,\"end_line\":M}])\n\n")
 
 	width := rangeWidth(fm.Symbols)
 	for _, s := range fm.Symbols {

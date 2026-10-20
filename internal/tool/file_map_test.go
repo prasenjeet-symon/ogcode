@@ -38,7 +38,7 @@ func Target() error {
 	}
 
 	// Feed that range straight back to read.
-	args, _ := json.Marshal(map[string]any{"path": "demo.go", "start_line": 3, "end_line": 6})
+	args, _ := json.Marshal(map[string]any{"path": "demo.go", "ranges": []map[string]any{{"start_line": 3, "end_line": 6}}})
 	res, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
 	if err != nil {
 		t.Fatalf("read: %v", err)

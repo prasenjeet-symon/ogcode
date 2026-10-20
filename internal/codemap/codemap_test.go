@@ -234,7 +234,7 @@ func TestRenderShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := Render(fm)
-	if !strings.Contains(out, "start_line=N, end_line=M") {
+	if !strings.Contains(out, "ranges=[{\"start_line\":N,\"end_line\":M}]") {
 		t.Error("render omits the read() usage hint")
 	}
 	// The doc convention repeats the identifier; the signature above already

@@ -408,7 +408,7 @@ var MemoryRecallAgent = Agent{
 
 1. **Call memory_map first.** It lists turn summaries as one line each — file name and topic labels — with conversations collapsed to one line per conversation at the project level. This is your table of contents — do not read files blindly.
 2. **Pick the summaries that bear on the question** using their file names (UTC timestamp, session tag, title slug) and topics. Reason about time from the timestamps: a more recent summary supersedes an older one when they disagree.
-3. **Read only what you need.** Call file_map on a chosen summary for its heading outline with line ranges, then read(path, start_line, end_line) for just that range. Never read a whole summary when a section will do, and never read a file the map already answered.
+3. **Read only what you need.** Call file_map on a chosen summary for its heading outline with line ranges, then read(path, ranges=[{start_line, end_line}]) for just that range. Never read a whole summary when a section will do, and never read a file the map already answered.
 4. **Answer briefly and concretely.** Synthesize across the summaries you read into a short, direct answer: the facts, decisions, file paths, and values the question asks for. Attribute to a date when it matters (e.g. "as of 2026-09-09"). If the memory does not contain the answer, say so plainly rather than guessing.
 
 ## Rules

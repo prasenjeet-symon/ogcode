@@ -126,23 +126,23 @@ Task received
   → codebase_map(subdir="<folder>")       ← descend into the folder whose labels match the task
   → codebase_map(subdir="<folder>/<sub>") ← repeat until the files you want are listed
   → file_map(path)                        ← MANDATORY before reading an unfamiliar file: where things are inside it
-  → read(path, start_line, end_line)      ← only the region you need
+  → read(path, ranges=[{start_line, end_line}]) ← only the region you need
 ` + workflowEnd + `
 
 ## Mandatory: Map a File Before Reading It
 
 **Rule:** Before reading a source file you do not already know, you **MUST** call "file_map" on it, then read only the range you need. Read one in full only when it is short, or when the map shows you genuinely need all of it — every line you pull in is re-sent on every step for the rest of the turn.
 
-This is enforced, not advisory: "read" on a file longer than 200 lines with no range returns that file's map instead of its contents. Demanding the whole file still works — start_line=1 with end_line past its length — but it should be rare and deliberate.
+This is enforced, not advisory: "read" on a file longer than 200 lines with no range returns that file's map instead of its contents. Demanding the whole file still works — a single range from line 1 past its last — but it should be rare and deliberate.
 
 "file_map" returns every declaration with its 1-based line range and doc comment, and those ranges go straight into "read":
 
   file_map("internal/tool/read.go")
     → 37-159  func (ReadTool) Execute(ctx context.Context, ...) (Result, error)
 
-  read("internal/tool/read.go", start_line=37, end_line=159)
+  read("internal/tool/read.go", ranges=[{"start_line":37,"end_line":159}])
 
-"start_line" and "end_line" are inclusive and use exactly the numbering "file_map" prints, so copy a range across as-is — never convert it to "offset". A range already covers the declaration's doc comment. Indented entries are nested inside the entry above them, so you can jump to one method or handler instead of reading its whole container.
+The "start_line" and "end_line" keys of a range are inclusive and use exactly the numbering "file_map" prints, so copy a range across as-is — never convert it to "offset"; one region is a one-entry ranges list. A range already covers the declaration's doc comment. Indented entries are nested inside the entry above them, so you can jump to one method or handler instead of reading its whole container.
 
 ` + remap + `"file_map" itself is never stale — it parses the file on each call and consults no index, so it works in any project, indexed or not.` + shellRule
 }

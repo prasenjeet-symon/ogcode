@@ -16,7 +16,7 @@ import (
 // agent can read the one region it needs instead of the whole file.
 //
 // It pairs with the read tool the way pdf_index pairs with read_pdf_page:
-// file_map to decide where to look, read(start_line, end_line) to look. Unlike
+// file_map to decide where to look, read(ranges=[{start_line, end_line}]) to look. Unlike
 // that pair it consults no index — the outline is parsed from the file on every
 // call, so its ranges always describe the file's current contents.
 type FileMapTool struct{}
@@ -36,7 +36,7 @@ func (FileMapTool) ID() string { return "file_map" }
 // arrive attached to the map they describe, which beats a static sentence the
 // agent has to remember applies.
 func (FileMapTool) Description() string {
-	return "Return the structural map of a single file: every declaration with its 1-based line range and its doc comment where it has one, nested entries indented under whatever contains them (a class's methods, a component's handlers). Use this before reading an unfamiliar file, then pass a range straight to read(path, start_line, end_line) to pull in only the part you need instead of the entire file. Ranges include each declaration's doc comment. Call this again after editing a file — the line numbers of everything below an edit will have moved. It lists declarations only: struct fields, class properties, and non-function local variables never appear, so a name missing from the map is not missing from the file. A very large file's map is capped: the deepest entries are dropped first and the map says so — pass start_line/end_line to map one region of the file in full. Go, TypeScript, TSX/JavaScript, Python, Rust, Java, C#, C, C++, Dart, PHP, Swift, HTML, CSS and HCL are parsed with a real grammar; any other file type falls back to an approximate heuristic scan, which the map flags when it happens."
+	return "Return the structural map of a single file: every declaration with its 1-based line range and its doc comment where it has one, nested entries indented under whatever contains them (a class's methods, a component's handlers). Use this before reading an unfamiliar file, then pass a range straight to read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) to pull in only the part you need instead of the entire file. Ranges include each declaration's doc comment. Call this again after editing a file — the line numbers of everything below an edit will have moved. It lists declarations only: struct fields, class properties, and non-function local variables never appear, so a name missing from the map is not missing from the file. A very large file's map is capped: the deepest entries are dropped first and the map says so — pass start_line/end_line to map one region of the file in full. Go, TypeScript, TSX/JavaScript, Python, Rust, Java, C#, C, C++, Dart, PHP, Swift, HTML, CSS and HCL are parsed with a real grammar; any other file type falls back to an approximate heuristic scan, which the map flags when it happens."
 }
 
 func (FileMapTool) Parameters() json.RawMessage {

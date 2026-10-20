@@ -39,14 +39,14 @@ func readWith(t *testing.T, path string, params map[string]any) string {
 	return res.Output
 }
 
-// start_line/end_line are 1-based and inclusive, matching what file_map prints.
-// The equivalent offset is start_line-1; getting that wrong shifts the window by
-// a line without erroring, which is exactly the failure these params exist to
+// A range is 1-based and inclusive, matching what file_map prints. The
+// equivalent offset is start_line-1; getting that wrong shifts the window by a
+// line without erroring, which is exactly the failure the range form exists to
 // prevent.
-func TestReadTool_StartEndLineAre1BasedInclusive(t *testing.T) {
+func TestReadTool_RangeIs1BasedInclusive(t *testing.T) {
 	path := numbered(t, 20)
 
-	out := readWith(t, path, map[string]any{"start_line": 5, "end_line": 8})
+	out := readWith(t, path, map[string]any{"ranges": []map[string]any{{"start_line": 5, "end_line": 8}}})
 
 	for _, want := range []string{"line5", "line6", "line7", "line8"} {
 		if !strings.Contains(out, lineNumberSep+want) {
@@ -63,7 +63,7 @@ func TestReadTool_StartEndLineAre1BasedInclusive(t *testing.T) {
 // A single-line range is the degenerate case of the inclusive rule and is what
 // file_map emits for one-line declarations.
 func TestReadTool_SingleLineRange(t *testing.T) {
-	out := readWith(t, numbered(t, 20), map[string]any{"start_line": 12, "end_line": 12})
+	out := readWith(t, numbered(t, 20), map[string]any{"ranges": []map[string]any{{"start_line": 12, "end_line": 12}}})
 
 	if !strings.Contains(out, lineNumberSep+"line12") {
 		t.Errorf("single-line range lost its line:\n%s", out)
@@ -73,10 +73,10 @@ func TestReadTool_SingleLineRange(t *testing.T) {
 	}
 }
 
-// start_line without end_line reads from there to the default limit, so a
-// caller can open a file at a declaration without knowing where it ends.
-func TestReadTool_StartLineWithoutEndLine(t *testing.T) {
-	out := readWith(t, numbered(t, 20), map[string]any{"start_line": 18})
+// A range without end_line reads to the default limit, so a caller can open a
+// file at a declaration without knowing where it ends.
+func TestReadTool_RangeWithoutEndLine(t *testing.T) {
+	out := readWith(t, numbered(t, 20), map[string]any{"ranges": []map[string]any{{"start_line": 18}}})
 
 	if !strings.Contains(out, lineNumberSep+"line18") || !strings.Contains(out, lineNumberSep+"line20") {
 		t.Errorf("open-ended range lost lines:\n%s", out)
@@ -89,15 +89,15 @@ func TestReadTool_StartLineWithoutEndLine(t *testing.T) {
 // An end_line past EOF clamps instead of erroring: file_map ranges can go stale
 // after an edit, and truncating the read is far kinder than failing it.
 func TestReadTool_EndLineBeyondEOFClamps(t *testing.T) {
-	out := readWith(t, numbered(t, 20), map[string]any{"start_line": 19, "end_line": 500})
+	out := readWith(t, numbered(t, 20), map[string]any{"ranges": []map[string]any{{"start_line": 19, "end_line": 500}}})
 
 	if !strings.Contains(out, lineNumberSep+"line20") {
 		t.Errorf("clamped read lost the last line:\n%s", out)
 	}
 }
 
-// offset stays 0-based for paging. Both forms must keep working, since the
-// truncation notice tells the agent to continue with offset.
+// offset stays 0-based for paging. It must keep working alongside ranges, since
+// the truncation notice tells the agent to continue with offset.
 func TestReadTool_OffsetRemains0Based(t *testing.T) {
 	out := readWith(t, numbered(t, 20), map[string]any{"offset": 5, "limit": 2})
 
@@ -106,24 +106,31 @@ func TestReadTool_OffsetRemains0Based(t *testing.T) {
 	}
 }
 
-// An end_line below start_line is always a caller slip — no amount of file
-// drift produces one — and either reading of the swapped values is a guess.
-// This used to fall back to the default 2000-line window, which handed back
-// far more than the caller meant with nothing to say end_line was ignored;
-// refusing with both numbers named costs one round trip and removes the guess.
-func TestReadTool_InvertedRangeIsRefused(t *testing.T) {
+// A single window used to have a second spelling: start_line/end_line at the
+// top level. Two shapes for one idea meant a caller could learn one and get
+// different lines from the other, and an ignored argument reads the wrong
+// lines with nothing to say so. The top-level pair is now refused, naming the
+// form that replaced it.
+func TestReadTool_StartEndLineArgsAreRefused(t *testing.T) {
 	path := numbered(t, 20)
-	args, _ := json.Marshal(map[string]any{"path": path, "start_line": 10, "end_line": 3})
-	_, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
-	if err == nil {
-		t.Fatal("an inverted range must be refused, not reinterpreted")
-	}
-	// Both numbers have to come back, or the caller cannot see which argument
-	// to fix; "inverted" names the problem.
-	for _, want := range []string{"10", "3", "inverted"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %q, got: %v", want, err)
-		}
+	for name, params := range map[string]map[string]any{
+		"both":       {"start_line": 10, "end_line": 3},
+		"start_only": {"start_line": 5},
+		"end_only":   {"end_line": 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			params["path"] = path
+			args, _ := json.Marshal(params)
+			_, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+			if err == nil {
+				t.Fatal("the top-level start_line/end_line form was accepted")
+			}
+			for _, want := range []string{"ranges", "start_line"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error should mention %q, got: %v", want, err)
+				}
+			}
+		})
 	}
 }
 
@@ -152,8 +159,11 @@ func TestReadTool_LongFileWithoutRangeReturnsMap(t *testing.T) {
 	if !strings.Contains(out, "too long to read in full") {
 		t.Fatalf("unranged read of a long file returned contents, not the map:\n%s", truncate(out))
 	}
-	if !strings.Contains(out, "start_line=N, end_line=M") {
+	if !strings.Contains(out, "ranges=[{\"start_line\":N,\"end_line\":M}]") {
 		t.Error("map response omits how to ask for a range")
+	}
+	if !strings.Contains(out, "ranges=[") {
+		t.Error("map response omits the multi-window form")
 	}
 	// It must be a map, not the source.
 	if strings.Contains(out, "return 7\n") {
@@ -169,10 +179,10 @@ func TestReadTool_LongFileWithRangeIsHonoured(t *testing.T) {
 	path := longGoFile(t, 60)
 
 	cases := map[string]map[string]any{
-		"start/end range": {"start_line": 4, "end_line": 6},
-		"offset paging":   {"offset": 3, "limit": 3},
-		"explicit whole":  {"start_line": 1, "end_line": 5000},
-		"limit only":      {"limit": 10},
+		"single ranges entry": {"ranges": []map[string]any{{"start_line": 4, "end_line": 6}}},
+		"offset paging":       {"offset": 3, "limit": 3},
+		"explicit whole":      {"ranges": []map[string]any{{"start_line": 1, "end_line": 5000}}},
+		"limit only":          {"limit": 10},
 	}
 	for name, params := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -219,12 +229,12 @@ func TestReadTool_LongUnmappableFileStillReads(t *testing.T) {
 	}
 }
 
-// end_line without start_line used to be silently dropped, falling back to
-// the default unranged window (from line 1, up to defaultReadLimit) with no
-// sign the argument was ignored. It now defaults start_line to 1, so the
-// range is honoured as "from the top through end_line".
-func TestReadTool_EndLineWithoutStartLine(t *testing.T) {
-	out := readWith(t, numbered(t, 20), map[string]any{"end_line": 3})
+// An end_line without start_line inside a range used to be silently dropped,
+// falling back to the default unranged window (from line 1, up to
+// defaultReadLimit) with no sign the argument was ignored. It now defaults
+// start_line to 1, so the range is honoured as "from the top through end_line".
+func TestReadTool_RangeEndLineWithoutStartLine(t *testing.T) {
+	out := readWith(t, numbered(t, 20), map[string]any{"ranges": []map[string]any{{"end_line": 3}}})
 
 	for _, want := range []string{lineNumberSep + "line1", lineNumberSep + "line2", lineNumberSep + "line3"} {
 		if !strings.Contains(out, want) {
@@ -442,8 +452,8 @@ func TestReadTool_WindowPastEOFExplains(t *testing.T) {
 	path := numbered(t, 20)
 
 	for name, params := range map[string]map[string]any{
-		"stale start_line": {"start_line": 50, "end_line": 80},
-		"stale offset":     {"offset": 20},
+		"stale range":  {"ranges": []map[string]any{{"start_line": 50, "end_line": 80}}},
+		"stale offset": {"offset": 20},
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := readWith(t, path, params)
@@ -476,5 +486,239 @@ func TestReadTool_LongLineCapKeepsValidUTF8(t *testing.T) {
 	}
 	if !strings.Contains(out, lineTruncatedSuffix) {
 		t.Errorf("the long line should be marked truncated:\n%q", out)
+	}
+}
+
+// One ranged call is the shape a post-grep fan-out needs: several hits in the
+// same file used to cost one read each. Every window keeps its own numbering
+// and the requested order, so the caller can walk the result top to bottom.
+func TestReadTool_RangesReturnEveryWindowInOrder(t *testing.T) {
+	path := numbered(t, 100)
+
+	out := readWith(t, path, map[string]any{"ranges": []map[string]any{
+		{"start_line": 3, "end_line": 5},
+		{"start_line": 40, "end_line": 42},
+	}})
+
+	for _, want := range []struct {
+		n    int
+		text string
+	}{
+		{3, "line3"}, {4, "line4"}, {5, "line5"},
+		{40, "line40"}, {41, "line41"}, {42, "line42"},
+	} {
+		if !strings.Contains(out, fmt.Sprintf("%6d%s%s", want.n, lineNumberSep, want.text)) {
+			t.Errorf("multi-range output missing %s:\n%s", want.text, truncate(out))
+		}
+	}
+	for _, unwanted := range []struct {
+		n    int
+		text string
+	}{
+		{2, "line2"}, {6, "line6"}, {39, "line39"},
+	} {
+		if strings.Contains(out, fmt.Sprintf("%6d%s%s", unwanted.n, lineNumberSep, unwanted.text)) {
+			t.Errorf("multi-range output included %s:\n%s", unwanted.text, truncate(out))
+		}
+	}
+	if strings.Index(out, "line3") > strings.Index(out, "line40") {
+		t.Error("windows came back out of request order")
+	}
+	for _, header := range []string{"f.txt:3-5", "f.txt:40-42"} {
+		if !strings.Contains(out, header) {
+			t.Errorf("output missing the %q heading:\n%s", header, truncate(out))
+		}
+	}
+}
+
+// The map interception is a whole-file guard, not a ban on reading a long
+// file: ranges is an explicit request for windows, so it must pass through.
+func TestReadTool_RangesAreHonouredOnALongFile(t *testing.T) {
+	path := longGoFile(t, 60)
+
+	out := readWith(t, path, map[string]any{"ranges": []map[string]any{
+		{"start_line": 4, "end_line": 6},
+		{"start_line": 24, "end_line": 26},
+	}})
+
+	if strings.Contains(out, "too long to read in full") {
+		t.Errorf("a ranges request was intercepted and mapped:\n%s", truncate(out))
+	}
+	for _, want := range []string{"func Fn0", "func Fn4"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("multi-range read missing %q:\n%s", want, truncate(out))
+		}
+	}
+}
+
+// ranges and offset/limit are two ways to place a window. Mixing them has no
+// single reading — a caller that sends both meant one of them, and guessing
+// which can silently read the wrong lines — so the call is refused.
+func TestReadTool_RangesRefusesPagingArgs(t *testing.T) {
+	path := numbered(t, 20)
+
+	for name, params := range map[string]map[string]any{
+		"offset": {"ranges": []map[string]any{{"start_line": 1, "end_line": 2}}, "offset": 5},
+		"limit":  {"ranges": []map[string]any{{"start_line": 1, "end_line": 2}}, "limit": 5},
+	} {
+		t.Run(name, func(t *testing.T) {
+			params["path"] = path
+			args, _ := json.Marshal(params)
+			_, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+			if err == nil {
+				t.Fatal("ranges combined with a single-window param was accepted")
+			}
+			if !strings.Contains(err.Error(), "ranges cannot be combined") {
+				t.Errorf("error should name the conflict, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestReadTool_RangesInvertedIsRefused(t *testing.T) {
+	path := numbered(t, 20)
+	args, _ := json.Marshal(map[string]any{
+		"path": path,
+		"ranges": []map[string]any{
+			{"start_line": 3, "end_line": 5},
+			{"start_line": 10, "end_line": 3},
+		},
+	})
+
+	_, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+	if err == nil {
+		t.Fatal("an inverted range inside ranges was accepted")
+	}
+	for _, want := range []string{"ranges[1]", "inverted"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+}
+
+// A stale line number is honest and common; it must not discard the windows
+// that are still inside the file.
+func TestReadTool_RangesPastEOFStillServeOtherWindows(t *testing.T) {
+	path := numbered(t, 20)
+
+	out := readWith(t, path, map[string]any{"ranges": []map[string]any{
+		{"start_line": 50, "end_line": 60},
+		{"start_line": 3, "end_line": 4},
+	}})
+
+	if !strings.Contains(out, "past the end") || !strings.Contains(out, "only 20 lines") {
+		t.Errorf("stale window should name the file's extent:\n%s", truncate(out))
+	}
+	if !strings.Contains(out, fmt.Sprintf("%6d%sline3", 3, lineNumberSep)) {
+		t.Errorf("a stale window dropped a window that was inside the file:\n%s", truncate(out))
+	}
+}
+
+// The output cap spans the whole call, not each window, or five windows could
+// each take a full cap. Whatever got no room is named rather than dropped.
+func TestReadTool_RangesRespectTheOutputCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wide.txt")
+	var b strings.Builder
+	for i := 0; i < 80; i++ {
+		b.WriteString(strings.Repeat("x", 1024))
+		b.WriteString("\n")
+	}
+	mustWriteFile(t, path, b.String())
+
+	out := readWith(t, path, map[string]any{"ranges": []map[string]any{
+		{"start_line": 1, "end_line": 80},
+		{"start_line": 1, "end_line": 1},
+		{"start_line": 1, "end_line": 1},
+	}})
+
+	if !strings.Contains(out, "cut at the output cap") {
+		t.Fatalf("a window past the cap should say where it stopped:\n%s", truncate(out))
+	}
+	if !strings.Contains(out, "not shown") {
+		t.Errorf("windows with no room left should be named, not silently dropped:\n%s", truncate(out))
+	}
+}
+
+// The result carries the number|text contract unchanged, so any line of any
+// window can be copied into an edit anchor.
+func TestReadTool_RangesKeepTheLineNumberContract(t *testing.T) {
+	path := numbered(t, 100)
+
+	out := readWith(t, path, map[string]any{"ranges": []map[string]any{
+		{"start_line": 7, "end_line": 7},
+		{"start_line": 90, "end_line": 90},
+	}})
+
+	for _, want := range []string{
+		fmt.Sprintf("%6d%sline7", 7, lineNumberSep),
+		fmt.Sprintf("%6d%sline90", 90, lineNumberSep),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("numbered line %q missing:\n%s", want, truncate(out))
+		}
+	}
+}
+
+// The schema description is the only place a caller learns the multi-window
+// form exists before making the call.
+func TestReadDescription_AdvertisesRanges(t *testing.T) {
+	desc := ReadTool{}.Description()
+	for _, want := range []string{"ranges", "one call", "cannot be combined with offset or limit"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("read description missing %q, so the multi-window form is unstated", want)
+		}
+	}
+}
+
+// The trailer plants the multi-window form at the decision point: a window was
+// just read and more of the file remains.
+func TestReadTool_TruncatedReadAdvertisesRanges(t *testing.T) {
+	out := readWith(t, numbered(t, 30), map[string]any{"offset": 0, "limit": 5})
+
+	if !strings.Contains(out, "ranges=[") {
+		t.Errorf("a truncated read should name the multi-window form:\n%s", truncate(out))
+	}
+}
+
+func TestReadTool_CompleteReadHasNoRangesTrailer(t *testing.T) {
+	out := readWith(t, numbered(t, 10), map[string]any{})
+
+	if strings.Contains(out, "ranges=[") {
+		t.Errorf("a complete read has nothing left to window:\n%s", out)
+	}
+}
+
+// Providers ignore the "integer" hint and some models write line numbers with
+// a decimal point; the integral-float coercion has to reach inside ranges too,
+// or a well-formed call fails to parse.
+func TestReadTool_RangesAcceptFloatLineNumbers(t *testing.T) {
+	path := numbered(t, 20)
+	args := json.RawMessage(fmt.Sprintf(`{"path":%q,"ranges":[{"start_line":3.0,"end_line":4.0}]}`, path))
+
+	res, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(res.Output, "f.txt:3-4") {
+		t.Errorf("integral floats in a range should decode as integers:\n%s", truncate(res.Output))
+	}
+}
+
+// An omitted end_line gets the default window, not the rest of the file: the
+// schema promises a default window length, and one sloppy range should not
+// pull a long file into the context whole.
+func TestReadTool_RangesOmittedEndGetsTheDefaultWindow(t *testing.T) {
+	overLimit := defaultReadLimit + 5
+	out := readWith(t, numbered(t, overLimit), map[string]any{"ranges": []map[string]any{
+		{"start_line": 1},
+	}})
+
+	if !strings.Contains(out, "f.txt:1-"+strconv.Itoa(defaultReadLimit)) {
+		t.Errorf("a range without end_line should stop at the default window (%d lines):\n%s",
+			defaultReadLimit, truncate(out))
+	}
+	if strings.Contains(out, fmt.Sprintf("%6d%sline%d", defaultReadLimit+1, lineNumberSep, defaultReadLimit+1)) {
+		t.Errorf("a range without end_line read past the default window:\n%s", truncate(out))
 	}
 }
