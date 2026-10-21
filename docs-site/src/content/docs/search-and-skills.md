@@ -21,6 +21,7 @@ Point it at your own search if you have one (for example a self-hosted SearxNG),
 | --- | --- |
 | `OGCODE_SEARXNG_URL` | Use a SearxNG instance for search |
 | `TAVILY_API_KEY` | Use Tavily for search and page reading |
+| `YDC_API_KEY` | Use You.com for search and page reading (select the You.com provider in Settings → Web search) |
 
 Two knobs tune deeper research — how many pages it reads and how much of each — but the defaults are sensible and most people never touch them.
 
