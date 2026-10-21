@@ -45,6 +45,28 @@ func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing
 	}
 }
 
+func TestBuildSystemPrompt_HistoryMDSectionIsAPointer(t *testing.T) {
+	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", 0, 0, true)
+	for _, want := range []string{
+		"## HISTORY.md — Project History",
+		"### Adding an entry",
+		"not loaded into your prompt",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("system prompt missing %q", want)
+		}
+	}
+
+	// PlanAgent is read-only: it is told what the file is, not how to write one.
+	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", 0, 0, true)
+	if !strings.Contains(planPrompt, "## HISTORY.md — Project History") {
+		t.Error("PlanAgent prompt lost the HISTORY.md pointer")
+	}
+	if strings.Contains(planPrompt, "### Adding an entry") {
+		t.Error("read-only agent is given HISTORY.md authoring rules")
+	}
+}
+
 func TestBuildSystemPrompt_MemoryMDSection_ContainsPurposeSection(t *testing.T) {
 	agent := BuildAgent
 	dir := "/tmp/test"

@@ -274,8 +274,16 @@ func TestUpdateIntentIDIsStable(t *testing.T) {
 // call before the message that ends the turn, or the last step lingers as active
 // after the turn finishes (nothing at turn end touches the intent).
 func TestUpdateIntentDescriptionClosesThePlan(t *testing.T) {
-	if got := NewUpdateIntentTool().Description(); !strings.Contains(got, "before the message that ends the turn") {
-		t.Errorf("description does not tell the agent to close its plan: %q", got)
+	got := NewUpdateIntentTool().Description()
+	for _, want := range []string{
+		"before the message that ends the turn",
+		// The closing call is only worth making if it moves the statuses: a
+		// list re-sent unchanged leaves the pill on the plan it opened with.
+		"with every step's real status",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("description does not tell the agent to close its plan (%q missing): %q", want, got)
+		}
 	}
 }
 

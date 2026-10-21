@@ -81,7 +81,7 @@ Use the shell to inspect, never to change: running tests, "git status"/"log"/"di
 		}
 		shellRule = `
 
-## Mandatory: Read Files With "read", Not The Shell
+### Read files with "read", not the shell
 
 **Rule:** Pull file contents with "read". "cat", "head", "tail" and "sed -n" walk straight past both rules above — no map, no range, and the whole file lands in context in one call, to be re-sent on every step for the rest of the turn. The interception that turns an oversized read into a map lives in "read"; the shell has no equivalent.` + shellUse
 	}
@@ -96,7 +96,7 @@ Use the shell to inspect, never to change: running tests, "git status"/"log"/"di
 	if canWrite {
 		workflowEnd = `  → Then make changes                     ← write and edit report any SYNTAX ERROR they introduce: fix it before anything else
   → check_syntax(path)                    ← for a file changed another way (shell, formatter, generator), or to confirm a fix
-  → build, then run the tests             ← a clean parse is grammar only; the build and the tests are the proof
+  → build, run the linter if one is configured, then the tests ← a clean parse is grammar only; the build and the tests are the proof
   → run it the way it is used             ← end to end, as a user or caller reaches it: the tests check the parts, this checks the whole`
 	}
 
@@ -107,15 +107,15 @@ Use the shell to inspect, never to change: running tests, "git status"/"log"/"di
 		remap = `**Before you read a range from a file you have edited, call "file_map" on it again.** An edit shifts every line below it, silently invalidating any range you were given earlier, and "edit" does not report the new line numbers. A file you are finished with needs no second map. `
 	}
 
-	return `## Mandatory: Use Project Index Before Exploration
+	return `## Mandatory: Explore Before You Read
 
-**Rule:** Map before you read — in every project, indexed or not. When the project has been indexed, that project map is "codebase_map", and it is your first exploration step, before reading any file or guessing at project structure. Whichever way you find the files, the flow after it is fixed: map every file you expect to touch, all in ONE block, then read only the ranges those maps printed, all in ONE block.
+**Rule:** Map before you read — in every project, indexed or not. When the project has been indexed, that project map is "codebase_map", and it is your first exploration step, before reading any file or guessing at project structure. Whichever way you find the files, the flow after it is fixed, and it is three moves: **find the files** ("codebase_map" when an index exists; "glob" and "grep" when it does not), **map them all in ONE block** (every "file_map" call for the turn — one per file you expect to touch — goes in the same block; they are independent, so never map one file, read it, then map the next), then **read in the NEXT block** (send every ranged "read" you need at once, one region per entry — a whole-file read to find where something is pays for every line on every step, and the map already said). This is not conditional, and one file per round trip is not thoroughness: each round trip re-sends the whole conversation.
 
 It shows **one directory level per call**. Every folder on that level is a single line: how many files it holds and the subfolders directly inside it, then a sample of topic labels drawn from across the whole folder; files sitting directly on that level are listed with their own labels. Nothing deeper is shown — a folder line is a door, not a listing.
 
-**Navigate by the labels.** Pick the folder whose labels or subfolder names match your task, call "codebase_map" again with "subdir" set to its path from the project root — the folder itself, or straight to one of the subfolders its line names — and repeat until the files you want are listed — usually one to three calls. This is the point of the tool: a folder whose labels have nothing to do with your task is an entire branch you never open. Do not stop at the top level and conclude the index is unhelpful because it only named folders; descending is how you use it.
+**Navigate by the labels.** Pick the folder whose labels or subfolder names match your task, call "codebase_map" again with "subdir" set to its path from the project root — the folder itself, or straight to one of the subfolders its line names — and repeat until the files you want are listed — usually one to three calls. This is the point of the tool: a folder whose labels have nothing to do with your task is an entire branch you never open. **Do not search the whole tree to find the files the map would name.** A grep answers "where does this string appear"; the descent answers "which branch does this belong to", which is the question that decides what to read — and a search that replaces it leaves you reading matches instead of the code around them.
 
-If it comes back empty, the project has not been indexed: stop calling it this session and use glob and grep instead. Use those too when the index does not cover what you need — unindexed files, binary patterns. codebase_map is your **first** exploration step whenever an index exists, never a blocker on getting the work done. An empty or unhelpful index changes only how you FIND the files; it never changes the two steps that follow.
+If it comes back empty, the project has not been indexed: stop calling it this session and use glob and grep instead. In an indexed project, search once the map has located the area — to confirm a name, to find every use inside files it already pointed at, or to reach what the index skips, such as binary files. An empty or unhelpful index changes only how you FIND the files; it never changes the flow after it.
 
 ` + docRule + `
 
@@ -131,21 +131,9 @@ Task received
 
 **The loop is not one pass.** Exploration ends when you can answer the question, not when the first read returns — two or three rounds are normal. A read routinely names a caller, a config key, a struct, or a test in an area you have not opened: go back to "codebase_map" for that area, descend it the same way, and run the flow again — every new "file_map" in ONE block, then their ranges in the NEXT. Let the labels steer; the second branch is the one the first read pointed at. A read that still leaves you guessing what else touches the code is a map you have not asked for yet.
 
-## Mandatory: Explore in Batches
+### Map a file before reading it
 
-**This is not conditional.** Indexed or not, exploration is three moves, and batching them is what saves the work:
-
-1. **Find the files.** "codebase_map" when an index exists; "glob" and "grep" when it does not.
-2. **Map them all in ONE block.** Every "file_map" call — one per file you expect to touch — goes in the same block. They are independent: none needs another's output. Do not map one file, read it, then map the next.
-3. **Read in the NEXT block.** The maps print every declaration's line range; send every "read" you need at once, one region per entry. Never read a file whole to find where something is — the map already said.
-
-One file per round trip is not thoroughness: each round trip re-sends the whole conversation, and a whole-file read pays for every line on every step for the rest of the turn. Batch by kind — all the maps, then all the reads.
-
-## Mandatory: Map a File Before Reading It
-
-**Rule:** Before reading a source file you do not already know, you **MUST** call "file_map" on it, then read only the range you need. Read one in full only when it is short, or when the map shows you genuinely need all of it — every line you pull in is re-sent on every step for the rest of the turn.
-
-This is enforced, not advisory: "read" on a file longer than 200 lines with no range returns that file's map instead of its contents. Demanding the whole file still works — a single range from line 1 past its last — but it should be rare and deliberate.
+Before reading a source file you do not already know, call "file_map" on it, then read only the range you need. Read one in full only when it is short, or when the map shows you genuinely need all of it — every line you pull in is re-sent on every step for the rest of the turn, and "read" on a file longer than 200 lines with no range returns that file's map instead of its contents. Demanding the whole file still works — a single range from line 1 past its last — but it should be rare and deliberate.
 
 "file_map" returns every declaration with its 1-based line range and doc comment, and those ranges go straight into "read":
 
@@ -241,7 +229,7 @@ func indexStatusPrompt(indexedFiles int) string {
 	case indexedFiles < 0:
 		return ""
 	case indexedFiles == 0:
-		return "Project index: empty — this project has not been indexed. Do not call codebase_map this session; find the files with glob and grep instead. The rest of the flow is unchanged: file_map every file you expect to touch in one block, then read only the ranges the maps printed. file_map parses files directly and works here as it does anywhere."
+		return "Project index: empty — this project has not been indexed. Do not call codebase_map this session; find the files with glob and grep instead, and follow the exploration flow as usual — file_map parses files directly and works here as it does anywhere."
 	default:
 		return fmt.Sprintf("Project index: %d files indexed. codebase_map is live — start at the project root, then descend one level at a time with subdir.", indexedFiles)
 	}
@@ -256,23 +244,23 @@ func indexStatusPrompt(indexedFiles int) string {
 // tag" even when no MEMORY.md existed, leaving the model chasing a block that
 // was never in the prompt.
 //
-// hasRecall gates the agentic-memory comparison for the same reason the rest of
-// this file gates on capability: Note and Breakdown are project-scoped, so they
-// receive this section, but neither holds memory_recall. Describing the tool to
-// them sends the model after a call it will never be offered. Every agent that
-// holds memory_recall also holds project_memory_recall, so one flag covers both.
+// The section spends words on the boundary on purpose. MEMORY.md is loaded into
+// every turn's cached prefix, and the failure mode is not a missing fact but a
+// file that grows into a log: history goes to HISTORY.md, procedures to
+// HOWTO.md, behavioural rules to AGENT.md, and only what changes the first
+// action stays here.
 func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 	base := "## MEMORY.md — Project Long-Term Memory\n\n"
 	switch {
 	case hasContent && canWriteFiles:
-		base += "The content above in the <memory-md> tag is your project's MEMORY.md — a persistent, cross-session knowledge base that survives across conversations (chat history does not).\n\n"
+		base += "The content above in the <memory-md> tag is your project's MEMORY.md — a persistent, cross-session working memory that survives across conversations (chat history does not).\n\n"
 	case hasContent:
-		base += "The content above in the <memory-md> tag is the project's MEMORY.md — a persistent, cross-session knowledge base that survives across conversations (chat history does not). Treat it as read-only reference.\n\n"
+		base += "The content above in the <memory-md> tag is the project's MEMORY.md — a persistent, cross-session working memory that survives across conversations (chat history does not). Treat it as read-only reference.\n\n"
 	default:
-		base += "This project has no MEMORY.md file yet, so there is no <memory-md> tag above. MEMORY.md is a project's persistent, cross-session knowledge base that survives across conversations, unlike chat history.\n\n"
+		base += "This project has no MEMORY.md file yet, so there is no <memory-md> tag above. MEMORY.md is a project's persistent, cross-session working memory, unlike chat history.\n\n"
 	}
 
-	base += "A line must be a fact a future session needs before acting: a gotcha with its fix (tried X → got Y → do Z instead), an invariant and the file or test that pins it, a canonical value (path, env var, version, exact command), or a decision and why. A record of what one session happened to do does not earn a place, nor does anything the code already says. **Ordered procedures belong in `HOWTO.md`, not here**; behavioural rules belong in `AGENT.md`. It is re-read at the start of every turn, so every line is a per-step cost."
+	base += "**MEMORY.md is not a log.** It holds only what a future session must know before acting, and only the hard-won kind: a gotcha with its fix (tried X → got Y → do Z instead), an invariant and the file or test that pins it, a canonical value (path, env var, version, exact command), or a decision and why. Anything the code, the `Makefile` or `--help` already answers does not earn a place. **History is not memory**: dates, measurements, session narratives, what was done, release and benchmark outcomes, experiments tried and rejected — those go in `HISTORY.md`, which a later session opens when it investigates that area. **Ordered procedures belong in `HOWTO.md`, and behavioural rules in `AGENT.md`.** The test: would a future session act differently for knowing this before it starts? If it only matters once someone is investigating the same thing, it is history. MEMORY.md is re-read at the start of every turn, so every line is a per-step cost. Keep the file under about 20 KB, and when it grows, move history out to `HISTORY.md` — never truncate the file."
 
 	// MEMORY.md is re-read at the start of every turn, so an unchecked inference
 	// written here reads as established fact to every later session. The update
@@ -283,7 +271,8 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 ### How to maintain MEMORY.md
 - Use the edit tool for targeted updates; use write only to restructure or first create the file.
 - Write down only what you have seen hold, and name the command or file that showed it when that is not obvious. An unchecked inference is marked "(unverified)" or left out — later sessions read this file as ground truth.
-- Before adding, check it isn't already recorded and update in place. Do this on your own initiative, before your final answer; that answer reports on the task, and mentions the memory update in one line at most.`
+- Before adding, check it isn't already recorded and update in place. Do this on your own initiative, before your final answer; that answer reports on the task, and mentions the memory update in one line at most.
+- When a line is a story about what happened rather than a fact to act on, move it to HISTORY.md. If the file passes about 20 KB, that move is the first thing to do — do not delete facts to hit a size.`
 		if !hasContent {
 			base += "\n- There is no MEMORY.md yet — create one in the project root with the write tool once there is knowledge worth recording."
 		}
@@ -297,6 +286,45 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 	}
 
 	return base
+}
+
+// historyMDPrompt returns the HISTORY.md pointer. Like HOWTO.md it carries no
+// content from the file: HISTORY.md is never loaded into the prompt, so the
+// section is a constant that does not take part in the per-turn rebuild of
+// entry [0]. Discovery happens through the ordinary file tools.
+//
+// The file exists so MEMORY.md can stay small. A dated measurement or the record
+// of an experiment is useful when a later session investigates the same area,
+// and useless — but expensive — in every turn's cached prefix; this is where the
+// prompt sends it.
+func historyMDPrompt(canWriteFiles bool) string {
+	base := `## HISTORY.md — Project History
+
+` + "`HISTORY.md`" + ` at the project root is the project's log: dated changes, measurements with
+their numbers, experiments and what they ruled out, version- or commit-specific
+outcomes. Open it when a task touches past work, when a fact looks like something
+already measured or tried, or before re-running an experiment, so you do not
+rediscover what it already settled. It is deliberately not loaded into your prompt —
+read it with "read", and search it with "grep" by topic or date.`
+
+	if !canWriteFiles {
+		return base
+	}
+
+	return base + `
+
+### Adding an entry
+
+Append an entry when a turn produced a finding worth not rediscovering — a
+measurement, what an experiment ruled out, an outcome that only makes sense in time —
+after the work and before you finish. Create the file at the project root if it does
+not exist, and put the newest entry last. One heading, then short bullets carrying
+the numbers, the commands, and what was rejected:
+
+## <date> — <what changed or was learned>
+
+Do not copy code or facts the repo already shows; a pointer to the file, test or
+commit is enough.`
 }
 
 // howToMDPrompt returns the HOWTO.md pointer. It carries no content from the
@@ -1098,7 +1126,7 @@ The user watching your transcript sees each action only once it is done, so the 
 
 **When to call it: first — before "codebase_map", before any read, before anything else in the turn.** This is the one call that must not wait for orientation. It runs the matcher that compares your steps against the skills and MCP tools you hold, and its result is the only place the relevant ones are named. A plan stated after you have already looked around spends that match on work that is done; a turn that never states one never gets the match at all. State the plan you are starting from, marking the first step active, even when it is rough — the exploration that follows is where you refine it, and a step that names real files, packages and commands matches best.
 
-**Then the map, before you read anything.** With the plan stated, exploration runs the usual way. When the project has an index, it opens with "codebase_map" — the plan says where the turn is going, the map says where the code is. From there the flow is fixed and does not depend on the index: every "file_map" you need in one block, then every ranged "read" in the next. Reading whatever comes to mind has guessed at the project anyway.
+**Then explore as usual.** The plan says where the turn is going; the map says where the code is. Reading whatever comes to mind has guessed at the project anyway.
 
 Call it again only when the plan changes: you start a step, you finish one, or one turns out not to be needed. Send the complete list every time — the call replaces the plan, so a step you leave out is gone. The tool echoes the plan back to you; copy that list and change only what moved, so a step you already finished stays finished.
 
@@ -1108,7 +1136,7 @@ Call it again only when the plan changes: you start a step, you finish one, or o
 
 Keep each step's label to a few words and the list to a handful; it is a map of the turn, not a script of it. A step may also carry a description — a sentence or two on what the step actually involves: the file types, the library, the command. The user never sees it; a matcher reads it to suggest the skills and MCP tools that could carry the step out, so write it to name the concrete things the step touches rather than to restate the label. A description that says "do the thing" gives the matcher nothing to work with.
 
-Keep it honest. A step you have finished is done, and a step you have abandoned is dropped. A step left pending, or left active after you have moved past it, tells the user something untrue about where you are — and an abandoned plan nobody has marked up reads as worse than no plan at all. Nothing closes the plan for you, so this includes the last step: make one final update_intent call, marking where you actually got to, before the message that ends the turn. A step still active once you have stopped reads as work you are still doing.
+**Keep the statuses updated — the status is what the user reads.** The pill counts "done" steps, not labels, so a call that re-sends the list with every status unchanged has updated nothing. Set each status to what has actually happened: "active" on the one step you are working on now, "done" on a step that finished, "dropped" on one you abandoned, "pending" only on what is genuinely still ahead. A step left pending, or left active after you have moved past it, tells the user something untrue about where you are — and an abandoned plan nobody has marked up reads as worse than no plan at all. **Nothing closes the plan for you**, so this includes the last step: before the message that ends the turn, call update_intent one final time with every step's real status, so the pill ends where the work ended instead of on the plan you opened with. A step still active once you have stopped reads as work you are still doing.
 
 Do not also narrate the steps in prose: the update_intent call is the narration, and a sentence repeating what the plan already shows is noise.`
 }

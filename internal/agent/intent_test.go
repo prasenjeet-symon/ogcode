@@ -43,16 +43,16 @@ func TestUpdateIntentPromptCarriesTheTimingContract(t *testing.T) {
 		"never gets the match at all",
 		"Never call \"skill\" with no name",
 		"Call it again only when the plan changes",
-		"**Then the map, before you read anything.**",
+		"**Then explore as usual.**",
 		"codebase_map",
-		"every \"file_map\" you need in one block",
-		"every ranged \"read\" in the next",
 		"**Call it on its own.**",
 		"replaces the plan",
 		"copy that list and change only what moved",
 		"dropped",
 		"Do not also narrate",
+		"the status is what the user reads",
 		"before the message that ends the turn",
+		"with every step's real status",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("updateIntentPrompt is missing %q", want)

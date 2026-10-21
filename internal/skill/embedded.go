@@ -150,9 +150,12 @@ a rule — the prompt is re-sent on every step of every turn.
 
 ## MEMORY.md — what is known about the project
 
-MEMORY.md holds facts, not instructions: decisions and their rationale,
-gotchas, non-obvious behaviour, values that would otherwise be rediscovered.
-If it tells the agent how to act, it belongs in AGENT.md instead.
+MEMORY.md holds facts, not instructions: the hard-won kind — gotchas with their
+fix, invariants and the file or test that pins them, canonical values, decisions
+and why. It is loaded into every session, so keep it small: no dates, no session
+narratives, no measurements. If it tells the agent how to act, it belongs in
+AGENT.md; if it is a procedure, HOWTO.md; if it records what happened,
+HISTORY.md.
 
 ## Skills — instructions loaded on demand
 

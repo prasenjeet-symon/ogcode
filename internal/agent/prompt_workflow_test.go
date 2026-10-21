@@ -18,7 +18,7 @@ func TestWorkflowEndsOnVerificationForAgentsThatWrite(t *testing.T) {
 		"→ Then make changes",
 		"SYNTAX ERROR",
 		"→ check_syntax(path)",
-		"→ build, then run the tests",
+		"→ build, run the linter if one is configured, then the tests",
 		"→ run it the way it is used",
 	} {
 		if !strings.Contains(build, want) {
@@ -48,7 +48,7 @@ func TestWorkflowEndsOnVerificationForAgentsThatWrite(t *testing.T) {
 func TestWorkflowNamesNoProjectSpecificPaths(t *testing.T) {
 	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
-		workflow := p[strings.Index(p, "### Workflow"):strings.Index(p, "## Mandatory: Map a File")]
+		workflow := p[strings.Index(p, "### Workflow"):strings.Index(p, "### Map a file before reading it")]
 		if strings.Contains(workflow, `subdir="internal`) {
 			t.Errorf("%s workflow names ogcode's own folders:\n%s", role, workflow)
 		}
@@ -81,12 +81,19 @@ func TestRemapAfterEditIsConditionalAndForWritersOnly(t *testing.T) {
 	}
 }
 
-// The atomic-edit rule is stated once in Hard rules, not twice in a row.
+// The atomic-edit contract is stated once, in Parallel tool calls, and Hard
+// rules points at it instead of restating a second, drifting version.
 func TestHardRulesStateAtomicEditsOnce(t *testing.T) {
 	for _, a := range []Agent{BuildAgent, TaskAgent} {
+		if n := strings.Count(a.System, "cannot half-apply a refactor"); n != 1 {
+			t.Errorf("%s: states the atomic-edit rule %d times, want once", a.Name, n)
+		}
 		hard := a.System[strings.Index(a.System, "## Hard rules"):]
-		if n := strings.Count(hard, "leaves the file untouched instead of partly rewritten"); n != 1 {
-			t.Errorf("%s: Hard rules state the atomic-edit rule %d times, want once", a.Name, n)
+		if !strings.Contains(hard, "The full contract, including the one forbidden pair, is in **Parallel tool calls**") {
+			t.Errorf("%s: Hard rules does not point at the full edit contract", a.Name)
+		}
+		if strings.Contains(hard, `Never batch a "write" with an "edit"`) {
+			t.Errorf("%s: Hard rules restates the write-vs-edit rule", a.Name)
 		}
 	}
 }

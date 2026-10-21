@@ -574,6 +574,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// has stated a plan. One per turn, for the same reason the plan itself is
 	// cleared at the start of each turn.
 	gate := newIntentGate(sessionID, intentOffered)
+	// The descent gate nudges a turn that searches before it navigates the
+	// project index. Armed only when the index holds files and the agent holds
+	// the tool that would descend it, so the reminder never names a call the
+	// agent was not offered or a map that would come back empty.
+	descent := newDescentGate(sessionID, indexedFiles > 0 && agent.HasTool("codebase_map"))
 
 	var providerTools []provider.ToolDefinition
 	var toolsGen uint64
@@ -1885,7 +1890,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// model calling something it was never given, and compact_context is
 			// added per step for agents that accumulate read context. Passing the
 			// static agent here would reject every compaction as a disallowed tool.
-			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, turnTools, intentFind, workDir, modelSupportsImages, modelID, providerID, pressure, gate)
+			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, turnTools, intentFind, workDir, modelSupportsImages, modelID, providerID, pressure, gate, descent)
 			if aborted {
 				exitReason = "aborted"
 				return ctx.Err()
@@ -2703,7 +2708,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 // executeReadyToolCalls runs every ready call and returns each one's result
 // keyed by call ID, so the caller can act on what a tool actually did rather
 // than on the fact that it was invoked.
-func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, turnTools *turnToolset, intentFind *intentFinder, workDir string, modelSupportsImages bool, modelID, providerID string, pressure *readPressure, gate *intentGate) (results map[string]tool.Result, loopAborted bool) {
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, turnTools *turnToolset, intentFind *intentFinder, workDir string, modelSupportsImages bool, modelID, providerID string, pressure *readPressure, gate *intentGate, descent *descentGate) (results map[string]tool.Result, loopAborted bool) {
 	if len(readyCalls) > 1 {
 		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
 	}
@@ -2818,6 +2823,10 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		// read-pressure reminder above, it has to be part of the stored output
 		// the model reads on its next step.
 		gate.observe(execInfos[i].tc.Name, &execInfos[i].result)
+		// Nudge a turn that searched the whole tree instead of descending the
+		// map it was given. The call has already run; the reminder is about the
+		// next one, so it rides this result like the two above.
+		descent.observe(execInfos[i].tc.Name, execInfos[i].tc.Input, &execInfos[i].result)
 	}
 	pressure.endStep()
 
@@ -4081,6 +4090,11 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
 		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
+
+		// HISTORY.md pointer: the log MEMORY.md is not. Nothing is loaded and
+		// no existence check is made, so the section stays constant and the
+		// file can grow without rewriting entry [0].
+		prompt += "\n\n" + historyMDPrompt(canWriteFiles)
 
 		// HOWTO.md pointer: what the file is and when to open it, plus the
 		// authoring rules for an agent that can write. Nothing is loaded and no

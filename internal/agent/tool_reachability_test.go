@@ -446,8 +446,8 @@ func TestBuildSystemPrompt_BoundaryClosesTheStaticBlock(t *testing.T) {
 func TestAgents_CarryTheMapBeforeReadWorkflow(t *testing.T) {
 	for _, a := range codeFacingAgents() {
 		for _, want := range []string{
-			"Mandatory: Use Project Index Before Exploration",
-			"Mandatory: Map a File Before Reading It",
+			"Mandatory: Explore Before You Read",
+			"### Map a file before reading it",
 		} {
 			if !strings.Contains(a.System, want) {
 				t.Errorf("%s: system prompt missing %q — it has the tools but was never given the rule", a.Name, want)

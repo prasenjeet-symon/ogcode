@@ -100,17 +100,86 @@ func TestMemoryMDPromptSavesFactsNotSessionNarratives(t *testing.T) {
 	for _, canWrite := range []bool{true, false} {
 		p := memoryMDPrompt(canWrite, true)
 		for _, want := range []string{
-			"A line must be a fact a future session needs before acting",
+			"MEMORY.md is not a log",
+			"only what a future session must know before acting",
 			"a gotcha with its fix",
 			"an invariant and the file or test that pins it",
 			"a canonical value (path, env var, version, exact command)",
 			"a decision and why",
-			"A record of what one session happened to do does not earn a place",
-			"anything the code already says",
+			"History is not memory",
+			"would a future session act differently",
+			"Keep the file under about 20 KB",
 		} {
 			if !strings.Contains(p, want) {
 				t.Errorf("MEMORY.md section missing %q (canWrite=%v)", want, canWrite)
 			}
+		}
+	}
+}
+
+// MEMORY.md and HISTORY.md are different stores: the first is re-read before
+// every action, the second is opened when a session investigates the past. If
+// the split is not named, measurements and session narratives keep landing in
+// the always-loaded file.
+func TestMemoryMDPromptSendsHistoryToHistoryMDPrompt(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		p := memoryMDPrompt(canWrite, true)
+		for _, want := range []string{
+			"HISTORY.md",
+			"History is not memory",
+			"measurements",
+			"session narratives",
+			"experiments tried and rejected",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("MEMORY.md section does not route %q to HISTORY.md (canWrite=%v)", want, canWrite)
+			}
+		}
+	}
+}
+
+// HISTORY.md is a pointer, not a payload: every project-scoped agent is told
+// what the file is and when to open it, and nothing from the file is loaded.
+func TestHistoryMDPrompt_CommonSection(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		p := historyMDPrompt(canWrite)
+		for _, want := range []string{
+			"## HISTORY.md — Project History",
+			"`HISTORY.md` at the project root",
+			"dated changes",
+			"measurements with",
+			"experiments and what they ruled out",
+			"Open it when a task touches past work",
+			"deliberately not loaded into your prompt",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("HISTORY.md section missing %q (canWrite=%v)", want, canWrite)
+			}
+		}
+	}
+}
+
+func TestHistoryMDPrompt_WritableRecordsEntries(t *testing.T) {
+	p := historyMDPrompt(true)
+	for _, want := range []string{
+		"### Adding an entry",
+		"after the work and before you finish",
+		"Create the file at the project root",
+		"newest entry last",
+		"## <date> — <what changed or was learned>",
+		"what was rejected",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("writable HISTORY.md section missing %q", want)
+		}
+	}
+}
+
+func TestHistoryMDPrompt_ReadOnlyCarriesNoAuthoringRules(t *testing.T) {
+	readOnly := historyMDPrompt(false)
+	for _, unwanted := range []string{"### Adding an entry", "newest entry last", "Create the file"} {
+		if strings.Contains(readOnly, unwanted) {
+			t.Errorf("read-only HISTORY.md section carries %q", unwanted)
 		}
 	}
 }
@@ -581,7 +650,7 @@ func TestCodingAgents_ReviewAndEndToEndVerification(t *testing.T) {
 			"hold every conclusion to the same standard of evidence",
 			"trace what depends on the change and what it depends on",
 			"list what you could not check as unverified",
-			"run it end to end and confirm the behavior you changed",
+			"end to end and confirm the behavior you changed",
 		} {
 			if !strings.Contains(a.System, want) {
 				t.Errorf("%s system prompt missing %q", a.ID, want)
@@ -909,7 +978,7 @@ func TestProjectIndexPrompt(t *testing.T) {
 	prompt := projectIndexPrompt("build", true, true)
 
 	for _, sub := range []string{
-		"Mandatory: Use Project Index Before Exploration",
+		"Mandatory: Explore Before You Read",
 		"codebase_map",
 		"MANDATORY FIRST STEP",
 		"has not been indexed", // the empty-index escape hatch
@@ -943,7 +1012,7 @@ func TestProjectIndexPrompt(t *testing.T) {
 
 func TestBuildAgent_SystemPrompt_ContainsProjectIndex(t *testing.T) {
 	// BuildAgent should contain the project index prompt since it has the codebase_map tool
-	if !strings.Contains(BuildAgent.System, "Mandatory: Use Project Index Before Exploration") {
+	if !strings.Contains(BuildAgent.System, "Mandatory: Explore Before You Read") {
 		t.Error("BuildAgent system prompt should include project index section")
 	}
 	if !strings.Contains(BuildAgent.System, "codebase_map") {
@@ -953,7 +1022,7 @@ func TestBuildAgent_SystemPrompt_ContainsProjectIndex(t *testing.T) {
 
 func TestPlanAgent_SystemPrompt_ContainsProjectIndex(t *testing.T) {
 	// PlanAgent should contain the project index prompt since it has the codebase_map tool
-	if !strings.Contains(PlanAgent.System, "Mandatory: Use Project Index Before Exploration") {
+	if !strings.Contains(PlanAgent.System, "Mandatory: Explore Before You Read") {
 		t.Error("PlanAgent system prompt should include project index section")
 	}
 	if !strings.Contains(PlanAgent.System, "codebase_map") {
@@ -974,7 +1043,7 @@ func TestPlanAgent_SystemPrompt_ContainsProjectIndex(t *testing.T) {
 
 func TestNoteAgent_SystemPrompt_ContainsProjectIndex(t *testing.T) {
 	// NoteAgent should contain the project index prompt since it has the codebase_map tool
-	if !strings.Contains(NoteAgent.System, "Mandatory: Use Project Index Before Exploration") {
+	if !strings.Contains(NoteAgent.System, "Mandatory: Explore Before You Read") {
 		t.Error("NoteAgent system prompt should include project index section")
 	}
 	if !strings.Contains(NoteAgent.System, "codebase_map") {
@@ -1097,27 +1166,15 @@ func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
 	}
 }
 
-// The same-file edit guidance is stated twice on purpose: once where batching
-// is explained, and once in Hard rules. It is the only piece of batching advice
-// whose cost when wrong is a corrupted file rather than a wasted round trip,
-// and Hard rules is where an agent looks for what it must not do — 60% into a
-// prompt, inside a section about efficiency, is not.
-//
-// The advice itself moved once "edit" learned to take several hunks atomically:
-// the array is the instruction, and separate same-file calls are the fallback
-// that still works. Both must be stated, because a partly-applied refactor is
-// exactly the corruption this rule exists to prevent.
-//
-// Only the write-capable agents carry it, because only they can commit the
-// mistake.
-func TestCodingAgentHardRules_SameFileEditBatching(t *testing.T) {
+// Hard rules names the edit form and points at Parallel tool calls for the
+// full contract, where it is stated once. Only the write-capable agents carry
+// the pointer, because only they can commit the mistake.
+func TestCodingAgentHardRules_PointAtTheEditContract(t *testing.T) {
 	for _, a := range []Agent{BuildAgent, TaskAgent} {
 		hard := a.System[strings.Index(a.System, "## Hard rules"):]
 		for _, want := range []string{
-			"\"edits\" array",                          // the atomic form, which is now the advice
-			"all-or-nothing",                           // the property that makes it the advice
-			"serializes mutations to the same path",    // why separate calls remain safe as a fallback
-			"Never batch a \"write\" with an \"edit\"", // the combination still forbidden
+			`"edits" array`,
+			"The full contract, including the one forbidden pair, is in **Parallel tool calls**",
 		} {
 			if !strings.Contains(hard, want) {
 				t.Errorf("%s: Hard rules missing %q", a.Name, want)
@@ -1125,7 +1182,7 @@ func TestCodingAgentHardRules_SameFileEditBatching(t *testing.T) {
 		}
 	}
 	for _, a := range []Agent{PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent} {
-		if strings.Contains(a.System, "serializes mutations to the same path") {
+		if strings.Contains(a.System, "The full contract, including the one forbidden pair") {
 			t.Errorf("%s: cannot edit, so the rule is noise in its prompt", a.Name)
 		}
 	}
@@ -1326,7 +1383,7 @@ func TestProjectIndexPromptLoopsBackWhenAReadPointsElsewhere(t *testing.T) {
 
 		// It belongs with the workflow diagram, which is the part read as a
 		// single pass, not buried in the descent paragraph above it.
-		workflow := prompt[strings.Index(prompt, "### Workflow"):strings.Index(prompt, "## Mandatory: Explore in Batches")]
+		workflow := prompt[strings.Index(prompt, "### Workflow"):strings.Index(prompt, "### Map a file before reading it")]
 		if !strings.Contains(workflow, "The loop is not one pass") {
 			t.Errorf("projectIndexPrompt(%q) loop-back clause is outside the workflow block", role)
 		}
@@ -1353,23 +1410,33 @@ func TestExplorationIsMapThenBatchedReadsInEveryProject(t *testing.T) {
 	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
 		for _, want := range []string{
-			"## Mandatory: Explore in Batches",
-			"**This is not conditional.**",
-			"all of them in ONE block",
-			"all of them in the NEXT block",
-			"Never read a file whole",
+			"## Mandatory: Explore Before You Read",
+			"This is not conditional",
+			"map them all in ONE block",
+			"read in the NEXT block",
+			"one per file you expect to touch",
 			"indexed or not",
 		} {
 			if !strings.Contains(p, want) {
 				t.Errorf("projectIndexPrompt(%q) missing %q", role, want)
 			}
 		}
+
+		// The flow is stated once, in the one mandatory section. A second copy
+		// under its own heading is how the prompt grew six tellings of it.
+		// The heading opens the block, so it carries no leading newline.
+		if n := strings.Count(p, "## Mandatory:"); n != 1 {
+			t.Errorf("projectIndexPrompt(%q) carries %d '## Mandatory:' headings, want 1", role, n)
+		}
+		if strings.Contains(p, "Mandatory: Explore in Batches") {
+			t.Errorf("projectIndexPrompt(%q) still carries the second exploration section", role)
+		}
 	}
 
 	// The empty-index line must keep the agent on that flow rather than drop
 	// the whole section along with the map it cannot use.
 	empty := indexStatusPrompt(0)
-	for _, want := range []string{"one block", "the ranges the maps printed"} {
+	for _, want := range []string{"glob and grep", "exploration flow as usual"} {
 		if !strings.Contains(empty, want) {
 			t.Errorf("empty-index status line missing %q", want)
 		}
