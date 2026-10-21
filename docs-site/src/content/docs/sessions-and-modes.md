@@ -54,7 +54,7 @@ ogcode run "add a --json flag to the CLI and document it"
 | --- | --- |
 | `-a, --agent` | Agent to run — `build` (default), `plan`, `task`, `breakdown` |
 | `-o, --output-format` | `text` (default) or `json` |
-| `--max-turns` | Stop after this many steps (default `100`) |
+| `--max-turns` | Stop after this many steps; `0` (the default) means no limit |
 | `--model` | Override the model for this run |
 
 A non-zero exit status means the run did not complete, so `run` fits into a pipeline like any other command.

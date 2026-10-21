@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"runtime"
@@ -34,6 +35,14 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 	"github.com/prasenjeet-symon/ogcode/internal/usage"
 )
+
+// MaxStepsUncapped asks RunLoop for no step ceiling. It has to be negative: 0
+// keeps meaning "use the default budget", because a zero-value LoopRunner
+// (tests, a sub-agent's runner) relies on that. Only `ogcode run` opts in.
+const MaxStepsUncapped = -1
+
+// defaultMaxSteps is the budget a zero-value MaxSteps runs under.
+const defaultMaxSteps = 1000
 
 // LoopRunner orchestrates the agent loop for a session.
 type LoopRunner struct {
@@ -160,6 +169,33 @@ func compactContextEnabled() bool {
 	return true
 }
 
+// stepBudgets resolves the runner's step limits into locals — never mutating
+// the shared field, because a deep_search call runs a nested RunLoop
+// concurrently with the parent loop. maxSteps is where an auto-resuming turn
+// first logs that it is extending itself and hardMax is where the loop actually
+// stops; the two are equal when auto-resume is off (the default), so callers
+// that leave MaxAutoResumes zero see nothing change. See
+// LoopRunner.MaxAutoResumes.
+//
+// MaxSteps 0 keeps its historical "use the default budget" meaning, because a
+// zero-value LoopRunner (tests, a sub-agent's runner via subagentMaxSteps)
+// relies on it; a negative value asks for no ceiling at all (MaxStepsUncapped).
+func stepBudgets(lr *LoopRunner) (maxSteps, hardMax int) {
+	maxSteps = lr.MaxSteps
+	switch {
+	case maxSteps == 0:
+		maxSteps = defaultMaxSteps
+	case maxSteps < 0:
+		maxSteps = math.MaxInt
+	}
+	hardMax = maxSteps
+	if lr.MaxAutoResumes > 0 && maxSteps != math.MaxInt {
+		// An uncapped run has nothing to extend, and the multiply would overflow.
+		hardMax = maxSteps * (1 + lr.MaxAutoResumes)
+	}
+	return maxSteps, hardMax
+}
+
 // RunLoop executes the core agent loop: prompt -> stream -> tools -> loop back.
 // maxReasoningLen bounds how much of a thinking block is stored, so a runaway
 // reasoning stream can't flood the DB or the UI.
@@ -195,19 +231,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// Read MaxSteps into a local; never mutate the shared LoopRunner field. A
 	// deep_search call runs a nested RunLoop concurrently with the parent loop,
 	// so writing lr.MaxSteps here would be a data race.
-	maxSteps := lr.MaxSteps
-	if maxSteps == 0 {
-		maxSteps = 1000
-	}
-	// Auto-resume ceiling. hardMax == maxSteps when auto-resume is off (the
-	// default), so nothing changes for callers that leave MaxAutoResumes zero.
-	// Read once into a local — the server shares one LoopRunner across concurrent
-	// turns, so this must not depend on mutating the shared field. See
-	// LoopRunner.MaxAutoResumes.
-	hardMax := maxSteps
-	if lr.MaxAutoResumes > 0 {
-		hardMax = maxSteps * (1 + lr.MaxAutoResumes)
-	}
+	maxSteps, hardMax := stepBudgets(lr)
 
 	// Keep the Mac (and its screen) awake for the duration of this turn — an
 	// active generation should never be cut off by display or idle system sleep.

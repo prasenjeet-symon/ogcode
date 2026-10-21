@@ -49,7 +49,7 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().StringVarP(&runAgentName, "agent", "a", "build", "Agent type: build or plan")
 	runCmd.Flags().StringVarP(&runOutputFormat, "output-format", "o", "text", "Output format: text or json")
-	runCmd.Flags().IntVar(&runMaxTurns, "max-turns", 100, "Maximum agent loop iterations")
+	runCmd.Flags().IntVar(&runMaxTurns, "max-turns", 0, "Maximum agent loop iterations; 0 means no limit")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Model ID override (e.g. claude-sonnet-4-5)")
 	runCmd.Flags().StringVar(&runEffort, "effort", "", "Reasoning effort: none, on, minimal, low, medium, high, xhigh or max; a level the model does not take runs it at its default")
 	rootCmd.AddCommand(runCmd)
@@ -313,6 +313,13 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		slog.Warn("usage ledger backfill", "err", err)
 	}
 	ledger.SetHosts(registry.EndpointHost)
+	// A headless run is uncapped unless --max-turns says otherwise, matching
+	// OpenCode's unset-by-default Infinity. RunLoop reads 0 as "use the default
+	// budget", so the CLI has to ask for the unbounded loop explicitly.
+	maxSteps := runMaxTurns
+	if maxSteps <= 0 {
+		maxSteps = agent.MaxStepsUncapped
+	}
 	lr := &agent.LoopRunner{
 		Store:           store,
 		Usage:           ledger,
@@ -321,7 +328,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		DefaultProvider: defaultProvider,
 		Tools:           toolRegistry,
 		Dir:             dir,
-		MaxSteps:        runMaxTurns,
+		MaxSteps:        maxSteps,
 		Skills:          skillLoader,
 		SearchBridge:    searchBridge,
 		SearchFetchTopK: searchCfg.FetchTopK,
@@ -463,7 +470,8 @@ const (
 )
 
 // allTurnsLimit is a ceiling, not a page size — every message of the session is
-// wanted. No agent loop approaches it: MaxSteps caps a run far below.
+// wanted. A capped run cannot approach it, and even an uncapped one would need
+// roughly half a million steps (two messages each) to reach it.
 const allTurnsLimit = 1_000_000
 
 // collectUsage sums the per-turn counts the loop recorded on assistant
