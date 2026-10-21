@@ -1,6 +1,6 @@
 ---
 title: Core concepts
-description: The mental model behind ogcode — workspace, sessions, modes, memory and permissions.
+description: "The mental model behind ogcode: workspace, sessions, modes, memory and permissions."
 ---
 
 A handful of ideas explain almost everything Ogcode does. None of them need configuration to get started.
@@ -9,7 +9,7 @@ A handful of ideas explain almost everything Ogcode does. None of them need conf
 
 Ogcode works inside one directory at a time: the **workspace**. It is the root the agent may read and write, and the boundary its file tools refuse to cross. Start `ogcode` from a project and that becomes the workspace; switch it from the UI to work elsewhere.
 
-A **project** is a workspace Ogcode has seen before. Everything project-scoped — sessions, the index, task worktrees — lives under `.ogcode/` inside it, so the state travels with the checkout and nothing leaks between projects.
+A **project** is a workspace Ogcode has seen before. Everything project-scoped (sessions, the index, task worktrees) lives under `.ogcode/` inside it, so the state travels with the checkout and nothing leaks between projects.
 
 ## Sessions and turns
 
@@ -21,13 +21,13 @@ The mode you launch decides the shape of the work: **Build** for everyday conver
 
 ## Tools
 
-The model decides *what* to do; the tools are *how*. Each turn offers the agent a set drawn from its definition — file reads and edits, shell commands, search, the code map, document indexing, web fetch, and any external tools you connect. Every call is recorded in the transcript with its arguments and result, so you can see exactly what happened.
+The model decides *what* to do; the tools are *how*. Each turn offers the agent a set drawn from its definition: file reads and edits, shell commands, search, the code map, document indexing, web fetch, and any external tools you connect. Every call is recorded in the transcript with its arguments and result, so you can see exactly what happened.
 
 Three of them work together to keep the agent fast on a large project:
 
-- **`codebase_map`** — gives the agent a feel for an unfamiliar codebase, so it starts from your project's structure instead of opening files at random.
-- **`file_map`** — points the agent at the part of a file that matters, so it goes straight there instead of reading the whole file.
-- **`compact_context`** — lets a long turn carry on coherently, setting aside detail it has finished with and keeping the thread of the task.
+- **`codebase_map`**: gives the agent a feel for an unfamiliar codebase, so it starts from your project's structure instead of opening files at random.
+- **`file_map`**: points the agent at the part of a file that matters, so it goes straight there instead of reading the whole file.
+- **`compact_context`**: lets a long turn carry on coherently, setting aside detail it has finished with and keeping the thread of the task.
 
 A few more worth knowing by name:
 
@@ -43,7 +43,7 @@ Ogcode remembers the work: project instructions you write, and short summaries o
 
 ## Permissions
 
-Before a consequential action — a shell command, a file write or an edit — the agent asks, and remembers your answer. The three modes, **Ask**, **Auto** and **Yolo**, control how often it stops. See [Permissions](/docs/permissions/).
+Before a consequential action (a shell command, a file write or an edit) the agent asks, and remembers your answer. The three modes, **Ask**, **Auto** and **Yolo**, control how often it stops. See [Permissions](/docs/permissions/).
 
 ## Rich results and local services
 

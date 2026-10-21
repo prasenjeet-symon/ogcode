@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ogcode — the coding agent that remembers</title>
-  <meta name="description" content="Ogcode remembers what it learns — every decision, every dead end, every why — and brings back only what each turn needs. Sessions run longer, bills stay flat. One Go binary, any model, open source.">
+  <title>Ogcode: the coding agent that remembers</title>
+  <meta name="description" content="Ogcode remembers what it learns (every decision, every dead end, every why) and brings back only what each turn needs. Sessions run longer, bills stay flat. One Go binary, any model, open source.">
   <link rel="canonical" href="https://ogcode.in/">
   <meta name="theme-color" content="#151414">
   <meta name="color-scheme" content="dark">
@@ -13,13 +13,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Ogcode">
   <meta property="og:url" content="https://ogcode.in/">
-  <meta property="og:title" content="Ogcode — the coding agent that remembers">
-  <meta property="og:description" content="Ogcode remembers what it learns — every decision, every dead end, every why — and brings back only what each turn needs. Sessions run longer, bills stay flat.">
+  <meta property="og:title" content="Ogcode: the coding agent that remembers">
+  <meta property="og:description" content="Ogcode remembers what it learns (every decision, every dead end, every why) and brings back only what each turn needs. Sessions run longer, bills stay flat.">
   <meta property="og:image" content="https://ogcode.in/media/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Ogcode — the coding agent that remembers">
+  <meta name="twitter:title" content="Ogcode: the coding agent that remembers">
   <meta name="twitter:description" content="The coding agent that remembers. Sessions run longer, bills stay flat. Self-hosted, any model, open source.">
   <meta name="twitter:image" content="https://ogcode.in/media/og.png">
 
@@ -288,7 +288,7 @@
     .link { color: var(--brand-ink); text-decoration: none; font-weight: 500; }
     .link:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 
-    /* Infinite horizontal loop — two identical sets, the second
+    /* Infinite horizontal loop: two identical sets, the second
        aria-hidden, the track slides by exactly one set. */
     .marquee {
       overflow: hidden;
@@ -785,7 +785,7 @@
 
     /* ══ Sections (spliced) ═════════════════════════════════════ */
 /* ── section: recall ── */
-/* ── #recall — "Recall, not replay." (the melting picture + callouts, then a 3-up strip) ── */
+/* ── #recall: "Recall, not replay." (the melting picture + callouts, then a 3-up strip) ── */
 
 /* Stage: the image's own aspect ratio, so percent coordinates track the picture. */
 #recall .rc-stage {
@@ -952,7 +952,7 @@
   text-wrap: pretty;
 }
 
-/* ── Motion — only when the viewer hasn't asked for less. The base styles above are
+/* ── Motion: only when the viewer hasn't asked for less. The base styles above are
       the final, static picture (what reduced-motion and no-JS visitors see).
       recall.js adds .rc-anim to the stage only when motion is allowed, so the hidden
       entrance states below can never strand a visitor whose JS didn't run.
@@ -1097,7 +1097,7 @@
   #recall .rc-node::after { animation: none; opacity: 0; }
 }
 
-/* ── #context — "A small context. Sharp models." ──────────────────────
+/* ── #context: "A small context. Sharp models." ──────────────────────
    One real session drawn as the tokens sent with each request, under a
    dashed 200K line, beside three measured figures and a two-up "why".
    The line draws in once when the box is revealed; the plot takes a
@@ -1212,7 +1212,7 @@
 }
 
 /* ── section: models ── */
-/* ── #models — "Your model. Your keys." (provider window + logo belt) ── */
+/* ── #models: "Your model. Your keys." (provider window + logo belt) ── */
 
 /* Window chrome */
 #models .md-win {
@@ -1224,7 +1224,7 @@
   padding: 0 10px 0 16px;
 }
 
-/* Tab strip — scrolls sideways inside the bar on narrow screens */
+/* Tab strip: scrolls sideways inside the bar on narrow screens */
 #models .md-tabs {
   position: relative;
   flex: 1 1 auto;
@@ -1558,7 +1558,7 @@
 }
 
 /* ── section: cluster ── */
-/* ── #cluster — "Or use ours. Hosted in-house." ─────────────────────────
+/* ── #cluster: "Or use ours. Hosted in-house." ─────────────────────────
    OGX's models on our own inference cluster: a session on the left, the racks
    on the right, the prompt going out along the wire and tokens streaming
    back; under it the measured speeds and the flat price. The static base is
@@ -1805,7 +1805,7 @@
 }
 
 /* ── section: why ── */
-/* ── #why — "Why ogcode" (chaos-vs-brand split) ── */
+/* ── #why: "Why ogcode" (chaos-vs-brand split) ── */
 
 /* Split cells */
 #why .wy-cell {
@@ -2198,7 +2198,7 @@
 }
 
 /* ── section: cost ── */
-/* #cost — "Pay only for what the turn needs" (Cloudflare's pricing block).
+/* #cost: "Pay only for what the turn needs" (Cloudflare's pricing block).
    Everything is scoped to #cost or prefixed co-. */
 
 #cost {
@@ -2592,8 +2592,8 @@
 #cost .co-note { margin: 8px 0 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
 #cost .co-cta { margin-top: auto; }
 
-/* ── motion (only once the box has been revealed — `.in` is added by the page
-   script, so none of this runs without JS — and only on the shown panel) ── */
+/* ── motion (only once the box has been revealed: `.in` is added by the page
+   script, so none of this runs without JS, and only on the shown panel) ── */
 #cost .co-box.in .co-play .co-curve-them { animation: co-draw 1.5s var(--ease) forwards; }
 #cost .co-box.in .co-play .co-curve-og { animation: co-draw-late 1.7s var(--ease) forwards; }
 #cost .co-box.in .co-play .co-area { animation: co-fade-late 1.9s ease forwards; }
@@ -2604,7 +2604,7 @@
 #cost .co-box.in .co-play .co-bars i { animation: co-grow calc(.5s + var(--i) * 40ms) var(--ease) forwards; }
 #cost .co-box.in .co-play .co-full { animation: co-pop-late 1.6s var(--ease) forwards; }
 /* memory: the files are written down in date order (a file's duration grows
-   with its month, so later files surface later — no animation-delay, which
+   with its month, so later files surface later; no animation-delay, which
    would flash the final state first), then the question appears, the recall
    line sweeps back to March, and the March file lights up. */
 #cost .co-box.in .co-play .co-file { animation: co-pop-file calc(.6s + var(--x) * 1.6s) var(--ease) forwards; }
@@ -2790,7 +2790,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 }
 
 /* ── section: product ── */
-/* #product — "Context engineering, at its peak." (Cloudflare-style bento)
+/* #product: "Context engineering, at its peak." (Cloudflare-style bento)
    Every selector is scoped to #product; classes are prefixed pr-. */
 
 /* ── Bento grid ──────────────────────────────────────────────────── */
@@ -3229,7 +3229,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 #product .pr-term.pr-busy .pr-caret { animation: none; opacity: 1; }
 
 /* Off-screen (product.js toggles .pr-idle on .pr-box): drop the loops outright.
-   Pausing is not enough — a held transform on an SVG child still lays out every frame. */
+   Pausing is not enough: a held transform on an SVG child still lays out every frame. */
 #product .pr-idle .pr-mg-wires path,
 #product .pr-idle .pr-mg-node .halo,
 #product .pr-idle .pr-pulse,
@@ -3445,7 +3445,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 }
 
 /* ── section: skills & MCP ── */
-/* #skills — "Your whole stack. Not your whole context." A plain-English
+/* #skills: "Your whole stack. Not your whole context." A plain-English
    turn sits in the middle of the connected workspace. Only the tools this
    task needs are lit, checked and wired in; the rest stay visibly available
    but idle. The answer lands underneath, and a lean context rail closes the
@@ -3747,7 +3747,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 #skills .sk-res-row .ck { width: 14px; height: 14px; flex: none; margin-left: auto; color: var(--ok); }
 
 /* The context rail: a short solid load, then the rest of the stack stays out.
-   No number, no scale — just a visibly small footprint. */
+   No number, no scale: just a visibly small footprint. */
 #skills .sk-ctx {
   display: flex; flex-wrap: wrap; align-items: center;
   gap: 7px 10px;
@@ -3776,7 +3776,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   white-space: nowrap;
 }
 
-/* Fact visuals: the same two ideas at a glance — three picks among many, and
+/* Fact visuals: the same two ideas at a glance: three picks among many, and
    a context rail that stays mostly empty. */
 #skills .sk-fact-vis {
   display: flex; align-items: center;
@@ -4249,11 +4249,11 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 }
 
 /* ── section: faq ── */
-/* FAQ — "Fair questions." A blueprint box: sticky "still have a question?" aside on the left,
+/* FAQ: "Fair questions." A blueprint box: sticky "still have a question?" aside on the left,
    nine hairline-separated <details> rows on the right. DOM order is list-then-aside so the
    stacked mobile layout (and reading order) ends on the call to action. */
 #faq {
-  --fq-pad: clamp(22px, 2.6vw, 34px);  /* row inset — identical to .cell, so stacked rows and aside align */
+  --fq-pad: clamp(22px, 2.6vw, 34px);  /* row inset, identical to .cell, so stacked rows and aside align */
   --fq-num: 28px;                      /* index column */
   --fq-gap: 16px;
   --fq-line: 24px;                     /* question line-height */
@@ -4268,7 +4268,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 #faq .fq-aside .ico { margin-bottom: 18px; }
 #faq .fq-aside .p { max-width: 34ch; }
 /* Buttons share one row when it fits and become two full-width pills when it
-   doesn't (narrow desktop column, phones) — never a ragged half-wrap. */
+   doesn't (narrow desktop column, phones), never a ragged half-wrap. */
 #faq .fq-actions {
   display: flex;
   flex-wrap: wrap;
@@ -4503,7 +4503,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
     }
   </style>
   <script>document.documentElement.classList.add('js');</script>
-  <!-- PostHog — analytics for this website (ogcode.in); this measures the
+  <!-- PostHog: analytics for this website (ogcode.in); this measures the
        marketing page only. -->
   <script>
     !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagResult isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
@@ -4587,7 +4587,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 
           <h1 class="hero-title rise r2" id="heroTitle">Get the job done without burning through your wallet.</h1>
 
-          <p class="hero-sub rise r3">From plan to pull request, Ogcode does the work <strong>end to end</strong>. OGmap steers it straight to the right files in even a huge codebase, it reads only the lines that matter, and it recalls instead of re-sending your whole conversation every turn — so you pay <strong>about a third of the usual bill</strong>.</p>
+          <p class="hero-sub rise r3">From plan to pull request, Ogcode does the work <strong>end to end</strong>. OGmap steers it straight to the right files in even a huge codebase, it reads only the lines that matter, and it recalls instead of re-sending your whole conversation every turn, so you pay <strong>about a third of the usual bill</strong>.</p>
 
           <div class="hero-actions rise r4" id="install">
             <button class="btn btn-light btn-lg" type="button" id="dlToggle" aria-expanded="false" aria-controls="dlPanel">
@@ -4631,14 +4631,14 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="recall-title">Recall, not replay.</h2>
-      <p class="sub">Every decision, every dead end, every why — indexed once, recalled on demand. Only what this turn needs is sent.</p>
+      <p class="sub">Every decision, every dead end, every why: indexed once, recalled on demand. Only what this turn needs is sent.</p>
     </div>
 
     <!-- The stage: the recall picture melting into the canvas, with Cloudflare-style
          dashed callouts wired to two icon nodes (you, at the desk / memory, on the lit
          drawers). Node + callout positions are percentages of the 1584×672 image, and
          the SVG shares that viewBox, so everything tracks the picture at any width. -->
-    <div class="rc-stage reveal" role="img" aria-label="A developer at a terminal faces a vast wall of memory drawers. A few drawers glow amber and are wired to the developer's screen. Callouts: 70% fewer tokens — each turn sends what matters, not the whole conversation again. Day 90 — what you decided in March is still right there in September.">
+    <div class="rc-stage reveal" role="img" aria-label="A developer at a terminal faces a vast wall of memory drawers. A few drawers glow amber and are wired to the developer's screen. Callouts: 70% fewer tokens, because each turn sends what matters, not the whole conversation again. Day 90: what you decided in March is still right there in September.">
       <div class="rc-art">
         <div class="rc-photo">
           <div class="rc-photo-in">
@@ -4671,7 +4671,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       <div class="rc-calls">
         <div class="rc-call rc-call-1">
           <p class="rc-call-t"><span data-count="70" data-suffix="%">70%</span> fewer tokens</p>
-          <p class="rc-call-p">Each turn sends what matters — not the whole conversation again.</p>
+          <p class="rc-call-p">Each turn sends what matters, not the whole conversation again.</p>
         </div>
         <div class="rc-call rc-call-2">
           <p class="rc-call-t"><span data-count="90" data-prefix="Day ">Day 90</span></p>
@@ -4694,7 +4694,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <div class="rc-feat reveal d1">
             <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><circle cx="16" cy="16" r="6"/><path d="M16 14v2.2l1.5 1.3"/></svg></span>
             <h3 class="h3">Built for long projects</h3>
-            <p class="p">Month three feels like day one. Conventions, choices and rejected ideas carry over — no amnesia.</p>
+            <p class="p">Month three feels like day one. Conventions, choices and rejected ideas carry over, with no amnesia.</p>
           </div>
         </div>
         <div class="cell">
@@ -4794,7 +4794,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="models-title">Your model. Your keys.</h2>
-      <p class="sub">Or none at all. Bring a key from any major provider — or run fully local with Ollama. Switching models never resets what Ogcode remembers.</p>
+      <p class="sub">Or none at all. Bring a key from any major provider, or run fully local with Ollama. Switching models never resets what Ogcode remembers.</p>
     </div>
 
     <div class="win md-win reveal d1" role="region" aria-roledescription="carousel" aria-label="Supported model providers">
@@ -4826,7 +4826,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <div class="md-panel is-on" role="tabpanel" id="md-panel-anthropic" aria-labelledby="md-tab-anthropic">
             <div class="md-card">
               <div class="md-text">
-                <p class="md-quote"><span class="md-lead">Claude</span> gets a tight, recalled context every turn&nbsp;— not a transcript that grows until it breaks.</p>
+                <p class="md-quote"><span class="md-lead">Claude</span> gets a tight, recalled context every turn,&nbsp;not a transcript that grows until it breaks.</p>
                 <div class="md-meta">
                   <span class="md-label">setup</span>
                   <code class="md-cmd"><span class="md-ps" aria-hidden="true">$ </span>export ANTHROPIC_API_KEY=<wbr><span class="md-nw">sk-ant-…</span>  <span class="md-nw"><span class="md-op">&amp;&amp;</span>  ogcode</span></code>
@@ -4839,7 +4839,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <div class="md-panel" role="tabpanel" id="md-panel-openai" aria-labelledby="md-tab-openai">
             <div class="md-card">
               <div class="md-text">
-                <p class="md-quote"><span class="md-lead">One OpenAI-compatible slot</span> points at GPT&nbsp;— or at Gemini, Groq, DeepSeek or any provider on the belt below.</p>
+                <p class="md-quote"><span class="md-lead">One OpenAI-compatible slot</span> points at GPT,&nbsp;or at Gemini, Groq, DeepSeek or any provider on the belt below.</p>
                 <div class="md-meta">
                   <span class="md-label">setup</span>
                   <code class="md-cmd"><span class="md-ps" aria-hidden="true">$ </span>export OPENAI_API_KEY=<wbr><span class="md-nw">sk-…</span>  <span class="md-nw"><span class="md-op">&amp;&amp;</span>  ogcode</span></code>
@@ -4987,7 +4987,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="why-title">Why Ogcode</h2>
-      <p class="sub">Everything a long session needs to stay sharp — and cheap.</p>
+      <p class="sub">Everything a long session needs to stay sharp and cheap.</p>
     </div>
 
     <div class="box wy-box reveal d1">
@@ -5012,11 +5012,11 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <div class="wy-fl wy-card wy-c2 wy-near">
               <span class="wy-p0">P0</span>
               <span class="wy-t">Re-sending 184k tokens</span>
-              <span class="wy-s">turn 212 — every turn, again</span>
+              <span class="wy-s">turn 212 · every turn, again</span>
             </div>
 
             <div class="wy-fl wy-card wy-c3 wy-far wy-quote">
-              <span class="wy-q">“Wait — which auth approach did we pick last week?”</span>
+              <span class="wy-q">“Wait, which auth approach did we pick last week?”</span>
             </div>
 
             <div class="wy-fl wy-card wy-c4 wy-far">
@@ -5059,15 +5059,15 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         <div class="wy-cell wy-calm on-brand">
           <span class="wy-glow" aria-hidden="true"></span>
           <h3 class="wy-title">Recalling with Ogcode</h3>
-          <p class="sr">With Ogcode, each turn recalls only what it needs — the relevant decisions and the exact file ranges — so every turn sends one small, tight context window, and what you decided months ago is still remembered.</p>
+          <p class="sr">With Ogcode, each turn recalls only what it needs (the relevant decisions and the exact file ranges), so every turn sends one small, tight context window, and what you decided months ago is still remembered.</p>
 
           <div class="wy-eq wy-eq-calm" aria-hidden="true"><i style="--h:.15;--i:0"></i><i style="--h:.18;--i:1"></i><i style="--h:.15;--i:2"></i><i style="--h:.14;--i:3"></i><i style="--h:.16;--i:4"></i><i style="--h:.17;--i:5"></i><i style="--h:.18;--i:6"></i><i style="--h:.14;--i:7"></i><i style="--h:.13;--i:8"></i><i style="--h:.15;--i:9"></i><i style="--h:.13;--i:10"></i><i style="--h:.18;--i:11"></i><i style="--h:.18;--i:12"></i><i style="--h:.16;--i:13"></i><i style="--h:.17;--i:14"></i><i style="--h:.16;--i:15"></i><i style="--h:.15;--i:16"></i><i style="--h:.16;--i:17"></i><i style="--h:.17;--i:18"></i><i style="--h:.18;--i:19"></i><i style="--h:.17;--i:20"></i><i style="--h:.13;--i:21"></i><i style="--h:.13;--i:22"></i><i style="--h:.14;--i:23"></i><i style="--h:.14;--i:24"></i><i style="--h:.14;--i:25"></i><i style="--h:.17;--i:26"></i><i style="--h:.18;--i:27"></i><i style="--h:.15;--i:28"></i><i style="--h:.14;--i:29"></i><i style="--h:.14;--i:30"></i><i style="--h:.17;--i:31"></i><i style="--h:.17;--i:32"></i><i style="--h:.14;--i:33"></i><i style="--h:.15;--i:34"></i><i style="--h:.15;--i:35"></i><i style="--h:.16;--i:36"></i><i style="--h:.14;--i:37"></i><i style="--h:.13;--i:38"></i><i style="--h:.17;--i:39"></i><i style="--h:.15;--i:40"></i><i style="--h:.15;--i:41"></i><i style="--h:.14;--i:42"></i><i style="--h:.15;--i:43"></i><i style="--h:.17;--i:44"></i><i style="--h:.13;--i:45"></i><i style="--h:.13;--i:46"></i><i style="--h:.17;--i:47"></i><i style="--h:.15;--i:48"></i><i style="--h:.14;--i:49"></i><i style="--h:.17;--i:50"></i><i style="--h:.15;--i:51"></i><i style="--h:.16;--i:52"></i><i style="--h:.16;--i:53"></i><i style="--h:.14;--i:54"></i><i style="--h:.17;--i:55"></i><i style="--h:.14;--i:56"></i><i style="--h:.18;--i:57"></i><i style="--h:.16;--i:58"></i><i style="--h:.14;--i:59"></i></div>
 
           <div class="wy-queue" aria-hidden="true">
             <div class="wy-toast" data-pos="main"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Recalled 3 decisions · 2 files</span></div>
-            <div class="wy-toast" data-pos="next"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Sent this turn’s context — not the whole chat</span></div>
+            <div class="wy-toast" data-pos="next"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Sent this turn’s context, not the whole chat</span></div>
             <div class="wy-toast" data-pos="wait"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Read <span class="wy-code">api.go</span> lines 112–158</span></div>
-            <div class="wy-toast" data-pos="wait"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Day 90 — still remembers March</span></div>
+            <div class="wy-toast" data-pos="wait"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Day 90: still remembers March</span></div>
             <div class="wy-toast" data-pos="out"><span class="wy-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="wy-msg">Opened PR: guard <span class="wy-code">Stage()</span> against empty paths</span></div>
           </div>
 
@@ -5151,7 +5151,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         <div class="co-panel co-off" id="co-panel-context" role="tabpanel" aria-labelledby="co-tab-context">
           <div class="co-copy">
             <h3 class="h3">No context clock.</h3>
-            <p class="p">Long sessions stop being a countdown to amnesia. The window carries this turn's context — not every turn that came before it.</p>
+            <p class="p">Long sessions stop being a countdown to amnesia. The window carries this turn's context, not every turn that came before it.</p>
             <a class="link co-more" href="https://github.com/prasenjeet-symon/ogcode#how-it-works" target="_blank" rel="noopener">How it works <span aria-hidden="true">→</span></a>
           </div>
           <div class="co-viz" role="img" aria-label="Context window per turn, from turn 1 to turn 212. With any other agent it fills a little more every turn until it is 97% full. With Ogcode it stays low and even on every turn.">
@@ -5175,7 +5175,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         <div class="co-panel co-off" id="co-panel-memory" role="tabpanel" aria-labelledby="co-tab-memory">
           <div class="co-copy">
             <h3 class="h3">Day 90, it still remembers.</h3>
-            <p class="p">Decisions, conventions and rejected approaches are written down as the work happens — and brought back the moment they matter again.</p>
+            <p class="p">Decisions, conventions and rejected approaches are written down as the work happens, and brought back the moment they matter again.</p>
             <a class="link co-more" href="https://github.com/prasenjeet-symon/ogcode#remember-the-work" target="_blank" rel="noopener">What it remembers <span aria-hidden="true">→</span></a>
           </div>
           <div class="co-viz" role="img" aria-label="Project memory from March to September: decisions, conventions and rejected approaches written down as small files as the work happens. Asked in September why Redis was dropped, Ogcode recalls rejected-redis-cache.md from March.">
@@ -5208,10 +5208,10 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         <div class="co-panel co-off" id="co-panel-accuracy" role="tabpanel" aria-labelledby="co-tab-accuracy">
           <div class="co-copy">
             <h3 class="h3">Same model, sharper answers.</h3>
-            <p class="p">Other agents hand the model every old turn, stale tool output and whole file, then ask it to find the answer in the noise. Ogcode's context is garbage-free — only the decisions, files and line ranges this question needs — so answers land on point, and the first attempt is usually the review-ready one.</p>
+            <p class="p">Other agents hand the model every old turn, stale tool output and whole file, then ask it to find the answer in the noise. Ogcode's context is garbage-free (only the decisions, files and line ranges this question needs), so answers land on point, and the first attempt is usually the review-ready one.</p>
             <a class="link co-more" href="https://github.com/prasenjeet-symon/ogcode#how-it-works" target="_blank" rel="noopener">How it works <span aria-hidden="true">→</span></a>
           </div>
-          <div class="co-viz" role="img" aria-label="What the model is handed for the same question. Any other agent: a context window packed with old turns, stale tool output, whole files and dead ends, with the three pieces that matter buried inside. Ogcode: the same window holding only those three pieces — one decision and two line ranges of api.go.">
+          <div class="co-viz" role="img" aria-label="What the model is handed for the same question. Any other agent: a context window packed with old turns, stale tool output, whole files and dead ends, with the three pieces that matter buried inside. Ogcode: the same window holding only those three pieces: one decision and two line ranges of api.go.">
             <i class="co-tk tl"></i><i class="co-tk tr"></i><i class="co-tk bl"></i><i class="co-tk br"></i>
             <div class="co-vh"><span>what the model is handed</span><i class="co-vh-rule"></i><span class="co-vh-tag">ogcode</span></div>
             <div class="co-acc">
@@ -5288,7 +5288,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         <div class="pr-card pr-a pr-wide">
           <div class="pr-in reveal">
             <div class="pr-vis">
-              <div class="pr-plan" role="img" aria-label="A locked plan running as a live task board. Each task moves from queued to running in its own git worktree, gets a pull request opened, and is merged — for example Write OAuth tests running while Add OAuth callback route has its pull request open.">
+              <div class="pr-plan" role="img" aria-label="A locked plan running as a live task board. Each task moves from queued to running in its own git worktree, gets a pull request opened, and is merged. For example, Write OAuth tests running while Add OAuth callback route has its pull request open.">
                 <div class="pr-lock on-brand">
                   <svg class="pr-lock-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10.5" rx="2.2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.6v2.4"/></svg>
                   <span class="pr-lock-steps"><i></i><i></i><i></i><i></i></span>
@@ -5364,7 +5364,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <div class="pr-copy">
               <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3.5 6.2v13.6L9 17.6l6 2.4 5.5-2.2V4.2L15 6.4z"/><path d="M9 4v13.6"/><path d="M15 6.4V20"/></svg></span>
               <h3 class="h3">Powered by OGmap</h3>
-              <p class="p">Think Google Maps, but for your agent. OGmap charts your whole codebase — every module, route and helper — so the agent always knows where things live and heads straight there.</p>
+              <p class="p">Think Google Maps, but for your agent. OGmap charts your whole codebase (every module, route and helper), so the agent always knows where things live and heads straight there.</p>
             </div>
           </div>
         </div>
@@ -5396,7 +5396,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <div class="pr-copy">
               <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5V5.5a2.5 2.5 0 0 1 2.5-2.5h2"/><path d="M16.5 3h2A2.5 2.5 0 0 1 21 5.5v2"/><path d="M21 16.5v2a2.5 2.5 0 0 1-2.5 2.5h-2"/><path d="M7.5 21h-2A2.5 2.5 0 0 1 3 18.5v-2"/><path d="M7.5 9.5h9"/><path d="M7.5 12h9"/><path d="M7.5 14.5h5"/></svg></span>
               <h3 class="h3">No more blind file reads</h3>
-              <p class="p">Every declaration is mapped to its lines, so the agent reads the exact range a task needs — and leaves the other four hundred lines alone.</p>
+              <p class="p">Every declaration is mapped to its lines, so the agent reads the exact range a task needs, and leaves the other four hundred lines alone.</p>
             </div>
           </div>
         </div>
@@ -5408,20 +5408,20 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
               <div class="pr-copy">
                 <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.6-9 4.6-9-4.6z"/><path d="m3 12.2 9 4.6 9-4.6"/><path d="m3 16.8 9 4.6 9-4.6"/></svg></span>
                 <h3 class="h3">Context built on the fly</h3>
-                <p class="p">Ogcode doesn't drag a fixed history into every turn. For any query, it builds the context it needs on the spot — recalling past decisions, finding the right files with OGmap, and reading just the lines that matter. With less noise to fight through, the first attempt is usually the review-ready one.</p>
+                <p class="p">Ogcode doesn't drag a fixed history into every turn. For any query, it builds the context it needs on the spot, recalling past decisions, finding the right files with OGmap, and reading just the lines that matter. With less noise to fight through, the first attempt is usually the review-ready one.</p>
               </div>
-              <div class="win pr-term" role="img" aria-label="A terminal session. The request “Dispatch API is not working — please fix” recalls three memories: the decision that retries live in the worker, not the API; an OGmap hit on dispatch/api.go, handleDispatch; and two line ranges of api.go to read. Context built for this query: 2 files and 1 decision, not the whole history. Then one edit to api.go lines 131 to 140, and the dispatch tests pass.">
+              <div class="win pr-term" role="img" aria-label="A terminal session. The request “Dispatch API is not working, please fix” recalls three memories: the decision that retries live in the worker, not the API; an OGmap hit on dispatch/api.go, handleDispatch; and two line ranges of api.go to read. Context built for this query: 2 files and 1 decision, not the whole history. Then one edit to api.go lines 131 to 140, and the dispatch tests pass.">
                 <div class="win-bar">
                   <span class="win-dots"><i></i><i></i><i></i></span>
                   <span class="win-title">ogcode · build</span>
                 </div>
                 <div class="pr-term-body">
-                  <div class="pr-tl pr-tl-q"><span class="pr-k">›</span> <span class="pr-qt">Dispatch API is not working — please fix</span></div>
+                  <div class="pr-tl pr-tl-q"><span class="pr-k">›</span> <span class="pr-qt">Dispatch API is not working, please fix</span></div>
                   <div class="pr-tl pr-tl-r"><span class="pr-k">●</span><span class="pr-lb">recall</span><span class="pr-str">"dispatch api, retries"</span><span class="pr-cnt">3 memories</span></div>
                   <div class="pr-tl pr-sub"><span class="pr-ar">↳</span><span class="pr-lb">decision</span><span>retries live in the worker, not the API</span></div>
                   <div class="pr-tl pr-sub"><span class="pr-ar">↳</span><span class="pr-lb">ogmap</span><span>dispatch/<wbr>api.go <span class="pr-nw">→ handleDispatch</span></span></div>
                   <div class="pr-tl pr-sub"><span class="pr-ar">↳</span><span class="pr-lb">read</span><span><span class="pr-nw">api.go 112–158</span> · <span class="pr-nw">231–249</span></span></div>
-                  <div class="pr-tl pr-tl-ok"><span class="pr-okk">✓</span> context built for this query <span class="pr-mut">— 2 files · 1 decision</span></div>
+                  <div class="pr-tl pr-tl-ok"><span class="pr-okk">✓</span> context built for this query <span class="pr-mut">2 files · 1 decision</span></div>
                   <div class="pr-tl pr-tl-r"><span class="pr-k">●</span><span class="pr-lb">edit</span><span class="pr-str">api.go 131–140</span><span class="pr-cnt">+6 −2</span></div>
                   <div class="pr-tl pr-tl-ok"><span class="pr-okk">✓</span> go test ./internal/dispatch <span class="pr-mut">· ok</span></div>
                 </div>
@@ -5469,7 +5469,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <div class="pr-copy">
               <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 2.5H9A2 2 0 0 0 7 4.5v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7z"/><path d="M15.5 2.5V7H20"/><path d="M4 7.5v12a2 2 0 0 0 2 2h9"/><path d="M10.5 11h6"/><path d="M10.5 14h4"/></svg></span>
               <h3 class="h3">Your project is more than code</h3>
-              <p class="p">Specs, proposals and spreadsheets sit right beside the source. Ogcode reads PDF, DOCX and CSV natively — no exports, no copy-paste.</p>
+              <p class="p">Specs, proposals and spreadsheets sit right beside the source. Ogcode reads PDF, DOCX and CSV natively, with no exports, no copy-paste.</p>
             </div>
           </div>
         </div>
@@ -5483,7 +5483,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
             <div class="pr-copy">
               <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 18.5a9.5 9.5 0 1 1 16.8 0"/><path d="m12 14.5 4.2-4.6"/><circle cx="12" cy="14.5" r="1.3"/><path d="M6.5 13h1M16.5 13h1M12 7v1"/></svg></span>
               <h3 class="h3">Fast, even on a monorepo</h3>
-              <p class="p">Reads only the lines a task needs, so turns finish in seconds, not minutes — and stay that fast on a ten-year-old monorepo.</p>
+              <p class="p">Reads only the lines a task needs, so turns finish in seconds, not minutes, and stay that fast on a ten-year-old monorepo.</p>
             </div>
           </div>
         </div>
@@ -5498,7 +5498,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="skills-title">Your whole stack.<br><span class="hl">Not your whole context.</span></h2>
-      <p class="sub">Figma, Linear, GitHub, Postgres, Playwright — and the way your team works, in one conversation. Each turn loads only the skill and MCP server it needs — no more — so the context stays small, the tokens stay low, and the answer stays sharp.</p>
+      <p class="sub">Figma, Linear, GitHub, Postgres, Playwright, plus the way your team works, in one conversation. Each turn loads only the skill and MCP server it needs (no more), so the context stays small, the tokens stay low, and the answer stays sharp.</p>
     </div>
 
     <div class="box sk-box reveal d1">
@@ -5514,10 +5514,10 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         </p>
 
         <ul class="sk-orbit" role="list" aria-label="Your connected stack; the tools used for this task are marked">
-          <li class="sk-node sk-pick" style="--x:34%;--y:8%;--d:-1.2s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#2EAD33" aria-hidden="true">PW</span>Playwright<span class="sk-sr"> — in this task</span></li>
-          <li class="sk-node sk-pick" style="--x:66%;--y:8%;--d:-.4s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#A259FF" aria-hidden="true">F</span>Figma<span class="sk-sr"> — in this task</span></li>
+          <li class="sk-node sk-pick" style="--x:34%;--y:8%;--d:-1.2s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#2EAD33" aria-hidden="true">PW</span>Playwright<span class="sk-sr">, in this task</span></li>
+          <li class="sk-node sk-pick" style="--x:66%;--y:8%;--d:-.4s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#A259FF" aria-hidden="true">F</span>Figma<span class="sk-sr">, in this task</span></li>
           <li class="sk-node sk-r sk-idle" style="--y:36%;--d:-2.8s"><span class="sk-g" style="--c:#5E6AD2" aria-hidden="true">L</span>Linear</li>
-          <li class="sk-node sk-r sk-pick" style="--y:64%;--d:-1.6s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#E6EDF3" aria-hidden="true">GH</span>GitHub<span class="sk-sr"> — in this task</span></li>
+          <li class="sk-node sk-r sk-pick" style="--y:64%;--d:-1.6s"><span class="sk-sel" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-5"/></svg></span><span class="sk-g" style="--c:#E6EDF3" aria-hidden="true">GH</span>GitHub<span class="sk-sr">, in this task</span></li>
           <li class="sk-node sk-idle" style="--x:66%;--y:92%;--d:-4.2s"><span class="sk-g" style="--c:#4A90E2" aria-hidden="true">PG</span>Postgres</li>
           <li class="sk-node sk-idle" style="--x:34%;--y:92%;--d:-3.5s"><span class="sk-g is-skill" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span>Release checklist</li>
           <li class="sk-node sk-l sk-idle" style="--y:64%;--d:-.9s"><span class="sk-g is-skill" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/></svg></span>Code review</li>
@@ -5525,7 +5525,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         </ul>
 
         <div class="sk-flow">
-          <div class="sk-thread" role="img" aria-label="One prompt typed in plain English: polish the onboarding flow, run the tests, and open a pull request. Only the three tools this task needs — Figma, Playwright and GitHub — are loaded into the context. The assistant answers that all three are done: the latest Figma flow pulled, all 14 Playwright tests green, and pull request 412 open on GitHub.">
+          <div class="sk-thread" role="img" aria-label="One prompt typed in plain English: polish the onboarding flow, run the tests, and open a pull request. Only the three tools this task needs (Figma, Playwright and GitHub) are loaded into the context. The assistant answers that all three are done: the latest Figma flow pulled, all 14 Playwright tests green, and pull request 412 open on GitHub.">
             <div class="sk-ask">
               <div class="sk-ask-top">
                 <span class="sk-ask-lbl"><i class="sk-dot"></i>whole stack connected</span>
@@ -5540,11 +5540,11 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
                 <span class="sk-reply-name">ogcode</span>
                 <span class="sk-reply-tag">just now</span>
               </div>
-              <p class="sk-reply-line"><span class="sk-ok" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span>Done — all three, in one pass.</p>
+              <p class="sk-reply-line"><span class="sk-ok" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span>Done: all three, in one pass.</p>
               <ul class="sk-res" role="list">
-                <li class="sk-res-row"><span class="sk-g" style="--c:#A259FF" aria-hidden="true">F</span><span><b>Figma</b> — latest flow pulled</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
-                <li class="sk-res-row"><span class="sk-g" style="--c:#2EAD33" aria-hidden="true">PW</span><span><b>Playwright</b> — 14 tests green</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
-                <li class="sk-res-row"><span class="sk-g" style="--c:#E6EDF3" aria-hidden="true">GH</span><span><b>GitHub</b> — PR #412 opened</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
+                <li class="sk-res-row"><span class="sk-g" style="--c:#A259FF" aria-hidden="true">F</span><span><b>Figma</b>: latest flow pulled</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
+                <li class="sk-res-row"><span class="sk-g" style="--c:#2EAD33" aria-hidden="true">PW</span><span><b>Playwright</b>: 14 tests green</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
+                <li class="sk-res-row"><span class="sk-g" style="--c:#E6EDF3" aria-hidden="true">GH</span><span><b>GitHub</b>: PR #412 opened</span><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></li>
               </ul>
             </div>
 
@@ -5594,7 +5594,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
               <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H14a4 4 0 0 0 0-8H9a4 4 0 0 1 0-8h6.5"/></svg></span>
             </div>
             <h3 class="h3">Your team's playbook, built in</h3>
-            <p class="p">The way your team reviews, tests and ships — written down once, followed every time, on every repo.</p>
+            <p class="p">The way your team reviews, tests and ships, written down once, followed every time, on every repo.</p>
           </div>
         </div>
       </div>
@@ -5606,7 +5606,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="review-title">Nothing goes unreviewed.</h2>
-      <p class="sub">Other agents commit in the dark. Ogcode works in the open — in Build Mode every change waits in your working tree as a real git diff, and nothing is written to history until you say so.</p>
+      <p class="sub">Other agents commit in the dark. Ogcode works in the open: in Build Mode every change waits in your working tree as a real git diff, and nothing is written to history until you say so.</p>
     </div>
 
     <div class="box rv-box reveal d1">
@@ -5701,7 +5701,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   <div class="frame">
     <div class="sec-head reveal">
       <h2 class="h2" id="faq-title">Fair questions.</h2>
-      <p class="sub">The ones skeptics ask first — answered plainly.</p>
+      <p class="sub">The ones skeptics ask first, answered plainly.</p>
     </div>
 
     <div class="box fq-box reveal d1">
@@ -5711,19 +5711,19 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
         <div class="faq fq-list">
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Does my source code leave my machine?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Only in the prompts you send to whichever model provider you chose — the same as any coding agent. There is no Ogcode server, no telemetry endpoint, and no account. Everything lives in a local database. Pick a local Ollama model and nothing leaves the machine at all.</div>
+            <div class="ans">Only in the prompts you send to whichever model provider you chose (the same as any coding agent). There is no Ogcode server, no telemetry endpoint, and no account. Everything lives in a local database. Pick a local Ollama model and nothing leaves the machine at all.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Can I really run it fully offline?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Yes. It auto-detects a running <code>ollama</code> on macOS and Linux. Offline you lose the web search tool and hosted models — everything else works.</div>
+            <div class="ans">Yes. It auto-detects a running <code>ollama</code> on macOS and Linux. Offline you lose the web search tool and hosted models; everything else works.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Is the 70% number real, or marketing?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Measured against agents that re-send the whole conversation every turn, across real sessions — about 68% at 50 messages, ~76% at 1,000. Short sessions save less because there's less history to avoid re-sending. The mechanism and the numbers are both in the <a class="link" href="https://github.com/prasenjeet-symon/ogcode#remember-the-work" target="_blank" rel="noopener">README</a>, and the code is open source — check it yourself.</div>
+            <div class="ans">Measured against agents that re-send the whole conversation every turn, across real sessions: about 68% at 50 messages, ~76% at 1,000. Short sessions save less because there's less history to avoid re-sending. The mechanism and the numbers are both in the <a class="link" href="https://github.com/prasenjeet-symon/ogcode#remember-the-work" target="_blank" rel="noopener">README</a>, and the code is open source; check it yourself.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">If it doesn't re-read everything, does it forget things?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">It doesn't drop them — it moves them. What matters is remembered and brought back when it's relevant. In practice it forgets <em>less</em> than other agents, which eventually run out of window and start losing the beginning of the conversation.</div>
+            <div class="ans">It doesn't drop them; it moves them. What matters is remembered and brought back when it's relevant. In practice it forgets <em>less</em> than other agents, which eventually run out of window and start losing the beginning of the conversation.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Can a small, cheap model really keep up?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
@@ -5731,15 +5731,15 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Does it work on Windows?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Yes — <code>irm https://ogcode.in/install.ps1 | iex</code> in PowerShell, or run the Docker image. Opening PRs automatically needs the <a class="link" href="https://cli.github.com" target="_blank" rel="noopener">GitHub CLI</a> authenticated.</div>
+            <div class="ans">Yes: <code>irm https://ogcode.in/install.ps1 | iex</code> in PowerShell, or run the Docker image. Opening PRs automatically needs the <a class="link" href="https://cli.github.com" target="_blank" rel="noopener">GitHub CLI</a> authenticated.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">Can I run it on a server and use it from my laptop?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Yes. It's a normal web server — put it behind nginx or Caddy with a password. Don't expose it to the open internet unprotected, since it can run commands on your machine. Setup notes are in the <a class="link" href="/docs/deployment/">remote deployment guide</a>.</div>
+            <div class="ans">Yes. It's a normal web server: put it behind nginx or Caddy with a password. Don't expose it to the open internet unprotected, since it can run commands on your machine. Setup notes are in the <a class="link" href="/docs/deployment/">remote deployment guide</a>.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">What does it cost?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">Ogcode is free and open source under the AGPL-3.0. You pay your model provider for tokens — which is rather the point of sending 70% fewer of them. With Ollama, it costs nothing.</div>
+            <div class="ans">Ogcode is free and open source under the AGPL-3.0. You pay your model provider for tokens, which is rather the point of sending 70% fewer of them. With Ollama, it costs nothing.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">I already use Claude Code / Cursor. Why switch?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
@@ -5747,7 +5747,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">How is this different from just a bigger context window?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">A bigger window still re-sends everything, every turn — you pay for it either way, and models get less accurate as the prompt grows. Ogcode brings back only what's relevant, so requests stay well under 200K and the bill stays flat no matter how long you work.</div>
+            <div class="ans">A bigger window still re-sends everything, every turn; you pay for it either way, and models get less accurate as the prompt grows. Ogcode brings back only what's relevant, so requests stay well under 200K and the bill stays flat no matter how long you work.</div>
           </details>
         </div>
 
@@ -5755,7 +5755,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <div class="fq-aside-in">
             <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
             <h3 class="h3">Still have a question?</h3>
-            <p class="p">Open an issue — a human answers.</p>
+            <p class="p">Open an issue; a human answers.</p>
             <div class="fq-actions">
               <a class="btn btn-line btn-sm" href="https://github.com/prasenjeet-symon/ogcode/issues" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>Open an issue</a>
             </div>
@@ -5789,7 +5789,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 
         <div class="cta-in">
           <h2 class="cta-title reveal" id="ctaTitle">From side project to enterprise codebase.</h2>
-          <p class="cta-sub reveal d1">One Go binary. Any model, your keys. No account and no cloud — your sessions and memory stay in a local database.</p>
+          <p class="cta-sub reveal d1">One Go binary. Any model, your keys. No account and no cloud: your sessions and memory stay in a local database.</p>
           <div class="cta-actions reveal d2">
             <button class="btn btn-light btn-lg" type="button" data-install>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
@@ -5926,7 +5926,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Linux, Windows",
     "url": "https://ogcode.in/",
-    "description": "A self-hosted coding agent that remembers what it learns — every decision, every dead end, every why — and brings back only what each turn needs. Sessions run longer, bills stay flat.",
+    "description": "A self-hosted coding agent that remembers what it learns (every decision, every dead end, every why) and brings back only what each turn needs. Sessions run longer, bills stay flat.",
     "license": "https://www.gnu.org/licenses/agpl-3.0.html",
     "isAccessibleForFree": true,
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -5956,7 +5956,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 
     /* The visitor's PostHog id, so a copied install command can carry it all the
        way to the machine. The installer writes it to ~/.ogcode/install-id and the
-       binary's first run reports with it — that is what stitches a download to a
+       binary's first run reports with it, which is what stitches a download to a
        real first session. Empty when analytics has no identity yet. */
     function phId() {
       try {
@@ -6330,7 +6330,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 <script>
 (function () {
   'use strict';
-  // #recall: all motion is CSS. This arms the stage's entrance (.rc-anim — without
+  // #recall: all motion is CSS. This arms the stage's entrance (.rc-anim, without
   // it the static final picture shows) and parks the looping bits (the dot flow on
   // the memory→you rail and the node pulses) while the stage is off-screen.
   try {
@@ -6350,7 +6350,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       }
     }, { rootMargin: '120px 0px' });
     io.observe(stage);
-  } catch (e) { /* decorative only — never break the page */ }
+  } catch (e) { /* decorative only, never break the page */ }
 })();
 </script>
 <script>
@@ -6383,7 +6383,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       win.classList.toggle('md-hold', offscreen || userPaused);
     }
 
-    /* Horizontal scroll of the tab strip only — never the page. */
+    /* Horizontal scroll of the tab strip only, never the page. */
     function reveal(tab) {
       var max = list.scrollWidth - list.clientWidth;
       if (max <= 1) return;
@@ -6601,14 +6601,14 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       if (mq.addEventListener) mq.addEventListener('change', onChange);
       else if (mq.addListener) mq.addListener(onChange);
     }
-  } catch (err) { /* decorative only — never break the page */ }
+  } catch (err) { /* decorative only, never break the page */ }
 })();
 </script>
 <script>
 (function () {
   'use strict';
 
-  // #cost — "What a tight context gets you" tabs. No auto-rotation. Switching tabs swaps the
+  // #cost: "What a tight context gets you" tabs. No auto-rotation. Switching tabs swaps the
   // top row of the pricing box and replays that panel's diagram animation.
   var root = document.getElementById('cost');
   if (!root) return;
@@ -6800,7 +6800,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   })();
 
   /* ── D · Terminal: the query types into the input, Enter is pressed, and
-     the recall lines print one by one — once, the first time it is seen. ── */
+     the recall lines print one by one, but only once, the first time it is seen. ── */
   (function terminal() {
     var term = root.querySelector('.pr-term');
     if (!term) return;
@@ -6978,7 +6978,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 <script>
 (function () {
   'use strict';
-  // #context — the readout for the session chart. The pointer, or the arrow
+  // #context: the readout for the session chart. The pointer, or the arrow
   // keys once the plot has focus, picks a stretch of the session and the tip
   // reads its largest request. The caption and the three figures tell the
   // same story without it, so a failure here costs nothing.
@@ -7029,7 +7029,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       e.preventDefault();
       show(next);
     });
-  } catch (err) { /* decorative only — never break the page */ }
+  } catch (err) { /* decorative only, never break the page */ }
 })();
 </script>
 </body>

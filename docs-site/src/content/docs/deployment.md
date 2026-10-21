@@ -1,31 +1,31 @@
 ---
 title: "Remote deployment"
-description: "Reach a remote server safely — run it directly, an SSH tunnel, a reverse proxy with HTTPS, or Docker."
+description: "Reach a remote server safely: run it directly, an SSH tunnel, a reverse proxy with HTTPS, or Docker."
 ---
 
-ogcode runs as a normal web server: one Go binary with the UI embedded, listening on a port (9595 by default). Running it on the machine where your code lives and reaching it from a browser elsewhere is a supported setup — but the agent can read and modify files and execute shell commands, so the way you expose it matters.
+ogcode runs as a normal web server: one Go binary with the UI embedded, listening on a port (9595 by default). Running it on the machine where your code lives and reaching it from a browser elsewhere is a supported setup, but the agent can read and modify files and execute shell commands, so the way you expose it matters.
 
 This guide covers the four most common ways to reach a remote ogcode safely:
 
-1. [Run it directly on a remote machine](#1-run-it-directly-on-a-remote-machine) — reach it at the host's address; only behind a firewall or on a private network, since there is no authentication.
-2. [SSH tunnel](#2-ssh-tunnel) — nothing exposed; reach it as if it were local.
-3. [Reverse proxy with HTTPS and authentication](#3-reverse-proxy-with-https-and-authentication) — a public URL, gated by a password.
-4. [Docker](#4-docker) — run it in a container, compose with either of the above.
+1. [Run it directly on a remote machine](#1-run-it-directly-on-a-remote-machine): reach it at the host's address; only behind a firewall or on a private network, since there is no authentication.
+2. [SSH tunnel](#2-ssh-tunnel): nothing exposed; reach it as if it were local.
+3. [Reverse proxy with HTTPS and authentication](#3-reverse-proxy-with-https-and-authentication): a public URL, gated by a password.
+4. [Docker](#4-docker): run it in a container, compose with either of the above.
 
-It is about the **standalone server only**. If you are hosting ogcode for several people, with per-user accounts, workspace allowlists, and isolated workers, that is the control plane — see [controlplane/docs/deploy.md](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md). The two are different things: the control plane authenticates and scopes users itself; the standalone server does not.
+It is about the **standalone server only**. If you are hosting ogcode for several people, with per-user accounts, workspace allowlists, and isolated workers, that is the control plane. See [controlplane/docs/deploy.md](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md). The two are different things: the control plane authenticates and scopes users itself; the standalone server does not.
 
 
 ## Before you start: what ogcode exposes
 
-**It binds all interfaces by default.** `ogcode serve` listens on `0.0.0.0:<port>` (or `::`) — there is no `--host` or `--bind` flag. The only option is the port:
+**It binds all interfaces by default.** `ogcode serve` listens on `0.0.0.0:<port>` (or `::`); there is no `--host` or `--bind` flag. The only option is the port:
 
 ```bash
 ogcode serve --port 9595      # or: ogcode -p 9595
 ```
 
-If the port is busy the server tries the next one, up to 50 times, and prints `port in use, trying next`. On a remote host you want a **fixed, known port** so your tunnel or proxy points at the right place — pass `--port` explicitly and make sure it is free. The server also remembers the port it used for each project; an explicit `--port` overrides and is saved.
+If the port is busy the server tries the next one, up to 50 times, and prints `port in use, trying next`. On a remote host you want a **fixed, known port** so your tunnel or proxy points at the right place: pass `--port` explicitly and make sure it is free. The server also remembers the port it used for each project; an explicit `--port` overrides and is saved.
 
-**There is no built-in authentication.** No login page, no basic auth, no bearer token — anyone who can reach the port can drive the agent: read and write files, run shell commands, and change settings. **Never expose the port directly to the public internet.** Authentication has to come from something in front of it: an SSH tunnel, or a reverse proxy with a password.
+**There is no built-in authentication.** No login page, no basic auth, no bearer token. Anyone who can reach the port can drive the agent: read and write files, run shell commands, and change settings. **Never expose the port directly to the public internet.** Authentication has to come from something in front of it: an SSH tunnel, or a reverse proxy with a password.
 
 The startup banner prints `ogcode is running at http://localhost:<port>`; on a headless host the attempt to open a browser fails harmlessly.
 
@@ -40,7 +40,7 @@ ogcode serve --port 9595
 
 Then browse to `http://your-server:9595` from a machine that can reach that port.
 
-**This is only safe on a private network.** As above, the standalone server has no authentication, so anyone who can reach the port has full control of the agent — the files it can read, the shell it can run, and the settings it can change. Use this when the host is on a private LAN, or when a cloud firewall or security group restricts the port to your own IP. **Never open the port to the public internet** — for that, use an SSH tunnel or a reverse proxy with a password.
+**This is only safe on a private network.** As above, the standalone server has no authentication, so anyone who can reach the port has full control of the agent: the files it can read, the shell it can run, and the settings it can change. Use this when the host is on a private LAN, or when a cloud firewall or security group restricts the port to your own IP. **Never open the port to the public internet.** For that, use an SSH tunnel or a reverse proxy with a password.
 
 
 ## 2. SSH tunnel
@@ -53,7 +53,7 @@ On the remote host, start ogcode bound to localhost. The server binds all interf
 # On the remote host
 ogcode serve --port 9595
 
-# On your local machine — forward local 9595 to the remote 9595
+# On your local machine: forward local 9595 to the remote 9595
 ssh -N -L 9595:localhost:9595 user@your-server
 ```
 
@@ -146,14 +146,14 @@ Generate the hash with `caddy hash-password`. `flush_interval -1` forces streami
 
 ### If it feels frozen
 
-The symptom is a UI that loads but never updates — no new messages, no tool output. That is Server-Sent Events being buffered. ogcode streams progress over SSE (`text/event-stream`); make sure the proxy does not buffer that response (`proxy_buffering off` in nginx, `flush_interval -1` in Caddy) and that the read timeout is generous (`proxy_read_timeout 3600s`). Once buffering is off it recovers on its own.
+The symptom is a UI that loads but never updates: no new messages, no tool output. That is Server-Sent Events being buffered. ogcode streams progress over SSE (`text/event-stream`); make sure the proxy does not buffer that response (`proxy_buffering off` in nginx, `flush_interval -1` in Caddy) and that the read timeout is generous (`proxy_read_timeout 3600s`). Once buffering is off it recovers on its own.
 
 ### Stronger than a password
 
 Basic auth over HTTPS is the minimum. Because the agent can execute commands, consider one more layer if the URL is broadly reachable:
 
-- **Restrict by IP** — `allow`/`deny` in nginx, or a security-group rule.
-- **An identity-aware proxy** — [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/), [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/), or Tailscale Serve — so access is tied to your SSO rather than a shared password.
+- **Restrict by IP**: `allow`/`deny` in nginx, or a security-group rule.
+- **An identity-aware proxy**: [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/), [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/), or Tailscale Serve, so access is tied to your SSO rather than a shared password.
 
 
 ## 4. Docker
@@ -169,10 +169,10 @@ docker run -d --name ogcode \
   ghcr.io/prasenjeet-symon/ogcode:latest
 ```
 
-- `-p 127.0.0.1:9595:9595` publishes on the host's **loopback only** — pair this with an SSH tunnel or a reverse proxy on the host. Use `-p 9595:9595` only if you intend the port to be reachable on the network directly (which, again, has no authentication).
-- `-v ~/.ogcode:/root/.ogcode` persists machine-wide state — providers, model preferences, theme, logs, and MCP tokens — across container restarts.
+- `-p 127.0.0.1:9595:9595` publishes on the host's **loopback only**; pair this with an SSH tunnel or a reverse proxy on the host. Use `-p 9595:9595` only if you intend the port to be reachable on the network directly (which, again, has no authentication).
+- `-v ~/.ogcode:/root/.ogcode` persists machine-wide state (providers, model preferences, theme, logs, and MCP tokens) across container restarts.
 - `-v /path/to/your/project:/workspace` mounts the code the agent will work on, and `-w /workspace` starts it there. git is installed in the image, so diffs and status work.
-- The image is also mirrored to Docker Hub as `prasenjeetsimon/ogcode:latest` — either reference works.
+- The image is also mirrored to Docker Hub as `prasenjeetsimon/ogcode:latest`; either reference works.
 - The container runs as root; `~/.ogcode` inside it is `/root/.ogcode`.
 
 Health: the image ships a `HEALTHCHECK` that probes the running server and expects a `200`. A running container with `(healthy)` is serving.
@@ -199,9 +199,9 @@ ogcode keeps machine-wide state in `~/.ogcode` and **per-project** state in `<pr
 
 ## Live service preview, remotely
 
-When the agent starts a local server while working (a dev server, a dashboard), ogcode can hand you a URL for it. Locally those URLs look like `http://3000.preview.localhost:9595/`. That works because a browser resolves `*.localhost` to the machine the browser runs on — which is why it reaches the server only from its own machine or through an SSH tunnel.
+When the agent starts a local server while working (a dev server, a dashboard), ogcode can hand you a URL for it. Locally those URLs look like `http://3000.preview.localhost:9595/`. That works because a browser resolves `*.localhost` to the machine the browser runs on, which is why it reaches the server only from its own machine or through an SSH tunnel.
 
-To open previews from a browser on a **different** machine, give ogcode a real domain — as an environment variable, or the matching `previewDomain` key in `ogcode.json`:
+To open previews from a browser on a **different** machine, give ogcode a real domain: as an environment variable, or the matching `previewDomain` key in `ogcode.json`:
 
 ```bash
 OGCODE_PREVIEW_DOMAIN=preview.example.com ogcode serve --port 9595
@@ -213,7 +213,7 @@ OGCODE_PREVIEW_DOMAIN=preview.example.com ogcode serve --port 9595
 
 Use a **wildcard DNS record** `*.preview.example.com` pointing at the host, and a wildcard TLS certificate for `*.preview.example.com` if the proxy serves HTTPS. Your reverse proxy must forward the original `Host` header to ogcode so it can route `3000.preview.example.com` to the service on port 3000, and it must pass WebSocket upgrades for apps that use them.
 
-Pick a **dedicated** domain for this — everything under it is treated as preview-only and never routes to the ogcode UI. Keeping it off the UI's own domain (not `ogcode.example.com`'s subtree) also keeps a previewed app from reading or setting cookies on the UI's origin.
+Pick a **dedicated** domain for this: everything under it is treated as preview-only and never routes to the ogcode UI. Keeping it off the UI's own domain (not `ogcode.example.com`'s subtree) also keeps a previewed app from reading or setting cookies on the UI's origin.
 
 
 ## Logs and diagnostics
@@ -246,7 +246,7 @@ Log shipping is **opt in and off by default**. When `OGCODE_POSTHOG_LOGS=1`, rec
 
 - [ ] ogcode is **not** reachable on its port from the public internet.
 - [ ] Access is through an SSH tunnel **or** a reverse proxy with HTTPS **and** a password.
-- [ ] The proxy does not buffer the SSE progress stream — verified by the UI updating live.
+- [ ] The proxy does not buffer the SSE progress stream: verified by the UI updating live.
 - [ ] The global config volume (`~/.ogcode`) and the workspace are mounted at **stable paths**.
 - [ ] For remotely-viewable service previews, `OGCODE_PREVIEW_DOMAIN` is set with matching wildcard DNS and TLS.
 - [ ] For more than one user, you are using the [control plane](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md) instead of the standalone server.
@@ -254,5 +254,5 @@ Log shipping is **opt in and off by default**. When `OGCODE_POSTHOG_LOGS=1`, rec
 
 ## See also
 
-- [README — Remote deployment and security](https://github.com/prasenjeet-symon/ogcode/blob/main/README.md#remote-deployment-and-security) — the short version.
-- [controlplane/docs/deploy.md](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md) — the hosted, multi-user control plane.
+- [Remote deployment and security in the README](https://github.com/prasenjeet-symon/ogcode/blob/main/README.md#remote-deployment-and-security): the short version.
+- [controlplane/docs/deploy.md](https://github.com/prasenjeet-symon/ogcode/blob/main/controlplane/docs/deploy.md): the hosted, multi-user control plane.

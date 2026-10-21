@@ -1,9 +1,9 @@
 // The docs sidebar, hand-authored.
 //
 // Every entry names a page under src/content/docs (the slug, minus a leading
-// slash). This one file drives all four navigation surfaces — the sidebar in
+// slash). This one file drives all four navigation surfaces: the sidebar in
 // Docs.astro, the prev/next pager, the landing-page cards, and the sitemap
-// ordering — so a page is "in the docs" exactly when it appears here.
+// ordering, so a page is "in the docs" exactly when it appears here.
 //
 // The shape is a Getting-started track that gets a binary running, then a
 // Guides group that walks one capability at a time. Empty groups are skipped
@@ -39,7 +39,7 @@ const nav: DocGroup[] = [
       {
         title: 'Install',
         slug: '/install',
-        description: 'One binary on macOS, Linux or Windows — or Docker, or Ollama.',
+        description: 'One binary on macOS, Linux or Windows, or Docker, or Ollama.',
       },
       {
         title: 'Quick start',
@@ -49,7 +49,7 @@ const nav: DocGroup[] = [
       {
         title: 'Core concepts',
         slug: '/core-concepts',
-        description: 'Sessions, agents, modes, context and memory — the mental model.',
+        description: 'Sessions, agents, modes, context and memory: the mental model.',
       },
     ],
   },
@@ -70,7 +70,7 @@ const nav: DocGroup[] = [
       {
         title: 'Permissions',
         slug: '/permissions',
-        description: 'Ask, Auto and Yolo — what is gated, and how approvals are remembered.',
+        description: 'Ask, Auto and Yolo: what is gated, and how approvals are remembered.',
       },
       {
         title: 'Memory & context',
@@ -101,7 +101,7 @@ export function navGroups(): DocGroup[] {
   return nav.filter((g) => g.items.length > 0);
 }
 
-/** Every page, in reading order — the source of truth for getStaticPaths. */
+/** Every page, in reading order: the source of truth for getStaticPaths. */
 export function flatPages(): DocPage[] {
   return nav.flatMap((g) => g.items);
 }

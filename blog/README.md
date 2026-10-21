@@ -1,6 +1,6 @@
 # Ogcode blog
 
-The blog at [ogcode.in/blog](https://ogcode.in/blog/). Fully static — every
+The blog at [ogcode.in/blog](https://ogcode.in/blog/). Fully static: every
 page is pre-rendered HTML with zero client-side JavaScript, built with
 [Astro](https://astro.build) and styled to match the homepage design system
 (`docs/index.html`).
@@ -16,8 +16,8 @@ title: "Why recall beats replay"
 description: "One or two sentences. Shown on the index, in search results, and on social cards."
 pubDate: 2026-09-21
 tags: ["context-engine"]        # optional
-draft: true                     # optional — visible in dev, excluded from builds
-hero: "/blog/media/why-recall-hero.jpg"   # optional — shown on the post page AND as the index thumbnail
+draft: true                     # optional: visible in dev, excluded from builds
+hero: "/blog/media/why-recall-hero.jpg"   # optional: shown on the post page AND as the index thumbnail
 heroAlt: "One sentence describing the image."
 # ogImage should point at the same hero (absolute URL) so shares show it too
 # updatedDate: 2026-09-25      # optional
@@ -35,7 +35,7 @@ automatically.
 
 ```sh
 npm install
-npm run dev        # http://localhost:4321/blog/ — drafts are visible here
+npm run dev        # drafts are visible at http://localhost:4321/blog/
 npm run build      # writes static HTML to ../docs/blog (gitignored)
 ```
 
@@ -45,7 +45,7 @@ npm run build      # writes static HTML to ../docs/blog (gitignored)
 
 GitHub Pages serves the `docs/` folder. The Pages workflow
 (`.github/workflows/pages.yml`) runs `npm ci && npm run build` here first, which
-writes the blog into `docs/blog/` before the folder is uploaded — so the built
+writes the blog into `docs/blog/` before the folder is uploaded, so the built
 blog is never committed, and every push to `main` touching `docs/**` or
 `blog/**` redeploys it.
 

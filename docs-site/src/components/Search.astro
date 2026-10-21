@@ -4,7 +4,7 @@
 // The index and the UI bundle are built after Astro, by postbuild.mjs, into
 // /docs/pagefind/. Nothing is available in `astro dev` (the index does not
 // exist yet), so the box mounts lazily and stays quiet if the bundle is
-// missing — a 404 on the script leaves an empty, harmless box.
+// missing; a 404 on the script leaves an empty, harmless box.
 ---
 <div class="ds-search" data-pagefind-ignore>
   <div id="search" aria-label="Search the docs"></div>

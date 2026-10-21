@@ -3,7 +3,7 @@
 // The blog is a fully static, pre-rendered site: every page is plain HTML at
 // build time, no client JS. It builds into ../docs/blog so GitHub Pages (which
 // serves the docs/ folder as ogcode.in) picks it up at ogcode.in/blog/.
-// docs/blog is gitignored — CI builds it fresh on every Pages deploy.
+// docs/blog is gitignored; CI builds it fresh on every Pages deploy.
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import fs from 'node:fs';
@@ -13,7 +13,7 @@ import { remarkReadingTime } from './remark-reading-time.mjs';
 
 const fontsDir = fileURLToPath(new URL('../docs/fonts', import.meta.url));
 
-// The blog's CSS references the same /fonts/*.woff2 files the homepage uses —
+// The blog's CSS references the same /fonts/*.woff2 files the homepage uses:
 // domain-root paths that exist in production but not under this project. This
 // dev-only middleware maps /fonts/ onto ../docs/fonts so `astro dev` renders
 // with the real typefaces instead of fallback stacks.

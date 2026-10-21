@@ -37,7 +37,7 @@ const groups = navGroups();
 const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
 const isActive = (p: DocPage) => p.slug === slug;
 ---
-<Base title={`${title} — Ogcode Docs`} description={description} canonical={canonical} ogType="article">
+<Base title={`${title}: Ogcode Docs`} description={description} canonical={canonical} ogType="article">
   <Fragment slot="head"><slot name="head" /></Fragment>
   <div class="frame">
     <div class="ds-frame">

@@ -1,9 +1,9 @@
 ---
 title: Install
-description: One binary on macOS, Linux or Windows — or Docker, or Ollama.
+description: One binary on macOS, Linux or Windows, or Docker, or Ollama.
 ---
 
-Ogcode ships as a single static binary. Pick your platform below; every path ends with the same thing — an `ogcode` command on your `PATH`.
+Ogcode ships as a single static binary. Pick your platform below; every path ends with the same thing: an `ogcode` command on your `PATH`.
 
 <div class="pill-tabs" role="tablist" aria-label="Install by platform">
   <button class="pill-tab" type="button" role="tab" id="os-mac" data-install-tab aria-selected="true" aria-controls="pane-mac" tabindex="0">macOS</button>
@@ -31,7 +31,7 @@ brew install ogcode
 
 <div class="install-pane" id="pane-linux" role="tabpanel" aria-labelledby="os-linux" hidden>
 
-The same script handles Linux — it detects `amd64` or `arm64` and installs to `/usr/local/bin`:
+The same script handles Linux: it detects `amd64` or `arm64` and installs to `/usr/local/bin`:
 
 ```bash
 curl -fsSL https://ogcode.in/install.sh | sh
@@ -70,7 +70,7 @@ docker run -p 9595:9595 \
   ghcr.io/prasenjeet-symon/ogcode:latest
 ```
 
-The image is also on Docker Hub as `prasenjeetsimon/ogcode:latest`. The container binds all interfaces, so `-p 9595:9595` publishes it on your host — keep that port off the public internet. See [Remote deployment](/docs/deployment/) before exposing it.
+The image is also on Docker Hub as `prasenjeetsimon/ogcode:latest`. The container binds all interfaces, so `-p 9595:9595` publishes it on your host; keep that port off the public internet. See [Remote deployment](/docs/deployment/) before exposing it.
 
 </div>
 

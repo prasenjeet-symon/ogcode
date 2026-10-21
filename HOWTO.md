@@ -239,7 +239,7 @@ readable, and the compose field is text-only.
 
 ## Install ogcode on a host
 
-Verified: 2026-10-20 @ v0.49.0-1-g7705e0a-dirty
+Verified: 2026-10-21 @ v0.50.1-1-g664be42-dirty
 Touches: `/usr/local/bin`, `~/.local/bin`, the Homebrew tap, `%LOCALAPPDATA%`, the Go module cache
 
 1. macOS/Linux: `curl -fsSL https://ogcode.in/install.sh | sh` → installs to `/usr/local/bin`.
@@ -252,7 +252,10 @@ Touches: `/usr/local/bin`, `~/.local/bin`, the Homebrew tap, `%LOCALAPPDATA%`, t
    secret, and the newline must be stripped or the gateway HMAC 401s. `make build` alone leaves the binary
    in the repo root.
 
-Done when: `ogcode version` prints a version string (there is no `--version` flag).
+Done when: `ogcode version` prints a version string (there is no `--version` flag), and for a local build the
+new binary boots — fresh `HOME` + temp cwd + `serve --port <spare>`, `GET /api/config` returns 200, then `kill`
+(expand `$HOME/.local/bin/ogcode` to `$BIN` **before** overriding `HOME`). Restart the live server separately by
+listening pid: the file is replaced but the running process keeps the old image.
 
 ## Trace the install-id stitch
 
@@ -316,23 +319,30 @@ against a real model must show intact `data:` frames and no gzip.
 
 ## Defragment MEMORY.md
 
-Verified: 2026-10-20 @ v0.48.0-dirty
-Touches: `MEMORY.md`, `MEMORY-ARCHIVE.md`
+Verified: 2026-10-21 @ v0.50.0-1-g1383bfd-dirty
+Touches: `MEMORY.md`, `HISTORY.md`, `HOWTO.md`, `MEMORY-ARCHIVE.md`
 
 1. `cp MEMORY.md /tmp/MEMORY.pre-defrag.md` first — `MEMORY.md` is gitignored, so there is no undo.
-2. Regroup to one section per topic: split a grab-bag section by subject, and merge facts on one subject
-   that sit in three places (install/version facts were scattered across three sections). Reword only what
-   repeats; carry every bullet's facts across.
-3. Re-measure while you are in there — `wc -c MEMORY.md AGENT.md HOWTO.md` — and correct the sizes line.
-4. Prove nothing was dropped with a small `python3` script: collect every backticked span and every numeric
-   literal from old and new and diff them. Each surviving difference must be a deliberate correction or a
-   line-wrap artifact of the old file, not a lost fact.
-5. Append the snapshot to `MEMORY-ARCHIVE.md` as
+2. Move history out first: dated measurements, session narratives, experiment logs and release/benchmark
+   outcomes go to `HISTORY.md` under `## <date> — <what changed or was learned>`. Keep the gotcha and the
+   invariant in `MEMORY.md`; the story goes.
+3. Move procedures second: anything that reads as ordered steps for a task — a one-off command sequence, a
+   deploy or probe recipe — becomes its own `## <task>` entry here (Verified / Touches / steps / Done when),
+   not a bullet in `MEMORY.md`. Update an existing entry in place; never add a second copy.
+4. Regroup what is left to one section per topic: split a grab-bag section by subject, and merge facts on one
+   subject that sit in three places (install/version facts were scattered across three sections). Reword only
+   what repeats; carry every bullet's facts across.
+5. Re-measure while you are in there — `wc -c MEMORY.md AGENT.md HOWTO.md HISTORY.md` — and correct the sizes line.
+6. Prove nothing was dropped with a small `python3` script: collect every backticked span and every numeric
+   literal from old and new (`MEMORY.md` + `HOWTO.md` + `HISTORY.md`) and diff them. Each surviving
+   difference must be a deliberate correction or a line-wrap artifact of the old file, not a lost fact.
+7. Append the snapshot to `MEMORY-ARCHIVE.md` as
    `## Snapshot <date> — MEMORY.md immediately before the defragmentation pass (<size>, <lines> lines)`,
    then the raw file.
 
-Done when: the token diff shows no lost span beyond deliberate corrections, `grep '^## ' MEMORY.md` lists no
-repeated topic, and the archive carries the new snapshot.
+Done when: `MEMORY.md` is under about 20 KB, the token diff shows no lost span beyond deliberate corrections,
+`grep '^## ' MEMORY.md` lists no repeated topic, procedures that were in the old file live in a HOWTO entry,
+and the archive carries the new snapshot.
 
 ## Run the agent benchmark offline with a reused code index
 
@@ -348,7 +358,9 @@ Touches: `~/Downloads/work/ogcode-bench/{index-backup,runs,RESULTS.md}` (outside
    both arms behind an allowlist CONNECT proxy — only `ollama.com:443` tunnels; every other host is
    `403` and logged as `DENY <target>` in `runs/<id>/egress.log`, summarised into `run.json.egress`.
 4. Read the setup block: `index: restored, 0.0s, 306 pages` and `egress: … proxied_model: true`.
-   `proxied_model: false` means the model call escaped the proxy — the run is not comparable.
+   `proxied_model: false` means the model call escaped the proxy — the run is not comparable. With the
+   default `wiretap=True`, `runs/<id>/wire.jsonl` holds one row per request (status, body bytes, ms,
+   usage) and `run.json.wire` the summary; `--no-wiretap` tunnels opaquely.
 5. `./benchmark.py report` → `RESULTS.md`; runs whose label starts `smoke` are skipped.
 
 Done when: the setup line says `restored` with a non-zero page count, `proxied_model: true`, and the
@@ -380,3 +392,66 @@ Touches: a throwaway rig under `/tmp` only — the live server on the project po
 Done when: every non-gradient node clears its threshold in both themes at each accent, and
 `GET /api/appearance` on the live port returns what step 3 saved. The checker script itself is
 session-local — re-create it from step 4; nothing in the repo ships it.
+
+## Wire the OGX assertion secret into a release build
+
+Verified: 2026-10-19 @ v0.48.0
+Touches: `~/.ogcode/ogx-app-secret`, the `OGX_APP_SECRET` repo secret, `.github/workflows/release.yml`
+
+1. `tr -d '\n' < ~/.ogcode/ogx-app-secret | gh secret set OGX_APP_SECRET -R prasenjeet-symon/ogcode` — the
+   file is 65 bytes (64 hex + newline); the trailing newline HMACs differently and every request 401s.
+2. Add three `env:` blocks and one `-X` each to `build-linux`, `build-macos` and `build-windows` in
+   `release.yml`, injecting `internal/provider.OGXAppSecret` from `secrets.OGX_APP_SECRET`. An unset secret
+   signs nothing, which is correct for a fork.
+3. For a local run instead: `make build-server OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)` —
+   local builds get no CI secret.
+4. Prove it landed with `HOWTO.md` → Prove a build-time secret is in a binary; `0` means the variable was
+   empty at link time.
+
+Done when: `LC_ALL=C grep -c '<64hex>' <binary>` is ≥1 and the extracted hex matches the secret file.
+
+## Prove which search backend served a request
+
+Verified: 2026-10-19 @ v0.48.0 — migrated from MEMORY.md, not re-run
+Touches: nothing in the repo; runs the binary with proxy env vars
+
+1. Start a blind CONNECT-logging proxy on a loopback port — it records the `CONNECT host:443` target and
+   tunnels the bytes.
+2. Run the search with `HTTPS_PROXY=http://127.0.0.1:<port>` and both `NO_PROXY` and `no_proxy` exported
+   empty — Go silently bypasses the proxy otherwise.
+3. Read the proxy log against the result's `Provider` stamp (`tavily`/`native`/`safari`/`chromium`), which is
+   set BEFORE the TTL cache. No fallback line means the primary backend served.
+
+Done when: the CONNECT log names the expected backend and the result's `Provider` stamp matches it.
+
+## Inspect the session database
+
+Verified: 2026-10-21 @ v0.50.0-1-g1383bfd-dirty
+Touches: reads `<project>/.ogcode/ogcode.db` and `~/.ogcode/config.db`; writes nothing
+
+1. Two DBs: `.ogcode/ogcode.db` per project (sessions, messages, parts, index) and `~/.ogcode/config.db`
+   global (permission grants and mode, UI prefs).
+2. `message` holds metadata only; content lives in `part.data`, including `state.input`/`state.output`. A
+   seeded `message.data` must also carry `id`/`sessionId`/`createdAt` — `GetMessages` does not copy SQL
+   columns back.
+3. Per-turn input tokens:
+   `sqlite3 ogcode.db "SELECT time_created, json_extract(data,'$.tokens.input') FROM message WHERE session_id='<id>' AND data LIKE '%\"role\":\"assistant\"%' ORDER BY time_created"`.
+   `tokens.input` is UNCACHED input; the billed prompt is `input + cacheRead`.
+4. A hand-seeded session row must set `permission` or `Store.List` 500s.
+
+Done when: the query returns the expected rows and no `database is locked` error appears (a live server
+holds the DB — read, do not write, while it runs).
+
+## Re-test a benchmark run's saved repo
+
+Verified: 2026-10-21 @ v0.50.0-1-g1383bfd-dirty
+Touches: `~/Downloads/work/ogcode-bench/runs/<label>-<arm>/repo` (outside this repo)
+
+1. `cd ~/Downloads/work/ogcode-bench/runs/<label>-<arm>/repo` — the snapshot is the agent's final tree.
+2. Copy the missing config fixture: `cp -R ../../../template/server/configs server/` (or from
+   `/tmp/probe-tpl`). Without it every `TestConfigReload*` fails with `open ./configs/reload/…: no such file`.
+3. A raw `CONNECT {}` gets `+OK\r\n` before `PONG\r\n` (the server defaults to verbose), so a handler test
+   writes `CONNECT {"verbose": false}`; asserting `+PONG` first fails on the pristine template too.
+4. `go test ./server/ -run 'TestConfigReload' -timeout 900s`.
+
+Done when: the reload tests run — pass or fail on the agent's code, not on a missing fixture.
