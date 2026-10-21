@@ -38,7 +38,7 @@ func NewUpdateIntentTool() UpdateIntentTool { return UpdateIntentTool{} }
 func (UpdateIntentTool) ID() string { return "update_intent" }
 
 func (UpdateIntentTool) Description() string {
-	return "State the plan for the current turn — the steps you mean to take and where you are in them — so the user can see where you are heading without reading the transcript. The first tool call of every turn is this one — before any read, grep, bash or skill call — because it also runs the matcher that names the skills and MCP tools fitted to your steps. Call it with the full list, then call it again only when the plan changes: when you start a step, finish one, or drop one. Nothing closes the plan for you, so make one final call before the message that ends the turn, marking where you got to. Replace the whole list every time — copy the list the tool echoed back to you and change only what moved, so a step you already finished stays finished. Keep each step's label short — a handful of words — and give it a description that says what the step actually involves: the file types, the library, the command. The description is never shown to the user; a matcher reads it to suggest the skills and MCP tools that could carry the step out, and it can only match what you name. Do not also narrate the steps in prose — this call is the narration. Call it on its own, in a block that carries no other tool call: the work it describes follows in the next block."
+	return "State the plan for the current turn — the steps you mean to take and where you are in them — so the user can see where you are heading without reading the transcript. When to call it: first, alone in your first block of every turn — before codebase_map, grep or any read — because the call runs the matcher that names the skills and MCP tools fitted to your steps, and a plan stated after the exploration has already happened spends that match on work that is done. Exploration follows the plan and is unchanged: when the project has an index, exploration opens with codebase_map — the plan says where the turn is going, the map says where the code is. Call it with the full list, then call it again only when the plan changes: when you start a step, finish one, or drop one. Nothing closes the plan for you, so make one final call before the message that ends the turn, marking where you got to. Replace the whole list every time — copy the list the tool echoed back to you and change only what moved, so a step you already finished stays finished. Keep each step's label short — a handful of words — and give it a description that says what the step actually involves: the file types, the library, the command. The description is never shown to the user; a matcher reads it to suggest the skills and MCP tools that could carry the step out, and it can only match what you name. Do not also narrate the steps in prose — this call is the narration. Call it on its own, in a block that carries no other tool call: the work it describes follows in the next block."
 }
 
 func (UpdateIntentTool) Parameters() json.RawMessage {
@@ -170,15 +170,20 @@ func (UpdateIntentTool) Execute(ctx context.Context, args json.RawMessage, tctx 
 		}, nil
 	}
 
-	open := 0
+	// The list is echoed, not argued for. The rule that closes a turn's plan is
+	// already stated in the per-step prompt and in this tool's description, both
+	// re-sent on every step; a tail inviting another call here was the freshest
+	// instruction in context, and it sent the model straight back into this tool
+	// instead of on to the exploration the turn still needed.
+	open := false
 	for _, s := range intent.Steps {
 		if s.Status == session.IntentActive || s.Status == session.IntentPending {
-			open++
+			open = true
 		}
 	}
-	tail := "\n\nEvery step is now done or dropped."
-	if open > 0 {
-		tail = "\n\nCopy this list when you next call update_intent and change only what moved. Not everything is closed: before you send the message that ends the turn, call it once more with every step done or dropped — a step left active or pending reads as work you are still doing."
+	tail := ""
+	if !open {
+		tail = "\n\nEvery step is now done or dropped."
 	}
 
 	return Result{

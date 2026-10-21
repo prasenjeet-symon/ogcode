@@ -1305,6 +1305,34 @@ func TestProjectIndexPromptTeachesTheDescent(t *testing.T) {
 	}
 }
 
+// The descent stops at "the files you want are listed", but exploration does
+// not stop there: the first read routinely names a caller, a config key, a
+// struct, or a test in an area not yet opened. Without a loop-back the workflow
+// diagram's arrow order reads as one pass — descend, map, read, done — and the
+// agent answers from the wrong package.
+func TestProjectIndexPromptLoopsBackWhenAReadPointsElsewhere(t *testing.T) {
+	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+		prompt := projectIndexPrompt(role, true, true)
+
+		for _, want := range []string{
+			"The loop is not one pass",  // that exploration is iterative
+			`go back to "codebase_map"`, // where it re-enters
+			"run the flow again",        // and that the whole flow repeats
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("projectIndexPrompt(%q) missing %q — a read that points elsewhere never re-enters the map", role, want)
+			}
+		}
+
+		// It belongs with the workflow diagram, which is the part read as a
+		// single pass, not buried in the descent paragraph above it.
+		workflow := prompt[strings.Index(prompt, "### Workflow"):strings.Index(prompt, "## Mandatory: Explore in Batches")]
+		if !strings.Contains(workflow, "The loop is not one pass") {
+			t.Errorf("projectIndexPrompt(%q) loop-back clause is outside the workflow block", role)
+		}
+	}
+}
+
 // The index-status line is the first thing said about the tool in an indexed
 // project, so it must not contradict the descent the main section teaches.
 func TestIndexStatusPromptPointsAtTheDescent(t *testing.T) {
@@ -1314,6 +1342,37 @@ func TestIndexStatusPromptPointsAtTheDescent(t *testing.T) {
 	}
 	if strings.Contains(indexStatusPrompt(0), "descend") {
 		t.Errorf("the empty-index line should not send the agent descending: %q", indexStatusPrompt(0))
+	}
+}
+
+// The exploration flow is the same in every project: find the files, map all of
+// them in one block, then read the ranges those maps printed in the next. The
+// index decides only how the files are FOUND — the batching that follows is
+// unconditional, and a file read one-per-round-trip is paid for on every step.
+func TestExplorationIsMapThenBatchedReadsInEveryProject(t *testing.T) {
+	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+		p := projectIndexPrompt(role, true, true)
+		for _, want := range []string{
+			"## Mandatory: Explore in Batches",
+			"**This is not conditional.**",
+			"all of them in ONE block",
+			"all of them in the NEXT block",
+			"Never read a file whole",
+			"indexed or not",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("projectIndexPrompt(%q) missing %q", role, want)
+			}
+		}
+	}
+
+	// The empty-index line must keep the agent on that flow rather than drop
+	// the whole section along with the map it cannot use.
+	empty := indexStatusPrompt(0)
+	for _, want := range []string{"one block", "the ranges the maps printed"} {
+		if !strings.Contains(empty, want) {
+			t.Errorf("empty-index status line missing %q", want)
+		}
 	}
 }
 

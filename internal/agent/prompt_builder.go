@@ -109,25 +109,37 @@ Use the shell to inspect, never to change: running tests, "git status"/"log"/"di
 
 	return `## Mandatory: Use Project Index Before Exploration
 
-**Rule:** When the project has been indexed, you **MUST** call "codebase_map" first — before reading any file or guessing at project structure.
+**Rule:** Map before you read — in every project, indexed or not. When the project has been indexed, that project map is "codebase_map", and it is your first exploration step, before reading any file or guessing at project structure. Whichever way you find the files, the flow after it is fixed: map every file you expect to touch, all in ONE block, then read only the ranges those maps printed, all in ONE block.
 
 It shows **one directory level per call**. Every folder on that level is a single line: how many files it holds and the subfolders directly inside it, then a sample of topic labels drawn from across the whole folder; files sitting directly on that level are listed with their own labels. Nothing deeper is shown — a folder line is a door, not a listing.
 
 **Navigate by the labels.** Pick the folder whose labels or subfolder names match your task, call "codebase_map" again with "subdir" set to its path from the project root — the folder itself, or straight to one of the subfolders its line names — and repeat until the files you want are listed — usually one to three calls. This is the point of the tool: a folder whose labels have nothing to do with your task is an entire branch you never open. Do not stop at the top level and conclude the index is unhelpful because it only named folders; descending is how you use it.
 
-If it comes back empty, the project has not been indexed: stop calling it this session and use glob and grep instead. Use those too when the index does not cover what you need — unindexed files, binary patterns. codebase_map is your **first** exploration step whenever an index exists, never a blocker on getting the work done.
+If it comes back empty, the project has not been indexed: stop calling it this session and use glob and grep instead. Use those too when the index does not cover what you need — unindexed files, binary patterns. codebase_map is your **first** exploration step whenever an index exists, never a blocker on getting the work done. An empty or unhelpful index changes only how you FIND the files; it never changes the two steps that follow.
 
 ` + docRule + `
 
 ### Workflow
 
 Task received
-  → codebase_map()                        ← MANDATORY FIRST STEP: top level, every folder one labeled line
+  → codebase_map()                        ← indexed projects only: MANDATORY FIRST STEP — top level, every folder one labeled line
   → codebase_map(subdir="<folder>")       ← descend into the folder whose labels match the task
   → codebase_map(subdir="<folder>/<sub>") ← repeat until the files you want are listed
-  → file_map(path)                        ← MANDATORY before reading an unfamiliar file: where things are inside it
-  → read(path, ranges=[{start_line, end_line}]) ← only the region you need
+  → file_map(path) × every file you expect to touch ← ALWAYS, indexed or not: all of them in ONE block
+  → read(path, ranges=[{start_line, end_line}]) × the regions you need ← ALWAYS: all of them in the NEXT block
 ` + workflowEnd + `
+
+**The loop is not one pass.** Exploration ends when you can answer the question, not when the first read returns — two or three rounds are normal. A read routinely names a caller, a config key, a struct, or a test in an area you have not opened: go back to "codebase_map" for that area, descend it the same way, and run the flow again — every new "file_map" in ONE block, then their ranges in the NEXT. Let the labels steer; the second branch is the one the first read pointed at. A read that still leaves you guessing what else touches the code is a map you have not asked for yet.
+
+## Mandatory: Explore in Batches
+
+**This is not conditional.** Indexed or not, exploration is three moves, and batching them is what saves the work:
+
+1. **Find the files.** "codebase_map" when an index exists; "glob" and "grep" when it does not.
+2. **Map them all in ONE block.** Every "file_map" call — one per file you expect to touch — goes in the same block. They are independent: none needs another's output. Do not map one file, read it, then map the next.
+3. **Read in the NEXT block.** The maps print every declaration's line range; send every "read" you need at once, one region per entry. Never read a file whole to find where something is — the map already said.
+
+One file per round trip is not thoroughness: each round trip re-sends the whole conversation, and a whole-file read pays for every line on every step for the rest of the turn. Batch by kind — all the maps, then all the reads.
 
 ## Mandatory: Map a File Before Reading It
 
@@ -229,7 +241,7 @@ func indexStatusPrompt(indexedFiles int) string {
 	case indexedFiles < 0:
 		return ""
 	case indexedFiles == 0:
-		return "Project index: empty — this project has not been indexed. Do not call codebase_map this session; explore with glob and grep instead. file_map is unaffected: it parses files directly and works here as it does anywhere."
+		return "Project index: empty — this project has not been indexed. Do not call codebase_map this session; find the files with glob and grep instead. The rest of the flow is unchanged: file_map every file you expect to touch in one block, then read only the ranges the maps printed. file_map parses files directly and works here as it does anywhere."
 	default:
 		return fmt.Sprintf("Project index: %d files indexed. codebase_map is live — start at the project root, then descend one level at a time with subdir.", indexedFiles)
 	}
@@ -1084,7 +1096,9 @@ func updateIntentPrompt() string {
 
 The user watching your transcript sees each action only once it is done, so the plan in your head never reaches them — they cannot tell what you are about to do from what you have already done. State it up front instead, with update_intent.
 
-**The first tool call of every turn is update_intent** — before any read, grep, bash, skill or other call, and before you have looked anything up. State the plan you are starting from, marking the first step active, even when it is rough; refine it as you learn. The call does more than show the user where you are going: it runs the matcher that compares your steps against the skills and MCP tools you hold, and its result is the only place the relevant ones are named. A turn that opens with work never gets that match.
+**When to call it: first — before "codebase_map", before any read, before anything else in the turn.** This is the one call that must not wait for orientation. It runs the matcher that compares your steps against the skills and MCP tools you hold, and its result is the only place the relevant ones are named. A plan stated after you have already looked around spends that match on work that is done; a turn that never states one never gets the match at all. State the plan you are starting from, marking the first step active, even when it is rough — the exploration that follows is where you refine it, and a step that names real files, packages and commands matches best.
+
+**Then the map, before you read anything.** With the plan stated, exploration runs the usual way. When the project has an index, it opens with "codebase_map" — the plan says where the turn is going, the map says where the code is. From there the flow is fixed and does not depend on the index: every "file_map" you need in one block, then every ranged "read" in the next. Reading whatever comes to mind has guessed at the project anyway.
 
 Call it again only when the plan changes: you start a step, you finish one, or one turns out not to be needed. Send the complete list every time — the call replaces the plan, so a step you leave out is gone. The tool echoes the plan back to you; copy that list and change only what moved, so a step you already finished stays finished.
 

@@ -179,12 +179,39 @@ func TestUpdateIntentAcceptsAPlan(t *testing.T) {
 	}
 }
 
+// The description is the only place the timing rule reaches the model when the
+// per-turn prompt section is not in view, so it must state the first-call rule
+// rather than the deferred boundary it replaced.
+func TestUpdateIntentDescriptionPutsThePlanFirst(t *testing.T) {
+	desc := NewUpdateIntentTool().Description()
+	for _, want := range []string{
+		"first, alone in your first block of every turn",
+		"before codebase_map, grep or any read",
+		"Call it on its own",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("Description missing %q", want)
+		}
+	}
+	for _, gone := range []string{
+		"before the first edit, write or bash call",
+		"by your fifth tool call",
+		"otherwise orient first",
+	} {
+		if strings.Contains(desc, gone) {
+			t.Errorf("Description still carries the deferred rule %q", gone)
+		}
+	}
+}
+
 // TestUpdateIntentOutputEchoesThePlan pins the continuity surface. The tool
 // result is the only place the model sees its own plan again, so it must come
 // back verbatim: without it a later call re-derives a re-worded list from memory
-// and every step the agent had closed is lost. The closing nudge is conditional
-// — it must push toward a final call while anything is still open, and disappear
-// once nothing is.
+// and every step the agent had closed is lost. It carries no invitation to call
+// the tool again: that invitation sat freshest in context and sent the model back
+// into this tool instead of on to the turn's first exploration call, so closing
+// the plan is left to the prompt and the description, which are re-sent every
+// step. Only a fully closed plan gets a line of its own.
 func TestUpdateIntentOutputEchoesThePlan(t *testing.T) {
 	res, err := NewUpdateIntentTool().Execute(context.Background(), json.RawMessage(
 		`{"steps":[{"step":"read the spec","status":"done"},{"step":"write the tool","status":"active"},{"step":"add tests","status":"pending"}]}`), Context{})
@@ -196,8 +223,8 @@ func TestUpdateIntentOutputEchoesThePlan(t *testing.T) {
 			t.Errorf("output does not echo %q: %q", want, res.Output)
 		}
 	}
-	if !strings.Contains(res.Output, "before you send the message that ends the turn") {
-		t.Errorf("an open plan did not carry the closing nudge: %q", res.Output)
+	if strings.Contains(res.Output, "call it once more") || strings.Contains(res.Output, "before you send the message that ends the turn") {
+		t.Errorf("the result invites another update_intent call: %q", res.Output)
 	}
 
 	closed, err := NewUpdateIntentTool().Execute(context.Background(), json.RawMessage(
@@ -210,6 +237,26 @@ func TestUpdateIntentOutputEchoesThePlan(t *testing.T) {
 	}
 	if strings.Contains(closed.Output, "before you send the message that ends the turn") {
 		t.Errorf("a closed plan still carried the closing nudge: %q", closed.Output)
+	}
+}
+
+// TestUpdateIntentDescriptionPointsAtTheMap pins the hand-off the same way,
+// from the description the model reads in every request: without it the plan
+// can swallow the map call, and the turn starts reading files blind. The plan
+// now comes first and the map follows it, so the hand-off has to survive the
+// reordering rather than be dropped with it.
+func TestUpdateIntentDescriptionPointsAtTheMap(t *testing.T) {
+	got := NewUpdateIntentTool().Description()
+	for _, want := range []string{
+		"exploration opens with codebase_map",
+		"the plan says where the turn is going, the map says where the code is",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("description does not hand off to codebase_map (%q missing): %q", want, got)
+		}
+	}
+	if strings.Contains(got, "otherwise orient first") {
+		t.Error("description still lets orientation precede the plan")
 	}
 }
 

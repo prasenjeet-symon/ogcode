@@ -24,21 +24,29 @@ func TestCanUpdateIntentIsOnlyTheBuildAgent(t *testing.T) {
 }
 
 // TestUpdateIntentPromptCarriesTheTimingContract pins the rules the feature
-// rests on: a plan is stated once at the start of the turn and then only when it
-// changes, the call stands in a block of its own so the plan lands before the
-// work it describes, the plan the user is reading must be kept honest (a step is
-// done or dropped, never left active after the agent has moved on), and the next
-// call copies the list the tool echoed back rather than re-deriving one from
-// memory.
+// rests on: the plan is the FIRST call of the turn — before codebase_map, before
+// any read — because the matcher's answer has to arrive before the exploration
+// it is meant to steer; the usual exploration path follows it (the map, then
+// every file map in one block, then every ranged read in the next); the call
+// stands in a block of its own so the plan lands before the work it describes;
+// the plan the user is reading must be kept honest (a step is done or dropped,
+// never left active after the agent has moved on); and the next call copies the
+// list the tool echoed back rather than re-deriving one from memory.
 func TestUpdateIntentPromptCarriesTheTimingContract(t *testing.T) {
 	p := updateIntentPrompt()
 	for _, want := range []string{
 		"## Saying where you are heading",
 		"update_intent",
-		"**The first tool call of every turn is update_intent**",
+		"**When to call it: first — before \"codebase_map\", before any read, before anything else in the turn.**",
+		"spends that match on work that is done",
 		"runs the matcher",
+		"never gets the match at all",
 		"Never call \"skill\" with no name",
 		"Call it again only when the plan changes",
+		"**Then the map, before you read anything.**",
+		"codebase_map",
+		"every \"file_map\" you need in one block",
+		"every ranged \"read\" in the next",
 		"**Call it on its own.**",
 		"replaces the plan",
 		"copy that list and change only what moved",
@@ -48,6 +56,17 @@ func TestUpdateIntentPromptCarriesTheTimingContract(t *testing.T) {
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("updateIntentPrompt is missing %q", want)
+		}
+	}
+	// The deferred rule is gone: no read-only orientation ahead of the plan, and
+	// no mutation-boundary or fifth-call fallback standing in for it.
+	for _, gone := range []string{
+		"before the first mutation",
+		"by your fifth tool call",
+		"may come before any plan",
+	} {
+		if strings.Contains(p, gone) {
+			t.Errorf("updateIntentPrompt still carries the deferred rule %q", gone)
 		}
 	}
 }
