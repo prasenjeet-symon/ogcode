@@ -797,6 +797,8 @@ export interface Theme {
   onPrimary: string;
   glow: string;
   tint: string;
+  accentInk: string;
+  accentInkLight: string;
 }
 
 export function getTheme(directory?: string): Promise<Theme> {

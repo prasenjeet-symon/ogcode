@@ -546,7 +546,7 @@ export default function NoteEditor(props: NoteEditorProps) {
       {/* File drag-over hint */}
       <Show when={fileDragOver()}>
         <div class="absolute inset-0 z-10 flex items-center justify-center pointer-events-none rounded-md bg-[color:var(--accent)]/5">
-          <div class="flex items-center gap-2 px-4 py-2 rounded-lg bg-[color:var(--bg-elevated)] border border-[color:var(--accent)]/40 text-[13px] text-[color:var(--accent)] font-medium">
+          <div class="flex items-center gap-2 px-4 py-2 rounded-lg bg-[color:var(--bg-elevated)] border border-[color:var(--accent)]/40 text-[13px] text-[color:var(--accent-ink)] font-medium">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -728,7 +728,7 @@ export default function NoteEditor(props: NoteEditorProps) {
                     onMouseEnter={() => setSlashMenu(m => m ? { ...m, selectedIdx: i() } : null)}
                     class={`w-full flex items-center gap-3 px-3 py-2 text-left transition ${sel() ? 'bg-[color:var(--accent-soft)] text-zinc-100' : 'text-zinc-300 hover:bg-[color:var(--bg-hover)]/50'}`}
                   >
-                    <span class={`w-7 h-7 rounded-md flex items-center justify-center text-[11px] font-bold shrink-0 ${sel() ? 'bg-[color:var(--accent)]/20 text-[color:var(--accent)]' : 'bg-[color:var(--bg-surface)] text-zinc-400'}`}>{cmd.textIcon}</span>
+                    <span class={`w-7 h-7 rounded-md flex items-center justify-center text-[11px] font-bold shrink-0 ${sel() ? 'bg-[color:var(--accent)]/20 text-[color:var(--accent-ink)]' : 'bg-[color:var(--bg-surface)] text-zinc-400'}`}>{cmd.textIcon}</span>
                     <div class="min-w-0">
                       <div class="text-[12px] font-medium leading-none mb-0.5">{cmd.label}</div>
                       <div class="text-[10px] text-zinc-500 leading-none">{cmd.description}</div>
@@ -771,7 +771,7 @@ export default function NoteEditor(props: NoteEditorProps) {
           <Show when={transformResult() !== null}>
             <div class="w-80 max-w-[calc(100vw-32px)] bg-[color:var(--bg-elevated)] border border-[color:var(--accent)]/30 rounded-lg shadow-xl overflow-hidden">
               <div class="px-3 py-2 border-b border-[color:var(--border-subtle)] flex items-center justify-between">
-                <span class="text-[10px] font-medium text-[color:var(--accent)] uppercase tracking-wider">Result</span>
+                <span class="text-[10px] font-medium text-[color:var(--accent-ink)] uppercase tracking-wider">Result</span>
                 <button
                   class="text-[10px] text-zinc-600 hover:text-zinc-400 transition leading-none"
                   onMouseDown={e => { e.preventDefault(); setSelState(null); setTransformResult(null); }}

@@ -31,7 +31,7 @@ export default function JumpToLatest(props: { count: number; onClick: () => void
       </span>
       <span class="tabular-nums">
         <Show when={props.count > 0} fallback={label()}>
-          <span class="text-[color:var(--accent)]">{props.count}</span> new
+          <span class="text-[color:var(--accent-ink)]">{props.count}</span> new
         </Show>
       </span>
     </button>

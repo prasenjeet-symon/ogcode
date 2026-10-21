@@ -172,7 +172,7 @@ function HomeContent() {
                 <Logo class="w-3.5 h-3.5 text-[color:var(--on-primary)]" small />
               </div>
               <span class="text-[14px] font-semibold tracking-tight text-zinc-100">ogcode</span>
-              <span class="ml-1.5 px-1.5 py-[1px] rounded text-[9px] font-mono font-medium text-[color:var(--accent)] bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/20">
+              <span class="ml-1.5 px-1.5 py-[1px] rounded text-[9px] font-mono font-medium text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/20">
                 v{version()}
               </span>
             </div>
@@ -266,7 +266,7 @@ function HomeContent() {
                     }}
                     class="h-8 px-3 rounded-full border border-[color:var(--border-subtle)]
                            bg-[color:var(--bg-surface)]/60 hover:border-[color:var(--accent)]/40
-                           hover:bg-[color:var(--accent-soft)] text-[12px] text-zinc-400 hover:text-[color:var(--accent)]
+                           hover:bg-[color:var(--accent-soft)] text-[12px] text-zinc-400 hover:text-[color:var(--accent-ink)]
                            transition-all var(--spring-sm) hover:scale-[1.02] active:scale-[0.98]"
                   >
                     {s}
@@ -316,7 +316,7 @@ function HomeContent() {
                       <div class="text-[9.5px] text-zinc-600 mt-1 max-w-[90px] leading-tight">{p.statLabel}</div>
                     </div>
                     <div class="w-9 h-9 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/15
-                                flex items-center justify-center text-[color:var(--accent)] mb-4
+                                flex items-center justify-center text-[color:var(--accent-ink)] mb-4
                                 group-hover:scale-110 transition-transform var(--spring-md)">
                       <PillarIcon name={p.icon} />
                     </div>

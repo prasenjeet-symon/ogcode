@@ -60,7 +60,7 @@ export default function SubagentIndicator() {
               title={`${task.title} — sub-agent running`}
             >
               {/* Bot head */}
-              <svg class="w-3.5 h-3.5 text-[color:var(--accent)] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <svg class="w-3.5 h-3.5 text-[color:var(--accent-ink)] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 {/* antenna */}
                 <path stroke-linecap="round" d="M12 3v3" />
                 <circle cx="12" cy="2.5" r="1" fill="currentColor" stroke="none" />
@@ -72,7 +72,7 @@ export default function SubagentIndicator() {
                 {/* mouth */}
                 <path stroke-linecap="round" d="M9.5 14.5h5" />
               </svg>
-              <span class="text-micro font-medium text-[color:var(--accent)] max-w-[140px] truncate">
+              <span class="text-micro font-medium text-[color:var(--accent-ink)] max-w-[140px] truncate">
                 {task.title}
               </span>
 
@@ -83,7 +83,7 @@ export default function SubagentIndicator() {
                 style={{ 'z-index': 9999 }}
               >
                 <span class="text-micro text-zinc-300">{task.title}</span>
-                <span class="text-micro text-[color:var(--accent)] ml-1.5">sub-agent running</span>
+                <span class="text-micro text-[color:var(--accent-ink)] ml-1.5">sub-agent running</span>
               </div>
             </div>
           )}

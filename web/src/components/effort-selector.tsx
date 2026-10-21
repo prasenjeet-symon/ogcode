@@ -48,7 +48,7 @@ function EffortGauge(props: { level: string; class?: string }) {
   return (
     <svg
       class={props.class ?? 'w-3 h-3'}
-      classList={{ 'text-[color:var(--accent)]': props.level === 'max' }}
+      classList={{ 'text-[color:var(--accent-ink)]': props.level === 'max' }}
       viewBox="0 0 12 12"
       fill="currentColor"
       aria-hidden="true"
@@ -216,12 +216,12 @@ export default function EffortSelector(props: EffortSelectorProps = {}) {
                       onClick={() => choose(row.level)}
                       class={`w-full text-left px-3 py-1.5 transition-colors flex items-center gap-2
                               ${isSelected()
-                                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+                                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
                                 : 'text-zinc-200 hover:bg-[color:var(--bg-hover)]'
                               }`}
                     >
                       <Show when={isSelected()} fallback={<span class="w-3.5 shrink-0" />}>
-                        <svg class="w-3.5 h-3.5 shrink-0 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <svg class="w-3.5 h-3.5 shrink-0 text-[color:var(--accent-ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                           <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                         </svg>
                       </Show>

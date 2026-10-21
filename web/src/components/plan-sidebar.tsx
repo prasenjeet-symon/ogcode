@@ -127,7 +127,7 @@ function PlanSidebarInner() {
               aria-label="Notes"
               class={`w-8 h-8 rounded-lg flex items-center justify-center transition
                 ${location.pathname.startsWith('/notes')
-                  ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                  ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)]'
                   : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
                 }`}
             >
@@ -142,7 +142,7 @@ function PlanSidebarInner() {
             aria-label="Project Index"
             class={`w-8 h-8 rounded-lg flex items-center justify-center transition
               ${location.pathname.startsWith('/docindex')
-                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)]'
                 : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
               }`}
           >
@@ -226,14 +226,14 @@ function PlanSidebarInner() {
           <button
             onClick={() => setArchiveFilter('active')}
             aria-pressed={archiveFilter() === 'active'}
-            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'active' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-[color:var(--text-label)] hover:text-[color:var(--text-secondary)]'}`}
+            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'active' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]' : 'text-[color:var(--text-label)] hover:text-[color:var(--text-secondary)]'}`}
           >
             Active
           </button>
           <button
             onClick={() => setArchiveFilter('archived')}
             aria-pressed={archiveFilter() === 'archived'}
-            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'archived' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-[color:var(--text-label)] hover:text-[color:var(--text-secondary)]'}`}
+            class={`flex-1 py-1 text-[11px] font-medium transition ${archiveFilter() === 'archived' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]' : 'text-[color:var(--text-label)] hover:text-[color:var(--text-secondary)]'}`}
           >
             Archive
             <Show when={archivedCount() > 0}>
@@ -272,7 +272,7 @@ function PlanSidebarInner() {
               <div
                 class={`group relative cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition
                   ${isActive()
-                    ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+                    ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
                     : 'text-zinc-400 hover:bg-[color:var(--bg-hover)]/50 hover:text-zinc-200'
                   }`}
               >
@@ -309,7 +309,7 @@ function PlanSidebarInner() {
                     </Show>
                   </span>
                   </button>
-                  <span class={`text-[10.5px] tabular-nums shrink-0 transition max-md:hidden ${isActive() ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-label)]'} group-hover:opacity-0`}>
+                  <span class={`text-[10.5px] tabular-nums shrink-0 transition max-md:hidden ${isActive() ? 'text-[color:var(--accent-ink)]' : 'text-[color:var(--text-label)]'} group-hover:opacity-0`}>
                     {formatTime(p.updatedAt)}
                   </span>
                   <button
@@ -346,7 +346,7 @@ function PlanSidebarInner() {
             onClick={() => navigate('/notes')}
           class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
             ${location.pathname.startsWith('/notes')
-              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
               : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
@@ -361,7 +361,7 @@ function PlanSidebarInner() {
           onClick={() => navigate('/docindex')}
           class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
             ${location.pathname.startsWith('/docindex')
-              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
               : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
@@ -376,7 +376,7 @@ function PlanSidebarInner() {
             onClick={() => navigate('/device')}
             class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
               ${location.pathname.startsWith('/device')
-                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
                 : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
               }`}
           >
@@ -391,7 +391,7 @@ function PlanSidebarInner() {
           onClick={() => navigate('/preview')}
           class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
             ${location.pathname.startsWith('/preview')
-              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
               : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >

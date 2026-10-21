@@ -193,7 +193,7 @@ export default function FileViewer(props: {
           class="shrink-0 h-5 pl-1.5 pr-1 rounded-md flex items-center gap-1.5 text-[0.625rem] font-medium border transition-colors"
           classList={{
             'text-[color:var(--text-secondary)] border-[color:var(--border-default)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]': props.file.indexed,
-            'text-[color:var(--accent)] border-[color:var(--accent-ring)] hover:bg-[color:var(--accent-soft)]': !props.file.indexed,
+            'text-[color:var(--accent-ink)] border-[color:var(--accent-ring)] hover:bg-[color:var(--accent-soft)]': !props.file.indexed,
             'bg-[color:var(--bg-hover)]': detailsOpen(),
           }}
           aria-haspopup="dialog"

@@ -171,7 +171,7 @@ function PlanListContent() {
                     }}
                     class="h-8 px-3 rounded-full border border-[color:var(--border-subtle)]
                            bg-[color:var(--bg-surface)]/60 hover:border-[color:var(--accent)]/40
-                           hover:bg-[color:var(--accent-soft)] text-[12px] text-zinc-400 hover:text-[color:var(--accent)]
+                           hover:bg-[color:var(--accent-soft)] text-[12px] text-zinc-400 hover:text-[color:var(--accent-ink)]
                            transition-all var(--spring-sm) hover:scale-[1.02] active:scale-[0.98]"
                   >
                     {s}

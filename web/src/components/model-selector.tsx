@@ -188,13 +188,13 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
                         class={`w-full text-left px-3 py-1.5 text-ui transition-colors
                                 flex items-center justify-between gap-2
                                 ${isSelected()
-                                  ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+                                  ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
                                   : 'text-zinc-200 hover:bg-[color:var(--bg-hover)]'
                                 }`}
                       >
                         <span class="truncate flex items-center gap-2">
                           <Show when={isSelected()} fallback={<span class="w-3.5" />}>
-                            <svg class="w-3.5 h-3.5 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                            <svg class="w-3.5 h-3.5 text-[color:var(--accent-ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                               <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                             </svg>
                           </Show>
@@ -214,7 +214,7 @@ export default function ModelSelector(props: ModelSelectorProps = {}) {
                           </Show>
                           <Show when={slotMap().get(model.id)}>
                             {(n) => (
-                              <span class="text-[9px] text-[color:var(--accent)] bg-[color:var(--accent-soft)] px-1 py-0.5 rounded font-mono font-semibold">
+                              <span class="text-[9px] text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)] px-1 py-0.5 rounded font-mono font-semibold">
                                 Alt+{n()}
                               </span>
                             )}

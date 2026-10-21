@@ -218,7 +218,7 @@ function SessionSidebarInner() {
       <div
         class={`group/row relative flex items-center gap-2 rounded-md h-7 pl-2.5 pr-1.5 text-ui transition-colors
           ${isActive()
-            ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)] font-medium'
+            ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)] font-medium'
             : 'text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)]'
           }`}
       >
@@ -274,7 +274,7 @@ function SessionSidebarInner() {
           {/* Timestamp and actions share the row end. The time stays put on
               hover — the actions appear beside it rather than replacing it,
               so the moment you were reading is not the moment it vanishes. */}
-          <span class={`text-micro tabular-nums shrink-0 ${isActive() ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-label)]'}`}>
+          <span class={`text-micro tabular-nums shrink-0 ${isActive() ? 'text-[color:var(--accent-ink)]' : 'text-[color:var(--text-label)]'}`}>
             {formatTime(s.updatedAt)}
           </span>
           <span class={`group-hover/row:flex items-center gap-0.5 shrink-0 ${isPinned() ? 'flex' : 'hidden'}`}>
@@ -284,7 +284,7 @@ function SessionSidebarInner() {
               aria-label={isPinned() ? 'Unpin session' : 'Pin session'}
               class={`w-5 h-5 rounded flex items-center justify-center transition-colors
                      ${isPinned()
-                       ? 'text-[color:var(--accent)] hover:bg-[color:var(--bg-elevated)]'
+                       ? 'text-[color:var(--accent-ink)] hover:bg-[color:var(--bg-elevated)]'
                        : 'text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)]'
                      }`}
             >
@@ -353,7 +353,7 @@ function SessionSidebarInner() {
               aria-label="Notes"
               class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
                 ${location.pathname.startsWith('/notes')
-                  ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                  ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)]'
                   : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
                 }`}
             >
@@ -368,7 +368,7 @@ function SessionSidebarInner() {
             aria-label="Project Index"
             class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
               ${location.pathname.startsWith('/docindex')
-                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)]'
                 : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
               }`}
           >
@@ -498,7 +498,7 @@ function SessionSidebarInner() {
             onClick={() => navigate('/notes')}
             class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
               ${location.pathname.startsWith('/notes')
-                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
                 : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
               }`}
           >
@@ -513,7 +513,7 @@ function SessionSidebarInner() {
           onClick={() => navigate('/docindex')}
           class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
             ${location.pathname.startsWith('/docindex')
-              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
               : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >
@@ -528,7 +528,7 @@ function SessionSidebarInner() {
             onClick={() => navigate('/device')}
             class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
               ${location.pathname.startsWith('/device')
-                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+                ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
                 : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
               }`}
           >
@@ -543,7 +543,7 @@ function SessionSidebarInner() {
           onClick={() => navigate('/preview')}
           class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
             ${location.pathname.startsWith('/preview')
-              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]'
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
               : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
             }`}
         >

@@ -80,7 +80,7 @@ function PlanDetailContent() {
               </span>
             </Show>
             <Show when={plan.loading()}>
-              <span class="flex items-center gap-1 text-[11px] text-[color:var(--accent)] ml-1">
+              <span class="flex items-center gap-1 text-[11px] text-[color:var(--accent-ink)] ml-1">
                 <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse" />
                 generating
               </span>
@@ -97,13 +97,13 @@ function PlanDetailContent() {
             <div class="flex rounded-lg border border-[color:var(--border-default)] overflow-hidden lg:hidden">
               <button
                 onClick={() => setActiveTab('conversation')}
-                class={`px-3 py-1.5 text-[11px] font-medium transition ${activeTab() === 'conversation' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-400 hover:text-zinc-200'}`}
+                class={`px-3 py-1.5 text-[11px] font-medium transition ${activeTab() === 'conversation' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]' : 'text-zinc-400 hover:text-zinc-200'}`}
               >
                 Chat
               </button>
               <button
                 onClick={() => setActiveTab('tasks')}
-                class={`px-3 py-1.5 text-[11px] font-medium transition ${activeTab() === 'tasks' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-zinc-400 hover:text-zinc-200'}`}
+                class={`px-3 py-1.5 text-[11px] font-medium transition ${activeTab() === 'tasks' ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]' : 'text-zinc-400 hover:text-zinc-200'}`}
               >
                 Tasks
               </button>

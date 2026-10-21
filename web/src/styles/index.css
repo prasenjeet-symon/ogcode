@@ -76,13 +76,16 @@
   --text-chat: 0.9375rem;
   --text-chat--line-height: 1.65;
 
-  /* Override Tailwind's zinc-500/zinc-600 text steps. The stock values
-     (#71717b / #52525c) are tuned for mid-gray surfaces; on this app's
-     near-black backgrounds they read at 3.96:1 and 2.57:1, failing WCAG AA.
-     These lifted values clear 4.5:1 on the darkest surface they sit on
-     (--bg-elevated #161619) while keeping the same visual rank. */
-  --color-zinc-500: #86868f;
-  --color-zinc-600: #808088;
+  /* Override Tailwind's zinc-500/600/700 text steps. The stock values
+     (#71717b / #52525c / #3f3f46) are tuned for mid-gray surfaces; on this app's
+     near-black backgrounds they read at 3.96:1, 2.57:1 and 1.91:1, failing WCAG
+     AA. These lifted values clear 4.5:1 on the LIGHTEST surface such text can
+     land on — --bg-hover #222226, a hovered row — which is the worst case, not
+     the darkest one, and they keep the same visual rank (500 lightest, 700
+     darkest). Measured on hover: 5.27 / 4.94 / 4.63. */
+  --color-zinc-500: #94949d;
+  --color-zinc-600: #8f8f98;
+  --color-zinc-700: #8a8a93;
 }
 
 /* ============================================================
@@ -102,14 +105,15 @@
   --border-strong:  #3a3a42;
 
   /* Text: warm-cool zinc progression — every step clears WCAG AA (>= 4.5:1)
-     on the darkest surface it sits on (--bg-elevated #161619). */
+     on the LIGHTEST surface it can sit on (--bg-hover #222226), because a row
+     that is legible until it is hovered is not legible. */
   --text-primary:   #ededef;
   --text-secondary: #9d9da6;
   --text-tertiary:  #8b8b94;
-  --text-muted:     #808088;
+  --text-muted:     #8a8a93;
   /* --text-label: the legible floor for small UI text (group labels, timestamps,
-     inactive nav rows) — ~5.3:1 on --bg-surface. */
-  --text-label:     #86868f;
+     inactive nav rows) — 4.63:1 on --bg-hover, ~6.1:1 on --bg-surface. */
+  --text-label:     #8a8a93;
 
   /* Accent: ogcode brand orange (#FF5E1F) — the single saturated color */
   --accent:         #ff5e1f;
@@ -117,6 +121,12 @@
   --accent-soft:    rgba(255, 94, 31, 0.12);
   --accent-ring:    rgba(255, 94, 31, 0.35);
   --on-primary:     #0a0a0b;
+  /* Accent ink: the accent as legible TEXT. One token cannot be both a fill and
+     an ink — the fill is fine beside the surfaces it lights up, the ink has to
+     clear AA on every surface AND on its own 12% wash (--accent-soft), which is
+     what a selected row or pill draws behind it. Per-mode because the accent
+     ramp is shared while the surfaces invert; the server derives both. */
+  --accent-ink:     var(--accent-ink-dark, #ff6022);
   --glow:           rgba(255, 94, 31, 0.12);
   --tint:           rgba(255, 94, 31, 0.05);
 
@@ -196,13 +206,14 @@
   --text-primary:   #16161a;
   --text-secondary: #494952;
   --text-tertiary:  #67676f;
-  --text-muted:     #6f6f78;
+  --text-muted:     #67676f;
   --text-label:     #67676f;
 
   /* Accent stays brand orange; only the derived tints soften. */
   --accent-hover:   #e14a00;
   --accent-soft:    rgba(255, 94, 31, 0.12);
   --accent-ring:    rgba(255, 94, 31, 0.30);
+  --accent-ink:     var(--accent-ink-light, #ab3000);
   --glow:           rgba(255, 94, 31, 0.10);
   --tint:           rgba(255, 94, 31, 0.04);
 
@@ -215,7 +226,7 @@
 
   --status-pending:    #6b7280;
   --status-progress:   #a16207;
-  --status-completed:  #e14a00;
+  --status-completed:  #b83800;
   --status-failed:     #d1242f;
   --status-pending-soft:    rgba(107, 114, 128, 0.12);
   --status-progress-soft:   rgba(161, 98, 7, 0.14);
@@ -241,9 +252,9 @@
   --color-zinc-200: #26262b;
   --color-zinc-300: #3a3a42;
   --color-zinc-400: #52525b;
-  --color-zinc-500: #6b6b75;
-  --color-zinc-600: #7c7c86;
-  --color-zinc-700: #9a9aa4;
+  --color-zinc-500: #5f5f67;
+  --color-zinc-600: #63636b;
+  --color-zinc-700: #686870;
   --color-zinc-800: #d3d3da;
   --color-zinc-900: #e7e7ec;
   --color-zinc-950: #f5f5f7;
@@ -1031,7 +1042,7 @@ textarea.auto-resize {
 }
 .latex-render-type {
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-ink);
   white-space: nowrap;
 }
 .latex-render-title {
@@ -1084,7 +1095,7 @@ textarea.auto-resize {
 }
 .latex-src-toggle.active {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   border-color: rgba(255, 94, 31, 0.3);
 }
 .latex-download-btn {
@@ -1094,7 +1105,7 @@ textarea.auto-resize {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   border: 1px solid rgba(255, 94, 31, 0.25);
   font-size: 0.75rem;
   font-weight: 600;
@@ -1778,7 +1789,7 @@ body.drawer-open {
   box-shadow: inset 0 0 0 1px var(--border-default);
 }
 .tool-count.is-accent {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
@@ -2388,7 +2399,7 @@ body.drawer-open {
   flex: none;
   width: 14px;
   height: 14px;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .intent-pill .txt {
   overflow: hidden;
@@ -2519,7 +2530,7 @@ body.drawer-open {
   color: var(--text-muted);
 }
 .intent-pop .s-active .glyph {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .intent-pop .s-active .lbl {
   color: var(--text-primary);

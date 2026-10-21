@@ -306,14 +306,17 @@ function ThemeGroup(props: { hide: Hide }) {
                   aria-pressed={active()}
                   class="w-6 h-6 rounded-full shrink-0 flex items-center justify-center transition-transform hover:scale-110"
                   style={{
-                    background: p.hex,
+                    // The active swatch paints the derived accent (slightly
+                    // clamped from the preset) so the checkmark's label colour,
+                    // --on-primary, is the one guaranteed to clear AA on it.
+                    background: active() ? 'var(--accent)' : p.hex,
                     'box-shadow': active()
                       ? '0 0 0 2px var(--bg-surface), 0 0 0 4px var(--text-primary)'
                       : 'inset 0 0 0 1px rgba(255,255,255,0.14)',
                   }}
                 >
                   <Show when={active()}>
-                    <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3.5">
+                    <svg class="w-3 h-3 text-[color:var(--on-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3.5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   </Show>

@@ -379,7 +379,7 @@ export default function DocIndexPage() {
           <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="w-7 h-7 rounded-lg bg-[color:var(--accent-soft)] shadow-[inset_0_0_0_1px_var(--accent-ring)] flex items-center justify-center shrink-0">
-              <svg class="w-3.5 h-3.5 text-[color:var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <svg class="w-3.5 h-3.5 text-[color:var(--accent-ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
               </svg>
             </div>
@@ -531,7 +531,7 @@ export default function DocIndexPage() {
           class="w-[300px] p-1.5"
         >
           <button type="button" role="menuitem" data-pop-item class="pop-item" onClick={() => openRunDialog(false)}>
-            <span class="mt-0.5 w-6 h-6 rounded-md shrink-0 flex items-center justify-center bg-[color:var(--accent-soft)] text-[color:var(--accent)]">
+            <span class="mt-0.5 w-6 h-6 rounded-md shrink-0 flex items-center justify-center bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]">
               <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 3l14 9-14 9V3z" />
               </svg>

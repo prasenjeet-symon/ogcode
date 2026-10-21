@@ -61,7 +61,7 @@ export default function ModelSwitchPopup() {
                 {(n) => (
                   <div
                     class="flex items-center justify-center w-7 h-7 rounded-lg shrink-0
-                           bg-[color:var(--accent-soft)] text-[color:var(--accent)]
+                           bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]
                            font-mono font-semibold text-[13px] border border-[color:var(--accent-ring)]"
                   >
                     {n()}

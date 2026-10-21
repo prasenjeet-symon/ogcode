@@ -189,7 +189,7 @@ export default function SettingsLayout(props: RouteSectionProps) {
               onClick={goBack}
               title="Close settings"
               class="flex items-center gap-0.5 h-8 pl-1 pr-2 rounded-lg shrink-0 transition-colors
-                     text-[color:var(--accent)] hover:bg-[color:var(--bg-hover)]"
+                     text-[color:var(--accent-ink)] hover:bg-[color:var(--bg-hover)]"
             >
               <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -277,7 +277,7 @@ export default function SettingsLayout(props: RouteSectionProps) {
                           so the eye lands on it without a filled pill shouting. */}
                       <svg
                         class={`w-4 h-4 shrink-0 transition-colors duration-150
-                          ${active() ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)]'}`}
+                          ${active() ? 'text-[color:var(--accent-ink)]' : 'text-[color:var(--text-muted)]'}`}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7"
                       >
                         <path stroke-linecap="round" stroke-linejoin="round" d={page.icon} />
@@ -343,7 +343,7 @@ export default function SettingsLayout(props: RouteSectionProps) {
                   <button
                     type="button"
                     onClick={() => { setQuery(''); searchEl?.focus(); }}
-                    class="text-[color:var(--accent)] font-medium hover:underline underline-offset-2"
+                    class="text-[color:var(--accent-ink)] font-medium hover:underline underline-offset-2"
                   >
                     Clear
                   </button>

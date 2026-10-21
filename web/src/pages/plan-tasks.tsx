@@ -240,7 +240,7 @@ function TaskDrawer(props: { task: Task | null; onClose: () => void }) {
                   href={t()!.prUrl!}
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1.5 text-[12px] text-[color:var(--accent)] hover:opacity-80 transition-opacity"
+                  class="inline-flex items-center gap-1.5 text-[12px] text-[color:var(--accent-ink)] hover:opacity-80 transition-opacity"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -442,7 +442,7 @@ function KanbanCard(props: { task: Task; focused: boolean; onSelect: (t: Task) =
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            class="text-[10px] text-[color:var(--accent)] hover:opacity-80 transition-opacity"
+            class="text-[10px] text-[color:var(--accent-ink)] hover:opacity-80 transition-opacity"
           >
             PR #{t().prNumber}
           </a>
@@ -454,7 +454,7 @@ function KanbanCard(props: { task: Task; focused: boolean; onSelect: (t: Task) =
             onClick={handleStart}
             disabled={starting()}
             class={`text-[10px] px-2 py-0.5 rounded-md border border-[color:var(--accent)]/50
-                    bg-[color:var(--accent-soft)] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/25
+                    bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)] hover:bg-[color:var(--accent)]/25
                     transition disabled:opacity-50 font-medium
                     ${props.focused ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           >
@@ -480,7 +480,7 @@ function KanbanCard(props: { task: Task; focused: boolean; onSelect: (t: Task) =
         <Show when={modelOverridden()}>
           <span
             class="shrink-0 text-[8.5px] uppercase tracking-wide px-1 py-px rounded font-medium"
-            style={{ color: 'var(--accent)', background: 'var(--accent-soft)' }}
+            style={{ color: 'var(--accent-ink)', background: 'var(--accent-soft)' }}
           >
             custom
           </span>

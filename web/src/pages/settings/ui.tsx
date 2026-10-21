@@ -307,9 +307,9 @@ type ButtonVariant = 'filled' | 'outlined' | 'text' | 'danger';
 
 const VARIANTS: Record<ButtonVariant, string> = {
   filled: 'bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:bg-[color:var(--accent-hover)] border border-transparent',
-  outlined: 'bg-[color:var(--bg-elevated)] text-[color:var(--accent)] border border-transparent hover:brightness-125',
+  outlined: 'bg-[color:var(--bg-elevated)] text-[color:var(--accent-ink)] border border-transparent hover:brightness-125',
   // An action, not a value: tinted text, no chrome around it.
-  text: 'bg-transparent text-[color:var(--accent)] border border-transparent hover:opacity-70',
+  text: 'bg-transparent text-[color:var(--accent-ink)] border border-transparent hover:opacity-70',
   // The way out of something — disconnect, remove. Quiet until pointed at, so
   // it never competes with the action a row is really for.
   danger:
@@ -373,7 +373,7 @@ export function IconButton(props: {
 }
 
 export function LinkAction(props: { onClick?: () => void; href?: string; children: JSX.Element }) {
-  const cls = 'text-meta font-medium text-[color:var(--accent)] hover:underline underline-offset-2 transition-colors';
+  const cls = 'text-meta font-medium text-[color:var(--accent-ink)] hover:underline underline-offset-2 transition-colors';
   return (
     <Show
       when={!props.href}
@@ -461,7 +461,7 @@ export function Chip(props: {
       aria-pressed={props.active}
       class={`inline-flex shrink-0 items-center gap-1.5 h-7 px-3 rounded-full text-meta font-medium border transition-colors
         ${props.active
-          ? 'border-[color:var(--accent)] text-[color:var(--accent)]'
+          ? 'border-[color:var(--accent)] text-[color:var(--accent-ink)]'
           : 'border-[color:var(--border-default)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]'
         }`}
     >
@@ -476,7 +476,7 @@ export function Tag(props: { tone?: 'accent' | 'muted'; children: JSX.Element })
     <span
       class={`shrink-0 inline-flex items-center h-[17px] px-1.5 rounded-full text-micro font-medium leading-none border
         ${props.tone === 'accent'
-          ? 'border-[color:var(--accent)] text-[color:var(--accent)]'
+          ? 'border-[color:var(--accent)] text-[color:var(--accent-ink)]'
           : 'border-[color:var(--border-default)] text-[color:var(--text-muted)]'
         }`}
     >

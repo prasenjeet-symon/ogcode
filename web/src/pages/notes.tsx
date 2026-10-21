@@ -66,7 +66,7 @@ function NoteCard(props: { note: Note; onDelete: (e: MouseEvent) => void; onClic
         </svg>
 
         {/* Filename */}
-        <span class="text-[13px] font-semibold text-[color:var(--accent)] hover:underline font-mono flex-1 min-w-0 truncate">
+        <span class="text-[13px] font-semibold text-[color:var(--accent-ink)] hover:underline font-mono flex-1 min-w-0 truncate">
           {toFilename(n().title || n().query)}
         </span>
 

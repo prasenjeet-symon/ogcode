@@ -186,7 +186,7 @@ function TaskExecutionContent() {
             </Show>
 
             <Show when={session.loading() || session.hasRunningTools()}>
-              <span class="flex items-center gap-1 text-[11px] text-[color:var(--accent)] ml-1 shrink-0">
+              <span class="flex items-center gap-1 text-[11px] text-[color:var(--accent-ink)] ml-1 shrink-0">
                 <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--accent)] animate-pulse" />
                 <span class="hidden sm:inline">{session.hasRunningTools() ? 'running tools' : 'generating'}</span>
               </span>
@@ -236,7 +236,7 @@ function TaskExecutionContent() {
           fallback={
             <div class="flex-1 flex items-center justify-center">
               <div class="flex flex-col items-center gap-3">
-                <svg class="w-6 h-6 text-[color:var(--accent)] animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg class="w-6 h-6 text-[color:var(--accent-ink)] animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4m0 8v4m8-8h-4M8 12H4m13.657-5.657l-2.829 2.829M9.172 14.828l-2.829 2.829m11.314 0l-2.829-2.829M9.172 9.172L6.343 6.343" />
                 </svg>
                 <p class="text-[13px] text-zinc-400">

@@ -108,7 +108,7 @@ export function DialogHeader(props: {
         <div
           class="w-8 h-8 rounded-[9px] flex items-center justify-center shrink-0"
           classList={{
-            'bg-[color:var(--accent-soft)] text-[color:var(--accent)] shadow-[inset_0_0_0_1px_var(--accent-ring)]': (props.tone ?? 'accent') === 'accent',
+            'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)] shadow-[inset_0_0_0_1px_var(--accent-ring)]': (props.tone ?? 'accent') === 'accent',
             'bg-[color:var(--warning)]/[0.12] text-[color:var(--warning)] shadow-[inset_0_0_0_1px_rgba(245,166,35,0.28)]': props.tone === 'warning',
           }}
         >

@@ -737,7 +737,7 @@ export default function MessageList() {
           <Show when={rows().list.length === 0 && !session.loading()}>
             <div class="flex flex-col items-center justify-center py-24 text-center animate-fade-in-up">
               <div class="w-11 h-11 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--border-subtle)] flex items-center justify-center mb-3.5">
-                <Logo class="w-6 h-6 text-[color:var(--accent)]" />
+                <Logo class="w-6 h-6 text-[color:var(--accent-ink)]" />
               </div>
               <p class="text-ui font-medium text-[color:var(--text-primary)] mb-1">Ready when you are</p>
               <p class="text-meta text-[color:var(--text-tertiary)]">Describe a task, ask a question, or paste an error.</p>

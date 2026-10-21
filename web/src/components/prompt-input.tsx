@@ -422,7 +422,7 @@ export default function PromptInput() {
             <div class="absolute inset-0 z-10 rounded-[1.25rem] flex items-center justify-center gap-2
                         pointer-events-none animate-fade-in
                         border-2 border-dashed border-[color:var(--accent)]
-                        bg-[color:var(--bg-surface)]/92 text-[color:var(--accent)] text-ui font-medium">
+                        bg-[color:var(--bg-surface)]/92 text-[color:var(--accent-ink)] text-ui font-medium">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9m0 0L8.25 12.75M12 9l3.75 3.75M3 16.5v.75A2.25 2.25 0 005.25 19.5h13.5A2.25 2.25 0 0021 17.25v-.75" />
               </svg>
@@ -468,7 +468,7 @@ export default function PromptInput() {
           {/* Guidance-in-flight indicator: queued until the loop picks the
               guidance up, then a brief "applied" before it clears. */}
           <Show when={session.guidanceStatus() !== 'idle'}>
-            <div class="px-4 pt-2 flex items-center gap-1.5 text-micro text-[color:var(--accent)]">
+            <div class="px-4 pt-2 flex items-center gap-1.5 text-micro text-[color:var(--accent-ink)]">
               <Show
                 when={session.guidanceStatus() === 'delivered'}
                 fallback={
@@ -549,7 +549,7 @@ export default function PromptInput() {
 
             {/* Guidance-sent confirmation badge */}
             <Show when={guidanceSent()}>
-              <span class="text-micro font-medium text-[color:var(--accent)] select-none animate-fade-in">
+              <span class="text-micro font-medium text-[color:var(--accent-ink)] select-none animate-fade-in">
                 Guidance sent
               </span>
             </Show>

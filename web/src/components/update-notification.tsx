@@ -76,7 +76,7 @@ export default function UpdateNotification() {
       >
         {/* Header */}
         <header class="flex items-start gap-3 px-4 pb-3 pt-4">
-          <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[color:var(--accent-soft)] text-[color:var(--accent)]">
+          <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5M5 12l7-7 7 7" />
             </svg>
@@ -178,7 +178,7 @@ export default function UpdateNotification() {
             href={versionInfo()?.releaseUrl}
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex items-center gap-1 text-[11px] font-medium text-[color:var(--accent)] transition-colors hover:text-[color:var(--accent-hover)]"
+            class="inline-flex items-center gap-1 text-[11px] font-medium text-[color:var(--accent-ink)] transition-colors hover:text-[color:var(--accent-hover)]"
           >
             Release notes
             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

@@ -15,15 +15,17 @@ import (
 
 // Theme holds a per-directory color palette derived from a user-chosen primary color.
 type Theme struct {
-	Directory    string `json:"directory"`
-	PrimaryColor string `json:"primaryColor"` // hex input from user, e.g. "#6366f1"
-	Accent       string `json:"accent"`       // --accent
-	AccentHover  string `json:"accentHover"`  // --accent-hover
-	AccentSoft   string `json:"accentSoft"`   // --accent-soft (rgba)
-	AccentRing   string `json:"accentRing"`   // --accent-ring (rgba)
-	OnPrimary    string `json:"onPrimary"`    // text color on accent bg
-	Glow         string `json:"glow"`         // --glow (rgba, for background accents)
-	Tint         string `json:"tint"`         // --tint (rgba, ~5% for sidebar/header)
+	Directory      string `json:"directory"`
+	PrimaryColor   string `json:"primaryColor"`   // hex input from user, e.g. "#6366f1"
+	Accent         string `json:"accent"`         // --accent
+	AccentHover    string `json:"accentHover"`    // --accent-hover
+	AccentSoft     string `json:"accentSoft"`     // --accent-soft (rgba)
+	AccentRing     string `json:"accentRing"`     // --accent-ring (rgba)
+	OnPrimary      string `json:"onPrimary"`      // text color on accent bg
+	Glow           string `json:"glow"`           // --glow (rgba, for background accents)
+	Tint           string `json:"tint"`           // --tint (rgba, ~5% for sidebar/header)
+	AccentInk      string `json:"accentInk"`      // --accent-ink in dark mode
+	AccentInkLight string `json:"accentInkLight"` // --accent-ink in light mode
 }
 
 func parseHex(s string) (r, g, b uint8, err error) {
@@ -126,22 +128,116 @@ func rgbaStr(r, g, b uint8, a float64) string {
 	return fmt.Sprintf("rgba(%d, %d, %d, %.2f)", r, g, b, a)
 }
 
-// on-primary crossover: white gives 1.05/(L+0.05), near-black gives (L+0.05)/0.05;
-// they are equal at L = 0.17913. Below it white contrasts more, above it black does.
-const onPrimaryCrossover = 0.17913
+// Contrast targets and the lightness step each derived colour walks by. The
+// label step is small because a visible bump in the accent means a different
+// brand colour on screen; the ink step can be a little larger because the ink
+// is a text token and is expected to differ from the fill.
+const (
+	minLabelContrast = 4.5
+	labelStep        = 0.0025
+	inkStep          = 0.005
+)
 
-// onPrimaryFor returns the label colour to draw on top of the given accent hex:
-// whichever of near-black/near-white contrasts MORE with it, so a filled button,
-// checkbox or badge always clears WCAG AA (4.5:1) on an accent the user chose.
-func onPrimaryFor(accentHex string) string {
-	r, g, b, err := parseHex(accentHex)
+// Surfaces an accent is drawn on as TEXT, per mode (--bg-base … --bg-elevated).
+// Each is also checked with a 12% accent wash composited over it, which is what
+// --accent-soft produces on a selected row, pill or chip.
+var (
+	darkSurfaces  = []string{"#09090b", "#0f0f12", "#161619", "#1b1b1f", "#222226"}
+	lightSurfaces = []string{"#ffffff", "#f8f8fa", "#f0f0f3", "#e9e9ee"}
+)
+
+func hexOf(r, g, b uint8) string {
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// contrastRatio returns the WCAG contrast ratio between two hex colors.
+func contrastRatio(a, b string) float64 {
+	ar, ag, ab, err := parseHex(a)
 	if err != nil {
-		return "#ffffff"
+		return 0
 	}
-	if relativeLuminance(r, g, b) > onPrimaryCrossover {
+	br, bg, bb, err := parseHex(b)
+	if err != nil {
+		return 0
+	}
+	la := relativeLuminance(ar, ag, ab)
+	lb := relativeLuminance(br, bg, bb)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// compositeHex returns the colour of an accent at the given opacity over a surface.
+func compositeHex(r, g, b uint8, alpha float64, surfaceHex string) string {
+	sr, sg, sb, err := parseHex(surfaceHex)
+	if err != nil {
+		return surfaceHex
+	}
+	mix := func(fg, bg uint8) uint8 {
+		return uint8(math.Round(float64(fg)*alpha + float64(bg)*(1-alpha)))
+	}
+	return hexOf(mix(r, sr), mix(g, sg), mix(b, sb))
+}
+
+// labelFor picks the label colour drawn ON an accent fill: whichever of
+// near-black/near-white clears the accent AND its hover by the wider margin.
+// The fill a pointer rests on is the hovered one, and it is darker than the
+// accent for every preset, so a label chosen on the accent alone can fail there.
+func labelFor(accent, hover string) string {
+	white := math.Min(contrastRatio("#ffffff", accent), contrastRatio("#ffffff", hover))
+	black := math.Min(contrastRatio("#0a0a0b", accent), contrastRatio("#0a0a0b", hover))
+	if black >= white {
 		return "#0a0a0b"
 	}
 	return "#ffffff"
+}
+
+// clampForLabel nudges an HSL lightness the shortest distance that lets the
+// given label reach minLabelContrast on that colour: darker for a white label,
+// lighter for a near-black one. Returns l unchanged if the range runs out.
+func clampForLabel(h, s, l float64, label string, step float64) float64 {
+	dir := step
+	if label == "#ffffff" {
+		dir = -step
+	}
+	for contrastRatio(hexOf(hslToRGB(h, s, l)), label) < minLabelContrast {
+		next := l + dir
+		if next < 0 || next > 1 {
+			return l
+		}
+		l = next
+	}
+	return l
+}
+
+// inkFor walks a hue's lightness away from its fill lightness until the colour
+// is legible as TEXT on every surface of the mode (and on each surface's 12%
+// accent wash). Light mode walks down, dark mode up.
+func inkFor(h, s, l float64, mode string) string {
+	surfaces, dir := darkSurfaces, inkStep
+	if mode == "light" {
+		surfaces, dir = lightSurfaces, -inkStep
+	}
+	worst := func(r, g, b uint8) float64 {
+		c := hexOf(r, g, b)
+		w := math.Inf(1)
+		for _, surface := range surfaces {
+			w = math.Min(w, contrastRatio(c, surface))
+			w = math.Min(w, contrastRatio(c, compositeHex(r, g, b, 0.12, surface)))
+		}
+		return w
+	}
+	for {
+		r, g, b := hslToRGB(h, s, l)
+		if worst(r, g, b) >= minLabelContrast {
+			return hexOf(r, g, b)
+		}
+		l += dir
+		if l < 0 || l > 1 {
+			return hexOf(r, g, b)
+		}
+	}
 }
 
 // deriveTheme computes a full palette from a single hex primary color.
@@ -157,58 +253,69 @@ func deriveTheme(primaryHex, directory string) Theme {
 
 	// Clamp near-black/near-white so accent is always visible on dark surfaces.
 	// Near-black (#000–#1e1e1e, L < 0.06) would be invisible against the app's
-	// dark backgrounds; near-white (L > 0.94) loses hover distinction and causes
-	// hardcoded "text-white" to become invisible on white buttons.
+	// dark backgrounds; near-white (L > 0.94) loses hover distinction on a light one.
 	displayL := l
 	if l < 0.06 {
 		displayL = 0.35
 	} else if l > 0.94 {
 		displayL = 0.88
 	}
-	if displayL != l {
-		r, g, b = hslToRGB(h, s, displayL)
-	}
-
-	// accent = primary color itself
-	accent := fmt.Sprintf("#%02x%02x%02x", r, g, b)
 
 	// accent-hover: darken slightly from the display lightness, boost saturation
-	darkL := displayL - 0.08
-	if darkL < 0.15 {
-		darkL = 0.15
-	}
 	boostS := s + 0.05
 	if boostS > 1 {
 		boostS = 1
 	}
-	hr, hg, hb := hslToRGB(h, boostS, darkL)
-	accentHover := fmt.Sprintf("#%02x%02x%02x", hr, hg, hb)
+	hoverL := func(from float64) float64 {
+		hl := from - 0.08
+		if hl < 0.15 {
+			hl = 0.15
+		}
+		return hl
+	}
+
+	// Pick the label from the unclamped pair, then move each colour the shortest
+	// distance that lets that label clear AA on both. Checking hover matters: the
+	// fill a pointer rests on is the hovered one, and it is darker for every preset.
+	label := labelFor(hexOf(hslToRGB(h, s, displayL)), hexOf(hslToRGB(h, boostS, hoverL(displayL))))
+	displayL = clampForLabel(h, s, displayL, label, labelStep)
+	accentL := clampForLabel(h, boostS, hoverL(displayL), label, labelStep)
+
+	// accent = primary color itself
+	ar, ag, ab := hslToRGB(h, s, displayL)
+	accent := hexOf(ar, ag, ab)
+	hr, hg, hb := hslToRGB(h, boostS, accentL)
+	accentHover := hexOf(hr, hg, hb)
 
 	// accent-soft: primary at 12% opacity on dark bg
-	accentSoft := rgbaStr(r, g, b, 0.12)
+	accentSoft := rgbaStr(ar, ag, ab, 0.12)
 
 	// accent-ring: primary at 35% opacity for focus rings
-	accentRing := rgbaStr(r, g, b, 0.35)
+	accentRing := rgbaStr(ar, ag, ab, 0.35)
 
-	// on-primary: the label colour drawn on top of the accent.
-	onPrimary := onPrimaryFor(accent)
+	// accent-ink: the same hue as TEXT, per mode — a fill can sit too close to a
+	// surface (or to its own 12% wash) to be read as a label.
+	accentInk := inkFor(h, s, displayL, "dark")
+	accentInkLight := inkFor(h, s, displayL, "light")
 
 	// glow: primary at 12% for background accents (like the home page gradient)
-	glow := rgbaStr(r, g, b, 0.12)
+	glow := rgbaStr(ar, ag, ab, 0.12)
 
 	// tint: primary at ~5% for subtle sidebar/header backgrounds
-	tint := rgbaStr(r, g, b, 0.05)
+	tint := rgbaStr(ar, ag, ab, 0.05)
 
 	return Theme{
-		Directory:    directory,
-		PrimaryColor: primaryHex,
-		Accent:       accent,
-		AccentHover:  accentHover,
-		AccentSoft:   accentSoft,
-		AccentRing:   accentRing,
-		OnPrimary:    onPrimary,
-		Glow:         glow,
-		Tint:         tint,
+		Directory:      directory,
+		PrimaryColor:   primaryHex,
+		Accent:         accent,
+		AccentHover:    accentHover,
+		AccentSoft:     accentSoft,
+		AccentRing:     accentRing,
+		OnPrimary:      label,
+		Glow:           glow,
+		Tint:           tint,
+		AccentInk:      accentInk,
+		AccentInkLight: accentInkLight,
 	}
 }
 
@@ -227,10 +334,11 @@ func (s *Server) handleGetTheme(w http.ResponseWriter, r *http.Request) {
 		// No theme saved yet — return defaults
 		t = deriveTheme("#ff5e1f", directory)
 	} else {
-		// on_primary is a cached derivation of accent; rows written before the
-		// crossover rule changed would keep a failing label colour, so recompute
-		// it from the stored accent on every read rather than trusting the column.
-		t.OnPrimary = onPrimaryFor(t.Accent)
+		// Every derived column is cached from primary_color, and rows written under
+		// an older derivation rule would keep a failing label or ink. The derivation
+		// is deterministic, so recompute the whole palette on read rather than
+		// trusting the stored columns.
+		t = deriveTheme(t.PrimaryColor, directory)
 	}
 	writeJSON(w, http.StatusOK, t)
 }

@@ -189,7 +189,7 @@ export default function NoteDetailPage() {
         <Show when={notFound()}>
           <div class="flex-1 flex items-center justify-center text-zinc-500 text-[14px]">
             Note not found.{' '}
-            <button onClick={() => navigate('/notes')} class="ml-1 text-[color:var(--accent)] hover:underline">
+            <button onClick={() => navigate('/notes')} class="ml-1 text-[color:var(--accent-ink)] hover:underline">
               Back to notes
             </button>
           </div>
@@ -250,7 +250,7 @@ export default function NoteDetailPage() {
                   onClick={handleToggleHistory}
                   class={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-md border transition shrink-0
                     ${showHistory()
-                      ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)] border-[color:var(--accent)]/30'
+                      ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)] border-[color:var(--accent)]/30'
                       : 'text-zinc-400 bg-[color:var(--bg-elevated)] border-[color:var(--border-subtle)] hover:text-zinc-200 hover:border-[color:var(--border-default)]'
                     }`}
                   title="Version history"
@@ -266,7 +266,7 @@ export default function NoteDetailPage() {
               <Show when={currentNote()?.status === 'done' && !isEditing()}>
                 <button
                   onClick={enterEditMode}
-                  class="shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-zinc-500 hover:text-[color:var(--accent)] hover:bg-[color:var(--accent-soft)] transition"
+                  class="shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-zinc-500 hover:text-[color:var(--accent-ink)] hover:bg-[color:var(--accent-soft)] transition"
                   title="Edit note"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -490,7 +490,7 @@ export default function NoteDetailPage() {
                             }`}
                         >
                           <div class="flex items-center justify-between gap-2 mb-0.5">
-                            <span class={`text-[12px] font-semibold ${isPreviewing() ? 'text-[color:var(--accent)]' : 'text-zinc-200'}`}>
+                            <span class={`text-[12px] font-semibold ${isPreviewing() ? 'text-[color:var(--accent-ink)]' : 'text-zinc-200'}`}>
                               v{v.version}
                             </span>
                             <Show when={isCurrent()}>

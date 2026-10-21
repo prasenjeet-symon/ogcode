@@ -228,7 +228,7 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
 
   const statusColor = () => {
     switch (status()) {
-      case 'running':   return 'text-[color:var(--accent)]';
+      case 'running':   return 'text-[color:var(--accent-ink)]';
       case 'completed': return 'text-emerald-400';
       case 'error':     return 'text-red-400';
       case 'denied':    return 'text-amber-400';
@@ -347,7 +347,7 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
         <Show when={showDuration()}>
           <span
             class={`flex items-center gap-1 shrink-0 text-micro font-mono tabular-nums ${
-              status() === 'running' ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)]'
+              status() === 'running' ? 'text-[color:var(--accent-ink)]' : 'text-[color:var(--text-muted)]'
             }`}
             title={isDeepSearch() ? 'Total time for this deep search' : 'Running for this long so far'}
           >
@@ -423,7 +423,7 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
             title={wrap() ? 'Disable word wrap' : 'Enable word wrap'}
             class={`h-6 px-1.5 rounded text-micro font-medium transition flex items-center gap-1
               ${wrap()
-                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)] hover:bg-[color:var(--accent-soft)]'
+                ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)] hover:bg-[color:var(--accent-soft)]'
                 : 'text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]'
               }`}
           >

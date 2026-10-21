@@ -647,7 +647,7 @@ function OGXSection(props: {
                 class="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-semibold tracking-[0.02em]"
                 style={{
                   background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
-                  color: 'var(--accent)',
+                  color: 'var(--accent-ink)',
                 }}
               >
                 {initials()}
@@ -1275,7 +1275,7 @@ function ModelList(props: {
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          class="mt-2 text-meta font-medium text-[color:var(--accent)] hover:underline underline-offset-2"
+          class="mt-2 text-meta font-medium text-[color:var(--accent-ink)] hover:underline underline-offset-2"
         >
           Show {hiddenCount()} more
         </button>

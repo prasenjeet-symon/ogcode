@@ -174,7 +174,7 @@ function CommunityCard(props: { entry: (typeof COMMUNITY)[number]; hidden: boole
       </div>
       <p class="mt-3 mb-3 text-meta leading-[1.55] text-[color:var(--text-tertiary)]">{props.entry.desc}</p>
       <span class="mt-auto inline-flex h-8 items-center gap-1.5 self-start rounded-lg bg-[color:var(--bg-elevated)] px-3.5
-        text-meta font-medium text-[color:var(--accent)] transition-colors group-hover:brightness-125">
+        text-meta font-medium text-[color:var(--accent-ink)] transition-colors group-hover:brightness-125">
         {props.entry.action}
         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />

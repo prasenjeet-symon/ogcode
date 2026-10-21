@@ -34,6 +34,8 @@ const DEFAULT_THEME: Theme = {
   onPrimary: '#0a0a0b',
   glow: 'rgba(255, 94, 31, 0.12)',
   tint: 'rgba(255, 94, 31, 0.05)',
+  accentInk: '#ff6022',
+  accentInkLight: '#ab3000',
 };
 
 // The localStorage mirror of the server-side mode. It exists only so the
@@ -78,6 +80,8 @@ function applyThemeCSS(t: Theme) {
   root.style.setProperty('--on-primary', t.onPrimary);
   root.style.setProperty('--glow', t.glow);
   root.style.setProperty('--tint', t.tint);
+  root.style.setProperty('--accent-ink-dark', t.accentInk);
+  root.style.setProperty('--accent-ink-light', t.accentInkLight);
 }
 
 function resetCSS() {
@@ -89,6 +93,8 @@ function resetCSS() {
   root.style.removeProperty('--on-primary');
   root.style.removeProperty('--glow');
   root.style.removeProperty('--tint');
+  root.style.removeProperty('--accent-ink-dark');
+  root.style.removeProperty('--accent-ink-light');
 }
 
 export const ThemeProvider: ParentComponent = (props) => {
