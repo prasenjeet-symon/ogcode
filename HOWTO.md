@@ -21,16 +21,44 @@ Touches: `internal/version/version.go`, `web/package.json`, `web/package-lock.js
    work into a published version's section — tags are immutable.
 3. Commit and push to `main`; CI (`.github/workflows/ci.yml`) must pass.
 4. `git tag vX.Y.Z && git push origin vX.Y.Z` (annotated). Nothing is built locally: the tag fires
-   Release (GoReleaser — `release.yml` is the only place that sets ldflags), Docker (`docker.yml`)
-   and Pages. `.goreleaser.yaml` copies prebuilt binaries via `tools/gobuild-shim.sh`.
+   Release (GoReleaser — `release.yml` is the only place that sets ldflags) and Docker (`docker.yml`).
+   **The tag does not fire Pages** — that needs a push touching `docs/**`, `blog/**` or `docs-site/**`;
+   see *Publish the docs site* below. `.goreleaser.yaml` copies prebuilt binaries via
+   `tools/gobuild-shim.sh`.
 5. Set the GitHub Release body by hand — GoReleaser's default body is only `## Changelog`, and
    `.goreleaser.yaml` has no `header`/`footer` key:
    `head -n <last content line> RELEASE_NOTES.md > /tmp/notes.md` then
    `gh release edit vX.Y.Z --notes-file /tmp/notes.md`. Use `head -n`, never an
    `awk … $0=="---"` idiom — it overshoots by a whole release.
 
-Done when: the three workflows are green, the Release page carries the notes body, and a
+Done when: Release and Docker are green, the Release page carries the notes body, and a
 downloaded asset's `ogcode version` prints `vX.Y.Z` (not `dev`, not a blank).
+
+## Publish the docs site
+
+Verified: 2026-10-20 @ v0.50.0
+Touches: GitHub Pages (`ogcode.in`, artifact built from `docs/`), the `gh` workflow dispatch
+
+1. `gh workflow run pages.yml --ref main`. `pages.yml` triggers only on a push to `main` carrying
+   `docs/**`, `blog/**` or `docs-site/**`, so a release with no site change leaves the live site a
+   version behind — `workflow_dispatch` is enabled for exactly this. Dispatch off `main`, not the
+   tag: the site is built from the tree, and `main` is at or ahead of the tag (`git rev-parse HEAD
+   origin/main` should match).
+2. `gh run watch <run-id> --exit-status` (the id is printed by the dispatch). The job builds the blog
+   (`blog/` → `docs/blog`) and the docs site (`docs-site/` → `docs/docs`) before uploading `docs`;
+   both `npm ci` runs hard-fail on a `package-lock.json` drift.
+3. `gh api repos/prasenjeet-symon/ogcode/deployments --jq '.[0] | {ref, created_at}'` and
+   `gh api repos/prasenjeet-symon/ogcode/deployments/<id>/statuses --jq '.[0].state'` → `success`.
+4. Prove the live site is this tree, not a cache: the homepage is uploaded byte-for-byte, so
+   `curl -sS https://ogcode.in/ | shasum -a 256` must equal `shasum -a 256 docs/index.html`. Then
+   `curl -o /dev/null -w '%{http_code}' https://ogcode.in/docs/install/` → 200.
+
+Done when: the run is green, a fresh `github-pages` deployment reports `success`, and the homepage
+hash matches `docs/index.html`.
+
+Note: the homepage `#versionPill` is **not** a deployment check — it fetches
+`releases/latest` at runtime and only replaces its text for a `v0.39.x` tag, so it still reads
+`v0.39.1` after a much newer release. That is deliberate, not stale content.
 
 ## Build and smoke-test the Docker image
 
@@ -326,3 +354,29 @@ Touches: `~/Downloads/work/ogcode-bench/{index-backup,runs,RESULTS.md}` (outside
 Done when: the setup line says `restored` with a non-zero page count, `proxied_model: true`, and the
 blocked list holds no host the agent needs. Bump the backup (`backup-index`) whenever the template repo
 moves; a stale backup is refused by commit, not silently reused.
+
+## Audit UI contrast in both themes
+
+Verified: 2026-10-21 @ v0.50.0-1-g1383bfd-dirty
+Touches: a throwaway rig under `/tmp` only — the live server on the project port is never the target
+
+1. Build first (`make build`): the server serves `web/dist` from an `embed.FS`, so a web-only change is
+   invisible until the Go binary is rebuilt.
+2. Copy the tree to the rig — `rsync -a --exclude node_modules --exclude .git --exclude dist . /tmp/contrast-verify/`
+   plus the fresh `./ogcode` — and start it on a spare port:
+   `cd /tmp/contrast-verify && nohup ./ogcode serve --port 7802 >/tmp/contrast-verify-serve.log 2>&1 &`,
+   then poll `curl -s http://localhost:7802/api/config` for a 200.
+3. **Save the live appearance first** — `GET /api/appearance` — because the theme mode is machine-wide in
+   `~/.ogcode/config.db` (`s.globalDB`), so the rig on another port flips the user's real UI. Restore that
+   body at the end.
+4. Walk `/`, `/settings` and a `/session/<id>` in dark, then again with the mode switched to light, for
+   each accent you care about. Collect every rendered text node, composite its colour over the nearest
+   opaque ancestor background, and compare against the WCAG minimum (4.5:1 body, 3:1 for ≥24px/18.66px-bold).
+5. Ignore `bg-clip-text text-transparent` nodes: the computed colour is `rgba(0,0,0,0)` and the real ink is
+   the gradient, which must be judged by its stops, not by the reported transparent text.
+6. Stop the rig by command — `pkill -f 'ogcode serve --port 7802'`. Never kill by port: `lsof -ti tcp:7802`
+   also lists WebKit/ego helper processes that share it.
+
+Done when: every non-gradient node clears its threshold in both themes at each accent, and
+`GET /api/appearance` on the live port returns what step 3 saved. The checker script itself is
+session-local — re-create it from step 4; nothing in the repo ships it.
