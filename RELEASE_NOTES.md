@@ -1,3 +1,75 @@
+# Release Notes — v0.50.2
+
+## Patch: A search that skipped the map gets one reminder
+
+The prompt makes `codebase_map` the first exploration step, but nothing below it
+noticed when a turn skipped the map and grepped the whole tree instead. A search
+returns matches in one call and reads as a successful step, so a turn could work
+from match lists without ever learning which branch a file lives in — the
+question the map's folder labels answer.
+
+Searches are watched now. When the project index holds files, the agent holds
+`codebase_map`, and a `grep` or `glob` result lands before anything has located
+files — no `codebase_map` call with `subdir`, no `read`, no `file_map` naming a
+file — that result carries one reminder to descend. It rides the stored tool
+output, so the model reads it on its next step, and it is sent once per turn: a
+second copy would add context without adding a decision. The search still runs.
+The matches were true when it returned; what the model is missing is the map's
+answer to a different question.
+
+## Patch: The exploration rules are one section instead of four
+
+"Map before you read" was stated three times under three *Mandatory* headings,
+and a fourth mandatory heading covered reading files with the tool rather than
+the shell. On one subject, five headings competed for attention and the longest
+read like a policy rather than a procedure.
+
+They are one section now, *Explore before you read*, built around the three
+moves it is actually asking for: find the files (the map when an index exists,
+glob and grep when it does not), map every file the turn expects to touch in one
+block, then read the ranges in the next. *Map a file before reading it* survives
+as a subsection, the read-not-the-shell rule loses its top-level heading, and
+the workflow diagram gained the linter.
+
+## Patch: HISTORY.md joins MEMORY.md, HOWTO.md and AGENT.md
+
+A project's memory was outgrowing the file that carries it. `MEMORY.md` is
+loaded into every turn's cached prefix, which makes a dated measurement or the
+record of an experiment expensive to keep and useless in most turns, and the
+prompt said nowhere else to put one.
+
+`HISTORY.md` is that place: dated changes, measurements with their numbers,
+experiments and what they ruled out. Like `HOWTO.md` it is never loaded — the
+prompt carries a constant pointer and the agent opens it when a task touches
+past work or before re-running an experiment — so the file can grow without
+rewriting entry [0] of the prompt. The `MEMORY.md` section was rewritten around
+the boundary, with a size budget and one instruction that matters more than the
+rest: when a line is a story about what happened rather than a fact to act on,
+move it out — do not delete facts to hit a size.
+
+## Patch: The plan pill moves only when the statuses move
+
+`update_intent` says the statuses are what the user reads, and a plan re-sent
+with every status unchanged has updated nothing — but the tool's own description
+and its `status` schema field said only what the four values meant, never that
+they were expected to change. Both say it now, and so does the prompt, which
+asks for the closing call to carry every step's real status instead of a
+sentence about where the turn got to.
+
+## Other changes
+
+- The build agent's workflow step 5 is three lines instead of seven, the edit
+  contract points at *Parallel tool calls* rather than restating it, and the
+  clarifying-question rule names `ask_user`.
+- Public copy across the homepage, the OGX page, the docs site and the blog no
+  longer uses em dashes (colons, semicolons and parentheses carry the break),
+  and the docs pages were refreshed alongside: `MEMORY.md`, `HISTORY.md` and
+  `HOWTO.md` are described as they now behave.
+- `HOWTO.md`'s *Install ogcode on a host* gained the post-install boot check and
+  the reminder that replacing the binary restarts nothing.
+
+---
+
 # Release Notes — v0.50.1
 
 ## Patch: Accent-coloured text is readable on every surface
