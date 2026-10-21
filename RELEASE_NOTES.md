@@ -1,3 +1,95 @@
+# Release Notes — v0.50.1
+
+## Patch: Accent-coloured text is readable on every surface
+
+The accent colour was doing two jobs. As a fill — a button, a selected row, a
+rule — it works at any lightness you like, because the label on top can be
+chosen against it. As the colour of text it does not: an orange that is
+comfortable under a white button label is 3.06:1 against a dark page, under the
+4.5:1 an ordinary line of text needs.
+
+Those two jobs now have two colours. `--accent` stays the fill, and
+`--accent-ink` is a per-mode colour derived to contrast against the surface the
+text actually sits on — the wash under a hovered row included, not just the
+panel behind it. Every place the app paints text in the accent reads the ink
+now, in both modes, for every preset.
+
+**Labels on the accent.** White on orange is 3.06:1, so the label colour is no
+longer a brightness guess. It takes whichever of white and black keeps the
+higher of its two ratios — against the accent and against the colour the accent
+becomes on hover — and the accent's lightness is then nudged until that choice
+clears AA. A light accent ends up with a black label, a dark one with white.
+
+Every stored theme is corrected retroactively: the palette is recomputed when
+the theme is read, so one saved under the old maths comes back fixed.
+
+## Patch: A muted label clears AA on the row it sits in
+
+`--text-muted`, `--text-label` and the zinc steps built on them were measured
+against the colour of a panel. Most of them do not sit on a panel: they sit in
+a row that has just lit up under the pointer, which is the lightest surface the
+token can ever land on. Measured there, they came out between 4.36:1 and
+4.39:1 — just under the threshold, which is exactly where a value checked
+against the wrong background lands.
+
+The floor is now the lightest surface rather than the darkest. Dark-mode muted
+text is `#8a8a93` (4.63:1 on a hovered row, 5.59:1 on a panel), with the zinc
+steps and the light-mode equivalents moved to match. Darkening the hover
+surface instead was tried and rejected: it weakens the hover feedback and
+cannot lift the lightest values at all.
+
+## Patch: A turn states its plan before it starts reading
+
+`update_intent` asks to be the first call of a turn now — before
+`codebase_map`, before a search, before any read. Its answer is a routing
+decision: it names the skills and MCP tools a step could use. An answer that
+arrives after the exploration it was meant to steer has nothing left to steer,
+and a turn that never states a plan never gets the match at all.
+
+Nothing enforces that order at the tool level, so the loop does. The first
+result of a turn that is not `update_intent` — a read, a map, a shell command —
+carries one reminder that the plan comes first. It is sent once per turn, and
+it is part of the stored output the model reads on its next step rather than a
+note beside it.
+
+**The result stopped inviting itself.** In this project's own build sessions
+the tool's closing sentence asked for another call, and being the freshest
+instruction in context it got one: of 118 turns that opened with a plan, 112
+made `update_intent` the second call as well, and `codebase_map` was never the
+second call in any of them. The result now says only that the plan is closed.
+
+**Exploration is batched.** The prompt asks for every file the turn expects to
+touch to be mapped in a single block, then every range read in the next, and
+sends the agent back to the map when a read names a caller or a config key in
+an area it has not opened — rather than guessing at it. It says the same thing
+in a project with no index, where the files are found by searching instead;
+only the way they are found changes.
+
+## Patch: A headless run no longer stops at a hundred steps
+
+`ogcode run` capped itself at 100 loop iterations. A long task — the kind that
+reads a test suite, writes a fix and runs it — could outlive that budget, and
+the way it died was misleading: mid-edit, on a compile error in its own
+half-written file, which reads as a bad fix rather than a cut-off run.
+
+The default is now `0`, meaning no limit, matching OpenCode's unset `steps`.
+`--max-turns N` still caps a run when a cap is what you want. The interactive
+server loop and `ogcode index` keep their own ceilings; only the headless
+command is uncapped by default, and the two docs pages that describe the flag
+now say so.
+
+## Other changes
+
+- `HOWTO.md`'s release procedure no longer claims a tag publishes the docs
+  site. It does not — Pages needs a push that carries a site change — and a new
+  *Publish the docs site* entry records the dispatch and the checks after it.
+- `HOWTO.md` also records how to audit contrast in both themes without
+  disturbing the running server: the theme mode is machine-wide, so the audit
+  rig has to save and restore `/api/appearance`, and the bundle is embedded in
+  the binary, so a web change needs a rebuild before it is visible.
+
+---
+
 # Release Notes — v0.50.0
 
 ## Minor: Read every part of a file you need in one call
