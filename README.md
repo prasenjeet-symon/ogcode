@@ -15,7 +15,7 @@ Ogcode is an AI agent that understands your codebase, uses real tools, researche
 
 <p align="center">
   <a href="https://ogcode.in">
-    <img src="docs/media/demo-poster-framed.webp" alt="The Ogcode web interface" width="100%">
+    <img src="docs/media/ogcode-demo.gif" alt="Ogcode in the browser: a session, the permission-mode picker, the project index and a reply" width="100%">
   </a>
 </p>
 

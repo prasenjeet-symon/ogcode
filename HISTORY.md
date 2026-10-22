@@ -1024,3 +1024,21 @@ prompt; it is kept so a later pass does not have to rediscover it.
   carry a control message. Progress can ride it; `done`/`blocked`/`question` need a durable per-session inbox.
 - Verdict delivered to the user: in-process durable inbox + spawn-time parent edges first; async task tool as the
   prerequisite for any real conversation; cross-process routing last (controlplane has only `Guidance`).
+
+## 2026-10-22 — README hero switched from a static poster to an animated GIF
+
+- Source was the developer's own screen recording `~/Desktop/232.mov` (h264, 3420×1978 — 2× of a ~1710×989
+  window, 60 fps, 60.3 s, 48.7 MB, no audio). Kept the **12–60 s** range at **2× speed**, 1080w, 15 fps
+  (`HOWTO.md` → Re-encode the README hero GIF), landing on `docs/media/ogcode-demo.gif`:
+  **1080×625, 360 frames, 24 s, 5.1 MB**, infinite loop.
+- Sizes rejected on the way: 1200w full clip 7.3 MB, 1200w 12–60 s 6.3 MB, 1080w at 20 fps 6.3 MB, 960w/12 fps
+  4.3 MB (too soft). Bayer dither (`bayer_scale=3`, `diff_mode=rectangle`) beat `sierra2_4a`/`none` on size at
+  equal quality; `palettegen=stats_mode=diff` across the whole clip beat per-segment palettes.
+- The developer chose the full tour knowing the 48–60 s tail shows the Project Index page with rendered
+  `HOWTO.md`/`MEMORY.md` text and a `~/Downloads/work/swe-bench` path. At 1080w that text is ~4 px and
+  unreadable, which is why it was acceptable — the 2026-10-03 retake (`4f04ec0`) removed the same class of leak
+  from the poster at a legible resolution.
+- Cost of the switch: the old `demo-poster-framed.webp` had a macOS window baked in (traffic lights, `ogcode.in`
+  title bar); the GIF is a bare viewport, and the clip itself flips dark → light theme mid-way, so the loop
+  restarts on a light frame and jumps back to the dark Settings page. `demo-poster-framed.webp` stays on disk,
+  unreferenced.

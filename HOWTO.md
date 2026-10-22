@@ -10,7 +10,7 @@ and canonical values live in `AGENT.md` and `MEMORY.md`, not here.
 
 ## Cut a release
 
-Verified: 2026-10-21 @ v0.50.1
+Verified: 2026-10-21 @ v0.50.2
 Touches: `internal/version/version.go`, `web/package.json`, `web/package-lock.json`, `RELEASE_NOTES.md`, git tags
 
 1. Bump the version in all four entries: `internal/version/version.go:18` `Version` as `vX.Y.Z`
@@ -200,6 +200,26 @@ Touches: the output file
    help instead.
 
 Done when: `file <out.webp>` reports `RIFF (little-endian) data, Web/P image`.
+
+## Re-encode the README hero GIF
+
+Verified: 2026-10-22 @ v0.50.2
+Touches: `docs/media/ogcode-demo.gif`, `README.md` (the hero `<img>`)
+
+1. The hero must be an animated **GIF** — GitHub renders neither animated WebP nor `<video>`. There is
+   no gifski or gifsicle here, so ffmpeg's two-pass palette flow is the encoder (it has no libwebp).
+2. One palette for the whole clip:
+   `ffmpeg -y -i <rec.mov> -vf "fps=15,scale=1200:-1:flags=lanczos,palettegen=stats_mode=diff" /tmp/pal.png`
+3. Encode — the trim, the speed-up and the encode are one chain, `setpts` **before** `fps` or the frame
+   count follows the source instead of the shortened timeline:
+   `ffmpeg -y -ss 12 -t 48 -i <rec.mov> -i /tmp/pal.png -lavfi "setpts=(PTS-STARTPTS)/2,fps=15,scale=1080:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" -loop 0 docs/media/ogcode-demo.gif`
+   A 3420×1978 / 60 fps / 60 s screen recording becomes **1080×625, 360 frames, 24 s, 5.1 MB** at 2×.
+4. `-loop 0` is the infinite loop; keep the `<a href="https://ogcode.in">` wrapper and `width="100%"`.
+5. Watch the recording before shipping it: this repo's own session titles and internal paths have leaked
+   into the hero twice. `~/…` placeholder paths in a throwaway workspace are fine.
+
+Done when: `git check-ignore -v docs/media/ogcode-demo.gif` exits 1, the README `src` resolves from the
+repo root, and both frames and loop are right (`gif` header w/h, `NETSCAPE2.0` loop count `0`).
 
 ## Post a Discord notification
 
