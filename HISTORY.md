@@ -1042,3 +1042,25 @@ prompt; it is kept so a later pass does not have to rediscover it.
   title bar); the GIF is a bare viewport, and the clip itself flips dark → light theme mid-way, so the loop
   restarts on a light frame and jumps back to the dark Settings page. `demo-poster-framed.webp` stays on disk,
   unreferenced.
+
+## 2026-10-22 — Where the tokens actually go (usage_event ledger, 102,347 rows)
+
+Measured over the whole `~/.ogcode/config.db` `usage_event` table, to answer "does turning thinking off save
+anything?":
+
+- **Prompt 98.7%, output 1.3%.** input 1.704 B + cache_read 5.432 B (7.136 B prompt) vs output 91.0 M,
+  reasoning 1.59 M. Overall cache-hit rate **76.1%**; mean **69,726 prompt tokens per step vs 889 output**.
+- **Reasoning is 67.9% of output** where a provider itemises it (3,009 of 102,347 rows — `glm-5.3-flash`,
+  `gpt-5.6-luna`, `grok-4.6`). The other 97% report 0 because their provider gives no breakdown, not because
+  they do not think.
+- **Cost shape** (cache_read 0.1× input, output 4× input): prompt **86%**, output **14%**. Killing *all*
+  thinking therefore saves at most ~9% of spend, and that is the accuracy-expensive trade
+  (`models_catalog.go:183-186` already refuses it for Claude).
+- **The real lever is cache-hit rate, and it is model-dependent.** Billed prompt units (input + 0.1×cache_read):
+  `glm-5.3-flash:cloud` **949 M at 78% full price** (17.8 k steps), `glm-5.2:cloud` **284 M at 100% full price**,
+  `deepseek-v4.1-flash` **264 M at 5% full price** (22.6 k steps), `deepseek-v4.1-flash:cloud` 208 M at 5%.
+  The two GLM routes are **55% of all prompt spend** at DeepSeek's work-per-step. Had they cached at 5% they
+  would bill ~212 M — a **39% cut in total spend with the same model answering the same prompts**.
+- Ruled out: treating `reasoning` as the savings target, and reading `reasoning = 0` as "this model does not
+  think". Ollama Cloud's DeepSeek rows show heavy `cache_read`, so the "Ollama has no prompt caching" note in
+  `MEMORY-ARCHIVE.md:1713` is stale for that route at least.
