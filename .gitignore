@@ -51,6 +51,12 @@ manifests/
 # Claude Code CLI
 .claude/
 
+# Stray skills install directory — an external skills installer wrote the
+# golang-* skills here instead of .agents/skills, which is the directory
+# ogcode actually discovers (internal/skill/discover.go). Root-anchored so no
+# nested agent/ folder is swallowed.
+/agent/
+
 # Demo media — screen recordings and extracted frames kept machine-local;
 # nothing in README/docs references them, so they must never land in the repo.
 ogcode-demo.mp4
