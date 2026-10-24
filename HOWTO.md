@@ -147,9 +147,79 @@ Touches: `/tmp` PNG/PDF files, the Chrome profile dir
    `document.body` over CDP — copy every Tailwind class verbatim and let the running bundle's own
    stylesheet style it.
 
+7. `Page.captureScreenshot` on a stock "Google Chrome for Testing" launched with `--remote-debugging-port`
+   works (2026-10-24) — the hang above was ego lite's. The CLI flag `--screenshot` HANGS on any page with
+   an open SSE stream (the session page never goes idle), so drive CDP instead; there `Page.captureScreenshot`
+   returns promptly with `--hide-scrollbars --window-size=W,H`.
+
+8. **The rig resolves the theme, not the user's**: headless chrome reports a light OS and the app's
+   boot reconcile (server-global `GET /api/appearance`) OVERRIDES a `localStorage['ogcode-theme-mode']`
+   written pre-load — a setItem + reload still resolved light (2026-10-24). To shoot dark, send
+   `Emulation.setEmulatedMedia{features:[{name:'prefers-color-scheme',value:'dark'}]}` BEFORE
+   `Page.navigate`; nothing is written to localStorage or `/api/appearance`, and
+   `document.documentElement.dataset.theme` answers `dark`.
+
 Done when: the PNG shows the intended page; for an injected overlay, verify it rendered (printToPDF
 can silently drop it) — a `bg-black/60` backdrop reads ~0.4× the undimmed capture and
 `getComputedStyle(backdrop).backgroundColor` is `oklab(0 0 0 / 0.6)`.
+
+## Drive the web UI end to end with ego-browser
+
+Verified: 2026-10-22 @ v0.50.2
+Touches: `/tmp/<rig>/`, an ego task space, nothing in the repo
+
+1. `cd web && npm run build` FIRST — `web/dist` is an `embed.FS`, so a stale dist means the browser runs
+   code that is not in your tree.
+2. `CGO_ENABLED=1 go build -o /tmp/<rig>/ogcode .`; a `git init`'d `/tmp/<rig>/proj` as the cwd;
+   `HOME=/tmp/<rig>/home` (chmod 700) — and **copy `~/.ogcode/config.db` into `$HOME/.ogcode/`**, else no
+   provider resolves.
+3. `HOME=… nohup ogcode serve --port 79xx > log 2>&1 &`, then poll `GET /api/config` for 200. An explicit
+   `--port` leaves `~/.ogcode/ports.json` alone; never drive the user's own listener.
+4. `~/.local/bin/ego-browser nodejs <<'EOF' … EOF` with
+   `const task = await taskSpace("<name>"); const page = task.page("p1");` then
+   `page.goto/fill/click/selectOption/reload/waitForSelector/waitForTimeout/evaluate`. Node `fetch` works
+   inside the script — use it to act BEHIND the page (e.g. prove an SSE-driven refresh).
+5. `page.snapshot()` takes a ref (`@21`) or nothing; a css locator throws `TypeError`. Read state with
+   `page.evaluate(() => …)` instead.
+6. Finish: `await task.finish({ keep: [] })`, `pkill -f '<rig>/ogcode serve'`, `rm -rf <rig>` — the copied
+   `config.db` holds API keys.
+7. A turn that dies on provider credit (`402 Insufficient Balance`) leaves every agent-side path
+   unverified — report that, not as a defect. Confirm the server said so in
+   `$HOME/.ogcode/logs/<proj>-*/ogcode.log`.
+
+Done when: the interaction ran through the rendered UI, the visible result matches, and the persisted state
+is cross-checked against `GET /api/…` — for a live-update claim, assert it appeared with no manual refresh.
+
+## Drive an agent turn end to end on the OGX gateway
+
+Verified: 2026-10-22 @ v0.50.2
+Touches: `/tmp/<rig>/` (its copied `config.db` holds API keys), nothing in the repo
+
+1. Build as in the ego-browser entry, plus the assertion secret or every call 401s:
+   `SEC=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)`; `CGO_ENABLED=1 go build -ldflags "-X
+   github.com/prasenjeet-symon/ogcode/internal/provider.OGXAppSecret=$SEC" -o /tmp/<rig>/ogcode .`; confirm
+   `strings /tmp/<rig>/ogcode | grep -c -F "$SEC"` is > 0. Never print the secret.
+2. `HOME=/tmp/<rig>/home` (chmod 700) with `~/.ogcode/config.db` copied in, `git init /tmp/<rig>/proj`,
+   `HOME=… nohup ogcode serve --port 79xx &`, poll `GET /api/config` for 200.
+3. `POST /api/session/` with `{"directory":"/tmp/<rig>/proj","model":"ogx-deepseek-v4.1-flash",
+   "provider":"ogx"}` → read `.id`; then `PATCH /api/session/<id>` `{"permission":"yolo"}`, else every tool
+   call blocks on a permission prompt nobody will answer.
+4. `POST /api/session/<id>/prompt` with `{"content":"…"}` → **204**. No other body shape works: the session
+   stores an empty text part and the turn never starts.
+5. Poll `GET /api/session/<id>/message?limit=40` while it runs. Each tool call shows up TWICE — an `assistant`
+   message carrying the call and a `user` message whose part echoes the same tool+input beside the result — so
+   count calls, not messages.
+6. Take ground truth from the DB, not the transcript:
+   `sqlite3 /tmp/<rig>/proj/.ogcode/ogcode.db "select handle,kind,status,last_seq from board_agent; select
+   seq,from_handle,to_handle,kind,text,path from board_post;"`.
+7. Watch `$HOME/.ogcode/logs/<proj>-*/ogcode.log` for `board: turn started` (the turn really began),
+   `board: delivered to turn` (a queued post reached the next turn) and `could not advance cursor` (a wait
+   replaying the same post).
+8. Teardown: `pkill -f '/tmp/<rig>/ogcode serve'`, `rm -rf /tmp/<rig>`. A HOME-isolated `go test` leaves a
+   read-only module cache — `chmod -R u+w <home>` before deleting it.
+
+Done when: the transcript's tool calls are the ones you meant, the DB rows agree with them (`last_seq` equals
+newest post, no `leaseUntil` left behind), and the log carries no `could not advance cursor`.
 
 ## Inspect a session's plan-intent routing
 
@@ -259,7 +329,8 @@ readable, and the compose field is text-only.
 
 ## Install ogcode on a host
 
-Verified: 2026-10-21 @ v0.50.1-1-g664be42-dirty
+Verified: 2026-10-23 @ v0.50.2-3-g033be0f-dirty (step 5 + the boot check re-run; the live server was left
+running, not restarted)
 Touches: `/usr/local/bin`, `~/.local/bin`, the Homebrew tap, `%LOCALAPPDATA%`, the Go module cache
 
 1. macOS/Linux: `curl -fsSL https://ogcode.in/install.sh | sh` → installs to `/usr/local/bin`.
@@ -275,7 +346,15 @@ Touches: `/usr/local/bin`, `~/.local/bin`, the Homebrew tap, `%LOCALAPPDATA%`, t
 Done when: `ogcode version` prints a version string (there is no `--version` flag), and for a local build the
 new binary boots — fresh `HOME` + temp cwd + `serve --port <spare>`, `GET /api/config` returns 200, then `kill`
 (expand `$HOME/.local/bin/ogcode` to `$BIN` **before** overriding `HOME`). Restart the live server separately by
-listening pid: the file is replaced but the running process keeps the old image.
+listening pid: the file is replaced but the running process keeps the old image. The version string is NO proof of
+a fresh image for uncommitted edits (`git describe --dirty` only flips the `-dirty` suffix), so prove it by mtime or
+a compiled-in literal (`LC_ALL=C grep -c '<a string you just added>' ~/.local/bin/ogcode`); `cmp ./ogcode
+~/.local/bin/ogcode` differs on macOS because `codesign` rewrites the Mach-O, not because the copy failed.
+6. Restarting the live server kills the session that asked for it, so schedule it detached instead of running
+   `kill` inline: write a script (`sleep 12; kill $(lsof -nP -iTCP:<port> -sTCP:LISTEN -t); wait for the port to
+   free; cd <dir>; $BIN`), then launch it with `python3 -c "import os; os.setsid(); os.execv('/bin/sh', …)"`
+   under `nohup` so a process-group kill cannot reach it. The 12 s delay lets the reply persist first; startup
+   `ResetRunningStatuses` (session/store.go) clears the stale running dot the kill leaves behind.
 
 ## Trace the install-id stitch
 
@@ -319,7 +398,7 @@ Verified: 2026-10-19 @ v0.48.0
 Touches: `/tmp/oglab-router-linux-amd64`, the oglab box's `/usr/local/bin/oglab-router`,
 `/root/oglab-router.bak-<ts>`, `systemctl oglab-router`, `/etc/nginx/sites-available/oglab`
 
-1. Cross-compile in `/Users/prasenjeet/Downloads/work/oglab` — the box has no Go:
+1. Cross-compile in `~/Downloads/work/oglab` — the box has no Go:
    `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/oglab-router-linux-amd64 ./cmd/router`,
    then `shasum -a 256` it for the post-deploy comparison.
 2. Connect with `export SSHPASS="$SUNOFLOW_SSH_PASSWORD"` then
@@ -386,6 +465,31 @@ Touches: `~/Downloads/work/ogcode-bench/{index-backup,runs,RESULTS.md}` (outside
 Done when: the setup line says `restored` with a non-zero page count, `proxied_model: true`, and the
 blocked list holds no host the agent needs. Bump the backup (`backup-index`) whenever the template repo
 moves; a stale backup is refused by commit, not silently reused.
+
+## Measure multi-agent against single-agent on the benchmark
+
+Verified: 2026-10-23 @ v0.50.1-1-g664be42-dirty
+Touches: `~/Downloads/work/ogcode-bench/runs` (outside this repo; not under git)
+
+1. `cd ~/Downloads/work/ogcode-bench` and confirm `SANDBOX_NOTE` is appended to the prompt for **both** modes in
+   `run_serve`. The graded clone has no gitignored `server/configs/*.conf`, so a bare `go test ./server` panics —
+   without the note runs blow the time limit and the cells are not comparable.
+2. One cell per invocation, ~8–40 min each (turn + up to 10 min of grading):
+   `python3 benchmark.py run --agent ogcode-serve --task {bug|build} --mode {single|multi} --label <rep>-<task>-<mode> --time-limit 1800`.
+   Chain the cells in one detached `/tmp/run_cellsN.sh` that logs `=== START/END <cell> <UTC>`; `pgrep -f run_cells`
+   gates a second script so two cells never share the machine.
+3. Read the grade from `runs/<id>/run.json`: `success`, `grade.tests_ok`, `grade.build_ok`, `timed_out`,
+   `cost_usd`, `turns`, `changes.files`. A `timed_out: true` run is **censored**, not a failure — it still grades,
+   so report it as `>1800 s` rather than as a time.
+4. Decompose before drawing conclusions: model seconds = sum of `ms` in `runs/<id>/wire.jsonl`; tool seconds and
+   the parent-vs-teammate split from `runs/<id>/repo/.ogcode/ogcode.db` (`part.data.type == "tool"`, dedupe on
+   `(tool, state.time.start)` — every call is stored twice — and group by `part.session_id`).
+5. Grep the run's session DB for sibling run labels: an agent that wanders into `runs/` can borrow another run's
+   `home/go/pkg/mod`, which contaminates that cell only.
+
+Done when: each cell's `run.json` says `proxied_model: true` and its grade is in, and the per-run tool/model
+split is in hand — wall clock alone says nothing when a cold `GOCACHE` turns each `go test ./server` into a
+150–420 s compile.
 
 ## Audit UI contrast in both themes
 
@@ -475,3 +579,25 @@ Touches: `~/Downloads/work/ogcode-bench/runs/<label>-<arm>/repo` (outside this r
 4. `go test ./server/ -run 'TestConfigReload' -timeout 900s`.
 
 Done when: the reload tests run — pass or fail on the agent's code, not on a missing fixture.
+
+## Verify a web change against the live server without restarting it
+
+Verified: 2026-10-24 @ v0.50.2-3-g033be0f-dirty
+Touches: writes a throwaway `web/vite.verify.config.ts` (delete after); spawns a vite dev server on :5199; reads live data from the running ogcode server on :7801 without touching it
+
+1. Committed `web/vite.config.ts` proxies `/api` to :9595 (`make dev`), so it cannot reach the live server.
+   Write a throwaway `web/vite.verify.config.ts` instead: `defineConfig` with the solid + tailwind plugins,
+   `server: { port: 5199, strictPort: true, proxy: { '/api': 'http://localhost:7801' } }`. Copy the plugin
+   imports from the committed config.
+2. `cd web && nohup npx vite --config vite.verify.config.ts >/tmp/vite-verify.log 2>&1 &` — open the printed
+   URL (http://localhost:5199).
+3. ego-browser: `taskSpace()`, `page.goto('http://localhost:5199')`, `page.snapshot()`. Selectors are plain
+   CSS (e.g. `button[aria-label="Show 10 agents"]`) — accessibility refs like `r=13` are invalid in
+   `page.click`, and there is no `page.setViewportSize`.
+4. Click the changed control, snapshot again, and confirm the live server's real data rendered (the proxy
+   means SSE and polls hit the actual sessions).
+5. Clean up: `pkill -f vite.verify.config` and `rm web/vite.verify.config.ts`. Never restart :7801 — it runs
+   the live session.
+
+Done when: the changed component renders real live data in the dev server and the interaction works; the
+live ogcode server was never restarted and the throwaway config is gone.

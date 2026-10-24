@@ -1064,3 +1064,770 @@ anything?":
 - Ruled out: treating `reasoning` as the savings target, and reading `reasoning = 0` as "this model does not
   think". Ollama Cloud's DeepSeek rows show heavy `cache_read`, so the "Ollama has no prompt caching" note in
   `MEMORY-ARCHIVE.md:1713` is stale for that route at least.
+
+## 2026-10-22 — Agent board and teammates shipped (build agent only)
+
+`plans/MULTI_AGENT_COMMS_PLAN.md` §1–§6 built: `internal/board` store + migrations, `internal/server/board.go`
++ `board_routes.go` (post/roster/claim/urgent, delivery at the top of `RunLoop`), `internal/tool/board.go`
+(`board`, `teammate`), web `agent-part.tsx`.
+
+- **"Build only" needed agent-id gates, not tool absence.** `codingAgentTools` is shared by `BuildAgent` and
+  `TaskAgent`, the roster auto-join sits in `startSessionLoop`, and `DeliverBoard` runs for every `RunLoop` —
+  so `canUseBoard`/`canSpawnTeammate`/`joinBoard`/`DeliverBoard` all test `agentID == "build"`, `teammate` is
+  offered via `allowIDs`, and the prompt section lives in the existing `if !task` branch. Without this a plan
+  session would appear on the roster and receive folded board posts.
+- **Bug found end to end**: an urgent post to a name nobody held returned `{"delivered":"injected"}`.
+  `board.Store.Get` returns the ZERO Handle with a nil error (its doc comment wrongly said "or nil"), and
+  `deliverUrgent` tested `h.Handle == "" || h.SessionID == ""` together and returned nil. Now two distinct
+  errors, `GET`/log show `queued`, and `internal/server/board_test.go` pins all four cases.
+- **Second bug**: a plain successful post returned Notice `""`, and `formatBoard` renders "The board is empty"
+  for an empty notice — so the model was told nobody had posted right after posting. Every post now carries
+  `Posted as #N.`.
+- **Deferred**: §7 (the board drawer / roster panel) is not built; only the `agent` transcript part renders.
+- Verification: `go build ./internal/... .` (CGO on), `go test ./internal/server ./internal/board
+  ./internal/tool ./internal/agent`, plus a fresh-HOME serve rig on :7877 — ghost urgent → `queued` + log
+  `no agent on the board is called "ghost"`, broadcast urgent and a plain post landed as `#2`/`#3` and listed
+  by `GET /api/board?limit=3`.
+
+## 2026-10-22 — Board drawer (§7) built, plus two bugs only the live UI caught
+
+- **§7 shipped**: `web/src/components/board-drawer.tsx` — a 28 px header pill (`aria-label="Board"`) that opens
+  a right-side `<Portal>` drawer (roster with status dots + `you` badge, frozen paths with an X release, posts,
+  and a compose form with Everyone/topic select + urgent). It refreshes on mount, on SSE `board.*` (150 ms
+  debounce), on `server.reconnectTick()`, and every 15 s while open; requests are serialized through a `chain`
+  promise. Mounted in `web/src/pages/session.tsx` first in the header-right cluster, before `<IntentPill />`;
+  the API helpers (`getBoard`, `postToBoard`, `getBoardRoster`, `claimBoardPath`, `releaseBoardPath`,
+  `stopBoardTeammate`) and their types live in `web/src/api/client.ts`.
+- **No live session ever joined the roster** before the UI was exercised: `sendPrompt` in `client.ts` never
+  sends an `agent` field, so `handlePrompt` passed `agentName == ""` and `joinBoard` (which refuses anything but
+  `"build"`) silently skipped it — with a spurious `agent/session type mismatch` warn from `loop.go`.
+  Fixed inside `startSessionLoop` (`internal/server/resume_routes.go`) by normalizing `"" → "build"` so every
+  caller gets the same resolution, mirroring the loop's own `GetAgent` fallback.
+- **Zero Go time does not survive `omitempty`**: an unexpiring (user) claim's `expires` arrives as
+  `"0001-01-01T00:00:00Z"` and rendered as a date in the past. `claimExpiry()` now shows "no expiry" for it.
+- **Claim/release posts carry their path twice**: `board.Store.Claim`/`Release` set `Text: "claim "+rel` AND
+  `Path: rel`, so the drawer's mono path line duplicated the row text. `PostRow` suppresses the path line when
+  the text already ends with it (the store's own Text left alone).
+- Live evidence (rig `/tmp/ogcode-ui-rig`, `HOME=/tmp/ogcode-ui-home`, port 7979, `OGCODE_AUTO_INDEX=false`,
+  ego lite at 1200×872): screenshots `/tmp/ogcode-ui-shots/drawer.png`, `drawer2.png`, `drawer3.png`,
+  `drawer-light2.png`. Compose → seq 4 + notice `Posted as #4 — queued for the next turn`; freeze
+  `web/src/pages/session.tsx` → row + `Froze …`; X → row gone, seq 6, `Released …`; header count 3→4→5→6;
+  Escape closes and the pill reopens; light mode renders a white panel with legible muted tokens. Log showed
+  `board: joined session=… handle=build-8d5f` and no mismatch warn.
+- Green: `go test ./internal/server`, `npx tsc --noEmit`, `npm run build` (re-embeds `web/dist`, gitignored),
+  `CGO_ENABLED=1 go build .`.
+
+## 2026-10-22 — Reference detail moved out of MEMORY.md (controlplane, docs, releases, measurements)
+
+Moved here so MEMORY.md fits its ~20 KB budget; MEMORY keeps the pointer lines.
+
+- **Controlplane**: `controlplane/` is a nested module; the worker daemon hosts one in-process
+  `server.Server` per worktree (`Serve(ctx)`/`Stop()`/`Port()`, `NewWithOptions`, `port:0` surfaces). Eager
+  tunnels dedupe via `tunnelled.LoadOrStore`; per-dir routes key `<workerID>-<route>` with **exact whole-label**
+  lookup. Stable worker id `~/.ogcode/worker-id` (0600, RFC 1123); reconnect persists token + expiry to
+  `~/.ogcode/worker-cred` and re-pairs on `Unauthenticated`. Accounts: removed users fail closed, total registry
+  loss brings the gate up **Locked**, passwords from env/`--password-file`, the cookie key is per-process,
+  `AssignUser` refuses admins. Incus: one container per assignment (`incus/v6/client`), masterURL = 10.0.192.1,
+  Docker's nft FORWARD swallows incusbr0. **Superseded, do not resurrect**: a master inside the ogcode server,
+  `proto/master.proto`, `MasterConfig`/`WorkerConfig`, `master`/`worker` keys in `ogcode.json`.
+- **Docs/marketing**: `blog/` sources are pre-rendered into gitignored `docs/blog/`; `ogcode.xyz` is removed.
+  `check-updates` exits 1 when an update is available. Release page triggers: `release.yml` is the only ldflags
+  site and Pages fires only on `docs/**`/`blog/**`/`docs-site/**` pushes, never on a tag.
+- **Measurements**: where a provider itemises reasoning, thinking was 68% of output tokens; output is ~1% of all
+  tokens (98.7% is prompt), so the spend lever is prompt cache-hit rate, not effort. `riskLLMMaxTokens = 1024`
+  was calibrated at 16/16 verdicts against 3/16 at 8 tokens.
+- **Machine tools**: `dblm` config is `~/.dblm/config.json`; the harness is
+  `~/Downloads/work/ogcode-bench/benchmark.py` with its json/Bill accounting traps in `HOWTO.md`.
+
+## 2026-10-22 — §7 board gets HTTP route coverage and one regression pin
+
+- New `internal/server/board_routes_test.go` (5 tests, ~0.25 s) drives `srv.routes()` with `httptest`:
+  board draw/post validation, claim→roster→release, teammate stop (200/404/400), 409 claim conflict
+  naming the holder, and 503 on all six routes with `s.board == nil`.
+- `TestStartSessionLoopJoinsAnEmptyAgentAsBuild` pins the live-found `"" → "build"` normalisation. Mutation
+  check: deleting only the block inside `startSessionLoop` (there are **two** copies — the resume handler has
+  its own at ~line 84) makes it fail with `board: session did not join … err="the  agent does not join the board"`.
+- Left untested on purpose: the web drawer (`web/package.json` has no test runner) and the SSE→15 s polling
+  fallback; both stay live-rig verified. `CGO_ENABLED=1 go test ./internal/server/ ./internal/board/` green,
+  `go vet` clean.
+
+## 2026-10-22 — §7 board drawer driven end to end by ego-browser
+
+- Throwaway instance (v0.50.2, `--port 7911`, isolated `HOME`, `config.db` copied in) + ego lite 2.1.0
+  against the real `web/dist`. Session `ses_01M5J25DSK3SAK3W7PPXQ5Y1H5` joined the roster as `build-dfd3`
+  (`msg="board: joined"`), so the `"" → "build"` normalisation holds through the actual web client, not just
+  the Go test.
+- Drawer verified by hand: open from the header, `1 agent · 0 posts`, post → `Posted as #1 — queued for the
+  next turn`, freeze `web/src/App.tsx` → `no expiry` on a zero `time.Time`, release → `No path is frozen.`,
+  `page.reload()` → all 4 posts/released claims still there, `Escape` closes without stopping the composer.
+- SSE: a `POST /api/board/post` issued from Node `fetch` outside the page reached the open drawer in **238 ms**
+  with no manual refresh (board.* event → 150 ms debounce → refetch). `GET /api/board` cross-check: cursor 4,
+  kinds note/claim/release, `leaseUntil` zero.
+- NOT exercised, and the reason: the turn itself 402'd (`anthropic … Insufficient Balance`), so the agent-side
+  board tools, post delivery into a next turn, and spawn/stop of a real teammate stayed untouched — and the Stop
+  button correctly never renders for `kind:"session"`.
+
+## 2026-10-22 — §7 board agent side driven end to end on ogx-deepseek
+
+- Throwaway instance (v0.50.2, `--port 7915`, isolated `HOME`, `config.db` copied in) rebuilt with
+  `-X internal/provider.OGXAppSecret=$SEC` (`strings | grep -c -F "$SEC"` → 3). Session
+  `ses_01M5J2HG12Q1JKXE9WEZP8Q0VA` joined as `build-92a4` on `ogx-deepseek-v4.1-flash` — so the three paths the
+  ego run could not reach (agent-side board tools, post delivery into a turn, spawn/stop of real teammates) are
+  now exercised against a real model.
+- Turn 1, one complex task: **three teammates** built an `md2site` project in the workspace; **40 pytest tests
+  pass** (`40 passed in 0.06s`, re-run by hand after the turn).
+- Turn 2, a forced turn isolating the wait path: teammate `wait-worker` writes `wait.txt` and posts a note to
+  `build-92a4`; the parent waits twice with `handles:["wait-worker"]`, then reads the file. First wait showed the
+  claim at `seq 25`; second showed the note at `seq 26` and did **not** replay the claim. `board_agent`:
+  `build-92a4 last_seq=26` (newest post), `wait-worker done`; posts 25 claim / 26 note / 27 release; `read` →
+  `wait worker ok`; no `could not advance cursor` in the log.
+- Three bugs only a live run finds, all fixed in `internal/server/board.go`: (A) nothing announced turn start, so
+  a spawned session sat unclaimed — `boardTurnStart` now mints the handle idempotently per turn, sets
+  `StatusRunning` for `KindSession`, logs `board: turn started`, and is called from `startSessionLoop`; (B) the
+  post-wait `Seen`/roster reads reused a possibly-expired op context — they now get a fresh one; (C) a
+  `handles`-filtered wait never advanced its cursor (the advance was guarded on `len(req.Handles) == 0`), so the
+  same post came back forever — it now advances past every post the wait showed and stops before the first one the
+  filter held back, so nothing is skipped.
+- `TestWaitAdvancesCursorPastAFilteredWait` pins (C): reverting `waitTeammate` to the old advance makes it fail
+  with `cursor 0 after a fully shown wait, want 1`; with the fix it passes. `HOME=… CGO_ENABLED=1 go test
+  ./internal/... . -count=1` → 29 packages ok, `gofmt -l` and `go vet ./internal/server/` clean.
+- Rig-specific gotcha for the next run: `GET /api/session/{id}/message?limit=N` lists every tool call twice (the
+  `assistant` call plus a `user` part echoing it beside the result), so do not read two invocations out of it. A
+  HOME-isolated `go test` leaves `$HOME/go/pkg/mod` read-only — `chmod -R u+w` before `rm -rf`.
+
+## 2026-10-23 — Multi-agent vs single-agent measured as a 2×2 on the benchmark
+
+- Setup: `ogcode-bench` `ogcode serve` arm, `ogx-deepseek-v4.1-flash`, `--time-limit 1800`,
+  n=2 replicates per cell (bug|build × single|multi), same hidden-test + build grading. All 8 runs graded
+  `success` (`tests_ok` and `build_ok`), every model call proxied (`proxied_model: true`), 0 egress denials.
+- Harness change first: `SANDBOX_NOTE` appended to the prompt for both modes in `run_serve` — the graded clone
+  lacks gitignored `server/configs/*.conf`, so a bare `go test ./server` panics (and one agent backgrounded a 40 h
+  timeout and polled). Without the note the comparison is unusable: bug/single 1276 s vs 487 s with it,
+  bug/multi pinned at the 2700 s cap, build/single killed before it finished.
+- Wall clock (s): bug/single 487.2 / 445.0; bug/multi 461.0 / 627.4; build/single 439.2 / **1800.2 capped**;
+  build/multi 601.6 / **1800.6 capped**. Means: 466 / 544 / (1120 censored) / (1201 censored).
+- Cost ($) and turns: bug/single 1.14·112, 0.90·75; bug/multi 1.75·140, 3.46·265; build/single 1.20·116,
+  1.03·98; build/multi 2.24·211, 1.55·156. Multi is 1.7–2.6× the spend and 1.5–3.5× the turns for no wall win.
+- Model seconds summed over sessions (wire.jsonl `ms`): bug 347/276 single vs 557/985 multi; build 328/303 vs
+  624/485 — the multi parent plus teammates think 1.6–3.6× as long in total.
+- Parent's last edit vs run tail: clean bug 323 s/128 s tail (multi) vs 391/87 (single); clean build 390/201 vs
+  329/100; rep2 bug 592/24 vs 353/81; rep2 build 1264/**710** vs 1845/4. So multi moves the parent's edits earlier
+  and adds a tail collecting teammate reports — the net is a loss, never a gain.
+- Compile tax dominates the build task, not orchestration: cold GOCACHE per run, each `go test ./server -run …`
+  costs 150–420 s. rep2 build/single: 1544 s of tool time, 1512 s of it in 6 calls >20 s. rep2 build/multi:
+  4941 s of tool time across three concurrent sessions, 22 calls >20 s summing 4844 s, both parent and teammates
+  recompiling the same package. Wall time measures compile rounds triggered, not agents run.
+- Teammates in the bug cells were mostly read-only investigators (`reload-auditor`, `mpay-upstream`,
+  `mpay-tests`) and test authors; only clean build/multi had teammates editing (windows 125–196 s and 207–272 s
+  inside the parent's 119–395 s).
+- One contaminated run, flagged: rep2 build/multi's teammate `QPETKV` walked to a sibling run dir and copied
+  `../rep2-build-single-…/home/go/pkg/mod` (10 references; the 159 s `chmod`/`cp` and 149 s `rm -rf` calls). The
+  runs directory is a harness artifact — no other run references another.
+- Verdict: no cell where multi is faster. Bug is inside replicate noise (single 445–487 vs multi 461–627, ranges
+  touch only at the ends); build is slower or censored in both modes. Parallel teammates do not shorten a task
+  whose critical path is one agent's edit/test loop on a shared compile cache.
+
+## 2026-10-23 — four parallel research teammates on the agent loop, permissions, indexing and the web client
+
+- Fan-out: 4 `teammate spawn` handles (loop-runner, permissions, indexer, web-client), one subsystem each, all
+  read-only, each writing a report to `public/research/<slug>.md` and posting a ≤5 KB summary to the board
+  (topic `review`, addressed to the parent). Wall time ≈ 5 min, four concurrent sessions; `board claim
+  public/research` (taken by `permissions`) then blocked `indexer`'s claim of its own file — claims are
+  path-prefix, so one prefix per writer, or distinct prefixes, is the fix.
+- Read-only held: mtimes under `internal/` and `web/src/` were unchanged across the run (19:46–20:12 vs spawn at
+  01:11); only `public/research/*.md` appeared.
+- **Two MEMORY.md lines were stale and are now corrected**, both verified in source before editing:
+  `codebase_map` has **no >10-descendant collapse** — "One level, never recursive, and no size threshold"
+  (`internal/tool/project_index.go:618-629`, the old <10-file expansion was deleted); the shipped exclude list is
+  **39** entries, not 38 (`internal/docindex/excludes.go:51-72`).
+- Index labels are generated by **`IndexAgent`** from a locally-extracted keyword corpus, never embeddings —
+  `grep -n 'embedding' internal/indexer internal/docindex` returns nothing; storage is `doc_page_index`
+  (db/022, `mod_time` from db/049).
+- Permission detail worth keeping: `requestPermission` evaluates the ruleset **before** the mode switch, and the
+  catch-all `{Permission:"*", Pattern:"*", Action:Allow}` rule means mode only ever affects bash/write/edit (and
+  the ask-path of teammate). The risk classifier's answer is cached process-globally by exact command string.
+- Cost note: this is the read-only case where fan-out does pay — the four reports are ~125 KB of cited analysis
+  produced in one wall-clock pass, against a serial version of the same reads.
+
+## 2026-10-23 — teammate spend in the parent's token pill
+
+- Built by fan-out, two teammates on disjoint files: `usage-api` (backend) and `usage-pill` (web); I held the
+  review, verification and memory.
+- Shape: `/session/{id}/token` and `/session/{id}/usage` each gained a `teammates` array (per handle +
+  sessionId + status, tokens or priced `Totals`); the headline totals stayed the session's own and
+  `token-pill.tsx` does the fold — headline counts session + teammates, popover shows "of which teammates" plus
+  one row per handle. Rejected: folding into the ledger/`foldChildUsage`, which would double the same tokens in
+  the parent pill and the child's own page.
+- Link is the board roster, not a schema change: `spawnedTeammates` does `board.BySession(parent)` then filters
+  roster rows to `KindTeammate && SpawnedBy == parent.Handle`. Handle names are random (`board.NewHandle`) and
+  `UNIQUE(board_agent.session_id)` pins one handle per session, so a reused name cannot pull in a stranger's
+  teammates.
+- Poll: the parent transcript does not move while a teammate works, so the pill refetches on `board.*` events
+  plus a 5s beat while any teammate is running/idle.
+- Verified: `go test ./internal/server/ ./internal/agent/` (23.8s / 37.4s, isolated HOME), `gofmt -l` clean,
+  `CGO_ENABLED=1 go build ./internal/... .`, `web: tsc --noEmit` + `npm run build` (14.05s). Live check on a
+  throwaway dir/HOME at :7799 (never the :7801 server this session runs in): created a session via
+  `POST /api/session`, both endpoints answered `"teammates":[]` and the parent totals 0. Non-empty lists are
+  covered by the seeded-board tests, not by a live teammate run.
+
+## 2026-10-23 — teammate nesting unbounded; depth-1 guard and the 4-live cap removed
+
+- Asked for: a teammate may spawn teammates, with no ceiling on how many run at once.
+- The real gate was never the comment in `agent.go` ("never offered the tool"): the child runs as
+  `SessionType: "build"` and got the tool on the wire, and `spawnTeammate` refused it on
+  `parentHandle.Kind == board.KindTeammate`. Deleted that guard and `maxLiveTeammates = 4` outright — no
+  soft or hidden limit, since none was asked for. What bounds nesting now is spend, `teammateMaxSteps = 300`,
+  0 auto-resumes and spawn = `Ask`.
+- Stale comments fixed to name the real mechanism: `canSpawnTeammate` (`internal/agent/agent.go`),
+  `spawnTeammate` doc + `teammatePrompt` (`internal/server/board.go`), the `TeammateTool` description, and
+  `cancelLoop` (`internal/server/host_session.go`) — that cascade already recursed, since each cancelled
+  child's `cancelLoop` re-enters `stopTeammatesOf`. Spawn notice dropped "of %d".
+- Test trap worth remembering: the obvious assertion, `liveTeammates >= 7`, FAILED in the full-suite run
+  (2 live) after passing alone — `leaveBoard` flips a teammate to `done` the moment its loop exits, and with
+  an empty registry the test loops exit immediately, so the count is a race. The pin now reads
+  `board.Roster` and asserts six `nested-*` rows exist. Six spawns is deliberate: past the old ceiling of 4.
+- Verified: `go test ./internal/server/... ./internal/tool/... ./internal/board/... ./internal/agent/...`
+  all ok (24.3s / 2.8s / 1.1s / 38.1s, isolated HOME), test `-count=5` stable, `gofmt -l` clean,
+  `CGO_ENABLED=1 go build ./internal/... .`. No live multi-agent run: nesting is pinned by unit test only.
+
+## 2026-10-23 — board claim/release noise in a user turn: by design, user chose to keep it
+
+- User asked why 8 `permissions/usage-pill/usage-api → you · claim/release` blocks appeared under a plain
+  "hii". Not agent-attached text: `Store.Claim`/`Release` write `board_post` rows with `to_handle = ''`
+  (broadcast, `internal/board/store.go:471`, `:496`), and `deliverBoard` (`internal/server/board.go:841` via
+  the `DeliverBoard` hook at `internal/agent/loop.go:386`) appends every undelivered broadcast post to the
+  turn's own user message (`lastUserMessageID`). `agent-part.tsx:39` labels any inbound post "→ you", so a
+  broadcast reads as addressed to the reader.
+- The batch arrived because three parallel agents claimed/released in the seconds before the message and no
+  turn had run since; the per-turn cap is 20 posts / 8 KB (`boardDeliveryPosts`/`boardDeliveryBytes`).
+- Presented three fixes (filter claim/release in `Store.Deliver`; addressed-posts-only delivery; UI collapse)
+  and the user chose **no change** — delivery semantics stay as designed in `plans/MULTI_AGENT_COMMS_PLAN.md`
+  §2.1/§2.5. Do not re-open this without asking.
+
+## 2026-10-23 — board delivery redesign agreed: push, ephemeral, filtered (design only)
+
+- User's complaint: the board "costs too many tokens". Diagnosis (no code changed): the pull is not the cost.
+  Four drivers, in `plans/BOARD_PUSH_PLAN.md` §0 — (1) delivered posts are persisted as a `PartAgent` on the
+  turn's user message (`internal/server/board.go:841` → `appendAgentPart`, rendered at
+  `internal/agent/loop.go:3908`) and re-sent every step of every later turn; (2) claim/release are broadcast
+  (`internal/board/store.go:471`, `:496`) so N agents pay for every claim; (3) claims are state delivered as
+  events though `claimHolder` already enforces collisions at write time; (4) 20 posts / 8 KB dumped at turn
+  start regardless of relevance.
+- Decisions taken: claims → **collision notices only**; routine posts **interrupt the stream** (guidance tier,
+  behind a once-per-step burst gate, or interrupts cost more than the pull); turn-start catch-up
+  **directed-only**, broadcast replay deleted.
+- Two facts found while designing: `deliverUrgent` (`internal/server/board.go:789`) pushes `board.Render(p)`
+  through `s.Guidance`, so a peer post reaches the model labelled "the user sent this while you were working",
+  contradicting its own fence — push-per-post would multiply that. And `Store.Deliver` (`store.go:330`)
+  advances `last_seq` itself; the new design needs ack-on-inject, so it must become a read-only `pending()`.
+- Correction to an earlier belief: `board.Store.mu` guards only the `wait` channel, not the `Insert` Exec, so
+  an insert hook cannot deadlock on it — it is async for latency and for re-entrancy safety, not to avoid a
+  deadlock.
+- Estimated, not measured: a busy 4-agent turn carries ~1.5k tokens of claim fences per agent, permanently.
+  Measure before/after on one real multi-agent session when P1 lands.
+
+## 2026-10-23 — claim-on-mutation reviewed; notify-on-release rejected
+
+- Proposal reviewed (no code changed): check the board on **every mutation**, and on a collision leave a
+  "tell me when it is released" subscription instead of waiting. Check-on-mutation already exists
+  (`claimHolder` → `tool.Context.HeldBy` → `write`/`edit` refuse); task-completion push does not exist yet
+  (P1/P2 of `plans/BOARD_PUSH_PLAN.md`).
+- Two real holes found in the existing claim protocol, both more urgent than the subscription: **nothing
+  auto-claims** (only `board claim` creates one, so the write check protects a holder, not two unclaimed
+  writers) and **the lease has no heartbeat** — `ClaimLease` (10 min) is set in `Store.Claim` only
+  (`internal/board/store.go:469`); the comment at `internal/board/board.go:25` saying a write refreshes it is
+  wrong, so a long edit silently loses its claim and a second agent may then write.
+- Why notify-on-release is the wrong lever: a released claim is usually **not an event** — the common way a
+  path frees is the lease expiring, which `Store.Claims` drops by wall clock with no post (`store.go:407`), so
+  the case most worth waking for is the one with no hook; push only reaches `StatusRunning` handles, so an
+  idle waiter that ends its turn cannot be woken (wakes are still design-only); a waiter registry needs cancel,
+  prefix matching (`Conflicts`), FIFO ordering and cycle detection. Payoff is one retry step.
+- Cheaper substitutes agreed in the same review: the collision notice goes to the **holder** (cause: shorter
+  hold) rather than the waiter (symptom: retry); `wait` gains a `path` mode that blocks until `HeldBy` is free
+  or a deadline, reusing `Store.signal()`. A blocked agent waiting one step is cheaper than ending the turn — a
+  new turn re-sends the whole prompt.
+
+## 2026-10-23 — board push delivery implemented, completion always reported
+
+- `plans/BOARD_PUSH_PLAN.md` is no longer design-only: posts ride `LoopControl` notices injected at the prompt
+  tail, acked once per turn (`catchUpBoard`/`ackBoard`), turn-start catch-up directed-only
+  (`board.DeliverDirected`), mid-turn fan-out through the store's `OnInsert` → `pumpBoardPosts` →
+  `fanOutBoardPost`, with `InterruptForNotice` behind the once-per-step gate and `urgent` cancelling the stream.
+- Gap found by the user's framing ("always a push"): a teammate that simply STOPPED without posting told its
+  spawner nothing. Fixed in `leaveBoard` → `reportTeammateDone`: a `StatusDone` end-of-turn with no post to
+  `SpawnedBy` **after the teammate's last message** posts a `status` carrying that message.
+  Stopped and stale handles still return early, so a cancellation is never announced as a completion.
+- "Was it reported?" is an ORDERING question, not a flag (`boardTurn.reportedAt`, compared against the newest
+  assistant message's `CreatedAt`): a mid-turn question to the parent must not suppress the final report, while
+  a post written after the last message is the report itself. Both stamps are wall clock (messages in unix
+  millis via `session.Now()`, posts `time.Now()`), so `lastAssistantText` converts with `time.UnixMilli`.
+- Prompt surfaces aligned with the guarantee: `teammatePrompt` says a post-less stop still sends the last
+  message, so make the last message the result; `boardPrompt` and `TeammateTool.Description` say the completion
+  is pushed (wait is optional, `status`/`roster` is the pull path).
+- Tests: `TestLeaveBoardReportsACompletionTheTeammateNeverPosted` (mutation-checked — fails without the hook),
+  `TestLeaveBoardLeavesAReportedCompletionAlone` (a post after the message suppresses the report, exactly 1
+  notice), and `TestLeaveBoardReportsAMessageWrittenAfterAPost` (the ordering rule).
+
+## 2026-10-23 — conflict-free mutations: read-bookmark file change gate shipped
+
+- Delivered `plans/CONFLICT_FREE_MUTATIONS_PLAN.md` v1: migration `066_file_change.sql` (history rows +
+  per-session bookmarks), `internal/filechange` (store, `Log` with a 50-entry per-file ring, `Stale`), the gate
+  in `tool/write.go` / `tool/edit.go` (`staleness.go` renders the refusal with the other session's diff),
+  `description` required on both tools, the `read` bookmark, and `GET /api/file-changes`.
+- Two test failures, both fixed: the rendered diff has a space after each sign (`"- one"`, not `"-one"`), and the
+  route's display relativization must run against a symlink-resolved root (`tool.FileKey(s.dir, ".")`) because
+  keys are `FileKey`-normalized on darwin (lowercased, `/var` → `/private/var`) — the route test also has to
+  create `internal/tool/edit.go` BEFORE keying it, since keying a path whose parent does not exist never resolves
+  `/var`.
+- Verified: `CGO_ENABLED=1 go build ./internal/... .`, `go vet ./internal/...`, and
+  `go test ./internal/tool/ ./internal/server/ ./internal/filechange/ ./internal/agent/ ./internal/cli/` all
+  clean; live `make -s build-server` run on port 7911 in `/tmp/fcgate-e2e` returned 200 from `/api/config` and
+  `{"changes":[],"cursor":0}` from `/api/file-changes?path=notes.md`, and `goose_db_version` showed 66 applied.
+- Deferred on purpose: cross-process staleness while both `serve` and `run` are up (would need a DB read per
+  mutation), `bash`/MCP/`latex_to_pdf` blind spots, `file_map` not counting as a read, and any history UI.
+
+## 2026-10-23 — bash joins the file change gate (fingerprint, not command parsing)
+
+- Chosen by the developer: **stat the files the log already tracks after each bash call**, rather than parsing
+  the command (`sed -i`, `>`, `mv` are unbounded) or snapshotting the workspace (cost grows with the tree, not
+  with the bookmarks). One `os.Stat` per tracked file per command.
+- `filechange.Fingerprint{Size, MTime}` + `FingerprintOf` (`fingerprint.go`); `Log.Read` stamps it for every
+  caller, `Log.Files()` lists what the log could have stalened. `observeShell` (`tool/bash_observe.go`, called at
+  the end of `BashTool.Execute`) records tool `bash` with the command as the note and no diff — the gate never
+  holds the bytes, so a diff would mean reading the file back on every command. Deletion works because
+  `Record`→`Read` re-stamps after the change and a missing file is the zero fingerprint.
+- Same turn, the bookmark sentinel bug: `Seen` returned 0 for "never read", so a file first read at revision 0
+  (seeded outside the tools) could never be refused. Now `-1`, `Stale` guards on `seen < 0`, and the revision-0
+  case is pinned by `TestBookmarkAtRevisionZeroStillRefuses`.
+- Rejected: hashing contents (byte cost per tracked file per command for a signal mtime+size already gives at
+  tool granularity); recording changes for untracked files (no bookmark ⇒ nobody to stale, so it is history
+  noise); auto-claiming a path from bash (claims stay opt-in, `claimHolder` only refuses).
+- Verified: `gofmt` clean, `CGO_ENABLED=1 go build ./internal/... .`, `go vet ./internal/filechange ./internal/tool`,
+  and `CGO_ENABLED=1 go test` on `filechange`, `tool` (4 new `bash_gate_test.go` cases through the real
+  `BashTool.Execute`), `server`, `agent`, `cli`, `session` — all ok, HOME isolated for the server suite.
+- Live: rebuilt (`/tmp`, `ogcode v0.50.2`), `serve --port 7923` in a throwaway dir with a throwaway HOME —
+  `/api/config` 200 after 2s, `/api/file-changes?path=notes.md` → `{"changes":[],"cursor":0}`, `goose_db_version`
+  showed 66 applied. **Not** driven through a live agent turn: `bash` is `Ask` in the ruleset and `ogcode run`
+  has no approval flag, so the agent-turn path stayed at tool level (real `Execute`) + the filechange store tests.
+
+## 2026-10-23 — board reduced to an agent tree (posts and claims deleted)
+
+- Developer's call: board messaging had no value once mutations became conflict-free. What is left is the tree —
+  who spawned whom, each handle's status, and a jump into its session. Reporting back is a status event, not a
+  post to anyone.
+- Cut: `board_post` (migration `067_agent_tree.sql` drops the table and its claim/release rows), post/read/wait/
+  claim/release ops, `board.DeliverDirected`/`Claims`/`HeldBy`/`Claim`/`Release`, the push pump + burst gate
+  (`pumpBoardPosts`/`fanOutBoardPost`/`OnInsert` board hook), `CatchUpBoard`/`AckBoard`, `boardTurn.reportedAt`,
+  the `claimHolder` check in `write`/`edit`, the drawer's posts/claims panes, and ≈400 Go lines. Kept: roster
+  (`Register`/`Get`/`BySession`/`SetStatus`/`Roster`/`Children`/`MarkReported`/`WaitStatus`/`Reconcile`), spawn/
+  stop cascade, and the roster's use by the file gate to name a session by handle.
+- Delivery rule (developer chose **queue until next turn** over waking an idle parent): child loop end sets
+  `status=done` + `updated_at`; spawner RUNNING → `LoopControl` notice carrying the child's last assistant message
+  (4 KB, plus `/session/<id>`) and `MarkReported`; spawner idle → `notified_at < updated_at` stays unreported and
+  `CatchUpTeammates` (replacing `CatchUpBoard`) hands it over at the parent's next turn start. Nothing starts a
+  turn on its own.
+- Accepted cost, stated up front: a teammate can no longer ask its parent mid-task, and a parent cannot ask a
+  running child — the only channel is spawn in, completion out.
+- Verified: `CGO_ENABLED=1 go build ./internal/... .`, `go vet` on board/agent/server/tool, `go test` on
+  `board`, `agent`, `tool` and the whole `internal/server` suite (HOME isolated), `npx tsc --noEmit`,
+  `npm run build` — all clean.
+- Live (throwaway git dir `/tmp/ogtree2.2kgPpG`, port 7899, real HOME): `goose_db_version` 67, `board_agent` has
+  `spawned_by`/`notified_at`, `board_post` gone, `/api/board/roster` → `{"agents":[]}` on an empty project. A
+  real spawn (`probe`) went `teammate → done`, `spawnedBy=build-b522`, `updated_at == notified_at` (push path),
+  and the parent's turn ended with "it finished with: `ok`" from the child's last message with no persisted part.
+  A second turn calling `board` `op=roster` printed the indented tree.
+- Build gotcha, again: the live binary must be `make -s build-server OGX_APP_SECRET=$(tr -d '\n' <
+  ~/.ogcode/ogx-app-secret)` — an unsigned build 401s "a valid client signature is required". Default `anthropic`
+  model returned **402 Insufficient Balance**, so the live session had to run `ogx-deepseek-v4.1-flash`.
+- Not exercised live: the idle-parent catch-up path (tests only — `internal/server/board_test.go`).
+
+## 2026-10-23 — teammate caps removed: report size and step ceiling
+
+- Deleted `teammateReportBytes` (4 KB) from `internal/server/board.go`: `teammateReportNotice`, `waitTeammate` and
+  `statusTeammate` now carry the child's last message whole, truncation removed from all three call sites.
+- Deleted `teammateMaxSteps` (300): `stepBudgetFor` returns `agent.MaxStepsUncapped` + 0 auto-resumes;
+  `internal/agent/loop.go` grew `overrideStepBudgets`, which maps a negative budget to `math.MaxInt` for both
+  `maxSteps` and `hardMax` (previously the override block was inline in `RunLoop`).
+- Investigated `LoopControl` as a residual clip: `maxNoticeBytes` (2 KB) bounds a BATCH only — `DrainNotices`
+  always-take-one rule means a 40 KB notice is delivered alone and intact. No change needed there.
+- Nothing pinned the old values before this; now `TestOverrideStepBudgets` (`internal/agent/step_budget_test.go`),
+  `TestStepBudgetLeavesTeammatesUncapped` and `TestTeammateReportKeepsTheWholeMessage` (40 KB body) do.
+- Still bounded, deliberately: `capToolOutput` 50 KB / 2000 lines on every tool result (so `teammate wait` output),
+  `teammate wait` timeout 60 s default / 120 s max, compaction 2 per run.
+
+## 2026-10-23 — build prompt now favors teammate splits
+
+- Rewrote `boardPrompt()` (`internal/agent/agent.go`) around the DECISION with the mechanics second. Two currencies
+  a teammate buys: **wall-clock** (independent streams finish in the time of the slowest, not the sum) and
+  **tokens** (a child's greps, reads and dead ends are billed in its own context, and the parent re-sends less
+  history on every step). "When either pays, favor the split" — spawn one per stream and take one yourself.
+- No mandate and no negation: nothing says "you must spawn", nothing says "don't do it all yourself" (this model
+  obeys negations literally and would read a ban as a prohibition). The four cases where one agent stays right
+  are stated positively instead: sequential pieces, one file, an edit smaller than its briefing, and research.
+- Verification is written as *review the diff + run the build and tests*, not "don't re-read" — it would
+  otherwise contradict the prompt's existing **Reviewing work** section.
+- Process step 1 gained the pointer, in the interactive branch only, so `TaskAgent` (which overrides step 1)
+  never sees it; `internal/tool/teammate.go` `Description()` was left untouched — the system prompt stays the one
+  source of truth on when to spawn.
+- Pin: `TestBoardPromptPrefersTheSplit` (`internal/agent/prompt_workflow_test.go`) — both driver labels present,
+  decision index before the `teammate spawn` mechanics index, and no non-build agent prompt mentioning `teammate`.
+
+## 2026-10-23 — Three HIGH bugs fixed in the file change gate and the board (fail-before proven)
+
+Found by reviewing the uncommitted multi-agent/changefile tree; medium/low findings left alone (#4, #7, #9 among them).
+
+- **Bash laundered a foreign change** (`internal/tool/bash_observe.go`): the observer recorded its change with
+  `Session: tctx.SessionID`, which made the running session the author of bytes it never held *and* advanced its
+  bookmark, so the next `write` clobbered another session's edit with no refusal. The record is now unattributed
+  (no `Session`), so the observer is refused like anyone else until it re-reads. **Deliberate behaviour change**:
+  `TestOwnShellChangeIsNotStale` was replaced by `TestOwnShellChangeRefusesUntilReRead` — a session's own shell
+  command now stales it, because size+mtime cannot attribute the write. Proof: temporarily re-adding the `Session`
+  field failed both new tests (`title = "notes.md", want the stale refusal`).
+- **Empty ring refused everything after a restart** (`internal/filechange/log.go`): `coveredRev < seen` is true for a
+  bookmark of 0 with no rows in the ring, so the `History` fallback never ran and `dropped` refused every
+  previously-read file. `covered := len(ring) > 0 && ring[0].Rev <= seen+1`.
+  `TestRestartRefusesABookmarkOfRevisionZero` failed against the old formula with `dropped = 1, want 0`.
+- **Stop/leave race re-delivered a completion** (`internal/board/store.go`): `stopTeammate` wrote `stopped` *after*
+  `cancelLoop` (which does not wait), so `leaveBoard` could write `done` and push a "finished" report, and the later
+  `stopped` write bumped `updated_at` → reported a second time. New
+  `SetStatusUnlessTerminal` (`WHERE status NOT IN (done,stopped,stale)`) claims the row first; stop and leave both
+  return early on a missed claim. `TestStopTeammateIsNotRewrittenDone` /
+  `TestStopTeammateOfAFinishedTeammateChangesNothing` failed against the unconditional UPDATE.
+- Verified: `CGO_ENABLED=1 go build ./internal/... .`, `go vet` on the four packages, `go test -count=1 ./internal/...`
+  all green; gofmt clean on the seven touched files.
+- `MEMORY.md` is ~29.5 KB (over its ~20 KB budget before this turn): its two largest sections are the board and the
+  file change gate, both live-feature invariants rather than history — a curation pass needs trimming spread across
+  ~28 small sections, so it was not done here.
+
+## 2026-10-23 — a teammate's permission Ask surfaced in the parent session
+
+- Before: the prompt was registered under the CHILD's sessionID on the one shared `permission.Manager`, and the
+  composer renders only the active session's queue, so a teammate blocked in Ask mode was invisible until the
+  child's page was opened (board drawer or desktop notification) and hung `running` forever when nobody did.
+- Now: `LoopRunner.ParentSessionOf` (`agent/loop.go`, wired to `server.parentSessionOf`, `board.go`) climbs the
+  board's `SpawnedBy` edges to the first non-teammate session, and `requestPermission` publishes a SECOND
+  `permission.requested` carrying `sessionId` = root session, `ownerSessionId` = the child, `teammate` = handle;
+  the cancel path mirrors `permission.replied` "cancelled". `GET /session/{id}/permission` appends
+  `pendingTeammatePermissions` (roster BFS, any depth) so a reload restores it; `handlePermissionReply` reads the
+  owner from `permissions.Get` before `Reply` and publishes to both sessions.
+- Client: `PendingPermission.sessionId` is the OWNER, `teammate` marks a mirrored prompt; `respondPermission`
+  posts to the owner's session; `permission-prompt.tsx` chips the handle and skips the focus grab for a mirrored
+  one. `ask_user` deliberately not mirrored.
+- Verified: `CGO_ENABLED=1 go test ./internal/server/ ./internal/permission/ ./internal/agent/` green (24s/1.4s/37s),
+  `npm run build` clean, and the fresh binary run on a throwaway rig (fresh HOME, temp dir, port 7923) served the
+  new `index-DvoV_PhC.js`, `/api/board/roster` 200 and an unknown permission reply 404. Not verified visually: the
+  live server on 7801 still runs the old embedded `web/dist` and a restart would kill the session.
+- Follow-up the first pass missed: answering from the CHILD's page published `permission.replied` only for the path
+  session (= the owner), so the parent's mirrored prompt stayed in its composer and 404'd when clicked. The handler
+  now notifies every distinct queue holding the prompt — path session, owner, and `parentSessionOf(owner)` —
+  pinned by `TestReplyingFromTheChildPageClearsTheParentQueue` (verified failing before the change: reached
+  `map[sess-child:true]` only).
+
+## 2026-10-23 — board prompt flipped from "look for a split" to "reach for a teammate first"
+
+- `boardPrompt()` (`internal/agent/agent.go`) led with "Look for a split before you read" and closed with "One
+  agent stays the right answer when…", which read as teammate-is-optional. Now it opens with "**Reach for a
+  teammate first**", states the default explicitly ("your default is a teammate working beside you"), lists the
+  cases that suit a split, makes spawning "the opening move of the turn, not the fallback", gives the one-sentence
+  brief test, and demotes the solo case to "Stay with one agent only when…".
+- Process step 1 (interactive build prompt) went from "when it splits into independent streams, plan the
+  teammates" to "your first instinct is a teammate working beside you … decide the split … before you start
+  reading".
+- Verification is a separate paragraph now (was folded into the "Spawn early" sentence). `TestBoardPromptPrefersTheSplit`
+  asserts the new strings and now REJECTS "Look for a split" / "Spawn early", so the fallback framing cannot creep
+  back in. Rendered prompt checked by dumping `agent.BuildAgent.System` from a throwaway `main` inside the module
+  (the package is `internal/`, so an external module cannot import it).
+- Rule unchanged and still a judgement call: strict sequence, one shared file, an edit too small to brief, or
+  research still want one agent.
+
+## 2026-10-23 — board prompt reframed from "reach for a teammate" to "you orchestrate"
+
+- Developer's ask: the main agent should spend its time thinking and deciding **how and how many** teammates to
+  swap in, acting as an orchestrator, and only do work itself when it has free time. The previous wording made a
+  split the default but read as "spawn one per stream and take a stream yourself", i.e. the parent still
+  implemented.
+- `boardPrompt()` now opens with "You orchestrate; teammates do the work", adds "Decide the fan-out before your
+  first read" (speed and token arguments), "How many, and which" (one per independent stream, no more than the
+  parent can verify, disjoint files, shared surface kept by the parent, spawn the batch in ONE tool block), and
+  "What you do with your own time" (next decision, shared files, verification, a user question). Process step 1
+  asks for the plan, then the teammate count and stream split, before any reading.
+- Two prompt-only rails added: do not end the turn while a spawned teammate is still working (nothing starts the
+  parent's turn; `catchUpTeammates` only delivers at the next user turn), and a teammate briefed to implement one
+  stream implements it rather than delegating again.
+- Deliberately NOT changed in code: no live-teammate cap (removed earlier on purpose,
+  `TestSpawnTeammateAllowsNestingAndCapsNothing`), and nothing auto-starts the parent's turn when a child finishes.
+  Both rails are prompt-enforced only; a harness option stays open if the prompt proves too weak.
+- Verified: `gofmt -l` clean, `CGO_ENABLED=1 go build ./internal/... .` OK,
+  `CGO_ENABLED=1 go test ./internal/agent/ ./internal/tool/ -count=1` green, `go vet ./internal/agent/` clean, and
+  the assembled section dumped from `BuildAgent.System` reads coherently. `TestBoardPromptPrefersTheSplit` asserts
+  the new wording and rejects "Reach for a teammate first" / "take a stream yourself".
+
+## 2026-10-23 — Task tool gains background mode
+
+- Why: a sync `task` runs a whole sub-agent inside one tool call, and the parent's batch blocks on `wg.Wait()` until the slowest tool returns — minutes-long research tasks froze the turn's output while everything else idled.
+- Design: `task` with `"background": true` → `spawnBackgroundTask` (`internal/server/board.go`) registers a KindTask board child (session type `"subagent"`, read-only prompt, model/permission inherited, budget = sync parity via `stepBudgetFor`) and returns a `task-*` handle + session URL immediately. Delivery reuses the existing teammate completion pipeline end to end — running-turn notice, idler's `CatchUpTeammates`, `teammate wait <handle>`, drawer Stop — no new transport. The launch report states the answer is NOT in the result and points at early collection.
+- Child ungating: `resume_routes.go` skips `WithPermissionGating` when `agentName == "subagent"` (read-only toolset); deliberate scope-out: permission BFS/`ParentSessionOf` stay teammate-only.
+- Verified: `CGO_ENABLED=1 go test ./internal/tool ./internal/board ./internal/server` all ok (new pins `TestTaskBackgroundRouting`, `TestSpawnBackgroundTaskRegistersATaskChild`, `TestLeaveBoardReportsABackgroundTaskToARunningSpawner`, `TestStepBudgetForATaskChildMatchesTheSyncSubAgent`), `CGO_ENABLED=1 go build ./internal/... .` OK, `npm --prefix web run build` OK, agent board-prompt tests green after the prompt teaching line.
+
+## 2026-10-23 — teammate "op is required": a model-side missing-arg loop, now self-healed
+
+- Reported from the adhyay-platform workspace: a spawning agent kept calling `teammate` with `{name, prompt}` and no `op`, got the soft refusal, and retried — the screenshot showed the call card with the refusal as its output.
+- Diagnosis on session `ses_01M5MNCVJVRRXPHB1Y4KJM7XN6` (DB `~/Downloads/work/adhyay/.ogcode/ogcode.db`), model `ogx-glm-5.3-flash`: 8 real failed calls (4× guard-review, 4× timing-review) across ~4 turns before one landed; the model's own reasoning part says "I passed name/prompt but the schema requires op… I keep forgetting the required op" — it copied the broken shape from its earlier failed tool_use replays. The provider does not enforce schema `required`, so the bad call reached Execute instead of being rejected client-side.
+- Ruled out: ogcode dropping args (sibling `board` calls in the same session carried `op:"roster"` fine; other teammate calls carried op — 14 wait, 2 status, 8 eventual spawns). The 61 "op is required" text matches in ogcode's own DB and 7 in oglab are TEXT inside reasoning/memory parts, not tool failures — a strict per-part query found 0 real missing-op tool parts in both.
+- Fix (user chose "self-heal + better error") in `internal/tool/teammate.go`: op inferred as `spawn` when a prompt is present (inference keys on the prompt, so `{name}` alone still refuses); the empty-op refusal is shape-aware via `missingOpHint` — `handles`/`timeout`→`wait`, `handle`→`stop`/`status`, `name`→`spawn`; the schema `op` description now spells out all four ops instead of "The operation.". An inferred spawn still goes through spawn's prompt validation and its output opens with `op omitted — treated as "spawn"` so the model learns the shape without losing the call.
+- Pins: new `internal/tool/teammate_test.go` (`TestTeammateSpawnWithoutOpInfersSpawn`, `TestTeammateMissingOpNamesTheOperation`, `TestTeammateExplicitOpsKeepTheirShape`). Soft refusals stay soft `Result`s — the UI's green check is by design so the model reads and corrects.
+- Verified: `gofmt -l` clean on both touched files (`task.go`/`task_test.go` flagged — pre-existing, untouched), `CGO_ENABLED=1 go build ./internal/... .` OK, `go test ./internal/tool ./internal/server -run 'Teammate|Board'` and the full `internal/tool` suite green.
+
+## 2026-10-23 — teammate self-heal installed locally on the ogcode machine
+
+- `make -s install OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)` (the HOWTO `Install ogcode on a host` local-checkout line) rebuilt web (board drawer, agent-part UI included from the uncommitted tree) in 14s and the CGO server, `rm -f` + `cp` + ad-hoc re-sign. Installed `~/.local/bin/ogcode` v0.50.2-3-g033be0f-dirty, built 21:01.
+- Neither the 20:46 repo `./ogcode` nor the 20:46 installed binary contained the teammate fix — both predated the final `teammate.go` edit — so the earlier "install" did not actually carry the self-heal. The 21:01 install does (strings marker `op omitted`, teammate.go:171).
+- Verification: `ogcode version` executes (no stale-signature `Killed: 9`), `codesign -dv` shows `flags=0x2(adhoc)`, `spctl -a` says "rejected" — the known normal state for ad-hoc (binary runs via `com.apple.provenance`, no quarantine xattr). Installed file is 76,598,432 vs repo 76,580,290 bytes — the delta is the embedded signature, identical to the pre-deploy pair.
+- Servers up at install time: pid 24536 = ogcode project :7801 (this chat; keeps the old binary until restarted), pid 24405 = adhyay project server (same old binary; needs its own restart to pick up the fix when it matters).
+
+## 2026-10-23 — orchestration-prompt fixes from the review turn
+
+Five findings fixed across six files; all prompt-side claims of the board/teammate surfaces now match loop reality.
+
+- **Teammates no longer get `ask_user`** (the substantive one): `askUserOffered` (internal/agent/loop.go) ends
+  `&& !lr.isTeammateSession(sessionID)`; `isTeammateSession` sits just before `parentSessionOf` and is nil-safe
+  (CLI/tests → false). Reasoning: teammates are gated for mirroring, not because a prompt reaches anyone; the
+  `"subagent"` skip was the precedent. `teammatePrompt` (internal/server/board.go) now forbids the call outright
+  ("its dialog would render only on your own page, where nobody is looking, and nothing notifies the parent
+  agent mid-task") instead of asserting a premise the model could disprove. Pin: `TestRunLoop_AskUserAbsentForTeammate`.
+- **The board rail now names its exits** (internal/agent/agent.go `boardPrompt`): `teammate stop <handle>`
+  (cascades to spawns) for a wrong/stuck brief, and parking — end the turn with a plain "so", report delivered
+  by CatchUpTeammates at the next turn's start; short-wait chaining called out as "polling with a timer".
+- **Spawn timing reconciled with the intent gate**: "as the opening move of the turn" → "right after
+  `update_intent` states your plan (the plan goes first, and alone)"; the old phrase is on the pins' STALE list.
+- **Dead boilerplate removed**: "Tell it that its last message is its result" cut from `TeammateTool.Parameters`
+  (internal/tool/teammate.go) — `teammatePrompt` already wraps every brief with that contract.
+- **backgroundTaskPrompt**: "nobody sees progress" → "nobody is watching your page for progress" (the child's
+  /session URL is handed back, so the old phrasing was literally false).
+
+Pins extended in `TestBoardPromptPrefersTheSplit` (internal/agent/prompt_workflow_test.go). Verified: `gofmt -l`
+clean on the six files, `CGO_ENABLED=1 go build ./internal/... .` OK, `HOME=$(mktemp -d) go test ./internal/agent
+./internal/tool ./internal/server -run 'Board|Teammate|AskUser'` all ok (server run isolated — config DB untouched).
+
+## 2026-10-23 — teammate ask_user now mirrors to the parent session
+
+The user asked for parity with the permission mirror, reversing the removal written up in the entry above; a
+blocked teammate's ask_user now reaches the human live instead of being deleted from its wire.
+
+- **Loop side** (internal/agent/loop.go): the teammate carve-out in `askUserOffered` is gone (`isTeammateSession`
+  deleted — the offer needs only interactive loop + Questions manager). `mirrorQuestion`, right after
+  `mirrorPermission`, republishes `question.requested` with SessionID=parent + OwnerSessionID=owner and
+  Request.Teammate=child handle; no-op without a bus or when parent==owner; the cancelled path mirrors
+  `question.replied` "cancelled".
+- **Route side** (internal/server/question_routes.go): the list route BFS-appends the subtree's batches via
+  `teammateChildrenOf` (shared with permission routes — a mid-tree session lists its children's questions too;
+  only a leaf lists just its own); the reply route is addressed to the OWNER and three-way notifies
+  path+owner+owner's root (dedup map by sessionId), so every queue clears from whichever page answered.
+- **Client** (web/src): mirrored entries file under the PARENT keyed `ownerSessionId || sessionId`, reply posts
+  to that owner (context/session.tsx); ask-user-dialog.tsx gains a teammate chip naming the child.
+- `teammatePrompt` now tells a blocked teammate to ASK instead of ending its turn; the block still has no
+  timeout, but a mirrored dialog is answerable at once, so the child-hang risk the removal targeted is gone.
+
+Pins: `TestRunLoop_AskUserOfferedForTeammate` (replaces the absent-pin), `TestTeammateQuestionMirrorsToTheParentSession`
+(+cancellation, +silent-without-a-parent — question_mirror_test.go), `TestParentSessionListsTeammateQuestions` and
+`TestReplyingAQuestionFromTheParentUnblocksTheTeammate` (question_routes_test.go). Verified: `CGO_ENABLED=1 go build
+./internal/... .` OK; web `npx tsc --noEmit` + `npm run build` green; go test ./internal/question ./internal/tool
+./internal/agent and the full ./internal/server suite (isolated HOME) all ok. No live E2E with a real model.
+
+## 2026-10-24 — agent drawer UI/UX pass
+
+- Split `board-drawer.tsx` into a shell + `board-drawer-row.tsx` + pure `web/src/lib/board-tree.ts`; added a
+  filter (handle/title/model/kind/session/spawnedBy), collapse chevrons, indent rails, disjoint header chips,
+  a `Finished N` tick toggle, skeleton, `role="alert"` error banner with Retry, and a `<details>` explainer.
+- `GET /api/board/roster` rows now carry `title`/`model` joined from `s.store.Get` (guarded, `omitempty`), so a
+  long agent list is named rather than a wall of handles. Old `[]board.Handle` decoders are unaffected.
+- **Chip bug found by the screenshot, not by types**: 28 agents rendered "15 live · 14 idle · 13 finished" = 42,
+  because `rosterSummary().live` already includes idle. Fixed by deriving `running = live − idle`.
+- **Screenshot method**: `chrome --headless --screenshot` HANGS on the session page (open SSE never idles);
+  a stock "Google Chrome for Testing" with `--remote-debugging-port` + CDP `Page.captureScreenshot` returns at
+  once. The old "captureScreenshot hangs" note in HOWTO was ego-lite-specific.
+- Verified: tsc clean, `npm run build` green (only the >500 kB chunk warning), `go build ./internal/... .` OK,
+  `go test ./internal/server -run Board` ok; live roster 28 agents / nesting levels confirmed by DOM query.
+
+## 2026-10-24 — Finished toggle restyled neutral (accent confined to the checkbox)
+
+- The user flagged the drawer's filter row: the checked "Finished N" toggle rendered as an accent
+  slab (`accent-ring` border + `accent-soft` wash + `accent-ink` text + full accent checkbox) — in a
+  palette where red = failure, sitting right under green finished chips. Restyled in
+  `board-drawer.tsx`: the pill stays neutral (`border-default` + `text-primary`, h-7 like the filter
+  input, hover/focus ring kept); only the 12px rounded checkbox carries accent + tick. The trigger
+  button's accent open-state was deliberately left alone (it is behind the scrim when open).
+- Verified dark AND light on the real 28-agent roster via the CDP rig: neutral pill both states,
+  toggle flips 15→28 rows, `/api/appearance` stayed `{\"mode\":\"system\"}` throughout.
+- **Throwaway screenshot rigs render LIGHT, not the user's dark**: headless chrome reports a light
+  OS, and the app's boot reconcile (GET `/api/appearance`, server-global) wins over any
+  `localStorage['ogcode-theme-mode']` you write pre-load — setItem + reload still resolved light.
+  Emulate instead: CDP `Emulation.setEmulatedMedia{features:[prefers-color-scheme:dark]}` BEFORE
+  `Page.navigate`. No server write, no localStorage write; `dataset.theme` comes back `dark`.
+
+## 2026-10-24 — Six-stream review of the uncommitted multi-agent tree: zero BUGs
+
+Scope: 51 modified + 30 untracked files (board/teammates, file-change gate, ask_user+permission mirroring,
+token/usage teammates arrays, web drawer/pill). Method: six parallel reviewer teammates (agent loop, server
+routes, tool gate, board core, web, provider/session), each running its own packages' tests with an
+HOME-isolated rig; parent ran `CGO_ENABLED=1 go build ./internal/... .` + full `go test ./internal/... .`
+(green, zero FAIL), `tsc --noEmit` clean, `-race` on internal/server green (122 s), go vet clean where run,
+migrations 065–067 never claimed in git history (no goose collision), server↔client `teammates` contract matches.
+
+Top unfixed RISKS in fix-priority order:
+1. `internal/tool/read.go` — `log.Read` (:206) stamps the bookmark BEFORE the map-vs-content branch (:233);
+   a bare >200-line read that returns an outline certifies content the model never saw, so the next edit is
+   NOT refused (the gate's missed-conflict direction). Fix: move the map-vs-content decision above `log.Read`.
+2. `internal/server/session_routes.go:582-594` + `usage_routes.go:84-97` — a transient error on ONE teammate
+   child 500s the whole token/usage response; the roster join already degrades per-row, this should too.
+3. `internal/server/board.go:121` — `boardTurnStart` is the only board helper without a nil-board guard; a
+   plain `Server{}` embedder panics at first prompt (serve() is safe).
+4. `internal/agent/loop_control.go:274` — `InterruptForNotice` is dead code: armed every step, never fired,
+   so teammate reports never pre-empt a step (delivered only post-step). Wire `reportTeammateDone`/
+   `CatchUpTeammates` to it or delete it.
+5. Report-loss window: `reportTeammateDone` pushes the notice then stamps `notified_at` (board.go ~:200); a
+   parent turn ENDING between push and DrainNotices loses the report permanently — same hole as the documented
+   crash window, but without the crash.
+6. `web/src/components/token-pill.tsx:132` — utility fold keeps only the session's own utility; teammates'
+   utility (inside their input/output) never reaches the "of which utility" row (display-only).
+
+Also (secondary): observeShell snapshots the before-fingerprint outside the file lock (TOCTOU → possible
+duplicate misattributed catch-up row, safe direction); doc comments (permission.go:36-39, question.go:124)
+deny Request.Teammate on the child's own batch while loop.go:3147/:3281 set it — child's own page renders a
+chip naming itself; PartAgent/AgentPartData + agent-part.tsx have no writer (unreachable dead UI);
+teammateLive counts idle as live so the 5 s token refetch never stops; token-pill refires per SSE event without
+debounce; stale-refusal instruction sits at the tail where the 50 KB KeepHead cap can cut it; empty
+question/permission lists marshal null (pre-existing); `teammate, *, Ask` makes spawn prompt where it used to
+fall through catch-all Allow (intended per docs/pins); HISTORY/HOWTO carry absolute user paths (no secrets).
+
+Confirmed sound (highlight reels): mirror payloads field-exact and pinned (7+4+6 targeted tests); cache
+breakpoints stay outside entry [0] byte-identical, notices appended after the breakpoint; no reasoning
+double-count; Yolo cannot bypass an explicit Deny; claim-before-cancel (`SetStatusUnlessTerminal`) pinned;
+Seen -1/0 semantics + empty-ring restart fallthrough pinned; migrations SQL sound with symmetric Down;
+zero-Handle contract honored at every call site that matters; queue dedup by id, replies POST to the owner;
+tokens fold client-side only; no XSS, typecheck clean.
+
+## 2026-10-24 — Fix turn for the review's six findings + secondaries (4 parallel streams)
+
+Four fixer teammates (gate-read-fix, routes-fix, board-loop-fix, web-pill-fix) over disjoint file sets; parent
+finished board-loop-fix's handovers (F4 deletion + the two doc comments). Nothing committed.
+
+- **F1 gate**: `internal/tool/read.go` — the map-vs-content decision moved ABOVE the `log.Read` bookmark stamp;
+  a map-only read no longer certifies unseen content. Pin `TestMapOnlyReadDoesNotCertifyContent`:
+  ranged read → foreign write → map-only re-read keeps Seen=0 → stale edit refused → content read moves Seen →
+  edit applies. Side effect: a map-only FIRST contact leaves the file untracked (no fingerprint; bash observation
+  records nothing until a content read).
+- **F2 rollups**: `session_routes.go`/`usage_routes.go` — a teammate child whose `store.Get`, step-sum, or
+  `usage.ForSession` read errors is skipped per-child with a warn; parent-side reads still 500. Pin
+  `TestSessionTokensSkipsATeammateWhoseReadErrors` (child's nullable `permission` TEXT poisoned to NULL).
+- **F3 nil board**: `boardTurnStart` opens `if s.board == nil { return nil }` — embedder `Server{}` safe.
+- **F4 dead interrupt deleted**: `InterruptForNotice`/`ArmNoticeInterrupt`/`interruptArmed` (`loop_control.go`)
+  + their nil-safe test lines. Evidence: `RunLoop` never called it; delivery is per-step `DrainNotices` +
+  `DeliveredNotices` injection.
+- **F5 report-loss**: `reportTeammateDone` no longer marks at push for a running parent — notice +
+  `BoardReport{Text, Mark}` ride `LoopRunner.TrackBoardReport` (package-level `boardReports sync.Map` keyed by
+  `*LoopRunner`, not a field); both `RunLoop` drain sites call `BoardNoticesDelivered`, so `notified_at` stamps
+  at DRAIN and a turn that ends before its drain re-delivers via `CatchUpTeammates`. Crash window became
+  at-least-once (accepted). Catch-up push and `wait` keep stamping at push. Pins rewritten
+  (`TestLeaveBoardReportsCompletionToARunningSpawner`, `TestStopTeammateOfAFinishedTeammateChangesNothing`,
+  `TestLeaveBoardReportsABackgroundTaskToARunningSpawner`) + new `board_reports_test.go` (3 tests) +
+  `TestTeammateReportUndrainedAtTurnEndStillDelivers`.
+- **F6 token pill**: `token-pill.tsx` — utility fold includes teammates' `t.utility` (subtotal, not atop
+  effective/total); `teammateLive`→`teammateRunning` so the 5s refetch rests when nothing runs; SSE board-event
+  refetch debounced 150ms trailing (inline, mirroring `board-drawer.tsx`).
+- **Secondaries**: `bash_observe.go` before-fingerprint snapshot moved inside `lockFileKey` (TOCTOU);
+  `Request.Teammate` doc comments corrected in `question.go`/`permission.go` (set on every copy, incl. the
+  child's own page — pins assert it IS set); parity-hole paragraphs in `permission_routes.go`/`question_routes.go`;
+  absolute `/Users/prasenjeet/` paths scrubbed from HISTORY/HOWTO.
+- **Left unfixed by design**: `agent-part.tsx` dead UI (no writer yet), same-size+same-mtime fingerprint gap,
+  `reconcileBoard` startup demotion (intended), Ask-on-spawn (intended per docs/pins), empty permission/question
+  lists marshal `null` (client keys off entries), message-driven pill refetch (per-step is intended).
+- **Verification**: `CGO_ENABLED=1 go build ./internal/... .` + vet + gofmt clean; full
+  `HOME=$(mktemp -d) CGO_ENABLED=1 go test ./internal/... .` all ok (29 packages); `tsc --noEmit` clean; `-race`
+  server `-run 'Board|Teammate|Roster|Unreported|CatchUp|Token|Usage'` ok 36.5s; `-race` agent
+  `-run 'Notice|Loop|Board'` ok 70.5s.
+
+## 2026-10-24 — Where the 784 MB project DB actually goes (and why `file_change` is not it)
+
+Question asked: does storing diffs pollute the DB / grow it exponentially?
+Measured on this project's live `.ogcode/ogcode.db` with `sqlite3 'file:…?mode=ro'` + `dbstat`.
+
+- **File 784,142,336 B** (`page_size` 4096 × 191,484 pages), `journal_mode=wal`, `freelist_count=0`,
+  `auto_vacuum=0`.
+- **`part` = 723.3 MB (92.2%)** — 154,069 rows in 1568 sessions, avg 3,993 B, max 3,117,066 B (a base64 PNG).
+  Buckets: `<1KB` 49,918 / `1–10KB` 94,212 (297 MB) / `10–50KB` 8,910 (164 MB) / `>50KB` 1,029 (124 MB).
+  `message` 33.6 MB, its three indexes ~20 MB.
+- **`file_change` = 581,632 B (0.07%)** — 197 rows. `edit` 150 (330 KB diff), `write` 19 (39 KB), `bash` 28
+  (0 diff, notes only). Avg diff 1,872 B, max 7,528 B against the 8,192 cap; **90/197 rows (46%) `diff_omitted`**.
+  Avg row ≈ 2,270 B of text; 2,952 B/row all-in with both indexes.
+- Rate over the table's whole 18.6 h life: **~250 rows/day, ~0.7 MB/day** — worst case bounded at 200 rows ×
+  10 KB. A year of days like that ≈ 200–260 MB; a year at ordinary intensity, far less.
+- **By session type**: `build` 433 sessions = 548.5 MB (1,297 KB/session) — 89% of the bytes; `index` 1,132
+  sessions = 37.6 MB (34 KB/session, 1,132 rows of bookkeeping for 8% of the size). Fattest single session
+  39.0 MB ("Request for Current Branch Name").
+- **No pruning and no reclaim anywhere**: `internal/db/db.go:23` sets only `journal_mode(WAL)`,
+  `foreign_keys(1)`, `busy_timeout(5000)`; `grep -rn "VACUUM\|auto_vacuum"` over `internal/` is empty. The only
+  deletes are `Store.Delete` (session) / `DeleteMessage`, and `foreign_keys(1)` means the cascades do fire —
+  `SELECT count(*) FROM part WHERE session_id NOT IN (SELECT id FROM session)` = 0.
+- Sibling disk, not the DB: `.ogcode/ogcode.db.bak-057` 492 MB (stale manual backup), `~/.ogcode/memory.db`
+  80 MB, `~/.ogcode/embed-model` 128 MB, `~/.ogcode/logs` 27 MB. Filesystem had 15 GiB free — a `VACUUM` of
+  784 MB would need roughly that much again in temp space.
+
+Conclusion: mutation history is linear in edits and hard-capped per row; the growth is the transcript, which
+nothing bounds except session deletion.
+
+## 2026-10-24 — Sidebar design D (agent-team chip)
+
+Chosen from a 4-design mockup (A nest-in-place, B team sections, C full-tree rails, D cluster chip);
+developer picked D. Implemented in `web/src/components/session-sidebar.tsx`:
+
+- Roster join: climbs `spawnedBy` edges of `/api/board/roster` cycle-safely to the root board handle,
+  filters the pseudo `user` handle, skips the session's own root row, keys by `root.sessionId` →
+  `{rootHandle, members}`. No DB change — migration 067 already carries the edges.
+- Chip between title and time: orange circle = live member count, grey = finished-only, folded by default.
+  Click toggles an inline team fold (rails/elbows, status dots, "T" badge for task children) with
+  stopPropagation so folding never selects the session; member rows do select.
+- Refresh: SSE events prefixed `board.` debounced 150 ms + `server.reconnectTick()` + 15 s interval backstop.
+- Verified against the live :7801 server via a throwaway vite config on :5199 (proxying /api) with
+  ego-browser — chips rendered on real sessions ("Show 10 agents", "Show 3 agents"), fold/expand works,
+  chip clicks do not navigate. Procedure recorded in HOWTO.md.
+- `web/dist` rebuilt and `./ogcode` binary rebuilt with it, but the LIVE SERVER WAS NOT RESTARTED (it runs
+  the active session) — the web change is not live until the developer restarts it.
+
+## 2026-10-24 — Which of the three diff caps actually binds (`file_change`)
+
+Asked whether `DiffMaxBytes` should be removed "while storing". Three caps stack, and they do not bind alike —
+measured on `.ogcode/ogcode.db` (`sqlite3 -readonly`), 206 `file_change` rows / 388 KB of diff:
+
+- `maxDiffBytes = 256 KB` (`internal/tool/write.go:79`, either side) — above it no diff is computed at all, and
+  the row is `diff_omitted` with empty text. 94 rows omitted, 29 empty (bash rows carry notes only,
+  `bash_observe.go:62`).
+- `diffMaxChangedLines = 64` + `diffContext = 3` (`internal/filechange/diff.go:11,17`) — **fired in 65 rows
+  (32%)**, every one of them ending in `(diff truncated)`.
+- `DiffMaxBytes = 8 KB` (`internal/filechange/filechange.go:34`) — **fired in 0 rows**; no stored diff contains
+  the `… (truncated)` marker. Largest real diff is 7,528 B (an `edit` to `MEMORY.md`), 664 B short of the cap.
+
+So the 8 KB cap is nearly binding but has never bound: it is a backstop against a pathological long line
+(minified bundle, JSON one-liner, base64 blob) in a file under 256 KB, not the thing that discards content.
+The 64-line budget is, at 25× the frequency. Removing `DiffMaxBytes` would not restore any lost bytes today
+and would remove that backstop — and because `capped()` runs once in `Log.Record` (`log.go:325`) into the ring
+`staleRefusal` renders (`internal/tool/staleness.go:36`), it is also the *refusal's* display cap; after a
+restart the rows are re-rendered verbatim from `history` (`log.go:296-298`), so there is no render-time
+re-application. Splitting storage from display would need a fourth meaning on `DiffOmitted`, which today
+conflates "line-truncated", "no baseline" and "byte-capped".
+
+## 2026-10-24 — Board report delivery restamped at dispatch; 7-bug teammate/board sweep
+
+Fixed the audit's 7 board/teammate bugs (two teammates: agent-side + server-side, disjoint file sets, merged and re-verified by the parent):
+
+- **Stamp at dispatch, not drain** (bug 1; was: stamped when drained — the pre-stream gap restart then re-took nothing and shipped a one-line "already given above" digest pointing at text no request ever carried, with the row already stamped; any drain→dispatch failure kept the stamp). RunLoop hoists `wireFresh`/`wireDigest` out of `TakeNoticesForInjection` (loop.go ~1163), the gap `continue` calls the new `LoopControl.RestoreNotices` (loop_control.go:301 — restores to the FRONT of `unshown`, idempotent, leaves `deliveredNotices` alone so digests never shadow restored full text), and the only `lr.BoardNoticesDelivered` call left is inside the dispatch-success block (loop.go ~1356). Provider connection retries re-enter that block, so only the eventual success stamps, once.
+- **`catchUpTeammates` no longer stamps at push** (bug 2; board.go ~314-399): each pushed report is tracked via `loopRunner.TrackBoardReport` with a Mark closure (own Background ctx + `boardOpTimeout`) like `reportTeammateDone`; a runner-less server falls back to the push-time stamp. A turn dying before its first dispatch leaves rows unreported and the next turn's catch-up re-pushes (at-least-once).
+- **Lying comment rewritten** (bug 3): waitTeammate's slice loop no longer claims "a notice pushed into this loop cancels the generation" — the true reason is that a notice can only inject when the tool call returns, so the loop breaks early on `lc.HasPendingNotice()`.
+- **`stopTeammate` reports "was stopped"** (bug 4): `reportTeammateDone` at board.go:935, guarded on `SpawnedBy`/`SessionID` so legacy fixture rows and `stopTeammatesOf` (the abort/delete cascade — deliberately report-free) still push nothing; `leaveBoard`'s claimed-already early return prevents double reports when the child winds down.
+- **Handle collisions no longer overwrite** (bug 5): `board.RegisterFresh` = insert-once (`ErrHandleTaken`; "UNIQUE constraint failed" string-mapped; store-mutex-serialized Get-check + plain INSERT) beside the untouched `Register` upsert; server `mintFreeHandle(ctx, reg, attempts, newName)` (board.go:103) rolls a 4-hex suffix up to `boardHandleAttempts` = 8; wired into `joinBoard`, `spawnTeammate`'s random path (claims the handle BEFORE the child session is created so the "New teammate …" title stays truthful), and `spawnBackgroundTask`; typed names keep the friendly Get pre-check and go through RegisterFresh.
+- **`waitTeammate` honors the turn's cancel** (bug 6): breaks its 250ms slice on `errors.Is(ctx.Err(), context.Canceled)` (board.go:791) so an abort / superseding prompt / session delete returns the partial "Still running" answer promptly instead of waiting out ~2 min; `DeadlineExceeded` is deliberately not a break — that is the tool's own op bound and the wait's wctx carries it past.
+- **Bug 7 (restart cascade) was an audit overstatement**: supersede via `startSessionLoop` only cancels the old loop (resume_routes.go); the teammate cascade lives only in `handleAbortSession`, `handleDeleteSession` and the hosted worker's `cancelLoop`. Pinned as correct behavior, no code change.
+
+New pins (13, all verified by name): agent `TestRunLoop_NoticeGapRestartRidesTheNextRequestFull`, `TestLoopBoardReportsStampOnlyAtDispatch`, `TestRestoreNoticesRequeuesFreshWithoutDigestLie`; server `TestStartSessionLoopSupersedeKeepsTeammates`, `TestMintFreeHandleRetriesPastCollisions`, `TestMintFreeHandleExhaustsItsRolls`, `TestSpawnTeammateRefusesANameSomebodyHolds`, `TestWaitTeammateReturnsPromptlyWhenTheTurnIsCancelled` (~0.55s vs the 120s bound), `TestWaitTeammateKeepsWaitingWhenOnlyItsOpContextExpires` (~2.08s); store `TestRegisterFreshClaimsAnUnusedHandle`, `TestRegisterFreshRefusesATakenHandle` (original row byte-untouched), `TestRegisterFreshRefusesReservedHandles`, `TestRegisterStillUpsertsARejoin`. Rewritten pins: `TestCatchUpTeammatesReportsAnIdleSpawnerOnce` (tracked not stamped; re-push needs a fresh lc — a dead turn's lc dies with it), `TestTeammateReportUndrainedAtTurnEndStillDelivers` (drains by hand via `BoardNoticesDelivered`), `TestStopTeammateIsNotRewrittenDone` (+ exactly one "was stopped" report).
+
+Verified: `go build ./internal/... .` OK; `CGO_ENABLED=1 go test` — agent 37.9s, board 0.98s, tool 2.5s all ok, server scope `Board|Teammate|CatchUp|Wait|Stop|Spawn|Join|Mint` 36 tests 6.7s ok; gofmt clean on all eight touched files. Known leftovers: a stream cancelled between take and dispatch doesn't stamp (row re-delivers next turn — accepted, much narrower than the fixed windows); `TestServe_StopFromAnotherGoroutine` flaked once under full-suite load (live openrouter/ollama fetches at server start; passed 3/3 isolated — serve-lifecycle owned, pre-existing); one recovered panic seen once in a server test log (`tool.Registry.Get` nil deref at loop.go:738 from a subagent goroutine; test passed; none of the changed regions touch that code — pre-existing, unverified).
