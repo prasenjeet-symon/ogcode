@@ -287,6 +287,23 @@ func TestUpdateIntentDescriptionClosesThePlan(t *testing.T) {
 	}
 }
 
+// TestUpdateIntentDescriptionRidesTheWork pins the mid-turn cadence. The
+// description is re-sent on every step while the per-turn section is not, so it
+// must carry the rule the user's pill depends on: the statuses move at the
+// moments the work produces them, not banked for the closing call — otherwise
+// the plan stays stale for the whole turn and only reports what finished.
+func TestUpdateIntentDescriptionRidesTheWork(t *testing.T) {
+	desc := NewUpdateIntentTool().Description()
+	for _, want := range []string{
+		"statuses ride the work",
+		"banked for the closing call",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("description does not move statuses while the work runs (%q missing): %q", want, desc)
+		}
+	}
+}
+
 // TestUpdateIntentDescriptionAsksForItsOwnBlock pins the sequencing rule. The
 // plan is what tells the user where the turn is heading, so a call batched with
 // the work it describes arrives after that work has already run — and any tool

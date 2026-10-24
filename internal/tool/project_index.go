@@ -51,7 +51,7 @@ func (ProjectIndexTool) Parameters() json.RawMessage {
 		"properties": {
 			"subdir": {
 				"type": "string",
-				"description": "Optional subdirectory path relative to the project root, never to the level last shown (e.g. \"internal/auth\"). Roots the map at that folder: the files directly inside it are listed, and the folders inside it are each summarized on one line. A subfolder named on a folder line can be passed directly (\"internal\" lists \"auth\" → subdir \"internal/auth\"). Omit to start at the project root."
+				"description": "Optional subdirectory path relative to the project root (e.g. \"internal/auth\"). Roots the map at that folder: the files directly inside it are listed, and the folders inside it are each summarized on one line. A subfolder named on a folder line can be passed directly (\"internal\" lists \"auth\" → subdir \"internal/auth\"). Omit to start at the project root."
 			}
 		}
 	}`)

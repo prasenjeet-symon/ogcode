@@ -9,6 +9,7 @@ import IntentPill from '../components/intent-pill';
 import ContextMeter from '../components/context-meter';
 import ResourcePill from '../components/resource-pill';
 import SubagentIndicator from '../components/subagent-indicator';
+import BoardDrawer from '../components/board-drawer';
 import { DrawerToggle } from '../components/sidebar-shell';
 import AskUserDialog from '../components/ask-user-dialog';
 import { NotFoundPanel } from './not-found';
@@ -63,6 +64,7 @@ function ChatContent() {
           </div>
 
           <div class="flex items-center gap-1.5 shrink-0">
+            <BoardDrawer />
             <IntentPill />
             <SubagentIndicator />
             <ContextMeter />

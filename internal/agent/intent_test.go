@@ -29,9 +29,12 @@ func TestCanUpdateIntentIsOnlyTheBuildAgent(t *testing.T) {
 // it is meant to steer; the usual exploration path follows it (the map, then
 // every file map in one block, then every ranged read in the next); the call
 // stands in a block of its own so the plan lands before the work it describes;
-// the plan the user is reading must be kept honest (a step is done or dropped,
-// never left active after the agent has moved on); and the next call copies the
-// list the tool echoed back rather than re-deriving one from memory.
+// a status move is a plan change, so the repeat calls land while the work runs
+// — active before a step's first block, done after its last — not banked for
+// the closing call; the plan the user is reading must be kept honest (a step is
+// done or dropped, never left active after the agent has moved on); and the
+// next call copies the list the tool echoed back rather than re-deriving one
+// from memory.
 func TestUpdateIntentPromptCarriesTheTimingContract(t *testing.T) {
 	p := updateIntentPrompt()
 	for _, want := range []string{
@@ -43,6 +46,8 @@ func TestUpdateIntentPromptCarriesTheTimingContract(t *testing.T) {
 		"never gets the match at all",
 		"Never call \"skill\" with no name",
 		"Call it again only when the plan changes",
+		"a status move is a plan change",
+		"not banked for the end of the turn",
 		"**Then explore as usual.**",
 		"codebase_map",
 		"**Call it on its own.**",
