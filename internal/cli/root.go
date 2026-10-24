@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync/atomic"
 
 	"github.com/joho/godotenv"
@@ -158,6 +159,26 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	if acct, err := session.GetOGXAccount(globalDatabase); err == nil && acct.HasPlan() {
 		if p, err := provider.NewOGXProvider(acct.Token); err == nil {
 			registry.Register(p)
+		}
+	}
+
+	// Extra OpenAI-compatible providers named in ogcode.json — the same block
+	// the run path and the server apply, so an index run resolves the same
+	// models. Sorted for deterministic order; entries that refuse to build are
+	// skipped with a warning.
+	customs := config.Load(dir).CustomProviders()
+	customIDs := make([]string, 0, len(customs))
+	for id := range customs {
+		customIDs = append(customIDs, id)
+	}
+	sort.Strings(customIDs)
+	for _, id := range customIDs {
+		pc := customs[id]
+		if p, err := provider.NewOpenAICompatibleProvider(id, pc.APIKey, pc.BaseURL, pc.Model, pc.Label); err == nil {
+			registry.Register(p)
+			slog.Info("registered custom provider", "id", id, "baseUrl", pc.BaseURL)
+		} else {
+			slog.Warn("skipped custom provider", "id", id, "err", err)
 		}
 	}
 

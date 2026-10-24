@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
+	"github.com/prasenjeet-symon/ogcode/internal/filechange"
 	"github.com/prasenjeet-symon/ogcode/internal/logging"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
@@ -138,6 +140,9 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		return ""
 	}
 
+	// ogcode.json is read once, ahead of the registry built here — its
+	// provider settings fill in below and its skills section is used further down.
+	fullCfg := config.Load(dir)
 	registry := provider.NewRegistry()
 	if key := resolveKey(os.Getenv("ANTHROPIC_API_KEY"), "anthropic"); key != "" {
 		baseURL := resolveBaseURL(os.Getenv("ANTHROPIC_BASE_URL"), "anthropic")
@@ -176,6 +181,26 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Extra OpenAI-compatible providers named in ogcode.json — an id beyond
+	// the four first-party slots, connected by a baseUrl (config.CustomProviders).
+	// Sorted for deterministic order; like every other provider here, an entry
+	// that refuses to build is skipped with a warning, not fatal.
+	customs := fullCfg.CustomProviders()
+	customIDs := make([]string, 0, len(customs))
+	for id := range customs {
+		customIDs = append(customIDs, id)
+	}
+	sort.Strings(customIDs)
+	for _, id := range customIDs {
+		pc := customs[id]
+		if p, err := provider.NewOpenAICompatibleProvider(id, pc.APIKey, pc.BaseURL, pc.Model, pc.Label); err == nil {
+			registry.Register(p)
+			slog.Info("registered custom provider", "id", id, "baseUrl", pc.BaseURL)
+		} else {
+			slog.Warn("skipped custom provider", "id", id, "err", err)
+		}
+	}
+
 	// Seed each provider's catalogue from the persisted copy so a headless run
 	// resolves a model without a live fetch. No background refresh here: the run
 	// resolves its model and exits.
@@ -197,9 +222,8 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	toolRegistry := tool.NewRegistry()
 	tool.RegisterCoreTools(toolRegistry, docindexStore)
 
-	// Skills, from the same ogcode.json this command already loads for
-	// provider settings.
-	fullCfg := config.Load(dir)
+	// Skills, from the same ogcode.json whose provider settings the registry
+	// above already consumed.
 	skillCfg := fullCfg.Skills
 	skillLoader := skill.NewLoader(skill.Config{
 		Paths:       skillCfg.Paths,
@@ -320,6 +344,12 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if maxSteps <= 0 {
 		maxSteps = agent.MaxStepsUncapped
 	}
+	// The file-change gate reads and writes the project DB, so a server running
+	// in the same directory sees what this run changed and a restart re-seeds the
+	// gate. A one-shot run has no board handle, so a refusal names a session by
+	// its id.
+	fileStore := filechange.Open(database, dir)
+	fileLog := filechange.NewLog(context.Background(), fileStore)
 	lr := &agent.LoopRunner{
 		Store:           store,
 		Usage:           ledger,
@@ -330,6 +360,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		Dir:             dir,
 		MaxSteps:        maxSteps,
 		Skills:          skillLoader,
+		FileLog:         fileLog,
 		SearchBridge:    searchBridge,
 		SearchFetchTopK: searchCfg.FetchTopK,
 		SearchPageChars: searchCfg.PageChars,

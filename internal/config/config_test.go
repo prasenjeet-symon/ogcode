@@ -466,3 +466,144 @@ func TestApplyEnv_SkipsEmptyPreviewDomain(t *testing.T) {
 		t.Error("an empty config preview domain must not be exported")
 	}
 }
+
+func TestCustomProvidersFiltersBuiltInSlots(t *testing.T) {
+	cfg := &Config{Providers: map[string]ProviderConfig{
+		"openai":         {BaseURL: "https://builtin.openai"},
+		"my-deepseek":    {Type: "openai", BaseURL: "https://deepseek.example", APIKey: "sk-test"},
+		"typeless-entry": {BaseURL: "https://typeless.example"},
+	}}
+	got := cfg.CustomProviders()
+	if len(got) != 2 {
+		t.Fatalf("CustomProviders returned %d entries (%v), want 2", len(got), got)
+	}
+	pc := got["my-deepseek"]
+	if pc.BaseURL != "https://deepseek.example" || pc.APIKey != "sk-test" {
+		t.Errorf("my-deepseek = %+v, want its baseUrl and apiKey passed through", pc)
+	}
+	if pc.Type != "openai" {
+		t.Errorf("my-deepseek type = %q, want %q", pc.Type, "openai")
+	}
+	// An empty type means openai, and CustomProviders normalizes it so callers
+	// never see "".
+	if got["typeless-entry"].Type != "openai" {
+		t.Errorf("typeless-entry type = %q, want normalized to %q", got["typeless-entry"].Type, "openai")
+	}
+}
+
+func TestCustomProvidersSkipsDisabledAndUnknownType(t *testing.T) {
+	cfg := &Config{Providers: map[string]ProviderConfig{
+		"off":   {BaseURL: "https://off.example", Disabled: true},
+		"alien": {BaseURL: "https://alien.example", Type: "anthropic"},
+		"ogx":   {BaseURL: "https://first-party.example"},
+		"kept":  {BaseURL: "https://kept.example"},
+	}}
+	got := cfg.CustomProviders()
+	if len(got) != 1 {
+		t.Fatalf("CustomProviders returned %d entries (%v), want 1", len(got), got)
+	}
+	if _, ok := got["kept"]; !ok {
+		t.Errorf("CustomProviders dropped kept, want it returned")
+	}
+}
+
+// An entry that is not pointed anywhere — or has no id at all — never comes
+// out of CustomProviders: there is nothing a caller could register for it.
+func TestCustomProvidersSkipsBaseUrllessEntries(t *testing.T) {
+	cfg := &Config{Providers: map[string]ProviderConfig{
+		"":      {BaseURL: "https://idless.example"},
+		"nourl": {},
+		"ok":    {BaseURL: "https://ok.example"},
+	}}
+	got := cfg.CustomProviders()
+	if len(got) != 1 {
+		t.Fatalf("CustomProviders returned %d entries (%v), want 1", len(got), got)
+	}
+	if _, ok := got["ok"]; !ok {
+		t.Errorf("CustomProviders dropped ok, want it returned")
+	}
+}
+
+func TestLoadMergedCustomProviderFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".config", "ogcode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(globalDir, "config.json"), `{
+		"providers": {
+			"my-deepseek": {"type": "openai", "baseUrl": "https://global:8000", "apiKey": "global-key", "model": "deepseek-v4.1", "label": "Global"},
+			"my-shutoff":  {"type": "openai", "baseUrl": "https://shutoff:8000", "disabled": true}
+		}
+	}`)
+
+	projectDir := t.TempDir()
+	writeJSON(t, filepath.Join(projectDir, "ogcode.json"), `{
+		"providers": {
+			"my-deepseek": {"baseUrl": "https://project:8000"},
+			"my-shutoff":  {}
+		}
+	}`)
+
+	cfg := Load(projectDir)
+
+	got := cfg.Providers["my-deepseek"]
+	if got.BaseURL != "https://project:8000" {
+		t.Errorf("my-deepseek baseUrl = %q, want project value to win", got.BaseURL)
+	}
+	if got.APIKey != "global-key" {
+		t.Errorf("my-deepseek apiKey = %q, want global value preserved", got.APIKey)
+	}
+	if got.Model != "deepseek-v4.1" || got.Label != "Global" {
+		t.Errorf("my-deepseek model/label = %q/%q, want global values preserved", got.Model, got.Label)
+	}
+	// Type must survive the JSON→merge path too: the merge loop copies it like
+	// the other fields, and CustomProviders trusts it to filter unsupported
+	// protocols. A regression that drops the merge silently turns a disabled-
+	// by-unsupported entry back into an OpenAI-compatible provider.
+	if got.Type != "openai" {
+		t.Errorf("my-deepseek type = %q, want the global value preserved", got.Type)
+	}
+	if got.Disabled {
+		t.Error("my-deepseek disabled = true, want it off")
+	}
+
+	if shutoff := cfg.Providers["my-shutoff"]; !shutoff.Disabled {
+		t.Error("my-shutoff: project states no disabled, want the global disabled preserved")
+	}
+
+	// A project can disable what the global config enabled — and, once
+	// disabled, later turns cannot use it (the one-way merge in Load).
+	everythingElse := t.TempDir()
+	t.Setenv("HOME", everythingElse)
+	globalDir2 := filepath.Join(everythingElse, ".config", "ogcode")
+	if err := os.MkdirAll(globalDir2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(globalDir2, "config.json"), `{
+		"providers": {
+			"my-quiet": {"type": "openai", "baseUrl": "https://quiet:8000"}
+		}
+	}`)
+	projectDir2 := t.TempDir()
+	writeJSON(t, filepath.Join(projectDir2, "ogcode.json"), `{
+		"providers": {
+			"my-quiet": {"type": "openai", "baseUrl": "https://quiet:8000", "disabled": true}
+		}
+	}`)
+	if quiet := Load(projectDir2).Providers["my-quiet"]; !quiet.Disabled {
+		t.Error("my-quiet disabled = false, want the project's disabled to win")
+	}
+
+	// A project can also RETYPE an entry — and CustomProviders must still see
+	// the project-won value, not the global one.
+	writeJSON(t, filepath.Join(projectDir2, "ogcode.json"), `{
+		"providers": {
+			"my-quiet": {"type": "anthropic", "baseUrl": "https://quiet:8000"}
+		}
+	}`)
+	if quiet := Load(projectDir2).Providers["my-quiet"]; quiet.Type != "anthropic" {
+		t.Errorf("my-quiet type = %q, want the project's anthropic to win", quiet.Type)
+	}
+}

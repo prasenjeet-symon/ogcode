@@ -611,6 +611,13 @@ type StreamRequest struct {
 	// caller leaves Messages alone. Everyone else ignores the field and the
 	// caller folds the same text into Messages as before.
 	Guidance string `json:"guidance,omitempty"`
+	// Notices is board traffic pushed into this step — a peer's report, a
+	// collision warning — already rendered and labelled by the caller. It rides
+	// beside Messages for the same reason Guidance does, and lands after it: the
+	// guidance is the user steering, the notices are what arrived since. A
+	// provider that places guidance places these too; everyone else gets them
+	// appended at the tail of the conversation by the caller.
+	Notices string `json:"notices,omitempty"`
 }
 
 // GuidancePlacer is implemented by providers that position
@@ -1053,6 +1060,47 @@ func NewProviderWithConfig(providerID, apiKey, baseURL string) (Provider, error)
 	default:
 		return nil, fmt.Errorf("unknown provider %q; must be anthropic, openai, openrouter, or ollama", providerID)
 	}
+}
+
+// NewOpenAICompatibleProvider builds an OpenAI-protocol provider under the
+// id an ogcode.json named it, pointed at an endpoint that speaks that
+// protocol (DeepSeek, Groq, Together, a self-hosted vLLM, …). It is how the
+// config file's extra named providers reach the registry — the four
+// first-party slots keep NewProviderWithConfig. label, when set, is the
+// group the provider's models carry in the picker (the collection); empty
+// falls back to the vendor collectionFromBaseURL recognises from the host,
+// else "".
+func NewOpenAICompatibleProvider(id, apiKey, baseURL, model, label string) (Provider, error) {
+	id = strings.TrimSpace(id)
+	baseURL = strings.TrimSpace(baseURL)
+	if id == "" {
+		return nil, fmt.Errorf("a named provider needs an id")
+	}
+	for _, reserved := range ProviderPriority {
+		if id == reserved {
+			return nil, fmt.Errorf("provider id %q is reserved for a built-in slot", id)
+		}
+	}
+	if strings.ContainsAny(id, " \t\n/") {
+		return nil, fmt.Errorf("provider id %q must be a plain slug (no spaces or /)", id)
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("provider %q needs a baseURL — an OpenAI-compatible provider only makes sense pointed at an endpoint", id)
+	}
+	p := NewOpenAIProvider()
+	p.id = id
+	p.apiKey = apiKey
+	p.baseURL = baseURL
+	if model != "" {
+		p.model = model
+		p.modelExplicit = true
+	}
+	if label != "" {
+		p.collection = label
+	} else {
+		p.collection = collectionFromBaseURL(baseURL)
+	}
+	return p, nil
 }
 
 // RefreshCatalogs fetches the live catalogue from every provider that has one,

@@ -12,10 +12,30 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/gitignore"
 )
 
-// ProviderConfig holds per-provider connection overrides.
+// ProviderConfig holds per-provider connection overrides. The four built-in
+// slots (anthropic, openai, openrouter, ollama) use it for endpoint and key
+// overrides; extra named entries in the same map create additional
+// OpenAI-compatible providers (see CustomProviders).
 type ProviderConfig struct {
+	// BaseURL overrides the provider endpoint; for a custom (non-slot) provider
+	// it is the endpoint itself and is required.
 	BaseURL string `json:"baseUrl,omitempty"`
-	APIKey  string `json:"apiKey,omitempty"`
+	// APIKey is the key exported for the provider (built-in slots) or the one
+	// sent as a bearer token (custom providers).
+	APIKey string `json:"apiKey,omitempty"`
+	// Type is the protocol this connection speaks. Today only "openai" — the
+	// OpenAI Chat Completions API — is supported, and empty means openai;
+	// anything else is rejected for now (CustomProviders skips such entries).
+	Type string `json:"type,omitempty"`
+	// Model is an optional default model for this provider, tried when the user
+	// has not picked one.
+	Model string `json:"model,omitempty"`
+	// Label is an optional human-readable label shown as this provider's
+	// grouping in the model picker.
+	Label string `json:"label,omitempty"`
+	// Disabled turns the provider off without deleting it, mirroring
+	// `disabled` on MCP servers. Off by default — an unset field means enabled.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // SkillsConfig configures where skills come from and which of them an agent
@@ -160,6 +180,22 @@ func Load(dir string) *Config {
 			if pc.APIKey != "" {
 				existing.APIKey = pc.APIKey
 			}
+			if pc.Model != "" {
+				existing.Model = pc.Model
+			}
+			if pc.Label != "" {
+				existing.Label = pc.Label
+			}
+			if pc.Type != "" {
+				existing.Type = pc.Type
+			}
+			// Disabled merges one-way: a project can disable a provider without
+			// touching the global config, but it cannot re-enable a globally-
+			// disabled one — flipping the bit back would silently undo a deliberate
+			// global shutoff on the machine this file is shared with.
+			if pc.Disabled {
+				existing.Disabled = true
+			}
 			merged.Providers[id] = existing
 		}
 		if c.PreviewDomain != "" {
@@ -196,6 +232,37 @@ func Load(dir string) *Config {
 		}
 	}
 	return merged
+}
+
+// CustomProviders returns the providers ogcode.json names beyond the four
+// built-in slots — extra OpenAI-compatible endpoints, each served under its
+// own name. Built-in ids (the keys of envNames) and "ogx" are never returned:
+// those are the first-party slots. An entry is skipped when it is disabled,
+// when its type is neither "" nor "openai" (unsupported for now), when its
+// baseUrl is empty (a custom provider only makes sense pointed somewhere),
+// or when its id is empty. The map may be empty; callers register every
+// returned entry under its map key.
+func (c *Config) CustomProviders() map[string]ProviderConfig {
+	out := make(map[string]ProviderConfig)
+	for id, pc := range c.Providers {
+		if id == "" {
+			continue
+		}
+		if _, builtin := envNames[id]; builtin || id == "ogx" {
+			continue
+		}
+		if pc.Disabled || pc.BaseURL == "" {
+			continue
+		}
+		if pc.Type != "" && pc.Type != "openai" {
+			continue
+		}
+		if pc.Type == "" {
+			pc.Type = "openai"
+		}
+		out[id] = pc
+	}
+	return out
 }
 
 // appendUnique adds each value of add to base that is not already there,
@@ -256,7 +323,8 @@ func findProjectFile(dir string) string {
 // ogcode.json. Every field is blank or empty — an unset field behaves
 // identically to an absent one everywhere this package is used — but listing
 // all four known providers, the skills section and the preview domain up front
-// makes the file self-documenting to open and edit.
+// makes the file self-documenting to open and edit. The file can also hold
+// extra named OpenAI-compatible providers beyond those four slots.
 const projectFileTemplate = `{
   "providers": {
     "anthropic": { "baseUrl": "", "apiKey": "" },
