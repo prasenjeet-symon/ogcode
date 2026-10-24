@@ -294,6 +294,7 @@ const (
 	PartReasoning PartType = "reasoning"
 	PartFile      PartType = "file"
 	PartImage     PartType = "image"
+	PartAgent     PartType = "agent"
 )
 
 type Part struct {
@@ -308,6 +309,22 @@ type Part struct {
 
 type TextPartData struct {
 	Text string `json:"text"`
+}
+
+// AgentPartData is one board post on the transcript: written by this agent
+// ("out") or delivered to it from a peer ("in"). The text is stored unfenced;
+// every path that puts it in front of a model passes it through board.Render.
+type AgentPartData struct {
+	Handle    string `json:"handle"`
+	Direction string `json:"direction"` // "in" | "out"
+	Seq       int64  `json:"seq"`
+	Kind      string `json:"kind,omitempty"`
+	Topic     string `json:"topic,omitempty"`
+	Text      string `json:"text"`
+	// To is the recipient handle for an outbound post; empty means everyone.
+	To string `json:"to,omitempty"`
+	// SessionID is the peer's session, so the UI can link to it.
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // ImagePartData stores a user-uploaded image attachment. Data is base64-encoded

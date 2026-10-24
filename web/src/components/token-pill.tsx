@@ -1,5 +1,6 @@
-import { For, createMemo, createResource, createSignal, Show } from 'solid-js';
+import { For, createEffect, createMemo, createResource, createSignal, on, onCleanup, Show } from 'solid-js';
 import { useSession } from '../context/session';
+import { useServer } from '../context/server';
 import { getSessionTokens, getSessionUsage, type MessageWithParts, type ModelUsage } from '../api/client';
 import { formatUSD, includedNote } from '../lib/money';
 
@@ -10,6 +11,7 @@ interface Totals {
   cacheRead: number;
   cacheWrite: number;
   utility: number;    // the effective tokens spent on utility work
+  teammates: number;  // the effective tokens spent by spawned teammates
   effective: number;  // the pill's figure: everything but cache reads
   total: number;      // every token, cache reads included
 }
@@ -40,6 +42,7 @@ function effective(input = 0, cacheWrite = 0, output = 0): number {
 
 export default function TokenPill(props: { messages?: () => MessageWithParts[] } = {}) {
   const session = useSession();
+  const events = useServer();
   const getMessages = () => props.messages ? props.messages() : session.messages();
 
   // Hover shows the breakdown on desktop; touch has no hover, so a tap
@@ -54,7 +57,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
   // arrives, or when it cannot be read.
   const localTotals = createMemo<Totals>(() => {
     const out: Totals = {
-      input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, utility: 0, effective: 0, total: 0,
+      input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, utility: 0, teammates: 0, effective: 0, total: 0,
     };
     for (const m of getMessages()) {
       const t = m.info.tokens;
@@ -88,6 +91,12 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
     return out;
   });
 
+  // A teammate's steps land on its own transcript, so its share of the figures
+  // above climbs while the parent's own token totals stand still — and the
+  // resource key would never change. `tick` is the extra reason to refetch:
+  // bumped by a board event, and on a beat while a teammate is still working.
+  const [tick, setTick] = createSignal(0);
+
   // The session view's authoritative totals, summed by the server over the
   // WHOLE transcript. The client only ever holds the newest transcript page, so
   // on a session longer than one page its own sum is short; the server reads
@@ -97,7 +106,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
   const [server] = createResource(
     () => {
       const id = session.activeSession()?.id;
-      return props.messages || !id ? false : `${id}|${localTotals().total}`;
+      return props.messages || !id ? false : `${id}|${localTotals().total}|${tick()}`;
     },
     (key: string) => getSessionTokens(key.slice(0, key.indexOf('|'))).catch(() => undefined),
   );
@@ -105,12 +114,38 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
   const totals = createMemo<Totals>(() => {
     const st = server();
     if (!st) return localTotals();
+    // The server reports the session's own tokens; its spawned teammates arrive
+    // beside them, one entry each. Fold them in: the pill is what running this
+    // session spent, and a teammate is work the session did. Utility is already
+    // inside input, output and cache writes, so it is never added again — the
+    // subtotal folds the teammates' own utility share in the same way.
+    let input = st.input, output = st.output, reasoning = st.reasoning;
+    let cacheRead = st.cacheRead, cacheWrite = st.cacheWrite, utility = st.utility, mates = 0;
+    for (const t of st.teammates ?? []) {
+      input      += t.input;
+      output     += t.output;
+      reasoning  += t.reasoning;
+      cacheRead  += t.cacheRead;
+      cacheWrite += t.cacheWrite;
+      utility    += t.utility;
+      mates      += t.effective;
+    }
     return {
-      input: st.input, output: st.output, reasoning: st.reasoning,
-      cacheRead: st.cacheRead, cacheWrite: st.cacheWrite, utility: st.utility,
-      effective: st.effective, total: st.total,
+      input, output, reasoning, cacheRead, cacheWrite, utility,
+      teammates: mates,
+      effective: effective(input, cacheWrite, output),
+      total: consumed(input, cacheRead, cacheWrite, output),
     };
   });
+
+  // Every teammate the session spawned, as the token endpoint reports them.
+  const teammates = () => server()?.teammates ?? [];
+  // While one is RUNNING its spend keeps climbing with nothing in the parent
+  // transcript to show it, so the token figure is read again on a beat. An idle
+  // child is settled — its spend no longer moves — so only a running one keeps
+  // the beat, matching the drawer's disjoint chips (running = live − idle).
+  const teammateRunning = createMemo(() =>
+    teammates().some((t) => t.status === 'running'));
 
   const hasData = () => totals().total > 0;
 
@@ -126,9 +161,41 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
     (key: string) => getSessionUsage(key.slice(0, key.indexOf('|'))).catch(() => undefined),
   );
   // Only per-token billing goes in the pill; a plan's list-price value is a
-  // comparison, not a charge, so it stays in the breakdown.
-  const billed = () => usage()?.totals.costUsd ?? 0;
+  // comparison, not a charge, so it stays in the breakdown. A teammate's spend
+  // counts as the session's: it ran because this session spawned it.
+  const teammateUsage = () => usage()?.teammates ?? [];
+  const billed = () =>
+    (usage()?.totals.costUsd ?? 0) + teammateUsage().reduce((n, t) => n + t.totals.costUsd, 0);
+  const includedValue = () =>
+    (usage()?.totals.includedListUsd ?? 0) + teammateUsage().reduce((n, t) => n + t.totals.includedListUsd, 0);
+  // A teammate's charge, joined from the usage scan by its own session id.
+  const teammateCost = (sessionId: string) =>
+    teammateUsage().find((t) => t.sessionId === sessionId)?.totals.costUsd ?? 0;
   const firstIncluded = () => usage()?.models.find((m) => m.billing === 'included');
+
+  // A board event is what announces a teammate starting, posting or stopping —
+  // the moments its spend can have moved. Deferred so the first render is not a
+  // reason to refetch what it just read, and debounced like the board drawer:
+  // the burst one spawn produces folds into one read, not one per event.
+  let sseTimer: ReturnType<typeof setTimeout> | null = null;
+  createEffect(on(events.eventTick, () => {
+    const last = events.lastEvent();
+    if (!last || !last.type.startsWith('board.')) return;
+    if (sseTimer) clearTimeout(sseTimer);
+    sseTimer = setTimeout(() => {
+      sseTimer = null;
+      setTick((n) => n + 1);
+    }, 150);
+  }, { defer: true }));
+  onCleanup(() => {
+    if (sseTimer) clearTimeout(sseTimer);
+  });
+
+  createEffect(() => {
+    if (!teammateRunning()) return;
+    const id = setInterval(() => setTick((n) => n + 1), 5000);
+    onCleanup(() => clearInterval(id));
+  });
 
   return (
     <Show when={hasData()}>
@@ -152,7 +219,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
 
         {/* Hover/tap breakdown */}
         <div
-          class="absolute top-full right-0 mt-1.5 w-60 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl transition"
+          class="absolute top-full right-0 mt-1.5 w-64 p-3 rounded-lg border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)] shadow-xl transition"
           classList={{
             'opacity-0 pointer-events-none': !showBreakdown(),
             'opacity-100 pointer-events-auto': showBreakdown(),
@@ -176,6 +243,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
             </span>
           </div>
           <Row label="of which utility" value={totals().utility} dot="bg-sky-400" sub dim={totals().utility === 0} />
+          <Row label="of which teammates" value={totals().teammates} dot="bg-cyan-400" sub dim={totals().teammates === 0} />
           <div class="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
             <Row label="Cache read" value={totals().cacheRead} dot="bg-amber-400" dim={totals().cacheRead === 0} />
             <div class="flex items-center justify-between py-0.5">
@@ -191,11 +259,11 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
           <Show when={usage()}>
             {(u) => (
               <div class="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
-                <Show when={u().models.some((m) => m.billing === 'metered')}>
+                <Show when={u().models.some((m) => m.billing === 'metered') || billed() > 0}>
                   <div class="flex items-center justify-between py-0.5">
                     <span class="text-micro font-semibold text-zinc-200">Cost</span>
                     <span class="text-meta font-mono tabular-nums text-zinc-100">
-                      {formatUSD(u().totals.costUsd, true)}
+                      {formatUSD(billed(), true)}
                     </span>
                   </div>
                 </Show>
@@ -205,7 +273,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
                       <div class="flex items-center justify-between py-0.5">
                         <span class="text-micro text-zinc-400">Plan value</span>
                         <span class="text-meta font-mono tabular-nums text-zinc-300">
-                          {u().totals.includedListUsd > 0 ? `≈ ${formatUSD(u().totals.includedListUsd, true)}` : 'unknown'}
+                          {includedValue() > 0 ? `≈ ${formatUSD(includedValue(), true)}` : 'unknown'}
                         </span>
                       </div>
                       <div class="text-micro text-zinc-500">{includedNote(m())}</div>
@@ -229,6 +297,34 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
                 </Show>
               </div>
             )}
+          </Show>
+          {/* The teammates this session spawned, one line each: the part of the
+              figures above they spent, and their charge when one was billed. A
+              teammate still working says so; a settled one needs no label. */}
+          <Show when={teammates().length > 0}>
+            <div class="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
+              <div class="text-micro uppercase tracking-wider text-zinc-500 font-semibold mb-1">Teammates</div>
+              <For each={teammates()}>
+                {(t) => (
+                  <div class="flex items-center justify-between gap-2 py-px">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <span class="text-micro font-mono text-zinc-400 truncate" title={t.handle}>{t.handle}</span>
+                      <Show when={t.status === 'running'}>
+                        <span class="text-micro text-[color:var(--accent-ink)] shrink-0">running</span>
+                      </Show>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                      <span class="text-micro font-mono tabular-nums text-zinc-300">{formatTokens(t.effective)}</span>
+                      <Show when={teammateCost(t.sessionId) > 0}>
+                        <span class="text-micro font-mono tabular-nums text-zinc-500">
+                          {formatUSD(teammateCost(t.sessionId), true)}
+                        </span>
+                      </Show>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
           </Show>
         </div>
       </div>
