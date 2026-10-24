@@ -40,7 +40,7 @@ func codingAgentSystem(mode string) string {
 	task := mode == "task"
 
 	opening := `You are an interactive coding assistant collaborating with a developer in their project, in a live conversation. You have full read/write access to the codebase: you can read and edit files, run shell commands, and search the project. The developer can see your work and will steer you as you go.`
-	step1 := `1. **Understand the request.** The developer's latest message is your source of truth. If it is ambiguous or underspecified, ask one focused clarifying question — with ` + "`ask_user`" + ` when it is offered — before changing code rather than guessing. For a substantial or multi-step change, briefly outline your approach first.`
+	step1 := `1. **Understand the request.** The developer's latest message is your source of truth. If it is ambiguous or underspecified, ask one focused clarifying question — with ` + "`ask_user`" + ` when it is offered — before changing code rather than guessing. For anything worth building, the plan comes before the code: outline the approach as parallel tracks, then decide how many teammates it takes and which stream each one gets before you start reading — the fan-out is the single biggest lever on how fast the work finishes and how many tokens it burns (see **Working alongside other agents**).`
 	step6 := `6. **Do not commit unless asked.** Leave your changes in the working tree so the developer can review them — nothing is lost by staying uncommitted, and this is the developer's own working directory. Commit or push only when the developer explicitly asks. When you do, stage only the files you intentionally changed (git status → git add <specific files> → git commit -m 'verb: what and why'), never git add -A blindly.`
 	scopeRule := `- Stay focused on what the developer asked. Do not refactor unrelated code, rename things that aren't broken, or expand scope — if a correct change requires touching more than was asked, check in with the developer first.`
 
@@ -52,6 +52,14 @@ func codingAgentSystem(mode string) string {
 	decisionSummary := ""
 	if !task {
 		decisionSummary = "\n\n" + decisionSummaryPrompt()
+	}
+
+	// boardSection is interactive-only, like decisionSummary. TaskAgent shares
+	// this prompt body but runs headless in a disposable worktree: it is handed
+	// neither board nor teammate (see canUseBoard), and there are no peers.
+	boardSection := ""
+	if !task {
+		boardSection = "\n\n" + boardPrompt()
 	}
 
 	if task {
@@ -108,7 +116,7 @@ When asked to review work — your own included — hold every conclusion to the
 - Never break existing tests — if a test fails because of your change, fix the code or the test (whichever is correct), not both arbitrarily.
 ` + scopeRule + `
 - If you are blocked by something genuinely outside your control (missing credentials, infrastructure not available), stop cleanly and describe the blocker clearly in your final message.
-` + "\n" + noPackageManagerDirsPrompt() + decisionSummary + `
+` + "\n" + noPackageManagerDirsPrompt() + decisionSummary + boardSection + `
 
 ` + markdownCapabilitiesPrompt(true, false)
 }
@@ -464,7 +472,10 @@ func (a *Agent) canHostPublicFiles() bool { return a.ID == "build" }
 // but runs headless, executing one breakdown task in a disposable worktree with
 // nobody to answer. A capability check would hand it a dialog no one can see.
 // The loop still gates the tool on permission gating and a live question
-// manager — this is the outer of the two conditions, not a substitute for them.
+// manager — this is the outer of the conditions, not a substitute for them. A
+// teammate of the build agent passes here too (teammatehood is a property of
+// the session, not the agent): its batch mirrors to the parent's composer, so
+// the human answers it there without ever opening the teammate's page.
 func (a *Agent) canAskUser() bool { return a.ID == "build" }
 
 // canUpdateIntent reports whether this agent states a forward-looking plan for
@@ -477,6 +488,71 @@ func (a *Agent) canAskUser() bool { return a.ID == "build" }
 // runs headless in a disposable worktree, and the sub-agent is headless too, so
 // a plan there would reach nobody and drive no suggestions.
 func (a *Agent) canUpdateIntent() bool { return a.ID == "build" }
+
+// canUseBoard reports whether this agent may read the tree of agents working
+// in the project, which is what the board tool needs.
+//
+// Like canAskUser, this is an agent id rather than a capability check. TaskAgent
+// shares BuildAgent's toolset but runs in a disposable worktree that is deleted
+// when the task ends — a tree of agents there outlives nothing and reaches
+// nobody, and PlanAgent is read-only, so it spawns nobody to track.
+func (a *Agent) canUseBoard() bool { return a.ID == "build" }
+
+// canSpawnTeammate reports whether this agent may spawn a teammate: another
+// build agent in this same directory, a child in the project's agent tree.
+//
+// Build-only for the same reason as canUseBoard: a teammate is a second writer
+// in the project tree, and only the build agent runs one. A spawned teammate
+// runs as "build", so it is offered this tool too and may spawn its own —
+// nesting has no depth limit.
+func (a *Agent) canSpawnTeammate() bool { return a.ID == "build" }
+
+// boardPrompt is the system-prompt section that teaches the build agent the
+// agent tree and the teammates it can spawn. It is a pointer, not an enumeration
+// of the tree's state: the roster is one call away and changes while a turn runs.
+//
+// It leads with the ROLE and gives the mechanics second. The build agent is the
+// orchestrator: it decides what the work is, how many teammates it takes and what
+// each one is briefed to do, and spends its own steps on the decision, the shared
+// surface and the verification rather than on a stream it could have handed out.
+// A teammate pays in exactly two currencies — wall-clock, when independent streams
+// run side by side, and tokens, when a wide exploration is billed to the child's
+// context instead of sitting in a parent history that is re-sent on every step — so
+// the section states the parallel-first default outright — side-by-side streams,
+// spawned right after the turn's stated plan, with the parent's own time overlapping its
+// children's rather than queued behind them — and names the narrower cases where
+// one agent still wins.
+//
+// The one rail the model has to hold itself, because nothing else will: a
+// teammate's completion is reported into the turn that is RUNNING, and no turn
+// starts on its own, so ending a turn with a teammate still working strands its
+// report until the developer speaks again (reportTeammateDone and
+// catchUpTeammates, internal/server/board.go). The section says so outright,
+// and names the two exits — teammate stop, and parking a long child — that
+// keep the rail survivable.
+func boardPrompt() string {
+	return `## Working alongside other agents
+
+You can share this project directory with other agents. ` + "`board roster`" + ` shows the tree of agents running here — who spawned whom, and each one's status — so call it before assuming you are alone.
+
+**You orchestrate; teammates do the work.** On anything worth building, your job is to decide what the work is, how many teammates it takes, and what each one is briefed to do — then verify what comes back and integrate it. Hand the implementation to a teammate instead of taking a stream yourself: your steps are the expensive ones, because every one re-sends this whole conversation. Running the streams side by side is the default, not an upgrade: the question is not whether you could do the work alone but which parts of it do not have to wait for each other — and those are the parts you hand out.
+
+**Decide the fan-out before your first read.** A teammate buys exactly two things:
+- **Speed** — independent streams (separate files, separate packages, one per test case or per question) finish in the time of the slowest, not the sum. A stream's clock starts when you spawn it, so every step you spend before spawning delays every stream by that much.
+- **Tokens** — a teammate carries its own context window, so its greps, reads and dead ends are billed there, and what comes back is a conclusion instead of a survey. Your window stays small, and every step you take re-sends less history. Even when a read looks quick, ask whether it belongs in your history at all — ten cheap greps by the parent cost more than one child reporting the conclusion.
+
+**How many, and which.** One teammate per stream that can run without the others — when the work splits into streams, take every stream, not just the obvious one. Give each a disjoint set of files — two agents editing one file collide — and keep the shared surface (the integration point, the router, the go.mod) for yourself or name it in exactly one brief. **Spawn the batch in one tool block**, right after ` + "`update_intent`" + ` states your plan (the plan goes first, and alone), and say in a line which stream each one takes — streams that start together finish together; the same work dribbled out one after another gets the serial schedule the batch existed to avoid. A brief you can state in a sentence is a brief a teammate can act on, so if you can say what the child would do, spawn it. Nothing caps how many run at once, and a teammate may spawn its own — but a teammate briefed to implement one stream implements it, and splits further only when its own brief turns out to be several.
+
+**What you do with your own time.** Never run serially what could run together — while your teammates work, keep working: take the next decision, the shared files you kept out of every brief, the verification, the question for the user. With nothing of yours left, ` + "`teammate wait`" + ` — do not poll ` + "`board roster`" + ` or ` + "`status`" + ` in a loop, and do not re-read an area a teammate has already read. And do not end the turn while a teammate you spawned is still working: a running turn hears a completion the moment it lands, but a turn that has already ended leaves the report queued until the developer's next message, because nothing starts your turn for you. The rail has two named exits: ` + "`teammate stop <handle>`" + ` cancels a child whose brief is wrong, duplicated or stuck — cascading to whatever it spawned — so a mid-turn turnabout never has to wait the child out; and a child that legitimately works long past everything of yours can be parked, when your reply no longer depends on its result — say so plainly and end the turn: nothing is cancelled, and the finished report is delivered to you at your next turn's start. Chaining short ` + "`wait`" + ` calls to hold the rail open is not parking; that is polling with a timer.
+
+Stay with one agent only when a teammate would cost more than it buys: the pieces must happen strictly in sequence, everything lands in the same file, the edit is small enough that briefing a child costs more than doing it, or the work is research (` + "`task`" + ` is cheaper and read-only — pass "background": true to park a long investigation off your turn's critical path; its report arrives when the child finishes, early via ` + "`teammate wait <handle>`" + `).
+
+Verify what a teammate returns the cheap way: review the diff it left and run the build and the tests, rather than re-reading the whole area it read, which hands back the tokens the split just saved.
+
+` + "`teammate spawn`" + ` starts one now, in parallel, and returns its handle and session immediately. The task must stand alone: a child does not see this conversation and cannot ask you anything, so name the files, the goal, the pattern to follow and what to report back — its last message is its result. Brief each stream on the files it owns: the change gate refuses a write built on a stale read and shows the diff, so two streams that share a file fail loudly instead of overwriting each other silently.
+
+` + "`teammate wait`" + ` blocks for the teammates you name and returns each one's last message; omit handles to watch every teammate you spawned, and it returns as soon as one of them reports, so issue it again while anything is left. A timeout is normal and reports "still running", and the report also arrives on its own when the child finishes, before your next step while your turn is running. ` + "`status`" + ` and ` + "`board roster`" + ` show where things stand right now.`
+}
 
 // promptRole maps an agent to the role string the shared prompt sections switch
 // on. TaskAgent is the headless variant of BuildAgent and shares its prompt, so

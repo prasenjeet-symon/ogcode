@@ -534,3 +534,28 @@ func TestAppendGuidanceBlock_StringTailBecomesBlocks(t *testing.T) {
 		t.Errorf("unexpected blocks: %v", blocks)
 	}
 }
+
+// Pushed board notices ride the same trailing message as guidance, after it: a
+// notice is the newest traffic of the two, so it stays furthest from the cached
+// prefix and both sit outside the breakpoint.
+func TestAppendNoticesBlock_SitsAfterGuidance(t *testing.T) {
+	msgs := []anthropicMessage{
+		{Role: "user", Content: "start"},
+		{Role: "assistant", Content: []map[string]any{{"type": "text", "text": "thinking"}}},
+	}
+	out := appendGuidanceBlock(msgs, "steer left")
+	out = appendNoticesBlock(out, "  Board: worker posted  ")
+	if len(out) != 3 {
+		t.Fatalf("expected one trailing message, got %d", len(out))
+	}
+	blocks := out[2].Content.([]map[string]any)
+	if len(blocks) != 2 {
+		t.Fatalf("expected guidance then the notice, got %v", blocks)
+	}
+	if blocks[0]["text"] != "steer left" || blocks[1]["text"] != "Board: worker posted" {
+		t.Errorf("unexpected blocks: %v", blocks)
+	}
+	if got := appendNoticesBlock(msgs, "   "); len(got) != len(msgs) {
+		t.Error("blank notices must not add a message")
+	}
+}

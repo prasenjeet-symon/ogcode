@@ -1,9 +1,10 @@
 import { useNavigate, useLocation } from '@solidjs/router';
 import { useSession } from '../context/session';
 import { useServer } from '../context/server';
-import { createSignal, createMemo, For, Show, onCleanup } from 'solid-js';
-import { deleteSession } from '../api/client';
+import { createSignal, createMemo, createEffect, For, Show, onCleanup, onMount, type JSXElement } from 'solid-js';
+import { deleteSession, getBoardRoster, type BoardHandle } from '../api/client';
 import type { Session } from '../api/client';
+import { isLive, statusMeta } from '../lib/board-tree';
 import { createSidebarWidth } from '../lib/sidebar-width';
 import Logo from './logo';
 import SidebarShell from './sidebar-shell';
@@ -209,11 +210,92 @@ function SessionSidebarInner() {
 
   const pinnedSessions = createMemo(() => filtered().filter((s) => pinned().has(s.id)));
 
+  // Cluster chips (design of the same name in the sidebar-grouping mockups):
+  // the session list joins the agent board — the roster the board drawer
+  // renders — without any API change. Every agent on the roster climbs its
+  // spawned_by edge to the root row the build session joined the board as, and
+  // the chip on that session's row counts the descendants; clicking the chip
+  // folds them in beneath the row. Sessions with no agents render exactly as
+  // before. The session's own root row is not a chip member: the chip counts
+  // only who the session spawned, not the session itself.
+  const [roster, setRoster] = createSignal<BoardHandle[]>([]);
+  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
+
+  const teamsById = createMemo(() => {
+    const byHandle = new Map<string, BoardHandle>();
+    for (const h of roster()) if (h.handle !== 'user') byHandle.set(h.handle, h);
+    const teams = new Map<string, { rootHandle: string; members: BoardHandle[] }>();
+    for (const h of byHandle.values()) {
+      // Climb cycle-safely: two rows naming each other — nothing writes that,
+      // but a hand-edited database could hold it — must not hang the memo.
+      const seen = new Set<string>([h.handle]);
+      let root: BoardHandle | undefined = h;
+      while (root && root.spawnedBy && byHandle.has(root.spawnedBy) && !seen.has(root.spawnedBy)) {
+        seen.add(root.spawnedBy);
+        root = byHandle.get(root.spawnedBy);
+      }
+      if (!root || root === h || !root.sessionId) continue;
+      const team = teams.get(root.sessionId) ?? { rootHandle: root.handle, members: [] as BoardHandle[] };
+      team.members.push(h);
+      teams.set(root.sessionId, team);
+    }
+    return teams;
+  });
+
+  const toggleTeam = (e: MouseEvent, id: string) => {
+    e.stopPropagation();
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // The chip has to be live: the same refresh pattern as the board drawer —
+  // board.* SSE events folded into one debounced read 150 ms later, a resync
+  // on reconnect (events published while the stream was down never arrived),
+  // and a 15 s poll as backstop for moves that publish no event of their own.
+  const refreshRoster = async () => {
+    try {
+      const r = await getBoardRoster();
+      setRoster(r.agents ?? []);
+    } catch (err) {
+      // The board may be unavailable (503 when it is nil); the last roster
+      // keeps rendering — a chip is a summary, not ground truth.
+      console.error('board roster failed:', err);
+    }
+  };
+
+  let sseTimer: ReturnType<typeof setTimeout> | null = null;
+  createEffect(() => {
+    const last = server.lastEvent();
+    if (!last || !last.type.startsWith('board.')) return;
+    if (sseTimer) clearTimeout(sseTimer);
+    sseTimer = setTimeout(() => {
+      sseTimer = null;
+      refreshRoster();
+    }, 150);
+  });
+  createEffect(() => {
+    server.reconnectTick();
+    refreshRoster();
+  });
+  onMount(() => {
+    const id = setInterval(refreshRoster, 15_000);
+    onCleanup(() => clearInterval(id));
+  });
+
   // One row renderer shared by the Pinned zone and the date groups.
   const sessionRow = (s: Session) => {
     const isActive = () => session.activeSession()?.id === s.id;
     const isEditing = () => editingId() === s.id;
     const isPinned = () => pinned().has(s.id);
+    // All reads via the memos are inside JSX, so a session that gains — or
+    // loses — agents on the roster re-renders.
+    const members = createMemo(() => teamsById().get(s.id)?.members ?? []);
+    const liveCount = () => members().filter((m) => isLive(m)).length;
+    const finCount = () => members().length - liveCount();
     return (
       <div
         class={`group/row relative flex items-center gap-2 rounded-md h-7 pl-2.5 pr-1.5 text-ui transition-colors
@@ -271,6 +353,29 @@ function SessionSidebarInner() {
             </Show>
             <span class="truncate flex-1 min-w-0">{s.title || 'Untitled'}</span>
           </button>
+          {/* The agent-cluster chip (design D): live agents on the row's end —
+              orange, finished — grey. Clicking unfolds the team in flow. */}
+          <Show when={members().length > 0}>
+            <button
+              type="button"
+              onClick={(e) => toggleTeam(e, s.id)}
+              title={`${members().length} agent${members().length === 1 ? '' : 's'} · ${liveCount()} live${expanded().has(s.id) ? ' — click to hide' : ' — click to show'}`}
+              aria-label={expanded().has(s.id) ? `Hide ${members().length} agents` : `Show ${members().length} agents`}
+              aria-expanded={expanded().has(s.id) ? 'true' : 'false'}
+              class="flex items-center -space-x-1 shrink-0 cursor-pointer"
+            >
+              <Show when={liveCount() > 0}>
+                <i class="flex items-center justify-center w-3.5 h-3.5 rounded-full border-[1.5px] border-[color:var(--bg-surface)] bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)] text-[8px] font-bold not-italic font-mono" title="Live teammates">
+                  {liveCount()}
+                </i>
+              </Show>
+              <Show when={finCount() > 0}>
+                <i class="flex items-center justify-center w-3.5 h-3.5 rounded-full border-[1.5px] border-[color:var(--bg-surface)] bg-[color:var(--bg-elevated)] text-[color:var(--text-label)] text-[8px] font-bold not-italic font-mono" title="Finished teammates">
+                  {finCount()}
+                </i>
+              </Show>
+            </button>
+          </Show>
           {/* Timestamp and actions share the row end. The time stays put on
               hover — the actions appear beside it rather than replacing it,
               so the moment you were reading is not the moment it vanishes. */}
@@ -319,6 +424,65 @@ function SessionSidebarInner() {
       </div>
     );
   };
+
+  // The unfolded team (design D): an agent row per member beneath a clicked
+  // session row. Nested teammates sit on their own rail level, read-only task
+  // children carry a T badge, and a click opens the member's session. Sibling
+  // order is the roster's — the order the agents registered in.
+  const teamRows = (s: Session) => {
+    const byParent = createMemo(() => {
+      const team = teamsById().get(s.id);
+      if (!team) return null;
+      const map = new Map<string, BoardHandle[]>();
+      for (const m of team.members) {
+        const key = m.spawnedBy || '';
+        const list = map.get(key) ?? [];
+        list.push(m);
+        map.set(key, list);
+      }
+      return { root: team.rootHandle, map };
+    });
+    const walk = (depth: number, m: BoardHandle): JSXElement => {
+      const pad = 10 + depth * 14;
+      const railX = pad - 7;
+      const meta = statusMeta(m.status);
+      return (
+        <div>
+          <div
+            style={{ 'padding-left': `${pad}px` }}
+            onClick={() => m.sessionId && handleSelect(m.sessionId)}
+            title={m.sessionId ? `Open session — ${m.title || m.handle} (${meta.label})` : `${m.handle} (${meta.label})`}
+            class="group/row relative flex items-center gap-2 h-6 rounded-md pr-1.5 text-meta cursor-pointer
+                   text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)]"
+          >
+            {/* Indent rail + elbow, drawn from the depth, one pair per level
+                — the guide lines the board drawer's rows draw. */}
+            <span aria-hidden="true" class="absolute top-0 bottom-0 w-px bg-[color:var(--border-default)]" style={{ left: `${railX}px` }} />
+            <span aria-hidden="true" class="absolute top-1/2 -translate-y-1/2 h-px w-2.5 bg-[color:var(--border-default)]" style={{ left: `${railX}px` }} />
+            <span role="img" aria-label={meta.label} class={`w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot}`} />
+            <Show when={m.kind === 'task'}>
+              <span class="shrink-0 text-[8px] font-bold leading-none tracking-[0.05em] not-italic px-1 py-[2px] rounded bg-[color:var(--bg-elevated)] text-[color:var(--text-tertiary)] border border-[color:var(--border-subtle)]">T</span>
+            </Show>
+            <span class="truncate flex-1 min-w-0">{m.title || m.handle}</span>
+            <span class="text-micro tabular-nums shrink-0 text-[color:var(--text-label)] opacity-0 group-hover/row:opacity-100">open</span>
+          </div>
+          <For each={byParent()?.map.get(m.handle) ?? []}>{(next) => walk(depth + 1, next)}</For>
+        </div>
+      );
+    };
+    return <For each={byParent()?.map.get(byParent()?.root ?? '') ?? []}>{(m) => walk(1, m)}</For>;
+  };
+
+  // A session row, plus its unfolded team when the chip was clicked. One
+  // wrapper the Pinned zone and the date groups both render.
+  const sessionItem = (s: Session) => (
+    <div>
+      {sessionRow(s)}
+      <Show when={expanded().has(s.id) && (teamsById().get(s.id)?.members.length ?? 0) > 0}>
+        <div class="pb-0.5">{teamRows(s)}</div>
+      </Show>
+    </div>
+  );
 
   return (
     <Show
@@ -466,7 +630,7 @@ function SessionSidebarInner() {
               <span>Pinned</span>
             </button>
             <Show when={pinnedOpen()}>
-              <For each={pinnedSessions()}>{(s) => sessionRow(s)}</For>
+              <For each={pinnedSessions()}>{(s) => sessionItem(s)}</For>
             </Show>
           </div>
         </Show>
@@ -476,7 +640,7 @@ function SessionSidebarInner() {
               <div class="px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
                 {group.label}
               </div>
-              <For each={group.items}>{(s) => sessionRow(s)}</For>
+              <For each={group.items}>{(s) => sessionItem(s)}</For>
             </div>
           )}
         </For>

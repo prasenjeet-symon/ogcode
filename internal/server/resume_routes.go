@@ -166,6 +166,14 @@ func requestOrigin(r *http.Request) string {
 // permission gating, or that failed to register its cancel func, would be a
 // loop the user could neither approve tools in nor stop.
 func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string, viewportWidth, viewportHeight int, serverURL string) {
+	// An empty name is the build agent: the web client sends no agent on a
+	// prompt, and GetAgent falls back to BuildAgent for a blank. Resolve it here
+	// so the board join and the mismatch check below see the agent this loop
+	// will actually run, instead of the blank the caller happened to pass.
+	if agentName == "" {
+		agentName = "build"
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	// A LoopControl lets the user inject mid-loop guidance and cancel in-flight
 	// tools without killing the loop.
@@ -174,12 +182,27 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 	// This is an interactive session with a UI that can answer permission
 	// prompts, so mark it gated: mutating tools (bash/write/edit) will pause for
 	// approval. Headless loops (task/breakdown/note/search) never set this flag.
-	ctx = agent.WithPermissionGating(ctx)
+	// The one headless agent that runs through this path is the background task
+	// child: a read-only sub-agent with nobody to answer it, so it is ungated —
+	// the sync sub-agent's runner strips Questions directly for the same reason.
+	if agentName != "subagent" {
+		ctx = agent.WithPermissionGating(ctx)
+	}
 	// The origin the client reached this server by, so the agent can hand back
 	// absolute /preview/ and /public/ URLs. Empty on the RPC-driven hosting path.
 	if serverURL != "" {
 		ctx = agent.WithServerURL(ctx, serverURL)
 	}
+
+	// Put the session on the board as running before the loop starts, so the first
+	// tool call already sees this session on the roster and any post that arrived
+	// while it was idle is folded into its first turn. Only the build agent joins
+	// (the check lives in joinBoard); a plan or task session logs and carries on.
+	joinCtx, joinCancel := context.WithTimeout(context.Background(), boardOpTimeout)
+	if jerr := s.boardTurnStart(joinCtx, sessionID, agentName); jerr != nil {
+		slog.Info("board: session did not join", "session", sessionID, "agent", agentName, "err", jerr)
+	}
+	joinCancel()
 
 	done := make(chan struct{})
 
@@ -199,7 +222,8 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 	go func() {
 		defer func() {
 			s.mu.Lock()
-			if s.runningToken[sessionID] == token {
+			current := s.runningToken[sessionID] == token
+			if current {
 				delete(s.running, sessionID)
 				delete(s.runningToken, sessionID)
 				delete(s.loopControls, sessionID)
@@ -208,6 +232,12 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 				}
 			}
 			s.mu.Unlock()
+			// Only the loop that is still current marks the session idle: a
+			// superseded loop exits after the newer one already took over, and
+			// letting it write here would report the live session as idle.
+			if current {
+				s.leaveBoard(sessionID)
+			}
 			// Closed unconditionally and outside the lock: a delete waiting on
 			// this loop must be released even when a newer loop replaced it.
 			close(done)

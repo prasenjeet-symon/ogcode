@@ -135,3 +135,103 @@ func TestParallelCallsPromptStatesTheSameFileOrder(t *testing.T) {
 		t.Error("read-only prompt carries the file-changing shell advice meant for writers")
 	}
 }
+
+// The build agent is the orchestrator: it decides what the work is, how many
+// teammates it takes and what each is briefed to do, and hands the streams out
+// rather than taking one itself. A teammate buys exactly two things — wall-clock,
+// when independent streams run side by side, and tokens, when a wide exploration
+// is billed to the child's context instead of a parent history re-sent on every
+// step — so the section states both drivers, makes the side-by-side default
+// explicit, sizes the fan-out, says what the parent does with its own time, and
+// names the cases that still want one agent.
+//
+// It also carries the one rail nothing else enforces: a completion is reported
+// into a RUNNING turn and no turn starts on its own, so the parent must not end
+// its turn with a teammate still working. The role comes before the mechanics,
+// and only the build agent gets any of it: teammate and board are build-only
+// (canSpawnTeammate, canUseBoard).
+func TestBoardPromptPrefersTheSplit(t *testing.T) {
+	p := boardPrompt()
+	for _, want := range []string{
+		"You orchestrate; teammates do the work",
+		"Running the streams side by side is the default, not an upgrade",
+		"A stream's clock starts when you spawn it",
+		"one child reporting the conclusion",
+		"Hand the implementation to a teammate",
+		"**Speed**",
+		"**Tokens**",
+		"**How many, and which.**",
+		"One teammate per stream that can run without the others",
+		"take every stream, not just the obvious one",
+		"the serial schedule the batch existed to avoid",
+		"Spawn the batch in one tool block",
+		"a teammate briefed to implement one stream implements it",
+		"**What you do with your own time.**",
+		"Never run serially what could run together",
+		"do not end the turn while a teammate you spawned is still working",
+		"Stay with one agent only when",
+		"`task` is cheaper and read-only",
+		"park a long investigation off your turn's critical path",
+		"right after `update_intent` states your plan",
+		"`teammate stop <handle>`",
+		"nothing is cancelled, and the finished report is delivered to you at your next turn's start",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("board prompt missing %q", want)
+		}
+	}
+	if role, mechanics := strings.Index(p, "You orchestrate"), strings.Index(p, "`teammate spawn` starts"); role < 0 || mechanics < 0 || role > mechanics {
+		t.Errorf("board prompt states the mechanics before the role (role at %d, spawn at %d)", role, mechanics)
+	}
+	// The framing this prompt used to have: the parent as one of the workers, and
+	// spawning as the thing you do when you run short of room. Neither may return.
+	for _, stale := range []string{"Reach for a teammate first", "take a stream yourself", "as the opening move of the turn"} {
+		if strings.Contains(p, stale) {
+			t.Errorf("board prompt still frames the parent as one of the workers (%q)", stale)
+		}
+	}
+
+	if !strings.Contains(BuildAgent.System, "You orchestrate") {
+		t.Error("BuildAgent prompt lost the orchestrator role")
+	}
+	if !strings.Contains(BuildAgent.System, "how many teammates it takes and which stream each one gets") {
+		t.Error("BuildAgent prompt does not point at the fan-out from the planning step")
+	}
+	for _, a := range []Agent{TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent} {
+		if strings.Contains(a.System, "teammate") {
+			t.Errorf("%s: cannot spawn a teammate, so the section is noise in its prompt", a.Name)
+		}
+	}
+}
+
+// Two "first calls of the turn" coexist in the build prompt: the diagram named
+// codebase_map the mandatory first exploration step while the update_intent
+// section called the plan first, and a literal reader of the diagram alone
+// started with the map and never stated a plan. The diagram carries the bridge
+// itself, phrased as a fact about plan-stating agents — an instruction to call
+// the tool would be a call a plan-less agent cannot follow. A read wave rides
+// the same reconciliation: a read routinely reveals another file, and mapping
+// that file may share the read block — map-before-read holds file by file.
+func TestProjectIndexPromptBridgesThePlanAndCarriesRevealedMaps(t *testing.T) {
+	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+		p := projectIndexPrompt(role, true, true)
+		workflow := p[strings.Index(p, "### Workflow"):strings.Index(p, "### Map a file before reading it")]
+
+		for _, want := range []string{
+			"update_intent comes before it, for agents that state a plan",
+			"map-before-read holds file by file, not block by block",
+		} {
+			if !strings.Contains(workflow, want) {
+				t.Errorf("%s workflow missing %q", role, want)
+			}
+		}
+		if !strings.Contains(p, "read wave may also carry \"file_map\" calls") {
+			t.Errorf("%s: loop paragraph lost the revealed-map wave", role)
+		}
+	}
+
+	// The parallel-batching bullet teaches the same wave to the writer's list.
+	if !strings.Contains(parallelToolCallsPrompt(true, true), "read wave may carry \"file_map\" calls") {
+		t.Error("batching bullet does not allow file_map calls riding a read wave")
+	}
+}

@@ -183,8 +183,8 @@ export interface Part {
   id: string;
   messageId: string;
   sessionId: string;
-  type: 'text' | 'tool' | 'reasoning' | 'image';
-  data: TextPartData | ToolPartData | ReasoningPartData | ImagePartData;
+  type: 'text' | 'tool' | 'reasoning' | 'image' | 'agent';
+  data: TextPartData | ToolPartData | ReasoningPartData | ImagePartData | AgentPartData;
   createdAt: number;
   updatedAt: number;
 }
@@ -219,6 +219,19 @@ export interface ReasoningPartData {
   redactedData?: string;
   /** The model that produced this block; blocks are only replayable to it. */
   model?: string;
+}
+
+// One board post on the transcript: written by this agent ("out") or
+// delivered to it from a peer ("in").
+export interface AgentPartData {
+  handle: string;
+  direction: 'in' | 'out';
+  seq: number;
+  kind?: string;
+  topic?: string;
+  text: string;
+  to?: string;
+  sessionId?: string;
 }
 
 // User-uploaded image attachment. Data is base64-encoded image bytes.
@@ -328,6 +341,8 @@ export interface PendingPermissionAPI {
   tool: string;
   input: string;
   patterns: string[];
+  /** Set when the request was raised by a teammate: its handle. */
+  teammate?: string;
 }
 
 // One option the model proposed for a question. The dialog always offers a
@@ -365,7 +380,15 @@ export interface QuestionAPI {
 // screen per question.
 export interface PendingQuestionAPI {
   questionId: string;
+  // The session whose loop is blocked on the batch. When a teammate's batch is
+  // surfaced under another session this still names the teammate — the loop the
+  // reply has to reach.
   sessionId: string;
+  // Set when the batch was mirrored from a teammate's own session, so the queue
+  // it is listed under is not the one that asked.
+  ownerSessionId?: string;
+  // The board handle of the teammate that asked, for the dialog's label.
+  teammate?: string;
   questions: QuestionAPI[];
 }
 
@@ -627,9 +650,24 @@ export interface UsageTotals extends UsageTokens {
   unknownEffective: number;
 }
 
+/**
+ * One teammate's spend, priced the same way as the session's own. A teammate
+ * runs as a session of its own, so its cost lands on its transcript and is
+ * reported here instead of being folded into the totals beside it.
+ */
+export interface TeammateSessionUsage {
+  handle: string;
+  sessionId: string;
+  /** Board status: running, idle, done, stopped or stale. */
+  status: string;
+  totals: UsageTotals;
+}
+
 export interface SessionUsage {
   models: ModelUsage[];
   totals: UsageTotals;
+  /** Every teammate the session spawned; empty when it spawned none. */
+  teammates: TeammateSessionUsage[];
 }
 
 export interface ProjectUsage extends UsageTokens {
@@ -669,6 +707,21 @@ export function getSessionUsage(sessionId: string): Promise<SessionUsage> {
 }
 
 /**
+ * One teammate's tokens, reported beside the session's own. A teammate runs as
+ * a session of its own, so its steps are billed on its transcript rather than
+ * on the one that spawned it.
+ */
+export interface SessionTeammateTokens extends UsageTokens {
+  handle: string;
+  /** The teammate's own session id, which keys its `usage.teammates` entry. */
+  sessionId: string;
+  /** Board status: running, idle, done, stopped or stale. */
+  status: string;
+  /** The effective tokens spent on its utility work, already inside the fields above. */
+  utility: number;
+}
+
+/**
  * A session's whole-transcript token totals — every assistant step plus the
  * session's utility work. Read from the server rather than summed from the
  * messages the client holds, whose window is only the newest transcript page
@@ -683,6 +736,11 @@ export interface SessionTokens {
   utility: number;
   effective: number;
   total: number;
+  /**
+   * The teammates this session spawned, their tokens reported separately: the
+   * fields above are the session's own. Empty when it spawned none.
+   */
+  teammates: SessionTeammateTokens[];
 }
 
 export function getSessionTokens(sessionId: string): Promise<SessionTokens> {
@@ -1576,4 +1634,47 @@ export function publishPreviewPort(port: number, directory?: string): Promise<{ 
 // preview hostname stops being served (until the agent announces it again).
 export function unpublishPreviewPort(port: number): Promise<void> {
   return fetchAPI(`/preview/ports/${port}`, { method: 'DELETE' });
+}
+
+// Board API. The board is the tree of agents working in this directory: one row
+// per session or teammate, with the spawned_by edge that nests a teammate under
+// the parent that spawned it. There is no post log — agents coordinate by
+// editing files, and a child reports back by finishing. Timestamps arrive as
+// RFC 3339 strings (Go time.Time), not epoch milliseconds.
+
+// One entry on the tree: an agent session or a teammate. Status is running,
+// idle, done, stopped or stale; kind is session or teammate. spawnedBy is the
+// parent's handle, empty for a session that joined on its own. Title and model
+// are joined from the row's session by the server, so a row can be named by what
+// the agent is doing rather than only by its generated handle.
+export interface BoardHandle {
+  id: string;
+  directory?: string;
+  handle: string;
+  sessionId?: string;
+  role?: string;
+  kind?: string;
+  spawnedBy?: string;
+  status: string;
+  title?: string;
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// getBoardRoster reads every agent on the board; the spawnedBy edges make it a
+// tree.
+export function getBoardRoster(): Promise<{ agents: BoardHandle[] }> {
+  return fetchAPI('/board/roster');
+}
+
+// stopBoardTeammate stops a teammate that is still running. Sessions are not
+// stoppable here, only teammates.
+export function stopBoardTeammate(handle: string): Promise<{
+  Handle: string;
+  SessionID: string;
+  Notice: string;
+  Live: number;
+}> {
+  return fetchAPI(`/board/teammate/${encodeURIComponent(handle)}/stop`, { method: 'POST' });
 }

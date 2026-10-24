@@ -375,6 +375,9 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	// tail that changes when the user steers, so it belongs outside the cached
 	// region rather than at its edge.
 	messages = appendGuidanceBlock(messages, req.Guidance)
+	// Notices after guidance, for the same reason: they are the newest traffic
+	// of the two and belong furthest from the cached prefix.
+	messages = appendNoticesBlock(messages, req.Notices)
 
 	var thinking *anthropicThinking
 	var outputConfig *anthropicOutputConfig
@@ -810,11 +813,22 @@ func (p *AnthropicProvider) PlacesGuidance() bool { return true }
 // it. When the conversation happens to end on an assistant message the guidance
 // becomes its own user message, which is ordinary alternation.
 func appendGuidanceBlock(messages []anthropicMessage, guidance string) []anthropicMessage {
-	guidance = strings.TrimSpace(guidance)
-	if guidance == "" {
+	return appendTrailingTextBlock(messages, guidance)
+}
+
+// appendNoticesBlock puts pushed board notices at the very end of the
+// conversation, after the guidance. Same placement and same reason as
+// appendGuidanceBlock; the text is already labelled by the caller.
+func appendNoticesBlock(messages []anthropicMessage, notices string) []anthropicMessage {
+	return appendTrailingTextBlock(messages, notices)
+}
+
+func appendTrailingTextBlock(messages []anthropicMessage, text string) []anthropicMessage {
+	text = strings.TrimSpace(text)
+	if text == "" {
 		return messages
 	}
-	block := map[string]any{"type": "text", "text": guidance}
+	block := map[string]any{"type": "text", "text": text}
 
 	if len(messages) == 0 || messages[len(messages)-1].Role != "user" {
 		return append(messages, anthropicMessage{

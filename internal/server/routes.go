@@ -191,6 +191,17 @@ func (s *Server) routes() http.Handler {
 			r.Post("/consent", s.handleSetIndexConsent)
 		})
 
+		// Agent board: the tree of agents working in this directory and their
+		// statuses. A teammate's stop is a plain handle-addressed POST so the
+		// user can end one without going through the session routes.
+		r.Get("/board/roster", s.handleBoardRoster)
+		r.Post("/board/teammate/{handle}/stop", s.handleBoardStopTeammate)
+
+		// The mutation history behind the file-change gate: what changed each
+		// file, who said they were doing it and the diff — the review surface a
+		// UI panel reads instead of opening the database.
+		r.Get("/file-changes", s.handleFileChanges)
+
 		// LaTeX compilation and rendering
 		s.registerLatexRoutes(r)
 	})

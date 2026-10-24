@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,10 +19,12 @@ import (
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
+	"github.com/prasenjeet-symon/ogcode/internal/board"
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
+	"github.com/prasenjeet-symon/ogcode/internal/filechange"
 	"github.com/prasenjeet-symon/ogcode/internal/git"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
@@ -62,6 +65,9 @@ type Server struct {
 	taskStore       *task.Store
 	noteStore       *note.Store
 	docindexStore   *docindex.Store
+	board           *board.Store
+	fileChanges     *filechange.Store
+	fileLog         *filechange.Log
 	registry        *provider.Registry
 	defaultProvider provider.Provider
 	loopRunner      *agent.LoopRunner
@@ -325,6 +331,25 @@ func (s *Server) serve(ctx context.Context) error {
 	s.taskStore = task.NewStore(database)
 	s.noteStore = note.NewStore(database)
 	s.docindexStore = docindex.NewStore(database)
+	// The per-project agent board: coordination between the sessions working in
+	// this directory. Scoped by directory, and its rows outlive the sessions
+	// that wrote them.
+	s.board = board.Open(database, s.dir)
+	// The file-change gate behind write and edit: a path another session changed
+	// after this one last read it is refused rather than overwritten. One gate
+	// per process, like pathlock; the rows live in the project DB, so a restart
+	// re-seeds both the revisions and every session's bookmark. A refusal has to
+	// name the other agent the way the prompt does, hence the board handle.
+	s.fileChanges = filechange.Open(database, s.dir)
+	s.fileLog = filechange.NewLog(ctx, s.fileChanges)
+	s.fileLog.Name = func(id session.SessionID) string {
+		nctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if h, err := s.board.BySession(nctx, string(id)); err == nil && h.Handle != "" {
+			return h.Handle
+		}
+		return string(id)
+	}
 	// Per-turn markdown memory: the index over .ogcode/memory/ lives in the same
 	// project-local DB, and one barrier serializes background summary writes
 	// against recall. Both are cheap to construct even when the feature is off.
@@ -373,6 +398,11 @@ func (s *Server) serve(ctx context.Context) error {
 	toolRegistry.Register(tool.BreakdownTool{})
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.NewMemoryMapTool(memfileStore))
+	// board and teammate are registered for every turn that shares this
+	// registry, but the agent loop offers them per agent (build only), so a
+	// headless task or a plan session never sees them.
+	toolRegistry.Register(tool.BoardTool{Run: s.boardTool})
+	toolRegistry.Register(tool.TeammateTool{Run: s.teammateTool})
 
 	// Skills: the "skills" section of ogcode.json decides which extra
 	// directories and remote manifests are consulted; the standard project and
@@ -602,6 +632,20 @@ func (s *Server) serve(ctx context.Context) error {
 		Permissions: s.permissions,
 		Questions:   s.questions,
 		Skills:      skillLoader,
+		// Teammate catch-up at the top of a build turn: the completions this
+		// session has not been told about are queued as notices, which the step
+		// loop injects at the tail of the request. Gated on the build agent
+		// inside RunLoop.
+		CatchUpTeammates: s.catchUpTeammates,
+		// A file another session changed since this one read it is refused by
+		// edit/write, with the changes to catch up on.
+		FileLog: s.fileLog,
+		// A teammate runs uncapped instead of on the interactive budget: it ends
+		// when its task is done, not at a step count.
+		StepBudgetFor: s.stepBudgetFor,
+		// A teammate's permission prompt is surfaced in the session that spawned
+		// it too, so the human sees it where they are working.
+		ParentSessionOf: s.parentSessionOf,
 	}
 
 	// Register deep_search after loopRunner is built (needs RunSearchSession).
@@ -613,7 +657,7 @@ func (s *Server) serve(ctx context.Context) error {
 	// Register the task sub-agent tool (needs RunTaskSession). Available
 	// regardless of the search bridge — the sub-agent is a read-only codebase
 	// investigator that only optionally uses deep_search.
-	toolRegistry.Register(tool.TaskTool{Run: s.loopRunner.RunTaskSession})
+	toolRegistry.Register(tool.TaskTool{Run: s.loopRunner.RunTaskSession, Spawn: s.spawnBackgroundTask})
 
 	// Register ask_user (needs AskUser). It is offered only in an interactive,
 	// permission-gated turn — the agent loop decides that per turn — so
@@ -645,6 +689,11 @@ func (s *Server) serve(ctx context.Context) error {
 	// needs loopRunner, so it runs here rather than beside the task recovery
 	// above, and before the HTTP server can accept anything.
 	s.recoverInterruptedSessions()
+
+	// The roster keeps what the previous process left behind. A handle still
+	// marked running has no loop to be running in, so it is demoted before the
+	// UI can show a teammate that will never answer.
+	s.reconcileBoard()
 
 	// Initialize version manager
 	s.versionManager = version.New()
@@ -984,10 +1033,32 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 		}
 	}
 
+	// Extra OpenAI-compatible providers named in ogcode.json — an id beyond
+	// the four first-party slots, connected by a baseUrl (see
+	// config.Config.CustomProviders). Sorted for deterministic log order; like
+	// every other provider here, an entry that refuses to build is skipped
+	// with a warning, not fatal. Reloaded together with the rest, so an edit
+	// to the file takes effect on the next reloadProviders.
+	customs := config.Load(s.dir).CustomProviders()
+	customIDs := make([]string, 0, len(customs))
+	for id := range customs {
+		customIDs = append(customIDs, id)
+	}
+	sort.Strings(customIDs)
+	for _, id := range customIDs {
+		pc := customs[id]
+		p, err := provider.NewOpenAICompatibleProvider(id, pc.APIKey, pc.BaseURL, pc.Model, pc.Label)
+		if err != nil {
+			slog.Warn("skipped custom provider", "id", id, "err", err)
+			continue
+		}
+		providers[id] = p
+		slog.Info("registered custom provider", "id", id, "baseUrl", pc.BaseURL)
+	}
+
 	return providers
 }
 
-// credentials and swaps it into the running server in place, so credential
 // changes from the settings/onboarding UI take effect without a restart. The
 // shared *provider.Registry pointer (held by the loop runner and handlers) is
 // preserved, and custom-model routing survives the swap.

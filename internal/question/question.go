@@ -116,6 +116,15 @@ func Visibility(questions []Question, answers map[string]Answer) []bool {
 type Request struct {
 	ID        QuestionID `json:"questionId"`
 	SessionID string     `json:"sessionId"`
+	// OwnerSessionID names the session whose loop is actually blocked when this
+	// copy was surfaced under another session — a teammate's batch mirrored to
+	// its parent. Empty when the batch is its own session's.
+	OwnerSessionID string `json:"ownerSessionId,omitempty"`
+	// Teammate is the board handle of the teammate that asked, so the dialog can
+	// say whose question the user is answering. It is set on every copy of a
+	// teammate's batch — the teammate's own page's copy included — and empty
+	// only for a batch the session itself asked, with no teammate involved.
+	Teammate  string     `json:"teammate,omitempty"`
 	Questions []Question `json:"questions"`
 }
 

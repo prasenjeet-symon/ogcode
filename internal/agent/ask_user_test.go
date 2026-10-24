@@ -74,6 +74,7 @@ type askScriptOptions struct {
 	gated        bool // run under permission gating, as the server's session loop does
 	registerTool bool // register ask_user in the tool registry
 	manager      bool // give the LoopRunner a question manager
+	teammate     bool // resolve ParentSessionOf for this session, as the server does for a teammate child
 }
 
 type askScriptResult struct {
@@ -128,6 +129,19 @@ func runAskScript(t *testing.T, opts askScriptOptions, answer question.Reply) as
 	if err := store.Create(sess); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	// Marking the session a teammate makes the loop resolve it through
+	// ParentSessionOf exactly as the permission mirror does — the path a
+	// teammate's ask_user batch must mirror over
+	// (TestRunLoop_AskUserOfferedForTeammate).
+	if opts.teammate {
+		lr.ParentSessionOf = func(id session.SessionID) (session.SessionID, string) {
+			if id == sess.ID {
+				return session.SessionID("root-session"), "teammate-child"
+			}
+			return "", ""
+		}
+	}
+
 	userMsg := &session.MessageInfo{ID: session.NewMessageID(), SessionID: sess.ID, Role: session.RoleUser, CreatedAt: session.Now()}
 	if err := store.CreateMessage(userMsg); err != nil {
 		t.Fatalf("create user msg: %v", err)
@@ -269,6 +283,27 @@ func TestRunLoop_AskUserAbsentWhenUnregistered(t *testing.T) {
 		if containsString(names, "ask_user") {
 			t.Errorf("step %d offered ask_user although it is not in the registry: %v", step, names)
 		}
+	}
+}
+
+// A teammate runs gated — that gate exists so its PERMISSION requests mirror
+// to the parent (startSessionLoop sets it for it) — and its Questions manager
+// is the server-wide one. Those are exactly the conditions ask_user needs to
+// surface in the composer the human is watching, so a teammate passes the
+// offer and its batch mirrors over that path like a permission does. Pins the
+// teammate branch of the offer.
+func TestRunLoop_AskUserOfferedForTeammate(t *testing.T) {
+	res := runAskScript(t, askScriptOptions{gated: true, registerTool: true, manager: true, teammate: true},
+		question.Reply{Answers: []question.Answer{{Selected: []string{"Postgres"}}}})
+
+	if !containsString(res.tools[0], "ask_user") {
+		t.Errorf("teammate's wire lacked ask_user: %v", res.tools[0])
+	}
+	if !offered(res.systems, 0, "Asking the User") {
+		t.Errorf("teammate's wire carried no ask_user guidance")
+	}
+	if res.asked != 1 {
+		t.Errorf("asked = %d, want the teammate's batch to reach the manager and get answered", res.asked)
 	}
 }
 

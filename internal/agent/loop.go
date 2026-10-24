@@ -15,12 +15,14 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
+	"github.com/prasenjeet-symon/ogcode/internal/filechange"
 	"github.com/prasenjeet-symon/ogcode/internal/id"
 	"github.com/prasenjeet-symon/ogcode/internal/keepawake"
 	"github.com/prasenjeet-symon/ogcode/internal/memfile"
@@ -43,6 +45,150 @@ const MaxStepsUncapped = -1
 
 // defaultMaxSteps is the budget a zero-value MaxSteps runs under.
 const defaultMaxSteps = 1000
+
+// DefaultMaxSteps is what a zero-value MaxSteps resolves to (RunLoop maps 0 →
+// this). The server's board answers it for background task children, whose loop
+// budget has to match a synchronous sub-agent's run rather than its own turn's.
+const DefaultMaxSteps = defaultMaxSteps
+
+// BoardReport is one completion report a server pushed into a running turn,
+// held by the TrackBoardReport tracker until the request that actually carries
+// the notice text is dispatched. The board's notified_at is stamped only by
+// Mark — at the dispatch, not at the push or the drain — so a step that takes
+// a notice but never sends it (a pre-stream gap restart, a dispatch that fails
+// every retry) leaves the row unreported: the model never read the text, so
+// the spawner's next turn hands it over again instead of the report counting
+// as delivered. The mark closure belongs to the server: this package owns no
+// board.
+type BoardReport struct {
+	// Text is the notice text the report was queued with; a dispatched request
+	// carrying that text concludes the report.
+	Text string
+	// Mark stamps the reported row on the board.
+	Mark func() error
+}
+
+// boardReports is the per-runner report tracker, kept beside the runner rather
+// than on it: LoopRunner is copied by value for teammates and tasks (see
+// NotesEnabled, whose pointer dodges the same copylocks check), and the
+// tracker lives one per process, keyed by the long-lived shared runner.
+var boardReports sync.Map // *LoopRunner → *boardReportQueue
+
+// boardReportQueue holds the reports one runner's turns still owe their board.
+type boardReportQueue struct {
+	mu      sync.Mutex
+	pending map[session.SessionID][]boardReport
+}
+
+// boardReport is one queued report: the LoopControl of the turn it was pushed
+// into (only that turn's drain concludes it — a later turn's drain is someone
+// else's), and the text and mark it queued with.
+type boardReport struct {
+	lc   *LoopControl
+	text string
+	mark func() error
+}
+
+// TrackBoardReport records a report the board pushed into lc, to be concluded
+// the first time a request dispatched for lc carries that notice's text. nil
+// safe on every part — a runner without a board tracks nothing.
+func (lr *LoopRunner) TrackBoardReport(lc *LoopControl, sessionID session.SessionID, rep BoardReport) {
+	if lr == nil || lc == nil || rep.Text == "" || rep.Mark == nil {
+		return
+	}
+	q, _ := boardReports.LoadOrStore(lr, &boardReportQueue{pending: map[session.SessionID][]boardReport{}})
+	q.(*boardReportQueue).track(lc, sessionID, rep.Text, rep.Mark)
+}
+
+// TrimBoardReports drops the session's reports whose turn is not live: the turn
+// that just took over replaced them, their notices died with their LoopControl,
+// and their rows stay unreported for this turn's catch-up to hand over itself.
+func (lr *LoopRunner) TrimBoardReports(sessionID session.SessionID, live *LoopControl) {
+	if lr == nil {
+		return
+	}
+	q, ok := boardReports.Load(lr)
+	if !ok {
+		return
+	}
+	q.(*boardReportQueue).trim(sessionID, live)
+}
+
+// BoardNoticesDelivered concludes the reports whose text a dispatched request
+// just carried — exactly the fresh full-text wires plus the repeat headlines
+// the step injected at the request's tail. RunLoop calls it only after
+// StreamChat returned a stream, so a notice is stamped exactly when the model
+// is reading its text — never while a step has merely drained a notice it may
+// still fail to send. Errors from the board are logged, not returned: an
+// unstamped row is still unreported, so the next turn's catch-up delivers it
+// again — never lost, at worst duplicated across turns.
+func (lr *LoopRunner) BoardNoticesDelivered(lc *LoopControl, sessionID session.SessionID, notices []Notice) {
+	if lr == nil {
+		return
+	}
+	q, ok := boardReports.Load(lr)
+	if !ok {
+		return
+	}
+	q.(*boardReportQueue).delivered(lc, sessionID, notices)
+}
+
+// track registers one report under its turn.
+func (q *boardReportQueue) track(lc *LoopControl, sessionID session.SessionID, text string, mark func() error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.pending[sessionID] = append(q.pending[sessionID], boardReport{lc: lc, text: text, mark: mark})
+}
+
+// trim drops the session's reports of any turn but live.
+func (q *boardReportQueue) trim(sessionID session.SessionID, live *LoopControl) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	kept := make([]boardReport, 0, len(q.pending[sessionID]))
+	for _, rep := range q.pending[sessionID] {
+		if rep.lc == live {
+			kept = append(kept, rep)
+		}
+	}
+	q.pending[sessionID] = kept
+}
+
+// delivered concludes the reports whose text the dispatched request carried: their marks run (the
+// board stamps its row), the entries come off the queue, so nothing runs
+// twice. The lock covers the queue only — marks run outside it.
+func (q *boardReportQueue) delivered(lc *LoopControl, sessionID session.SessionID, notices []Notice) {
+	if lc == nil || len(notices) == 0 {
+		return
+	}
+	q.mu.Lock()
+	var done []boardReport
+	kept := make([]boardReport, 0, len(q.pending[sessionID]))
+	for _, rep := range q.pending[sessionID] {
+		if rep.lc != lc {
+			kept = append(kept, rep)
+			continue
+		}
+		drained := false
+		for _, n := range notices {
+			if n.Text == rep.text {
+				drained = true
+				break
+			}
+		}
+		if drained {
+			done = append(done, rep)
+			continue
+		}
+		kept = append(kept, rep)
+	}
+	q.pending[sessionID] = kept
+	q.mu.Unlock()
+	for _, rep := range done {
+		if err := rep.mark(); err != nil {
+			slog.Warn("board report mark failed", "session", sessionID, "err", err)
+		}
+	}
+}
 
 // LoopRunner orchestrates the agent loop for a session.
 type LoopRunner struct {
@@ -122,7 +268,9 @@ type LoopRunner struct {
 	// cannot answer itself, put to the user through the UI, blocking until they
 	// reply. nil disables it (CLI, tests, sub-agents). Like Permissions, it is
 	// only offered when the context carries WithPermissionGating, so headless
-	// runs never block on a dialog nobody can see.
+	// runs never block on a dialog nobody can see. A teammate's loop IS gated
+	// and shares this manager: its batch mirrors to the parent (user-facing)
+	// session, where the human answers from the composer they are watching.
 	Questions *question.Manager
 	// Skills resolves the skills available in a project directory. nil (CLI,
 	// tests) means no skill is ever listed and the skill tool has nothing to
@@ -141,6 +289,32 @@ type LoopRunner struct {
 	// (copying the atomic itself is what go vet's copylocks check rejects).
 	// nil — the default in tests — reads as off.
 	NotesEnabled *atomic.Bool
+	// CatchUpTeammates, when set, hands this turn the completions its spawned
+	// teammates produced since it last heard, as pending notices, before the
+	// history is loaded. They reach the model at the tail of the first request.
+	// It never starts a turn and never fails the turn: nil (CLI, tests) leaves
+	// it unwired.
+	CatchUpTeammates func(ctx context.Context, sessionID session.SessionID, dir string) error
+	// StepBudgetFor, when set, overrides the step limits for one session. This
+	// runner owns no board of its own to know which sessions are teammates, so
+	// the server answers for it. Returning zero leaves stepBudgets' answer in
+	// place; a negative maxSteps asks for no ceiling at all (MaxStepsUncapped).
+	StepBudgetFor func(sessionID session.SessionID) (maxSteps, maxAutoResumes int)
+	// ParentSessionOf, when set, resolves where a permission request is also
+	// surfaced: for a teammate, the user-facing session that started it (the
+	// root of the nesting) plus the teammate's own handle, so the prompt shows
+	// up in the composer the human is watching rather than only on the
+	// teammate's page. Like StepBudgetFor, this runner owns no board, so the
+	// server answers for it. An empty parent means "own session only"; nil
+	// (CLI, tests) publishes nothing beyond it. The ask_user mirror rides the
+	// same resolve: a teammate's question batch also surfaces under the parent,
+	// so the human watching that composer sees the dialog.
+	ParentSessionOf func(sessionID session.SessionID) (parent session.SessionID, teammate string)
+	// FileLog is the read-bookmark gate write and edit consult before mutating a
+	// file: a path another session changed after this one last read it is refused
+	// rather than overwritten. nil (tests) leaves every mutation exactly as it
+	// was before the gate existed.
+	FileLog *filechange.Log
 }
 
 // notesOn reports whether this runner's turns include the notes section.
@@ -196,6 +370,27 @@ func stepBudgets(lr *LoopRunner) (maxSteps, hardMax int) {
 	return maxSteps, hardMax
 }
 
+// overrideStepBudgets applies StepBudgetFor's answer to stepBudgets' limits. A
+// negative maxSteps means no ceiling, the same way MaxStepsUncapped does, and an
+// uncapped run has nothing to extend, so auto-resume is ignored.
+func overrideStepBudgets(lr *LoopRunner, sessionID session.SessionID, maxSteps, hardMax int) (int, int) {
+	if lr.StepBudgetFor == nil {
+		return maxSteps, hardMax
+	}
+	n, resumes := lr.StepBudgetFor(sessionID)
+	switch {
+	case n == 0:
+		return maxSteps, hardMax
+	case n < 0:
+		return math.MaxInt, math.MaxInt
+	}
+	hardMax = n
+	if resumes > 0 {
+		hardMax = n * (1 + resumes)
+	}
+	return n, hardMax
+}
+
 // RunLoop executes the core agent loop: prompt -> stream -> tools -> loop back.
 // maxReasoningLen bounds how much of a thinking block is stored, so a runaway
 // reasoning stream can't flood the DB or the UI.
@@ -232,6 +427,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// deep_search call runs a nested RunLoop concurrently with the parent loop,
 	// so writing lr.MaxSteps here would be a data race.
 	maxSteps, hardMax := stepBudgets(lr)
+	maxSteps, hardMax = overrideStepBudgets(lr, sessionID, maxSteps, hardMax)
 
 	// Keep the Mac (and its screen) awake for the duration of this turn — an
 	// active generation should never be cut off by display or idle system sleep.
@@ -349,6 +545,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	}
 	agentMDContent := LoadAgentMD(workDir)
 	memoryMDContent := LoadMemoryMD(workDir)
+
+	// Hand this turn the completions its own teammates reported while it was not
+	// running, as pending notices. Build only, like the board tool itself: the
+	// plan and task agents spawn nobody. A failure is logged, never fatal — the
+	// turn is still valid without the report, and stranding the user over a
+	// board read would be worse.
+	if lr.CatchUpTeammates != nil && agent.ID == "build" {
+		if derr := lr.CatchUpTeammates(ctx, sessionID, workDir); derr != nil {
+			slog.Warn("teammate catch-up failed", "session", sessionID, "err", derr)
+		}
+	}
 
 	// Config-driven ask/deny rules have to be in the session's ruleset before the
 	// first skill call, or the default catch-all Allow answers for them. Seeding
@@ -537,9 +744,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// ask_user is offered only where a question manager is wired AND the loop is
 	// interactive — permission gating is set by the server's session loop alone,
 	// which is exactly the context in which a prompt has a user to reach. A
-	// headless run (CLI, indexer) and a sub-agent therefore never see it. Like
-	// compact_context, this decides both a tool on the wire and a system entry,
-	// so it is resolved once per turn and the two stay in step.
+	// headless run (CLI, indexer) and a sub-agent therefore never see it. A
+	// teammate passes, though it has no user of its own: like permission
+	// requests, AskUser mirrors its batch to the parent (user-facing) session,
+	// so the human answers from the composer they are watching and the child
+	// blocks until the reply arrives. Like compact_context, this decides both a
+	// tool on the wire and a system entry, so it is resolved once per turn and
+	// the two stay in step.
 	askUserOffered := agent.canAskUser() && PermissionGatingEnabled(ctx) &&
 		lr.Questions != nil && lr.Tools.Get("ask_user") != nil
 	// update_intent is offered to the interactive build agent alone: the plan it
@@ -547,6 +758,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// session has no one to see. Resolved once per turn and used for both the
 	// tool on the wire and the system entry below, so the two stay in step.
 	intentOffered := agent.canUpdateIntent() && lr.Tools.Get("update_intent") != nil
+	// board and teammate are the shared-board tools, offered to the interactive
+	// build agent alone. They are not in codingAgentTools, which TaskAgent also
+	// holds: a task session runs in a worktree deleted when it ends, where a post
+	// reaches nobody and a teammate would write into a tree about to go away.
+	// PlanAgent is read-only and has no board section in its prompt.
+	boardOffered := agent.canUseBoard() && lr.Tools.Get("board") != nil
+	teammateOffered := agent.canSpawnTeammate() && lr.Tools.Get("teammate") != nil
 	allowIDs := append([]string{}, agent.Tools...)
 	if compactContextOffered {
 		allowIDs = append(allowIDs, "compact_context")
@@ -556,6 +774,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	}
 	if intentOffered {
 		allowIDs = append(allowIDs, "update_intent")
+	}
+	if boardOffered {
+		allowIDs = append(allowIDs, "board")
+	}
+	if teammateOffered {
+		allowIDs = append(allowIDs, "teammate")
 	}
 	// The agent as this turn actually sees it. executeTool checks its Tools as an
 	// allowlist, so it must cover every tool that can reach the wire — including
@@ -681,7 +905,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// never persisted to the message DB, so it does not interact with
 		// compaction turn boundaries or agentic-memory <prior_context> slicing.
 		pendingGuidance := ""
+		var pendingNotices []Notice
 		if lc := LoopControlFromContext(ctx); lc != nil {
+			// Notice delivery needs no generation interrupt: a teammate report
+			// pushed mid-turn is drained per step — here and in the shouldBreak
+			// re-drain below — and rides the request built this iteration.
 			pendingGuidance = lc.DrainGuidance()
 			if pendingGuidance != "" {
 				slog.Info("mid-loop guidance injected", "session", sessionID, "step", step, "len", len(pendingGuidance))
@@ -689,6 +917,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					"sessionId": string(sessionID),
 					"status":    "delivered",
 				})
+			}
+			// Board notices are pushed into the turn the same way, but they are
+			// not the user speaking: they ride in their own labelled block at the
+			// tail of the request and never become a message. Draining only
+			// moves them into the injection pipeline — the board rows behind
+			// them are stamped where the dispatch succeeds, below, so a notice
+			// taken but never sent stays unreported for the next turn's
+			// catch-up instead of being marked for text the model never read.
+			pendingNotices = lc.DrainNotices()
+			if len(pendingNotices) > 0 {
+				slog.Info("mid-loop board notices drained", "session", sessionID, "step", step, "count", len(pendingNotices))
 			}
 		}
 
@@ -737,24 +976,21 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 
 		// Check if we should continue: last assistant finished means done
 		if shouldBreak(messages) {
-			// Don't break if there is pending guidance — the user injected a
-			// new instruction while the loop was running and we just drained
-			// it at the top of this iteration. If we broke here the guidance
-			// would be silently discarded because it is never persisted to the
-			// message DB (it's an ephemeral append to the user message content).
-			// Continue so the guidance reaches the LLM on this iteration's call.
-			if pendingGuidance == "" {
-				// Re-check: guidance may have arrived after DrainGuidance at
-				// the top of this iteration but before/during the DB load
-				// above. Without this re-check the loop would exit and silently
-				// drop the guidance (it is never persisted to the message DB).
-				// Drain it here so the loop continues and injects it into the
-				// upcoming user message.
+			// Don't break if there is pending input — the user injected a new
+			// instruction (guidance) or a peer pushed a post (notice) while the
+			// loop was running, and we just drained it at the top of this
+			// iteration. If we broke here it would be silently discarded, because
+			// neither is ever persisted to the message DB.
+			if pendingGuidance == "" && len(pendingNotices) == 0 {
+				// Re-check: either may have arrived after the drain at the top of
+				// this iteration but before/during the DB load above. Drain here so
+				// the loop continues and injects it into the upcoming request.
 				if lc := LoopControlFromContext(ctx); lc != nil {
 					pendingGuidance = lc.DrainGuidance()
+					pendingNotices = lc.DrainNotices()
 				}
 			}
-			if pendingGuidance == "" {
+			if pendingGuidance == "" && len(pendingNotices) == 0 {
 				last := messages[len(messages)-1]
 				finish := "stop"
 				if last.Info.Finish != nil {
@@ -768,7 +1004,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				lr.autoIndexTurn(agent.ID, sessionID, modelID, providerID)
 				return nil
 			}
-			slog.Info("agent loop continuing for pending guidance", "session", sessionID, "step", step, "len", len(pendingGuidance))
+			slog.Info("agent loop continuing for pending input", "session", sessionID, "step", step, "guidance", len(pendingGuidance), "notices", len(pendingNotices))
 		}
 
 		// Create new assistant message
@@ -913,6 +1149,30 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 		}
 
+		// Board notices, appended at the very TAIL of the request and never folded
+		// into the turn's first user message: a notice arriving mid-turn must not
+		// invalidate every tool result behind it in the prompt cache. They are
+		// ephemeral like guidance — the transcript keeps only the receipt a post
+		// already wrote, never the injected block.
+		var providerPlacedNotices string
+		// wireFresh and wireDigest are exactly what this iteration's request
+		// tail will carry. They are hoisted out of the take block because two
+		// later branches need them: the pre-stream gap restart below must put
+		// what it took but never sent back on unshown, and the stamp after the
+		// dispatch must conclude exactly the reports this request carried.
+		var wireFresh, wireDigest []Notice
+		if lc := LoopControlFromContext(ctx); lc != nil {
+			wireFresh, wireDigest = lc.TakeNoticesForInjection()
+			if len(wireFresh) > 0 || len(wireDigest) > 0 {
+				text := noticesUserContent(wireFresh, wireDigest)
+				if provider.PlacesGuidance(p) {
+					providerPlacedNotices = text
+				} else {
+					modelMessages = appendTailUserMessage(modelMessages, text)
+				}
+			}
+		}
+
 		// Derive a child context for the LLM stream. This allows mid-loop stream
 		// cancellation: when the user sends guidance, CancelStream cancels only
 		// this child, so the stream winds down (the provider's HTTP request is
@@ -944,10 +1204,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// wasn't registered yet), so the stream was never interrupted.
 			// Without this check the stream would run to completion (10-30s)
 			// and the guidance would only be applied on the NEXT iteration.
-			// Re-check the queue: if guidance arrived, cancel the stream so
-			// the next iteration drains it and injects it promptly.
-			if lc.HasPendingGuidance() {
-				slog.Info("guidance arrived during pre-stream gap, cancelling stream before it starts", "session", sessionID, "step", step)
+			// Re-check the queue: if guidance or a notice arrived, cancel the
+			// stream so the next iteration drains it and injects it promptly.
+			// This iteration's take (wireFresh) moved notices out of unshown
+			// into a request that has NOT dispatched yet — without restoring them
+			// the restarted step would re-ship them only as a one-line digest
+			// claiming "already delivered above", pointing at text no request
+			// ever carried. Put them back on unshown first; the stamp never ran
+			// for them either way — it waits for a real dispatch below.
+			if lc.HasPendingGuidance() || lc.HasPendingNotice() {
+				slog.Info("mid-loop input arrived during pre-stream gap, cancelling stream before it starts", "session", sessionID, "step", step)
+				lc.RestoreNotices(wireFresh)
 				streamCancelFn()
 				lc.ClearStreamCancel()
 				continue
@@ -967,6 +1234,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// Empty unless this provider places guidance itself; the fallback
 			// has already folded it into Messages above.
 			Guidance: providerPlacedGuidance,
+			// Empty unless this provider places guidance itself; the fallback
+			// has already appended the notices at the tail of Messages.
+			Notices: providerPlacedNotices,
 			// The agent loop is the one caller that asks for thinking. Providers
 			// that have no reasoning mode, and models that would need a
 			// configuration ogcode cannot size safely, ignore it.
@@ -1075,6 +1345,20 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 					slog.Warn("persist delivery on stream connect", "session", sessionID, "err", err)
 				}
 				lr.Bus.Publish("message.updated", assistantMsg)
+				// The request just dispatched carried this step's notice wires —
+				// the fresh full texts and the repeat headlines — so the board
+				// rows behind them are stamped HERE, when the dispatch landed,
+				// not where the notices were drained. A step that takes notices
+				// and then never dispatches (gap restart, error, cancelled
+				// stream) leaves them unreported for the next turn's catch-up.
+				// Connection retries above re-enter this block, so only the
+				// eventual success stamps, once.
+				if lc != nil && (len(wireFresh) > 0 || len(wireDigest) > 0) {
+					stamped := make([]Notice, 0, len(wireFresh)+len(wireDigest))
+					stamped = append(stamped, wireFresh...)
+					stamped = append(stamped, wireDigest...)
+					lr.BoardNoticesDelivered(lc, sessionID, stamped)
+				}
 				break
 			}
 			// Stream was cancelled by mid-loop guidance (the stream child context
@@ -1971,8 +2255,8 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// inject it into the user message. Without this check the
 			// shouldBreak guard at the next iteration's top would see an empty
 			// queue and exit, dropping the guidance.
-			if lc != nil && lc.HasPendingGuidance() {
-				slog.Info("agent loop continuing for guidance received during iteration", "session", sessionID, "step", step)
+			if lc != nil && (lc.HasPendingGuidance() || lc.HasPendingNotice()) {
+				slog.Info("agent loop continuing for input received during iteration", "session", sessionID, "step", step)
 				continue
 			}
 			slog.Info("agent loop complete", "session", sessionID, "steps", step, "reason", finishReason)
@@ -2669,6 +2953,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 			// Derived rather than threaded through: the effective agent holds
 			// update_intent exactly when this turn runs the matcher.
 			IntentMatcher: a.HasTool("update_intent"),
+			FileLog:       lr.FileLog,
 		}
 		// Honor cancellation at the dispatch boundary. Several built-in tools do
 		// bounded local work and don't check ctx themselves, so a mid-loop abort
@@ -3029,6 +3314,8 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 		Input:     string(tc.Input),
 		Patterns:  []string{pattern},
 	}
+	parent, teammate := lr.parentSessionOf(sessionID)
+	req.Teammate = teammate
 	pr := lr.Permissions.Create(req)
 	lr.Bus.Publish("permission.requested", map[string]string{
 		"sessionId":    string(sessionID),
@@ -3037,6 +3324,7 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 		"pattern":      pattern,
 		"input":        string(tc.Input),
 	})
+	lr.mirrorPermission("permission.requested", parent, sessionID, req, "")
 	slog.Info("awaiting tool permission", "session", sessionID, "tool", tc.Name, "permission", req.ID)
 
 	select {
@@ -3050,6 +3338,7 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 			"permissionId": string(req.ID),
 			"response":     "cancelled",
 		})
+		lr.mirrorPermission("permission.replied", parent, sessionID, req, "cancelled")
 		return permission.Deny, ctx.Err()
 	case reply := <-pr.ReplyCh:
 		switch reply {
@@ -3072,6 +3361,73 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 	}
 }
 
+// parentSessionOf asks the server where a permission request raised by this
+// session should also be surfaced. nil or empty means this session is its own
+// audience.
+func (lr *LoopRunner) parentSessionOf(sessionID session.SessionID) (session.SessionID, string) {
+	if lr.ParentSessionOf == nil {
+		return "", ""
+	}
+	return lr.ParentSessionOf(sessionID)
+}
+
+// mirrorPermission repeats a teammate's permission event under its parent
+// (user-facing) session, so the human watching that session sees the prompt in
+// their composer and can answer it from there. The mirror carries the
+// teammate's session as ownerSessionId — the loop that is actually blocked —
+// and the same permissionId, because the reply route resolves by id alone, so
+// answering either copy unblocks the same wait. A no-op for a session that is
+// nobody's teammate, and for the cancellation path as well: a parent queue left
+// holding a dead prompt would answer nothing and never clear.
+func (lr *LoopRunner) mirrorPermission(event string, parent, owner session.SessionID, req permission.Request, response string) {
+	if lr.Bus == nil || parent == "" || parent == owner {
+		return
+	}
+	props := map[string]string{
+		"sessionId":      string(parent),
+		"ownerSessionId": string(owner),
+		"permissionId":   string(req.ID),
+		"teammate":       req.Teammate,
+	}
+	if event == "permission.requested" {
+		props["tool"] = req.Tool
+		props["input"] = req.Input
+		if len(req.Patterns) > 0 {
+			props["pattern"] = req.Patterns[0]
+		}
+	} else {
+		props["response"] = response
+	}
+	lr.Bus.Publish(event, props)
+}
+
+// mirrorQuestion repeats a teammate's ask_user event under its parent
+// (user-facing) session, so the human watching that session sees the dialog in
+// their composer and can answer it from there. The mirror carries the
+// teammate's session as ownerSessionId — the loop that is actually blocked —
+// and the same questionId, because the reply route resolves by id alone, so
+// answering either copy unblocks the same wait. A no-op for a session that is
+// nobody's teammate, and for the cancellation path as well: a parent queue
+// left holding a dead dialog would answer nothing and never clear.
+func (lr *LoopRunner) mirrorQuestion(event string, parent, owner session.SessionID, req question.Request, response string) {
+	if lr.Bus == nil || parent == "" || parent == owner {
+		return
+	}
+	if event == "question.requested" {
+		mirrored := req
+		mirrored.SessionID = string(parent)
+		mirrored.OwnerSessionID = string(owner)
+		lr.Bus.Publish(event, mirrored)
+		return
+	}
+	lr.Bus.Publish(event, map[string]string{
+		"sessionId":      string(parent),
+		"ownerSessionId": string(owner),
+		"questionId":     string(req.ID),
+		"response":       response,
+	})
+}
+
 // AskUser puts a batch of questions to the user and blocks until they answer,
 // the loop is cancelled, or the client goes away. It is the ask_user tool's
 // implementation, wired in as tool.AskUserTool{Ask: lr.AskUser} so the tool
@@ -3080,18 +3436,24 @@ func (lr *LoopRunner) requestPermission(ctx context.Context, sessionID session.S
 // It mirrors requestPermission exactly: register the pending request, announce
 // it on the bus, then wait on a buffered channel the HTTP handler writes to from
 // another goroutine — the first client to answer wins, because the manager
-// deletes the entry before handing it over.
+// deletes the entry before handing it over. And like requestPermission, a
+// teammate's batch is also mirrored to its parent (user-facing) session, so
+// the human answers from the composer they are watching no matter which page
+// the dialog opened on.
 func (lr *LoopRunner) AskUser(ctx context.Context, sessionID string, questions []question.Question) (question.Reply, error) {
 	if lr.Questions == nil {
 		return question.Reply{}, fmt.Errorf("ask_user is not available in this environment")
 	}
+	parent, teammate := lr.parentSessionOf(session.SessionID(sessionID))
 	req := question.Request{
 		ID:        question.NewQuestionID(),
 		SessionID: sessionID,
 		Questions: questions,
+		Teammate:  teammate,
 	}
 	pr := lr.Questions.Create(req)
 	lr.Bus.Publish("question.requested", req)
+	lr.mirrorQuestion("question.requested", parent, session.SessionID(sessionID), req, "")
 	slog.Info("awaiting user answers", "session", sessionID, "question", req.ID, "count", len(questions))
 
 	select {
@@ -3105,6 +3467,7 @@ func (lr *LoopRunner) AskUser(ctx context.Context, sessionID string, questions [
 			"questionId": string(req.ID),
 			"response":   "cancelled",
 		})
+		lr.mirrorQuestion("question.replied", parent, session.SessionID(sessionID), req, "cancelled")
 		return question.Reply{}, ctx.Err()
 	case reply := <-pr.ReplyCh:
 		return reply, nil
@@ -4378,6 +4741,35 @@ func appendGuidanceToUserMessage(messages []provider.ModelMessage, guidance stri
 		messages[i].Content, _ = json.Marshal(content)
 		return
 	}
+}
+
+// appendTailUserMessage puts text at the very end of the conversation: extra
+// content on a trailing user message, or a new user message when the
+// conversation ends on anything else (an assistant turn, a tool result).
+//
+// It is the guidance fallback's opposite on purpose. Guidance belongs on the
+// turn's first user message because it re-states the user's instruction, but a
+// board notice arriving mid-turn must not change a byte that early: the prompt
+// cache reuses a request only as far as the bytes still match, so rewriting the
+// first message throws away every tool result behind it on the very step the
+// notice arrives. Appended at the tail there is nothing behind it to
+// invalidate.
+func appendTailUserMessage(messages []provider.ModelMessage, text string) []provider.ModelMessage {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return messages
+	}
+	if n := len(messages); n > 0 && messages[n-1].Role == "user" {
+		var content string
+		if messages[n-1].Content != nil {
+			json.Unmarshal(messages[n-1].Content, &content)
+		}
+		content += "\n\n" + text
+		messages[n-1].Content, _ = json.Marshal(content)
+		return messages
+	}
+	encoded, _ := json.Marshal(text)
+	return append(messages, provider.ModelMessage{Role: "user", Content: encoded})
 }
 
 // isContextLengthError returns true when the provider rejects the request because

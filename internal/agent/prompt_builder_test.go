@@ -980,7 +980,7 @@ func TestProjectIndexPrompt(t *testing.T) {
 	for _, sub := range []string{
 		"Mandatory: Explore Before You Read",
 		"codebase_map",
-		"MANDATORY FIRST STEP",
+		"FIRST EXPLORATION STEP",
 		"has not been indexed", // the empty-index escape hatch
 		"glob and grep",        // ...and what to do instead
 		"subdir",

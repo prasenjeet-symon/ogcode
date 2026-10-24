@@ -33,6 +33,11 @@ type Request struct {
 	Tool      string       `json:"tool"`
 	Input     string       `json:"input"`
 	Patterns  []string     `json:"patterns"`
+	// Teammate is the board handle of the teammate whose loop is actually
+	// blocked. It is set on every copy of a teammate's request — the
+	// teammate's own page's copy included — and empty only for a request the
+	// session itself made, with no teammate involved.
+	Teammate string `json:"teammate,omitempty"`
 }
 
 // Evaluate checks the ruleset and returns the action for the given tool and path.
@@ -59,6 +64,10 @@ func DefaultRuleset() Ruleset {
 		{Permission: "bash", Pattern: "*", Action: Ask},
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "edit", Pattern: "*", Action: Ask},
+		// Spawning is money and a second writer in the same tree, so it asks
+		// before it happens; yolo (which only reaches what would have been
+		// Ask) proceeds without a prompt, by design.
+		{Permission: "teammate", Pattern: "*", Action: Ask},
 		{Permission: "*", Pattern: "*", Action: Allow},
 	}
 }

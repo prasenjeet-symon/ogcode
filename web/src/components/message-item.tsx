@@ -1,5 +1,6 @@
 import { Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData, Interruption, InterruptReason } from '../api/client';
+import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData, AgentPartData, Interruption, InterruptReason } from '../api/client';
+import AgentPart from './agent-part';
 import MarkdownContent from './markdown-content';
 import FileDiff, { diffStat } from './file-diff';
 import { useNote } from '../context/note';
@@ -579,6 +580,9 @@ function PartDisplay(props: { part: Part }) {
       </Show>
       <Show when={props.part.type === 'reasoning'}>
         <ReasoningPartDisplay data={parsePartData<ReasoningPartData>(props.part.data)} />
+      </Show>
+      <Show when={props.part.type === 'agent'}>
+        <AgentPart data={parsePartData<AgentPartData>(props.part.data)} createdAt={props.part.createdAt} />
       </Show>
     </>
   );

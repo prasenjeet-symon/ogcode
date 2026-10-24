@@ -185,6 +185,10 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		delete(s.runningDone, id)
 	}
 	s.mu.Unlock()
+	// Spawned teammates are children of this session: they have nothing left to
+	// report to once it is gone, so stop them rather than leave them writing to
+	// a deleted board row.
+	s.stopTeammatesOf(id)
 	if done != nil {
 		select {
 		case <-done:
@@ -246,6 +250,10 @@ func (s *Server) handleAbortSession(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		slog.Info("aborted session", "session", sessionID)
 	}
+	// Aborting a session deliberately ends the teammates it spawned: they were
+	// working towards its goal, and leaving them running would keep spending
+	// after the user said stop.
+	s.stopTeammatesOf(sessionID)
 
 	// Mark the last unfinished assistant message as aborted and cancel all in-progress tool calls
 	messages, err := s.store.GetMessages(sessionID, "", 100)
@@ -478,6 +486,10 @@ func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 // step's counts plus the session row's utility work. It is the figure the token
 // pill shows for a session, so it is the session's own and does not change with
 // how much of the transcript a client happens to hold.
+//
+// Teammates is a separate rollup of what this session spawned on the project
+// board. The headline totals above never include it — a client that wants the
+// whole subtree folds the teammate rows in itself.
 type sessionTokens struct {
 	Input      int `json:"input"`
 	Output     int `json:"output"`
@@ -487,6 +499,49 @@ type sessionTokens struct {
 	Utility    int `json:"utility"`
 	Effective  int `json:"effective"`
 	Total      int `json:"total"`
+	// Teammates is always present, as [] when the session spawned none.
+	Teammates []sessionTeammateTokens `json:"teammates"`
+}
+
+// sessionTeammateTokens is one teammate's token totals, for the pill's
+// per-teammate rows.
+type sessionTeammateTokens struct {
+	Handle     string `json:"handle"`
+	SessionID  string `json:"sessionId"`
+	Status     string `json:"status"`
+	Input      int    `json:"input"`
+	Output     int    `json:"output"`
+	Reasoning  int    `json:"reasoning"`
+	CacheRead  int    `json:"cacheRead"`
+	CacheWrite int    `json:"cacheWrite"`
+	Utility    int    `json:"utility"`
+	Effective  int    `json:"effective"`
+	Total      int    `json:"total"`
+}
+
+// sessionTokenTotals sums one session's assistant-step tokens plus the
+// utility work recorded on its row.
+func sessionTokenTotals(store *session.Store, sess *session.Session) (counts session.TokenCounts, utility int, err error) {
+	steps, err := store.ListStepUsage(sess.ID)
+	if err != nil {
+		return counts, 0, err
+	}
+	for _, st := range steps {
+		counts.Input += st.Tokens.Input
+		counts.Output += st.Tokens.Output
+		counts.Reasoning += st.Tokens.Reasoning
+		counts.CacheRead += st.Tokens.CacheRead
+		counts.CacheWrite += st.Tokens.CacheWrite
+	}
+	if u := sess.UtilityTokens; u != nil {
+		counts.Input += u.Input
+		counts.Output += u.Output
+		counts.Reasoning += u.Reasoning
+		counts.CacheRead += u.CacheRead
+		counts.CacheWrite += u.CacheWrite
+		utility = u.Effective()
+	}
+	return counts, utility, nil
 }
 
 // handleSessionTokens totals a session's tokens over its whole transcript,
@@ -494,6 +549,10 @@ type sessionTokens struct {
 // same figure as when it was new. The token pill calls this in place of summing
 // the messages it holds, which on a session past one transcript page is only the
 // newest page.
+//
+// Its teammates are enumerated beside it: a teammate is a real build session the
+// board ties to this one, so its spend lives in its own transcript and is
+// reported as a separate rollup rather than folded into the parent's totals.
 func (s *Server) handleSessionTokens(w http.ResponseWriter, r *http.Request) {
 	id := session.SessionID(chi.URLParam(r, "sessionID"))
 	sess, err := s.store.Get(id)
@@ -505,28 +564,60 @@ func (s *Server) handleSessionTokens(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	steps, err := s.store.ListStepUsage(id)
+	counts, utility, err := sessionTokenTotals(s.store, sess)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var counts session.TokenCounts
-	for _, st := range steps {
-		counts.Input += st.Tokens.Input
-		counts.Output += st.Tokens.Output
-		counts.Reasoning += st.Tokens.Reasoning
-		counts.CacheRead += st.Tokens.CacheRead
-		counts.CacheWrite += st.Tokens.CacheWrite
+
+	ctx, cancel := context.WithTimeout(r.Context(), boardOpTimeout)
+	defer cancel()
+	handles, err := s.spawnedTeammates(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	var utility int
-	if u := sess.UtilityTokens; u != nil {
-		counts.Input += u.Input
-		counts.Output += u.Output
-		counts.Reasoning += u.Reasoning
-		counts.CacheRead += u.CacheRead
-		counts.CacheWrite += u.CacheWrite
-		utility = u.Effective()
+	teammates := make([]sessionTeammateTokens, 0, len(handles))
+	for _, h := range handles {
+		child, err := s.store.Get(session.SessionID(h.SessionID))
+		if err != nil || child == nil {
+			// A deleted teammate keeps its roster row; its spend is gone with
+			// it. A transient store error on a child's row degrades exactly
+			// the same way — the roster join skips the failing row per-row
+			// rather than costing the drawer every other agent — so this
+			// rollup drops the child and keeps the parent's totals and its
+			// remaining teammates standing.
+			if err != nil {
+				slog.Warn("token rollup: could not read a teammate, skipping it",
+					"session", id, "teammate", h.Handle, "err", err)
+			}
+			continue
+		}
+		c, u, err := sessionTokenTotals(s.store, child)
+		if err != nil {
+			// The child's own step read failing is the same per-child fault:
+			// its spend is this rollup's separate field, folded in on the
+			// client, so it is dropped rather than fatal — the parent's
+			// totals never depend on it.
+			slog.Warn("token rollup: could not sum a teammate's steps, skipping it",
+				"session", id, "teammate", h.Handle, "err", err)
+			continue
+		}
+		teammates = append(teammates, sessionTeammateTokens{
+			Handle:     h.Handle,
+			SessionID:  h.SessionID,
+			Status:     h.Status,
+			Input:      c.Input,
+			Output:     c.Output,
+			Reasoning:  c.Reasoning,
+			CacheRead:  c.CacheRead,
+			CacheWrite: c.CacheWrite,
+			Utility:    u,
+			Effective:  c.Effective(),
+			Total:      c.Consumed(),
+		})
 	}
+
 	writeJSON(w, http.StatusOK, sessionTokens{
 		Input:      counts.Input,
 		Output:     counts.Output,
@@ -536,6 +627,7 @@ func (s *Server) handleSessionTokens(w http.ResponseWriter, r *http.Request) {
 		Utility:    utility,
 		Effective:  counts.Effective(),
 		Total:      counts.Consumed(),
+		Teammates:  teammates,
 	})
 }
 

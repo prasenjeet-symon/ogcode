@@ -96,6 +96,10 @@ func (s *Server) cancelLoop(id session.SessionID) {
 	if ok {
 		cancel()
 	}
+	// A cancelled loop takes its spawned teammates with it: stop reaches them by
+	// cancelling their loops, and each of those cancels in turn, so the cascade
+	// runs down every level of nested teammates.
+	s.stopTeammatesOf(id)
 }
 
 // Guidance injects mid-loop guidance into a running loop: the text is queued
