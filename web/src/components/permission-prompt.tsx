@@ -17,9 +17,21 @@ export default function PermissionPrompt() {
 
   let allowBtn: HTMLButtonElement | undefined;
 
+  // A prompt raised by a teammate is surfaced here but belongs to the
+  // teammate's own loop; it must not steal focus from the user's typing in the
+  // session they are actually working in.
+  const isOwn = (req: { sessionId?: string }) => {
+    const id = session.activeSession()?.id;
+    return !req.sessionId || !id || req.sessionId === id;
+  };
+
+  // True when the prompt was raised by a teammate and is mirrored here so the
+  // human can answer it while watching this session.
+  const fromTeammate = (req: { teammate?: string; sessionId?: string }) => !!req.teammate && !isOwn(req);
+
   createEffect(() => {
-    const id = current()?.permissionId;
-    if (id) queueMicrotask(() => allowBtn?.focus());
+    const req = current();
+    if (req && isOwn(req)) queueMicrotask(() => allowBtn?.focus());
   });
 
   const handleKey = (e: KeyboardEvent) => {
@@ -72,6 +84,14 @@ export default function PermissionPrompt() {
               >
                 {req().pattern && req().pattern !== '*' ? req().pattern : `Use ${req().tool}`}
               </code>
+              <Show when={fromTeammate(req())}>
+                <span
+                  class="shrink-0 rounded bg-[color:var(--bg-hover)] px-1.5 py-0.5 font-mono text-micro text-[color:var(--text-tertiary)]"
+                  title={`Permission requested by teammate ${req().teammate}`}
+                >
+                  {req().teammate}
+                </span>
+              </Show>
               <Show when={queue().length > 1}>
                 <span class="shrink-0 text-micro text-[color:var(--text-tertiary)]">+{queue().length - 1}</span>
               </Show>

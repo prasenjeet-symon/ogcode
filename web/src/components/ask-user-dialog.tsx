@@ -168,6 +168,14 @@ export default function AskUserDialog() {
                       : `${total()} questions — your turn pauses until they are answered.`}
                   </p>
                 </div>
+                <Show when={batch()?.teammate}>
+                  <span
+                    class="shrink-0 rounded bg-[color:var(--bg-hover)] px-1.5 py-0.5 font-mono text-micro text-[color:var(--text-tertiary)] mt-0.5"
+                    title={`Question asked by teammate ${batch()?.teammate}`}
+                  >
+                    {batch()?.teammate}
+                  </span>
+                </Show>
               </div>
             </div>
 

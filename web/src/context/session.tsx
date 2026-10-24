@@ -46,6 +46,12 @@ import { joinsHeld, mergeTranscript } from '../lib/transcript';
 
 export interface PendingPermission {
   permissionId: string;
+  /** The session whose agent loop is blocked on the reply. It is the active
+   *  session for a prompt it raised itself, and a teammate's session for a
+   *  prompt surfaced here from the agent tree. */
+  sessionId: string;
+  /** The teammate whose loop is blocked, when this prompt came from one. */
+  teammate?: string;
   tool: string;
   pattern: string;
   input: string;
@@ -857,6 +863,8 @@ export const SessionProvider: ParentComponent = (props) => {
             .filter((p) => !have.has(p.permissionId))
             .map((p) => ({
               permissionId: p.permissionId,
+              sessionId: p.sessionId,
+              teammate: p.teammate,
               tool: p.tool,
               pattern: p.patterns?.[0] ?? '',
               input: p.input,
@@ -878,7 +886,17 @@ export const SessionProvider: ParentComponent = (props) => {
         setQuestionQueue(id, (prev) => {
           const kept = prev.filter((q) => fetchedIds.has(q.questionId));
           const have = new Set(kept.map((q) => q.questionId));
-          const added = pending.filter((q) => !have.has(q.questionId));
+          const added = pending
+            .filter((q) => !have.has(q.questionId))
+            .map((q) => ({
+              questionId: q.questionId,
+              // A teammate's batch is listed here but owned by that teammate's
+              // loop — the same shape the SSE question.requested event arrives
+              // in, so the restore and live paths stay interchangeable.
+              sessionId: q.ownerSessionId || q.sessionId,
+              teammate: q.teammate || undefined,
+              questions: q.questions,
+            }));
           return [...kept, ...added];
         });
       } catch (e) {
@@ -1511,10 +1529,19 @@ export const SessionProvider: ParentComponent = (props) => {
     if (last.type === 'permission.requested') {
       const sid = p.sessionId;
       if (!sid) return;
+      // A teammate's request is mirrored into the session it was spawned from:
+      // it is filed under the parent (sid) but owned by the teammate
+      // (ownerSessionId), which is the loop the reply has to reach.
+      const entry: PendingPermission = {
+        permissionId: p.permissionId,
+        sessionId: p.ownerSessionId || sid,
+        teammate: p.teammate || undefined,
+        tool: p.tool,
+        pattern: p.pattern,
+        input: p.input,
+      };
       setPermQueue(sid, (prev) =>
-        prev.some((x) => x.permissionId === p.permissionId)
-          ? prev
-          : [...prev, { permissionId: p.permissionId, tool: p.tool, pattern: p.pattern, input: p.input }],
+        prev.some((x) => x.permissionId === p.permissionId) ? prev : [...prev, entry],
       );
     } else if (last.type === 'permission.replied') {
       const sid = p.sessionId;
@@ -1525,10 +1552,17 @@ export const SessionProvider: ParentComponent = (props) => {
       // struct itself), so the dialog can render it without a follow-up fetch.
       const sid = p.sessionId;
       if (!sid || !p.questionId) return;
+      // A teammate's dialog is mirrored into the session it was spawned from:
+      // it is filed under the parent (sid) but owned by the teammate
+      // (ownerSessionId), which is the loop the reply has to reach.
+      const entry: PendingQuestion = {
+        questionId: p.questionId,
+        sessionId: p.ownerSessionId || sid,
+        teammate: p.teammate || undefined,
+        questions: p.questions || [],
+      };
       setQuestionQueue(sid, (prev) =>
-        prev.some((x) => x.questionId === p.questionId)
-          ? prev
-          : [...prev, { questionId: p.questionId, sessionId: sid, questions: p.questions || [] }],
+        prev.some((x) => x.questionId === p.questionId) ? prev : [...prev, entry],
       );
     } else if (last.type === 'question.replied') {
       const sid = p.sessionId;
@@ -1553,14 +1587,19 @@ export const SessionProvider: ParentComponent = (props) => {
 
   async function respondPermission(permissionId: string, response: PermissionResponse) {
     const sess = activeSession();
-    const tool = sess ? (permQueues()[sess.id] || []).find((x) => x.permissionId === permissionId)?.tool : undefined;
+    const entry = sess ? (permQueues()[sess.id] || []).find((x) => x.permissionId === permissionId) : undefined;
+    // A teammate's prompt is listed in this session but owned by the teammate's
+    // own loop: name its session in the path. The backend resolves the reply by
+    // permission id alone, so either page can answer it; naming the owner keeps
+    // the resolution event on the queue that is actually blocked.
+    const owner = entry?.sessionId || sess?.id;
     // Optimistically dismiss so the UI feels instant; the backend also emits
     // permission.replied which reconciles any other client.
     if (sess) setPermQueue(sess.id, (prev) => prev.filter((x) => x.permissionId !== permissionId));
-    if (!sess) return;
-    trackPermissionPromptAnswered({ tool: tool || 'unknown', response });
+    if (!sess || !owner) return;
+    trackPermissionPromptAnswered({ tool: entry?.tool || 'unknown', response });
     try {
-      await replyPermission(sess.id, permissionId, response);
+      await replyPermission(owner, permissionId, response);
     } catch (e) {
       // 404 = already resolved/cancelled server-side — safe to ignore.
       const msg = e instanceof Error ? e.message : String(e);
@@ -1570,12 +1609,18 @@ export const SessionProvider: ParentComponent = (props) => {
 
   async function respondQuestion(questionId: string, answers: QuestionAnswerAPI[]) {
     const sess = activeSession();
+    // A teammate's dialog is listed in this session but owned by the teammate's
+    // own loop: name its session in the path, exactly as a permission reply
+    // does. The backend resolves the reply by question id alone, so either page
+    // can answer it.
+    const entry = sess ? (questionQueues()[sess.id] || []).find((x) => x.questionId === questionId) : undefined;
+    const owner = entry?.sessionId || sess?.id;
     // Optimistic dismissal, same as a permission reply; the backend's
     // question.replied event reconciles any other client.
     if (sess) setQuestionQueue(sess.id, (prev) => prev.filter((x) => x.questionId !== questionId));
-    if (!sess) return;
+    if (!sess || !owner) return;
     try {
-      await replyQuestion(sess.id, questionId, answers);
+      await replyQuestion(owner, questionId, answers);
     } catch (e) {
       // 404 = already answered/cancelled server-side — safe to ignore.
       const msg = e instanceof Error ? e.message : String(e);
