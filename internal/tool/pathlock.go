@@ -47,7 +47,14 @@ func FileKey(dir, path string) string {
 
 // lockPath acquires the per-path mutex for path and returns the unlock func.
 func lockPath(path string) func() {
-	muIface, _ := fileLocks.LoadOrStore(lockKey(path), &sync.Mutex{})
+	return lockFileKey(lockKey(path))
+}
+
+// lockFileKey acquires the mutex for a file already keyed by FileKey. The file
+// tools key a path once and use that key for both the lock and the change log,
+// so the two can never disagree about which file they mean.
+func lockFileKey(key string) func() {
+	muIface, _ := fileLocks.LoadOrStore(key, &sync.Mutex{})
 	mu := muIface.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock

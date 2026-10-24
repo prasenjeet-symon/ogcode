@@ -11,6 +11,11 @@ import (
 
 func writeWith(t *testing.T, dir string, params map[string]any) Result {
 	t.Helper()
+	// Every write now carries a description, so the tests that aren't about
+	// that requirement supply one here rather than in each call.
+	if _, ok := params["description"]; !ok {
+		params["description"] = "test change"
+	}
 	args, _ := json.Marshal(params)
 	res, err := WriteTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
 	if err != nil {
@@ -104,7 +109,7 @@ func TestWriteTool_StatErrorOtherThanNotExistIsSurfaced(t *testing.T) {
 	defer os.Chmod(blocked, 0755)
 	path := filepath.Join(blocked, "f.txt")
 
-	args, _ := json.Marshal(map[string]any{"path": path, "content": "x"})
+	args, _ := json.Marshal(map[string]any{"path": path, "content": "x", "description": "test change"})
 	_, err := WriteTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
 	if err == nil {
 		t.Error("expected an error stat-ing through a directory with no permissions, got nil")

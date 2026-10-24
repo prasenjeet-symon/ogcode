@@ -129,6 +129,11 @@ func (BashTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// dump tens of thousands of tokens that then ride along on every later step.
 	output, truncated := TruncateOutput(output, KeepTail)
 
+	// The gate cannot see a shell command write a file; it can see the file
+	// afterwards. Recorded before the result returns, so a mutation still
+	// running in this turn is decided against the post-command bytes.
+	observeShell(ctx, tctx, input.Command)
+
 	return Result{
 		Title:     input.Command,
 		Output:    output,

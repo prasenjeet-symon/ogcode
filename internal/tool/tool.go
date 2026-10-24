@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/prasenjeet-symon/ogcode/internal/filechange"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
@@ -56,7 +57,22 @@ type Context struct {
 	// otherwise enumerate every candidate (the skill listing) uses it to stay
 	// quiet instead of spending context on what the matcher already narrowed.
 	IntentMatcher bool
+	// FileLog is the read-bookmark gate: read records the revision it saw,
+	// write and edit refuse a mutation another session made after it, and bash
+	// records what a command changed among the files the gate has seen. nil (a
+	// bare CLI run, a test, any loop with no database) is a no-op gate, so the
+	// tools behave exactly as they did before it existed.
+	FileLog *filechange.Log
 }
+
+// fileLog returns the change gate wired for this call. Every Log method is
+// nil-safe, so callers read their result without a nil check and a loop with
+// no gate simply sees no changes to refuse.
+func (c Context) fileLog() *filechange.Log { return c.FileLog }
+
+// fileKey names path the way the lock and the change log both want it: one
+// identity per file, whatever spelling the call used (see FileKey).
+func (c Context) fileKey(path string) string { return FileKey(c.SessionDir, path) }
 
 // PermissionRequest is sent when a tool needs user approval.
 type PermissionRequest struct {

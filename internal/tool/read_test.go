@@ -360,7 +360,7 @@ func TestReadTool_OffsetStillPagesWithoutARange(t *testing.T) {
 // map back with no way to tell whether that was the rule or a malfunction.
 func TestReadDescription_StatesTheBareLimitCap(t *testing.T) {
 	desc := ReadTool{}.Description()
-	for _, want := range []string{"200 lines", "which part"} {
+	for _, want := range []string{"200 lines", "which part", "a bare offset is a placed window", "falls through to a plain read", "with no map and no notice"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("read description missing %q; the bare-limit cap is unstated", want)
 		}

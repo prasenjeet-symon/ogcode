@@ -13,8 +13,9 @@ import (
 func edit(t *testing.T, dir, rel, old, new string) Result {
 	t.Helper()
 	args, _ := json.Marshal(map[string]any{
-		"path":  rel,
-		"edits": []map[string]any{{"old_string": old, "new_string": new}},
+		"path":        rel,
+		"description": "test change",
+		"edits":       []map[string]any{{"old_string": old, "new_string": new}},
 	})
 	res, err := EditTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
 	if err != nil {
@@ -25,7 +26,7 @@ func edit(t *testing.T, dir, rel, old, new string) Result {
 
 func writeFile(t *testing.T, dir, rel, content string) Result {
 	t.Helper()
-	args, _ := json.Marshal(map[string]string{"path": rel, "content": content})
+	args, _ := json.Marshal(map[string]string{"path": rel, "content": content, "description": "test change"})
 	res, err := WriteTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
 	if err != nil {
 		t.Fatalf("write: %v", err)

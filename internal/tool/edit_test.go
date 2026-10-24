@@ -18,7 +18,13 @@ import (
 // build their JSON directly — see TestEditTool_OnlyTakesTheEditsArray.
 func editWith(t *testing.T, dir string, params map[string]any) (Result, error) {
 	t.Helper()
-	args, _ := json.Marshal(asEditsForm(params))
+	form := asEditsForm(params)
+	// Every edit now carries a description, so the tests that aren't about
+	// that requirement supply one here rather than in each call.
+	if _, ok := form["description"]; !ok {
+		form["description"] = "test change"
+	}
+	args, _ := json.Marshal(form)
 	return EditTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
 }
 
@@ -563,7 +569,7 @@ func TestEditTool_OmittedNewStringRejected(t *testing.T) {
 	original := "func important() { doWork() }\n"
 	mustWriteFile(t, path, original)
 
-	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"edits":[{"old_string":"doWork()"}]}`)
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change","edits":[{"old_string":"doWork()"}]}`)
 	_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
 	if err == nil {
 		t.Fatal("omitting new_string must not be read as a deletion")
@@ -586,7 +592,7 @@ func TestEditTool_ExplicitEmptyNewStringDeletes(t *testing.T) {
 	path := filepath.Join(dir, "f.txt")
 	mustWriteFile(t, path, "keep\ndrop\nkeep\n")
 
-	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"edits":[{"old_string":"drop\n","new_string":""}]}`)
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change","edits":[{"old_string":"drop\n","new_string":""}]}`)
 	if _, err := (EditTool{}).Execute(context.Background(), raw, Context{SessionDir: dir}); err != nil {
 		t.Fatalf("an explicit empty new_string should delete: %v", err)
 	}
@@ -669,7 +675,7 @@ func TestEditTool_OnlyTakesTheEditsArray(t *testing.T) {
 	original := "import (\n\t\"fmt\"\n\t\"github.com/spf13/cobra\"\n)\n"
 	run := func(body string) (Result, error) {
 		mustWriteFile(t, path, original)
-		raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,` + body + `}`)
+		raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change",` + body + `}`)
 		return EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
 	}
 
@@ -730,7 +736,7 @@ func TestEditTool_StringifiedEditsArrayIsExplained(t *testing.T) {
 	// The hunk list as a string, escaped the way a caller double-encoding it
 	// would: the inner array is JSON text, not a second array.
 	inner := `[{"old_string":"world","new_string":"there"}]`
-	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"edits":` + strconv.Quote(inner) + `}`)
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change","edits":` + strconv.Quote(inner) + `}`)
 
 	_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
 	if err == nil {
@@ -1007,7 +1013,7 @@ func TestEditTool_TopLevelPerHunkFieldsRejected(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			mustWriteFile(t, path, original)
-			raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,` + extra +
+			raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change",` + extra +
 				`,"edits":[{"old_string":"foo","new_string":"bar","replace_all":true}]}`)
 			_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
 			if err == nil {

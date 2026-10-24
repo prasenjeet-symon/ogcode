@@ -46,7 +46,7 @@ const rangedReadTrailer = `Need more of this file? Ask for every window at once 
 
 func (ReadTool) ID() string { return "read" }
 func (ReadTool) Description() string {
-	return "Read file contents or list directory contents. Each line comes back as its line number, a '|', then the line exactly as it is in the file — so everything after the FIRST '|' is literal content, including its leading tabs or spaces, and that is what an edit anchor must copy. To read part of a file, pass ranges: a list of {start_line, end_line} objects, 1-based and inclusive, taking the ranges printed by file_map directly. One entry reads one region; several read every grep hit or file_map entry you need in one call, returned in the order given under a file:start-end heading with the same numbering. A single region is just ranges with one entry — there is no separate start_line/end_line form. ranges carries its own windows and cannot be combined with offset or limit. IMPORTANT: reading a file longer than 200 lines without a range returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with a single range covering it, e.g. ranges=[{\"start_line\":1,\"end_line\":1234}]. Use offset/limit to page through a file once you know its shape — a limit on its own is honoured only up to 200 lines, because it says how much to read but not which part."
+	return "Read file contents or list directory contents. Each line comes back as its line number, a '|', then the line exactly as it is in the file — so everything after the FIRST '|' is literal content, including its leading tabs or spaces, and that is what an edit anchor must copy. To read part of a file, pass ranges: a list of {start_line, end_line} objects, 1-based and inclusive, taking the ranges printed by file_map directly. One entry reads one region; several read every grep hit or file_map entry you need in one call, returned in the order given under a file:start-end heading with the same numbering. A single region is just ranges with one entry — there is no separate start_line/end_line form. ranges carries its own windows and cannot be combined with offset or limit. IMPORTANT: reading a file longer than 200 lines without a range returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with a single range covering it, e.g. ranges=[{\"start_line\":1,\"end_line\":1234}]. Use offset/limit to page through a file once you know its shape: a bare offset is a placed window that pages raw content past the map, and a bare limit is honoured on its own only up to 200 lines because it says how much to read but not which part. The interception needs a file the mapper recognizes — long prose, data or config carries no symbols, so it falls through to a plain read (bounded by the limit and the byte cap) with no map and no notice, and there a bare limit past 200 is honoured too."
 }
 func (ReadTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -167,6 +167,16 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		}, nil
 	}
 
+	// Capture the revision this read is about to see BEFORE the bytes are read.
+	// The order is deliberate and conservative: if a mutation lands between
+	// the capture and the read, the bookmark ends up older than the content,
+	// so the next edit may refuse and show a change this reader already has.
+	// The opposite order could certify a bookmark newer than the bytes that
+	// were actually returned — a missed conflict, which is the one failure
+	// this gate must not have.
+	log, key := tctx.fileLog(), tctx.fileKey(path)
+	seen := log.Rev(key)
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read file: %w", err)
@@ -202,6 +212,28 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	}
 	totalLines := len(lines)
 
+	// The map-vs-content branch runs before the bookmark below, and with the
+	// exact predicate the branch itself applies: no range asked for, more
+	// lines than the map threshold, and declarations the mapper finds. A read
+	// that will answer with the map has shown the file's structure and none of
+	// its bytes, so it must not be recorded here — a bookmark stamped at this
+	// point would certify content that was never returned, and a change another
+	// session made since the last real read would be blessed through the next
+	// stale edit instead of refused by it. The branch is reused as is: the
+	// stamp decides against what the bytes will actually be, with no second
+	// spelling of the predicate to drift from.
+	if out, ok := mapInsteadOfWholeFile(path, totalLines, rangeRequested); ok {
+		return out, nil
+	}
+
+	// The file is now in the caller's context, so record it: from here on an
+	// edit this session makes against an older revision is refused rather than
+	// applied over whatever changed in between. Only a regular text file gets
+	// here — a directory listing is not the file's content, a binary file was
+	// answered without one, and a map-only read above returned without any of
+	// the bytes the bookmark would claim were seen.
+	log.Read(ctx, key, tctx.SessionID, seen)
+
 	// Empty output is ambiguous: it reads equally as "empty file", "window past
 	// EOF" and "something went wrong", and a caller acting on the wrong reading
 	// of it can reach for a destructive fix. Both empty-looking cases say what
@@ -211,10 +243,6 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 			Title:  filepath.Base(path),
 			Output: fmt.Sprintf("%s is an empty file (0 lines).", filepath.Base(path)),
 		}, nil
-	}
-
-	if out, ok := mapInsteadOfWholeFile(path, totalLines, rangeRequested); ok {
-		return out, nil
 	}
 
 	if len(input.Ranges) > 0 {

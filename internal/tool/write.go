@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/prasenjeet-symon/ogcode/internal/filechange"
 )
 
 type WriteTool struct{}
@@ -19,19 +22,34 @@ func (WriteTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File path to write to"},
-			"content": {"type": "string", "description": "Content to write"}
+			"content": {"type": "string", "description": "Content to write"},
+			"description": {"type": "string", "description": "A few lines: what this change does and why. Another agent working in this project will see this text if it has to re-read the file after your edit."}
 		},
-		"required": ["path", "content"]
+		"required": ["path", "content", "description"]
 	}`)
 }
 
 func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var input struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
+		Path        string `json:"path"`
+		Content     string `json:"content"`
+		Description string `json:"description"`
 	}
 	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
+	}
+
+	// The description is the only record of WHY a write happened, and it is
+	// what a refused agent is shown: without it the catch-up is a diff with no
+	// intent. The schema's "required" is advice to the model (DecodeArgs is a
+	// plain unmarshal), so it is enforced here, as a result rather than an
+	// error for the same reason the stale refusal is one.
+	description := strings.TrimSpace(input.Description)
+	if description == "" {
+		return Result{
+			Title:  "Description required",
+			Output: "Every write carries a description: a few lines on what this change does and why. Another agent working in this project sees that text if it has to re-read the file after your write. Resend the call with \"description\" beside \"path\" and \"content\".",
+		}, nil
 	}
 
 	path := input.Path
@@ -42,8 +60,19 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	// Serialize with any concurrent write/edit to the same file. The agent loop
 	// runs a turn's tool calls in parallel, so two mutations to this path would
 	// otherwise race and lose one another's changes.
-	unlock := lockPath(path)
+	log, key := tctx.fileLog(), tctx.fileKey(path)
+	unlock := lockFileKey(key)
 	defer unlock()
+
+	// Refuse rather than overwrite: another session changed this file after
+	// this one last read it, so the content this call was built against is no
+	// longer what is on disk. The check runs under the lock, where every
+	// writer records its change, so the revision cannot move between the check
+	// and the write below.
+	seen := log.Seen(key, tctx.SessionID)
+	if changes, dropped := log.Stale(ctx, key, tctx.SessionID, seen); len(changes) > 0 || dropped > 0 {
+		return staleRefusal(input.Path, log, seen, log.Rev(key), changes, dropped), nil
+	}
 
 	// Capture the prior content (if any) so the UI can render a before/after diff.
 	// Cap the captured size so huge files don't bloat the persisted message.
@@ -96,6 +125,26 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	// truncated one. See writeFileAtomic.
 	if err := writeFileAtomic(path, []byte(input.Content)); err != nil {
 		return Result{}, fmt.Errorf("write file: %w", err)
+	}
+
+	// Recorded after the bytes are on disk: the log describes what happened, so
+	// it must not claim a change that a failed write never made. prior is nil
+	// for a file that did not exist, which is the right baseline — every line
+	// of a new file is this call's — but an unreadable existing file has no
+	// baseline at all, and a diff invented from empty would be a lie.
+	if log != nil {
+		diff, truncated := filechange.DiffLines(string(prior), input.Content)
+		if !created && prior == nil {
+			diff, truncated = "", true
+		}
+		log.Record(ctx, key, filechange.Change{
+			Session:     tctx.SessionID,
+			Agent:       tctx.Agent,
+			Tool:        "write",
+			Note:        description,
+			Diff:        diff,
+			DiffOmitted: truncated,
+		})
 	}
 
 	metadata := map[string]any{"created": created}

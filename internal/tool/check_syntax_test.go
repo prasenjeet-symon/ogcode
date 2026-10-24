@@ -36,7 +36,8 @@ func Target() error {
 
 	// An edit that drops the closing brace of the body — the classic damage.
 	args, _ := json.Marshal(map[string]any{
-		"path": "demo.go",
+		"path":        "demo.go",
+		"description": "test change",
 		"edits": []map[string]any{
 			{"old_string": "\treturn nil\n}", "new_string": "\treturn nil"},
 		},

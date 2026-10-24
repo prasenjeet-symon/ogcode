@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/prasenjeet-symon/ogcode/internal/filechange"
 )
 
 type EditTool struct{}
@@ -32,6 +34,7 @@ func (EditTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File path to edit"},
+			"description": {"type": "string", "description": "A few lines: what this change does and why. Another agent working in this project will see this text if it has to re-read the file after your edit."},
 			"edits": {
 				"type": "array",
 				"minItems": 1,
@@ -48,7 +51,7 @@ func (EditTool) Parameters() json.RawMessage {
 				}
 			}
 		},
-		"required": ["path", "edits"]
+		"required": ["path", "edits", "description"]
 	}`)
 }
 
@@ -78,8 +81,9 @@ type resolvedHunk struct {
 
 func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var input struct {
-		Path  string     `json:"path"`
-		Edits []editHunk `json:"edits"`
+		Path        string     `json:"path"`
+		Edits       []editHunk `json:"edits"`
+		Description string     `json:"description"`
 		// Decoded only to recognise the flat shape this tool no longer takes, so
 		// a caller reaching for it gets told the exact form to send instead of a
 		// puzzling "edits is required". They are never applied: accepting them
@@ -114,6 +118,19 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		return Result{}, fmt.Errorf("parse args: %w", err)
 	}
 
+	// The description is the only record of WHY an edit happened, and it is
+	// what a refused agent is shown: without it the catch-up is a diff with no
+	// intent. The schema's "required" is advice to the model (DecodeArgs is a
+	// plain unmarshal), so it is enforced here, as a result rather than an
+	// error for the same reason the stale refusal is one.
+	description := strings.TrimSpace(input.Description)
+	if description == "" {
+		return Result{
+			Title:  "Description required",
+			Output: "Every edit carries a description: a few lines on what this change does and why. Another agent working in this project sees that text if it has to re-read the file after your edit. Resend the call with \"description\" beside \"path\" and \"edits\".",
+		}, nil
+	}
+
 	sawLegacy := input.LegacyOld != nil || input.LegacyNew != nil ||
 		input.LegacyReplaceAll != nil || input.LegacyExpected != nil
 	hunks, err := collectHunks(input.Edits, sawLegacy)
@@ -129,8 +146,20 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// Serialize the read-modify-write with any concurrent write/edit to the same
 	// file. The agent loop runs a turn's tool calls in parallel; without this an
 	// interleaved write could make edit operate on stale content or clobber it.
-	unlock := lockPath(path)
+	log, key := tctx.fileLog(), tctx.fileKey(path)
+	unlock := lockFileKey(key)
 	defer unlock()
+
+	// Refuse rather than apply the hunks: another session changed this file
+	// after this one last read it, so the anchors were chosen against content
+	// that is no longer there — and an anchor that still matches would cut a
+	// region its author never saw. The check runs under the lock, where every
+	// writer records its change, so the revision cannot move between the check
+	// and the write below.
+	seen := log.Seen(key, tctx.SessionID)
+	if changes, dropped := log.Stale(ctx, key, tctx.SessionID, seen); len(changes) > 0 || dropped > 0 {
+		return staleRefusal(input.Path, log, seen, log.Rev(key), changes, dropped), nil
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -166,6 +195,21 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// copy of it is `data`, in memory, about to go out of scope.
 	if err := writeFileAtomic(path, newContent); err != nil {
 		return Result{}, fmt.Errorf("write file: %w", err)
+	}
+
+	// Recorded after the bytes are on disk: the log describes what happened, so
+	// it must not claim a change a failed write never made. data is the file as
+	// it was read above, which is exactly what the agent's anchors matched.
+	if log != nil {
+		diff, truncated := filechange.DiffLines(string(data), content)
+		log.Record(ctx, key, filechange.Change{
+			Session:     tctx.SessionID,
+			Agent:       tctx.Agent,
+			Tool:        "edit",
+			Note:        description,
+			Diff:        diff,
+			DiffOmitted: truncated,
+		})
 	}
 
 	// A replaced block that drops a brace or breaks an indent leaves a file that
