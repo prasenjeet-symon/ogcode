@@ -1,3 +1,103 @@
+# Release Notes — v0.51.0
+
+## Minor: The agent board — teammates that do the work
+
+A coding agent holding the whole task by itself pays for it twice: once in
+wall-clock, where every stream that could have run beside another instead
+queued behind it, and once in its own context, where the code it explored for
+one part of the job is still being re-sent while it works on the next.
+
+Ogcode's build agent can now fan the work out. It states a plan, then spawns
+telemates — `teammate spawn` names a stream and hands it a complete brief —
+and each teammate is a real session on the board: its own loop, its own
+context window, its own spend ledgers. Parent and children appear as an
+indented tree in the board drawer, with a status dot per row, a spawn count,
+and Open to jump to a teammate's session. The parent's prompt is written for
+"I orchestrate; teammates do the work" — it is told to decide the fan-out
+before its first read, keep the shared files and verification for itself, and
+never hold a stream a teammate could hold.
+
+Board mechanics are deliberately plain. There is no spawn depth limit and no
+cap on live teammates; steps on a teammate session are uncapped, so a long
+stream runs until it is done. A child reports back by finishing: its last
+assistant message is delivered to the spawner whole, and the delivery is
+stamped as reported only once the text is actually dispatched into the
+parent's turn — a crashed stream re-delivers rather than loses. After the
+first step, an already-shown report re-appears only as a one-line digest, so
+a flash model does not re-acknowledge it at every step. `teammate wait`
+blocks for a child or several; `teammate stop` cancels one and everything it
+spawned, and the terminal status is claimed before the loop is cancelled so a
+finishing child cannot write done over your stop.
+
+## Minor: A teammate's questions reach your composer
+
+A teammate was always able to hit a moment only you can settle — a permission
+it needs, an `ask_user` question with buttons — but nothing carried the
+moment to you, and a child would sit blocked or end its turn early.
+
+Both now mirror. When a teammate's loop requests a permission or asks a
+question, the server republishes it to the parent session's queue, tagged
+with the child that owns it, so the prompt appears in your composer on the
+page you are already reading, with a chip naming the teammate. The child
+blocks until it is answered, there is no timeout, and a reply clears every
+copy of the prompt wherever it is queued, so answering from the parent's page
+leaves nothing stale in the child's. Cancellation mirrors the same way.
+
+## Minor: A file changed by another session is refused, with the diff
+
+Sessions editing the same working tree used to trust their last read. If
+another session wrote the file in between, the next edit anchored on content
+that no longer existed.
+
+There is a file change gate now. A `write` or `edit` of a file changed by
+another session since you last read it is refused, and the refusal is a tool
+result that carries the diff, so re-reading is exactly one move away. The
+`bash` tool is covered too: after every command it fingerprints the files it
+knows about, and a change it cannot attribute records unattributed, so the
+session that ran the command is refused by its own shell until it re-reads —
+crediting the caller would launder exactly the foreign change it must notice.
+Every `write`/`edit` needs a `description`, which is the history note.
+Per-file history is kept in the project database, ring-capped, and served at
+`GET /api/file-changes`; the gate fails open when no history row exists to
+show, because a refusal with no catch-up to display has nothing to teach.
+
+## Minor: Bring your own OpenAI-compatible providers
+
+`ogcode.json` accepts named, OpenAI-compatible providers beyond the built-in
+slots now: an entry carries a `type` (openai-compatible is what lands), the
+required `baseUrl`, and optional `model` and `label`. Registration is wired
+end to end across the CLI and the server, so a `reloadProviders` picks up the
+edit, and the model picker groups the entries by their label. Credentials are
+read from the existing custom-provider fields, and a globally disabled
+provider stays disabled; a project file can disable one but never re-enable
+it.
+
+## Minor: Teammate spend lands on your token pill
+
+A teammate is a real session, so its tokens were always billed — to the
+project, but invisible in the parent's headline figures, which made a
+fanned-out turn look cheaper than it ran.
+
+The parent's token and usage endpoints now carry a `teammates` array beside
+the session-only totals, and the token pill folds the children's input,
+output, cache and utility spend into the figures it shows. The fold happens
+on the client, so nothing in the stored transcript changes; a teammate whose
+read errors is skipped with a warning rather than breaking the whole pill.
+
+## Other changes
+
+- The `update_intent` contract now says statuses move as the work moves: a
+  step goes active before its first block and done as soon as its last lands,
+  rather than being banked for a closing call. The session page carries the
+  plan pill.
+- The session page header gained the intent pill, and the `file_map` step
+  description wording was tightened.
+- `HISTORY.md` and `HOWTO.md` record the board, the gate and the release
+  procedure as they were built; the three multi-agent design documents are
+  kept under `plans/` as history of how the shape was chosen.
+
+---
+
 # Release Notes — v0.50.2
 
 ## Patch: A search that skipped the map gets one reminder
