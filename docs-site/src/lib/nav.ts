@@ -92,6 +92,11 @@ const nav: DocGroup[] = [
         slug: '/deployment',
         description: 'Reach a remote server safely: SSH tunnel, reverse proxy, Docker.',
       },
+      {
+        title: 'Privacy',
+        slug: '/privacy',
+        description: 'What the Ogcode server and the Ogweb extension handle locally, and what leaves the machine.',
+      },
     ],
   },
 ];
