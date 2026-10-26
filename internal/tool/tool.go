@@ -99,9 +99,13 @@ type Result struct {
 	Image *ResultImage `json:"image,omitempty"`
 	// Truncated marks that the tool already capped its own Output to a safe size.
 	// The agent loop's global truncation backstop leaves such results untouched;
-	// results without this flag are capped to MaxToolOutputBytes/MaxToolOutputLines
+	// results without either flag are capped to MaxToolOutputBytes/MaxToolOutputLines
 	// before they enter the model context.
 	Truncated bool `json:"truncated,omitempty"`
+	// Uncapped marks that Output is deliberately whole content the backstop must
+	// not bound. read and file_map set it: a clipped read is not a cheaper
+	// answer, it is a wrong one. Internal to the loop — never sent to the client.
+	Uncapped bool `json:"-"`
 	// Denied marks that the tool call was rejected by the permission gate and was
 	// never executed. The loop uses it to record a ToolDenied status (distinct
 	// from ToolCompleted/ToolError) so the UI and DB reflect that the call was

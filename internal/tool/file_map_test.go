@@ -104,6 +104,18 @@ func TestFileMapDescription_StatesWhatIsNotListed(t *testing.T) {
 	}
 }
 
+// One map is one file, so a fan-out is one call per file in the same block —
+// and a file a grep has already located needs no map at all. The contract is
+// where the caller decides both, so it has to say both.
+func TestFileMapDescription_BatchesAndSkipsANeedlessMap(t *testing.T) {
+	desc := FileMapTool{}.Description()
+	for _, want := range []string{"one call per file in the SAME block", "one round trip", "a grep has already printed"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("file_map description missing %q", want)
+		}
+	}
+}
+
 // start_line/end_line map one region: the declarations reaching into it, with
 // the ones enclosing it, and nothing else.
 func TestFileMapTool_RangeMapsOneRegion(t *testing.T) {

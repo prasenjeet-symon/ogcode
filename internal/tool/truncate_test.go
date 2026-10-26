@@ -90,11 +90,13 @@ func TestTruncateOutput_LineCapCutsAtRuneBoundary(t *testing.T) {
 	}
 }
 
-func TestReadTool_DefaultLimitAndFooter(t *testing.T) {
+// A read with no limit returns the whole file: there is no default window and
+// no continuation footer, because the read tool is never truncated.
+func TestReadTool_NoDefaultWindow(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "big.txt")
 	var b strings.Builder
-	for i := 0; i < defaultReadLimit+100; i++ {
+	for i := 0; i < 2100; i++ {
 		b.WriteString("row\n")
 	}
 	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
@@ -105,19 +107,14 @@ func TestReadTool_DefaultLimitAndFooter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Truncated {
-		t.Fatalf("reading a file larger than the default limit should truncate")
+	if res.Truncated {
+		t.Fatalf("reading a file whole should not report truncation")
 	}
-	if !strings.Contains(res.Output, "Use offset=") {
-		t.Fatalf("expected a continuation footer, got tail: %q", res.Output[len(res.Output)-120:])
+	if strings.Contains(res.Output, "Use offset=") {
+		t.Fatalf("a whole-file read should carry no continuation footer, got tail: %q", res.Output[len(res.Output)-120:])
 	}
-	// Line count of the numbered body must not exceed the default window.
-	body := res.Output
-	if idx := strings.Index(body, "\n\n(Showing"); idx >= 0 {
-		body = body[:idx]
-	}
-	if got := len(strings.Split(body, "\n")); got > defaultReadLimit {
-		t.Fatalf("returned %d lines, want <= %d", got, defaultReadLimit)
+	if got := len(strings.Split(res.Output, "\n")); got != 2100 {
+		t.Fatalf("returned %d lines, want all 2100", got)
 	}
 }
 

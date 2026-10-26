@@ -15,20 +15,58 @@ type ReadTool struct{}
 
 // readRange is one window of a multi-range read. Its field names match the
 // single-window parameters, so a range printed by file_map copies across
-// unchanged.
+// unchanged. EndLine is a pointer so an explicitly given value stays distinct
+// from an omitted one — an explicit end_line must name a real line, while an
+// omitted one runs to the end of the file.
 type readRange struct {
-	StartLine int `json:"start_line"`
-	EndLine   int `json:"end_line"`
+	StartLine int  `json:"start_line"`
+	EndLine   *int `json:"end_line"`
+}
+
+// readRequest is one file's read with the file already resolved away: the
+// single-file form and one files entry carry exactly the same window fields.
+type readRequest struct {
+	Offset int
+	Limit  int
+	Ranges []readRange
+}
+
+// readEntry is one element of the files array.
+type readEntry struct {
+	Path   string      `json:"path"`
+	Offset int         `json:"offset"`
+	Limit  int         `json:"limit"`
+	Ranges []readRange `json:"ranges"`
+	// A window pair at the entry level is the shape a caller reaches for after
+	// reading the single-file form. It is decoded only to be refused: left
+	// alone, json.Unmarshal would ignore it and the entry would read the whole
+	// file with no sign the window was dropped.
+	StartLine *int `json:"start_line"`
+	EndLine   *int `json:"end_line"`
+}
+
+// readBookmark is the revision a content read saw, kept until the bytes are
+// actually part of the result. A map, a directory listing, a binary notice or
+// an error has none: none of them put the file's bytes in the caller's context.
+type readBookmark struct {
+	key  string
+	seen int64
+}
+
+// readOutcome is one file's contribution to a read result: title names the
+// file in the result, body is the content the caller sees, truncated says
+// whether the content was cut, and stamp is the revision a content read saw,
+// recorded once the bytes are actually part of the result.
+type readOutcome struct {
+	title     string
+	body      string
+	truncated bool
+	stamp     *readBookmark
 }
 
 // lineNumberSep divides the line number from the line's own text. It must not
 // be a whitespace character: see the numbering loop below.
 const lineNumberSep = "|"
-
-// defaultReadLimit is the number of lines returned when the caller passes no
-// limit. It bounds a single read so a large file doesn't flood the context;
-// callers page through the rest with offset.
-const defaultReadLimit = 2000
 
 // rangedReadThreshold is the file length past which an unranged read returns the
 // file's map instead of its contents.
@@ -36,7 +74,9 @@ const defaultReadLimit = 2000
 // Below it a whole-file read is a few kilobytes and cheaper than the two calls
 // it would take to narrow one down, so the interception would cost more than it
 // saves. Above it, pulling the whole file is the behaviour file_map exists to
-// replace.
+// replace. It sizes the bare whole-file case only: any explicit window — a
+// range, a positive offset, or a limit of any size — reads its window whatever
+// the file's length, so the threshold never qualifies a limit.
 const rangedReadThreshold = 200
 
 // rangedReadTrailer is appended when a read leaves part of the file unread. It
@@ -46,28 +86,52 @@ const rangedReadTrailer = `Need more of this file? Ask for every window at once 
 
 func (ReadTool) ID() string { return "read" }
 func (ReadTool) Description() string {
-	return "Read file contents or list directory contents. Each line comes back as its line number, a '|', then the line exactly as it is in the file — so everything after the FIRST '|' is literal content, including its leading tabs or spaces, and that is what an edit anchor must copy. To read part of a file, pass ranges: a list of {start_line, end_line} objects, 1-based and inclusive, taking the ranges printed by file_map directly. One entry reads one region; several read every grep hit or file_map entry you need in one call, returned in the order given under a file:start-end heading with the same numbering. A single region is just ranges with one entry — there is no separate start_line/end_line form. ranges carries its own windows and cannot be combined with offset or limit. IMPORTANT: reading a file longer than 200 lines without a range returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with a single range covering it, e.g. ranges=[{\"start_line\":1,\"end_line\":1234}]. Use offset/limit to page through a file once you know its shape: a bare offset is a placed window that pages raw content past the map, and a bare limit is honoured on its own only up to 200 lines because it says how much to read but not which part. The interception needs a file the mapper recognizes — long prose, data or config carries no symbols, so it falls through to a plain read (bounded by the limit and the byte cap) with no map and no notice, and there a bare limit past 200 is honoured too."
+	return "Read file contents or list directory contents. One file reads with path, optionally with ranges/offset/limit. Two or more files read together in ONE call with files=[{\"path\": ..., \"ranges\": [...]}, ...] — the shape a grep or file_map fan-out leaves you with, and never one call per file. Each line comes back as its line number, a '|', then the line exactly as it is in the file — so everything after the FIRST '|' is literal content, including its leading tabs or spaces, and that is what an edit anchor must copy. To read part of a file, pass ranges: a list of {start_line, end_line} objects, 1-based and inclusive, taking the ranges printed by file_map or the line numbers grep printed directly. One entry reads one region; several read every grep hit or file_map entry you need in one call, returned in the order given under a file:start-end heading with the same numbering. A single region is just ranges with one entry — there is no separate start_line/end_line form. ranges carries its own windows and cannot be combined with offset or limit. Each files entry takes the single-file form — {path, ranges} or {path} alone for a whole file or a directory listing — and every file comes back in the order given under a '== path ==' heading. path and files are exclusive, and a files entry carries its own windows instead of a top-level ranges/offset/limit. A file that fails inside files does not discard the others — its section names the error. IMPORTANT: reading a file longer than 200 lines with no window at all — no ranges, no offset, no limit — returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with a single range covering it, e.g. ranges=[{\"start_line\":1,\"end_line\":1234}]. Use offset/limit to page through a file once you know its shape: a bare offset is a placed window that pages raw content past the map, and a bare limit is honoured on its own at any size. The interception needs a file the mapper recognizes — long prose, data or config carries no symbols, so a bare whole-file read of one falls through to a plain read with no map and no notice."
 }
 func (ReadTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "File or directory path"},
+			"path": {"type": "string", "description": "File or directory path. One file: for several files in one call use files instead."},
+			"files": {
+				"type": "array",
+				"minItems": 1,
+				"description": "Several files in one call, read in the order given. Each entry is one {path, ranges} (or {path} alone for the whole file or a directory listing) and accepts the same fields as the single-file form. Use after a grep or file_map fan-out so one call returns every window. Cannot be combined with path or with a top-level ranges/offset/limit.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"path": {"type": "string", "description": "File or directory path for this entry"},
+						"ranges": {
+							"type": "array",
+							"description": "Line windows within this file, each {\"start_line\": N, \"end_line\": M} (1-based, inclusive). Same rules as the top-level ranges.",
+							"items": {
+								"type": "object",
+								"properties": {
+									"start_line": {"type": "integer", "description": "First line of this window, 1-based and inclusive. Defaults to 1 when only end_line is given."},
+									"end_line": {"type": "integer", "description": "Last line of this window, 1-based and inclusive. If omitted, reads to the end of the file."}
+								}
+							}
+						},
+						"offset": {"type": "integer", "description": "Line offset to start reading from (0-based). For paging this file; cannot be combined with this entry's ranges."},
+						"limit": {"type": "integer", "description": "Maximum number of lines to read from this file (default: every line)"}
+					},
+					"required": ["path"]
+				}
+			},
 			"ranges": {
 				"type": "array",
-				"description": "Line windows to read, each {\"start_line\": N, \"end_line\": M} (1-based, inclusive). One entry reads one region; several read every grep hit or file_map entry in one call. This is the only form for a range. Send it alone: it cannot be combined with offset or limit.",
+				"description": "Line windows to read, each {\"start_line\": N, \"end_line\": M} (1-based, inclusive). One entry reads one region; several read every grep hit or file_map entry you need in one call. This is the only form for a range. Send it alone: it cannot be combined with offset or limit.",
 				"items": {
 					"type": "object",
 					"properties": {
 						"start_line": {"type": "integer", "description": "First line of this window, 1-based and inclusive. Defaults to 1 when only end_line is given."},
-						"end_line": {"type": "integer", "description": "Last line of this window, 1-based and inclusive. If omitted, reads to the default window length."}
+						"end_line": {"type": "integer", "description": "Last line of this window, 1-based and inclusive. If omitted, reads to the end of the file."}
 					}
 				}
 			},
 			"offset": {"type": "integer", "description": "Line offset to start reading from (0-based). For paging; cannot be combined with ranges."},
-			"limit": {"type": "integer", "description": "Maximum number of lines to read (default 2000)"}
-		},
-		"required": ["path"]
+			"limit": {"type": "integer", "description": "Maximum number of lines to read (default: every line)"}
+		}
 	}`)
 }
 
@@ -77,10 +141,14 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		Offset int         `json:"offset"`
 		Limit  int         `json:"limit"`
 		Ranges []readRange `json:"ranges"`
+		// Files is a pointer so an explicitly empty array is distinct from an
+		// absent one: "files": [] deserves a message naming it rather than the
+		// generic "pass one of the two".
+		Files *[]readEntry `json:"files"`
 		// The top-level pair used to be a second spelling of a single window.
 		// It is decoded only so a caller that still sends it is pointed at the
 		// form that replaced it, rather than being ignored into a whole-file
-		// read.
+		// read. A files entry carries the same guard below.
 		StartLine *int `json:"start_line"`
 		EndLine   *int `json:"end_line"`
 	}
@@ -99,20 +167,96 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		return Result{}, fmt.Errorf(`start_line/end_line are not accepted at the top level — pass each window as ranges: [{"start_line": N, "end_line": M}]; one entry reads one region, several read a fan-out`)
 	}
 
-	// A bare limit is sized, not placed: it says how much to take and never
-	// which part, so it cannot stand in for a range on a file the caller has
-	// not mapped. Honoured up to rangedReadThreshold — a window that small
-	// costs no more context than a short file already does, and it keeps a
-	// peek at a file's head working — but past that it is a whole-file read
-	// wearing a different argument, and the map is what the caller needs
-	// first. An offset is placed, so it stays a window on its own: paging
-	// presupposes you already know the file's shape.
-	//
-	// ranges and offset/limit are two ways to place a window, so mixing them
-	// has no single reading: the caller meant one of them, and guessing which
-	// silently returns lines nobody asked for.
-	if len(input.Ranges) > 0 && (input.Offset > 0 || input.Limit > 0) {
-		return Result{}, fmt.Errorf("ranges cannot be combined with offset or limit — each range carries its own window; send ranges alone")
+	// Trim once: validation and resolution below both see the same cleaned
+	// path, so a stray space never turns resolution into a confusing
+	// "stat  main.go" error instead of the file itself.
+	input.Path = strings.TrimSpace(input.Path)
+	hasPath := input.Path != ""
+	hasFiles := input.Files != nil
+	if hasPath && hasFiles {
+		return Result{}, fmt.Errorf(`path and files are two ways to name what to read — pass path for one file, or files=[{"path": "...", "ranges": [...]}] for several, not both`)
+	}
+	if !hasPath && !hasFiles {
+		return Result{}, fmt.Errorf(`pass path for one file, or files=[{"path": "...", "ranges": [...]}] for several files in one call — one of the two is required`)
+	}
+
+	if hasFiles {
+		files := *input.Files
+		if len(files) == 0 {
+			return Result{}, fmt.Errorf(`files is empty — pass at least one {"path": "..."} entry, or use path for a single read`)
+		}
+		// A top-level window has no file to apply to once the files array names
+		// them all. The entry is where a window belongs, and guessing which
+		// file an outer one meant would silently read the wrong lines.
+		if len(input.Ranges) > 0 || input.Offset != 0 || input.Limit != 0 {
+			return Result{}, fmt.Errorf(`files entries carry their own ranges/offset/limit — a top-level window has no file to apply to; move it into the entry that needs it`)
+		}
+		for i, e := range files {
+			prefix := fmt.Sprintf("files[%d]: ", i)
+			// The same one-trim rule as the single-file path: this is the value
+			// readFiles resolves, so the trimmed copy is the one checked and
+			// carried onward.
+			files[i].Path = strings.TrimSpace(e.Path)
+			if files[i].Path == "" {
+				return Result{}, fmt.Errorf("%spath is empty — every entry names the file it reads", prefix)
+			}
+			if e.StartLine != nil || e.EndLine != nil {
+				return Result{}, fmt.Errorf(`%sstart_line/end_line are not accepted on an entry — pass the window as ranges: [{"start_line": N, "end_line": M}]; one entry reads one region, several read a fan-out`, prefix)
+			}
+			if err := validateReadWindows(e.Ranges, e.Offset, e.Limit, prefix); err != nil {
+				return Result{}, err
+			}
+		}
+		// Every argument error has been raised before this point, so a
+		// malformed entry can never leave the earlier files half-read.
+		return readFiles(ctx, files, tctx), nil
+	}
+
+	if err := validateReadWindows(input.Ranges, input.Offset, input.Limit, ""); err != nil {
+		return Result{}, err
+	}
+
+	resolved := resolveReadPath(tctx.SessionDir, input.Path)
+	out, err := readOne(resolved, filepath.Base(resolved), readRequest{
+		Offset: input.Offset,
+		Limit:  input.Limit,
+		Ranges: input.Ranges,
+	}, tctx)
+	if err != nil {
+		return Result{}, err
+	}
+	if out.stamp != nil {
+		tctx.fileLog().Read(ctx, out.stamp.key, tctx.SessionID, out.stamp.seen)
+	}
+	return Result{
+		Title:     out.title,
+		Output:    out.body,
+		Truncated: out.truncated,
+		Uncapped:  true,
+	}, nil
+}
+
+// validateReadWindows applies the one-shape rule for one file's window. ranges
+// and offset/limit are two ways to place a window, so mixing them has no
+// single reading: the caller meant one of them, and guessing which silently
+// returns lines nobody asked for.
+//
+// prefix names the entry in a files call ("files[1]: ") and is empty for the
+// single-file form, whose messages predate the array.
+func validateReadWindows(ranges []readRange, offset, limit int, prefix string) error {
+	// A negative offset or limit is a caller slip, not a window: offset counts
+	// lines from the top of the file (0-based) and limit caps how many are
+	// returned, so neither has a negative reading. Silently clamping or
+	// ignoring one would run the call as a different read than the caller
+	// asked for, with nothing to say so.
+	if offset < 0 {
+		return fmt.Errorf("%soffset %d is negative — offset is a 0-based line index counted from the top of the file; omit it (or pass 0) to start at the first line", prefix, offset)
+	}
+	if limit < 0 {
+		return fmt.Errorf("%slimit %d is negative — limit caps how many lines are returned; omit it (or pass 0) to read every line", prefix, limit)
+	}
+	if len(ranges) > 0 && (offset > 0 || limit > 0) {
+		return fmt.Errorf("%sranges cannot be combined with offset or limit — each range carries its own window; send ranges alone", prefix)
 	}
 
 	// A range is 1-based and inclusive: the same numbering the file_map tool
@@ -125,33 +269,118 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// An inverted range is always a caller slip — no amount of file drift
 	// produces one. Name the offending entry so a long list is fixable without
 	// bisecting it.
-	for i, r := range input.Ranges {
+	for i, r := range ranges {
 		start := r.StartLine
 		if start <= 0 {
 			start = 1
 		}
-		if r.EndLine > 0 && r.EndLine < start {
-			return Result{}, fmt.Errorf("ranges[%d]: end_line %d is before start_line %d — the range is inverted and reads nothing; send it with start_line ≤ end_line", i, r.EndLine, start)
+		// An explicitly given end_line must name a real line: a value <= 0
+		// once slipped past the inverted check below and read as "to the end
+		// of the file" — a different read than the caller asked for. An
+		// omitted one (nil) still runs to the end.
+		if r.EndLine != nil && *r.EndLine <= 0 {
+			return fmt.Errorf("%sranges[%d]: end_line %d is not a line number — end_line is 1-based and inclusive; omit it to read to the end of the file", prefix, i, *r.EndLine)
+		}
+		if r.EndLine != nil && *r.EndLine < start {
+			return fmt.Errorf("%sranges[%d]: end_line %d is before start_line %d — the range is inverted and reads nothing; send it with start_line ≤ end_line", prefix, i, *r.EndLine, start)
 		}
 	}
+	return nil
+}
 
-	rangeRequested := len(input.Ranges) > 0 || input.Offset > 0 ||
-		(input.Limit > 0 && input.Limit <= rangedReadThreshold)
-
-	path := input.Path
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(tctx.SessionDir, path)
+// resolveReadPath makes a caller's path absolute against the session directory,
+// the way every file tool resolves one.
+func resolveReadPath(dir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
 	}
+	return filepath.Join(dir, path)
+}
+
+// displayReadPath names a file in a multi-file section. Base names collide (two
+// util.go in one project), so the section uses the path relative to the session
+// directory when the file is inside it, and the absolute path otherwise.
+func displayReadPath(dir, resolved string) string {
+	if rel, err := filepath.Rel(dir, resolved); err == nil {
+		if rel == "." {
+			return filepath.Base(resolved)
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(resolved)
+}
+
+// readFiles answers a files=[...] call: one section per entry, in the order
+// given. A file that fails becomes a section naming the error rather than
+// failing the call, so one stale path cannot discard the content the caller
+// asked for. Nothing here bounds the total: the caller named the files and gets
+// them whole.
+//
+// Only entries whose bytes were returned stamp a bookmark. A map, a listing, a
+// binary notice and an error are not content: their sections leave the read
+// bookmark exactly where it was, so a later stale edit is still refused rather
+// than certified by a read that never saw the bytes.
+func readFiles(ctx context.Context, entries []readEntry, tctx Context) Result {
+	var b strings.Builder
+	truncated := false
+	for i, e := range entries {
+		resolved := resolveReadPath(tctx.SessionDir, e.Path)
+		display := displayReadPath(tctx.SessionDir, resolved)
+		header := fmt.Sprintf("== %s ==\n", display)
+		out, err := readOne(resolved, display, readRequest{
+			Offset: e.Offset,
+			Limit:  e.Limit,
+			Ranges: e.Ranges,
+		}, tctx)
+		if err != nil {
+			out.body = err.Error()
+			out.truncated = false
+			out.stamp = nil
+		}
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(header)
+		b.WriteString(out.body)
+		// A section with no body returned none of the file's bytes, so it
+		// must not certify a revision the caller never saw.
+		if out.stamp != nil && out.body != "" {
+			tctx.fileLog().Read(ctx, out.stamp.key, tctx.SessionID, out.stamp.seen)
+		}
+		truncated = truncated || out.truncated
+	}
+
+	title := fmt.Sprintf("%d files", len(entries))
+	if len(entries) == 1 {
+		title = filepath.Base(entries[0].Path)
+	}
+	return Result{
+		Title:     title,
+		Output:    strings.TrimRight(b.String(), "\n"),
+		Truncated: truncated,
+		Uncapped:  true,
+	}
+}
+
+// readOne answers one file. display is how the file is named in headings and
+// messages: the base name for the single-file form, a path relative to the
+// session directory inside a multi-file call.
+func readOne(path, display string, req readRequest, tctx Context) (readOutcome, error) {
+	out := readOutcome{title: filepath.Base(path)}
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return Result{}, fmt.Errorf("stat %s: %w", path, err)
+		// os.Stat's error already carries the path; wrapping it in another
+		// "stat <path>" only repeats it in the section a files call returns.
+		return out, err
 	}
 
 	if info.IsDir() {
 		entries, err := os.ReadDir(path)
 		if err != nil {
-			return Result{}, fmt.Errorf("read dir: %w", err)
+			return out, fmt.Errorf("read dir: %w", err)
 		}
 		var lines []string
 		for _, e := range entries {
@@ -161,10 +390,9 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 			}
 			lines = append(lines, prefix+e.Name())
 		}
-		return Result{
-			Title:  filepath.Base(path) + "/",
-			Output: strings.Join(lines, "\n"),
-		}, nil
+		out.title = filepath.Base(path) + "/"
+		out.body = strings.Join(lines, "\n")
+		return out, nil
 	}
 
 	// Capture the revision this read is about to see BEFORE the bytes are read.
@@ -179,7 +407,7 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Result{}, fmt.Errorf("read file: %w", err)
+		return out, fmt.Errorf("read file: %w", err)
 	}
 
 	// A binary file has no line structure: splitting it on '\n' bytes that
@@ -188,14 +416,12 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// reaches the model. Catch it with the same heuristic file_map uses and
 	// say so instead.
 	if codemap.LooksBinary(data) {
-		return Result{
-			Title: filepath.Base(path),
-			Output: fmt.Sprintf(
-				"%s is a binary file — it has no line structure to read as text. "+
-					"For an image use view_image; for a PDF use pdf_index/read_pdf_page; for a DOCX use docx_index/read_docx_page.",
-				filepath.Base(path),
-			),
-		}, nil
+		out.body = fmt.Sprintf(
+			"%s is a binary file — it has no line structure to read as text. "+
+				"For an image use view_image; for a PDF use pdf_index/read_pdf_page; for a DOCX use docx_index/read_docx_page.",
+			display,
+		)
+		return out, nil
 	}
 
 	// Split into lines without counting a phantom trailing line for a file
@@ -213,7 +439,7 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	totalLines := len(lines)
 
 	// The map-vs-content branch runs before the bookmark below, and with the
-	// exact predicate the branch itself applies: no range asked for, more
+	// exact predicate the branch itself applies: no window asked for, more
 	// lines than the map threshold, and declarations the mapper finds. A read
 	// that will answer with the map has shown the file's structure and none of
 	// its bytes, so it must not be recorded here — a bookmark stamped at this
@@ -222,7 +448,18 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// stale edit instead of refused by it. The branch is reused as is: the
 	// stamp decides against what the bytes will actually be, with no second
 	// spelling of the predicate to drift from.
-	if out, ok := mapInsteadOfWholeFile(path, totalLines, rangeRequested); ok {
+	//
+	// Any explicit window is honoured whatever its size: ranges name their
+	// lines, a positive offset names a placed window, and a bare limit names
+	// one too — it reads exactly the lines it counts, past the map or not.
+	rangeRequested := len(req.Ranges) > 0 || req.Offset > 0 || req.Limit > 0
+	if body, ok := mapInsteadOfWholeFile(path, display, totalLines, rangeRequested); ok {
+		out.title = fmt.Sprintf("File Map / %s", filepath.Base(path))
+		// The map answers with structure, not bytes, and comes back whole. The
+		// result says so (Uncapped) so the loop's backstop leaves it alone: the
+		// outline is the answer, and a clipped outline would silently hide the
+		// declarations the caller is looking for.
+		out.body = body
 		return out, nil
 	}
 
@@ -231,82 +468,67 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// applied over whatever changed in between. Only a regular text file gets
 	// here — a directory listing is not the file's content, a binary file was
 	// answered without one, and a map-only read above returned without any of
-	// the bytes the bookmark would claim were seen.
-	log.Read(ctx, key, tctx.SessionID, seen)
+	// the bytes the bookmark would claim were seen. The stamp is applied by the
+	// caller once the section is actually part of the result.
+	out.stamp = &readBookmark{key: key, seen: seen}
 
 	// Empty output is ambiguous: it reads equally as "empty file", "window past
 	// EOF" and "something went wrong", and a caller acting on the wrong reading
 	// of it can reach for a destructive fix. Both empty-looking cases say what
 	// they are instead of returning "".
 	if totalLines == 0 {
-		return Result{
-			Title:  filepath.Base(path),
-			Output: fmt.Sprintf("%s is an empty file (0 lines).", filepath.Base(path)),
-		}, nil
+		out.body = fmt.Sprintf("%s is an empty file (0 lines).", display)
+		return out, nil
 	}
 
-	if len(input.Ranges) > 0 {
-		return renderRanges(filepath.Base(path), lines, totalLines, input.Ranges), nil
+	if len(req.Ranges) > 0 {
+		out.body = renderRanges(display, lines, totalLines, req.Ranges)
+		return out, nil
 	}
 
-	start := input.Offset
-	if start < 0 {
-		start = 0
-	}
+	start := req.Offset
 	// A window that begins past EOF happens honestly — line numbers go stale
 	// whenever an edit shrinks the file — but it used to come back as empty
 	// output with nothing to say why. Name the file's real extent so the next
 	// call can be ranged correctly.
 	if start >= totalLines {
-		return Result{
-			Title: filepath.Base(path),
-			Output: fmt.Sprintf("%s has only %d lines — the requested window starts at line %d, past the end of the file. Line numbers may have shifted since this file was last read; re-read with a range within 1-%d.",
-				filepath.Base(path), totalLines, start+1, totalLines),
-		}, nil
+		out.body = fmt.Sprintf("%s has only %d lines — the requested window starts at line %d, past the end of the file. Line numbers may have shifted since this file was last read; re-read with a range within 1-%d.",
+			display, totalLines, start+1, totalLines)
+		return out, nil
 	}
 
-	// Default to a bounded window when the caller gives no limit, so reading a
-	// large file doesn't dump the whole thing into the model context (and re-send
-	// it on every subsequent step of the turn). The model can page with offset.
-	limit := input.Limit
+	// With no limit the caller asked for the file, not a window of it: every
+	// remaining line is returned. A read is never truncated.
+	limit := req.Limit
 	if limit <= 0 {
-		limit = defaultReadLimit
+		limit = totalLines
 	}
 	end := start + limit
 	if end > totalLines {
 		end = totalLines
 	}
 
-	// Add line numbers, capping any single very long line and the total byte
-	// size so one read can't blow the budget on its own.
-	numbered, shownEnd, _, truncatedByBytes := numberLines(lines, start, end, MaxToolOutputBytes)
+	// Number the lines and return them exactly as they are in the file: no line
+	// is shortened and none is dropped.
+	numbered, shownEnd := numberLines(lines, start, end)
 
 	output := strings.Join(numbered, "\n")
-	truncated := false
-	switch {
-	case truncatedByBytes:
-		output += fmt.Sprintf("\n\n(Output capped at %d KB. Showing lines %d-%d of %d. Use offset=%d to continue.)",
-			MaxToolOutputBytes/1024, start+1, shownEnd, totalLines, shownEnd)
-		truncated = true
-	case shownEnd < totalLines:
+	truncated := shownEnd < totalLines
+	if truncated {
 		output += fmt.Sprintf("\n\n(Showing lines %d-%d of %d. Use offset=%d to continue.)",
 			start+1, shownEnd, totalLines, shownEnd)
-		truncated = true
-	}
-	if truncated {
 		output += "\n\n" + rangedReadTrailer
 	}
 
-	return Result{
-		Title:     filepath.Base(path),
-		Output:    output,
-		Truncated: truncated,
-	}, nil
+	out.body = output
+	out.truncated = truncated
+	return out, nil
 }
 
-// numberLines renders lines[start:end] with a "number|text" prefix, stopping
-// before budget bytes are exceeded but always emitting at least one line.
-// shownEnd is the exclusive index it reached and capped reports the early stop.
+// numberLines renders lines[start:end] with a "number|text" prefix. shownEnd is
+// the exclusive index it reached. No line is shortened and none is dropped: the
+// caller asked for these lines and gets them exactly as they are in the file,
+// which is what an edit anchor is copied from.
 //
 // The separator is deliberately not whitespace. This output is what a caller
 // copies from to build an "edit" anchor, and a tab separator made that
@@ -317,39 +539,22 @@ func (ReadTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 // wrong — which "edit" can only report as text that is not in the file.
 // Deeper nesting made it worse, four tabs for three levels. A visible
 // separator makes the rule exact: content begins at the character after it.
-func numberLines(lines []string, start, end, budget int) (rendered []string, shownEnd, used int, capped bool) {
-	i := start
-	for ; i < end; i++ {
-		ln, _ := truncateLongLine(lines[i])
-		entry := fmt.Sprintf("%6d%s%s", i+1, lineNumberSep, ln)
-		// Stop before exceeding the byte cap, but always emit at least one line.
-		if used+len(entry) > budget && len(rendered) > 0 {
-			capped = true
-			break
-		}
-		rendered = append(rendered, entry)
-		used += len(entry) + 1 // +1 for the joining newline
+func numberLines(lines []string, start, end int) (rendered []string, shownEnd int) {
+	for i := start; i < end; i++ {
+		rendered = append(rendered, fmt.Sprintf("%6d%s%s", i+1, lineNumberSep, lines[i]))
 	}
-	return rendered, i, used, capped
+	return rendered, end
 }
 
-// renderRanges numbers several windows of one file into a single result.
+// renderRanges numbers several windows of one file into a single section.
 //
 // Each window opens with a file:start-end heading and keeps the same
 // number|text line format as a single-window read, so any returned line still
-// copies straight into an edit anchor. The byte cap spans the whole call: one
-// window cannot spend the budget of the next, and a window that got no room is
-// named instead of silently dropped.
-func renderRanges(name string, lines []string, totalLines int, ranges []readRange) Result {
+// copies straight into an edit anchor. Every window is rendered in full: the
+// fan-out is one deliberate call, and a short window would be a silent loss.
+func renderRanges(name string, lines []string, totalLines int, ranges []readRange) string {
 	var b strings.Builder
-	remaining := MaxToolOutputBytes
-	truncated := false
 	for i, r := range ranges {
-		if remaining <= 0 {
-			fmt.Fprintf(&b, "\n(%d more range(s) not shown — the output cap was reached; ask for them in a follow-up call.)\n", len(ranges)-i)
-			truncated = true
-			break
-		}
 		start := r.StartLine
 		if start <= 0 {
 			start = 1
@@ -362,30 +567,19 @@ func renderRanges(name string, lines []string, totalLines int, ranges []readRang
 				name, start, name, totalLines)
 			continue
 		}
-		// An omitted end_line gets the same bounded window a single-window read
-		// defaults to, not the rest of the file: one sloppy range should not
-		// pull a whole long file into the context.
-		end := start + defaultReadLimit - 1
-		if r.EndLine >= start {
-			end = r.EndLine
+		// An omitted end_line runs to the end of the file: the caller asked for
+		// the window and left the rest open.
+		end := totalLines
+		if r.EndLine != nil && *r.EndLine >= start {
+			end = *r.EndLine
 		}
 		if end > totalLines {
 			end = totalLines
 		}
-		rendered, shownEnd, used, capped := numberLines(lines, start-1, end, remaining)
-		remaining -= used
+		rendered, shownEnd := numberLines(lines, start-1, end)
 		fmt.Fprintf(&b, "%s:%d-%d\n%s\n", name, start, shownEnd, strings.Join(rendered, "\n"))
-		if capped {
-			fmt.Fprintf(&b, "(%s:%d-%d was cut at the output cap after line %d; ask for the rest as another range.)\n",
-				name, start, end, shownEnd)
-			truncated = true
-		}
 	}
-	return Result{
-		Title:     name,
-		Output:    strings.TrimRight(b.String(), "\n"),
-		Truncated: truncated,
-	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // mapInsteadOfWholeFile intercepts a read that asks for a long file with no
@@ -400,34 +594,30 @@ func renderRanges(name string, lines []string, totalLines int, ranges []readRang
 // caller needs in order to ask again with a range — refusing would cost a round
 // trip and teach nothing.
 //
-// Three cases fall through to a normal read. An explicit range, including
-// offset/limit paging, is a deliberate request and is honoured, so
-// read(path, ranges=[{"start_line":1,"end_line":N}]) stays the way to demand a
-// whole file. A short file is cheaper read than mapped. And a file the mapper finds no
+// Three cases fall through to a normal read. An explicit window — a range, a
+// positive offset, or a limit of any size — is a deliberate request and is
+// honoured, so read(path, ranges=[{"start_line":1,"end_line":N}]) stays the way
+// to demand a whole file and a bare limit pages content past the map whatever
+// its size. A short file is cheaper read than mapped. And a file the mapper finds no
 // declarations in — prose, data, an unsupported language whose heuristics
 // caught nothing — has no map worth returning, so withholding its contents
 // would strand the caller with nothing at all.
-func mapInsteadOfWholeFile(path string, totalLines int, rangeRequested bool) (Result, bool) {
+func mapInsteadOfWholeFile(path, display string, totalLines int, rangeRequested bool) (string, bool) {
 	if rangeRequested || totalLines <= rangedReadThreshold {
-		return Result{}, false
+		return "", false
 	}
 
 	fm, err := codemap.Outline(path)
 	if err != nil || len(fm.Symbols) == 0 {
-		return Result{}, false
+		return "", false
 	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s is %d lines — too long to read in full. Its map is below.\n\n",
-		filepath.Base(path), totalLines)
+		display, totalLines)
 	b.WriteString(codemap.Render(fm))
 	fmt.Fprintf(&b, "\nRead the part you need with read(path, ranges=[{\"start_line\":N,\"end_line\":M}]), or every part together with read(path, ranges=[{\"start_line\":N,\"end_line\":M}, {\"start_line\":N2,\"end_line\":M2}]).\n"+
 		"If you genuinely need the whole file, ask for it explicitly with a single range covering it: ranges=[{\"start_line\":1,\"end_line\":%d}].\n",
 		totalLines)
-
-	return Result{
-		Title:     fmt.Sprintf("File Map / %s", filepath.Base(path)),
-		Output:    b.String(),
-		Truncated: true,
-	}, true
+	return b.String(), true
 }

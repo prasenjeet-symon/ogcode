@@ -36,7 +36,7 @@ func (FileMapTool) ID() string { return "file_map" }
 // arrive attached to the map they describe, which beats a static sentence the
 // agent has to remember applies.
 func (FileMapTool) Description() string {
-	return "Return the structural map of a single file: every declaration with its 1-based line range and its doc comment where it has one, nested entries indented under whatever contains them (a class's methods, a component's handlers). Use this before reading an unfamiliar file, then pass a range straight to read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) to pull in only the part you need instead of the entire file. Ranges include each declaration's doc comment. Call this again after editing a file — the line numbers of everything below an edit will have moved. It lists declarations only: struct fields, class properties, and non-function local variables never appear, so a name missing from the map is not missing from the file. A very large file's map is capped: the deepest entries are dropped first and the map says so — pass start_line/end_line to map one region of the file in full. Go, TypeScript, TSX/JavaScript, Python, Rust, Java, C#, C, C++, Dart, PHP, Swift, HTML, CSS and HCL are parsed with a real grammar; any other file type falls back to an approximate heuristic scan, which the map flags when it happens."
+	return "Return the structural map of a single file: every declaration with its 1-based line range and its doc comment where it has one, nested entries indented under whatever contains them (a class's methods, a component's handlers). Use this before reading an unfamiliar file, then pass a range straight to read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) to pull in only the part you need instead of the entire file. Mapping several files? Issue one call per file in the SAME block — they are independent, so the maps arrive together in one round trip. When a grep has already printed the file and line you need, read that window directly instead of mapping first. Ranges include each declaration's doc comment. Call this again after editing a file — the line numbers of everything below an edit will have moved. It lists declarations only: struct fields, class properties, and non-function local variables never appear, so a name missing from the map is not missing from the file. A very large file's map is capped: the deepest entries are dropped first and the map says so — pass start_line/end_line to map one region of the file in full. Go, TypeScript, TSX/JavaScript, Python, Rust, Java, C#, C, C++, Dart, PHP, Swift, HTML, CSS and HCL are parsed with a real grammar; any other file type falls back to an approximate heuristic scan, which the map flags when it happens."
 }
 
 func (FileMapTool) Parameters() json.RawMessage {
@@ -109,5 +109,8 @@ func (FileMapTool) Execute(_ context.Context, args json.RawMessage, tctx Context
 	return Result{
 		Title:  fmt.Sprintf("File Map / %s", filepath.Base(path)),
 		Output: codemap.Render(fm),
+		// The outline is the answer, not a preview of one: it is never cut by
+		// size. The flag keeps the loop's truncation backstop off it.
+		Uncapped: true,
 	}, nil
 }

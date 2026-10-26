@@ -174,6 +174,43 @@ func TestReadTool_LongFileWithoutRangeReturnsMap(t *testing.T) {
 	}
 }
 
+// The map branch is one of the two places a map reaches the model, and it is
+// not bounded: an outline is the answer the caller asked for, so the whole
+// outline arrives even when it runs past the size every other tool is capped at.
+func TestReadTool_MapIsReturnedWhole(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("package big\n\n")
+	for i := 0; i < 450; i++ {
+		fmt.Fprintf(&b, "// HandleThing%d processes a request and returns the payload for the caller to inspect.\n", i)
+		fmt.Fprintf(&b, "func HandleThing%d(ctx context.Context, request *SomeRequestType, options ...OptionWithAVeryLongName) (*SomeResponseType, error) {\n\treturn nil, nil\n}\n\n", i)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.go")
+	mustWriteFile(t, path, b.String())
+
+	args, _ := json.Marshal(map[string]any{"path": path})
+	res, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if !strings.Contains(res.Output, "too long to read in full") {
+		t.Fatalf("expected the map branch:\n%s", truncate(res.Output))
+	}
+	if len(res.Output) <= MaxToolOutputBytes {
+		t.Errorf("map is %d bytes — a whole map may run past the %d-byte cap other tools use", len(res.Output), MaxToolOutputBytes)
+	}
+	if strings.Contains(res.Output, "more line(s) not shown") {
+		t.Errorf("the map was cut:\n%s", truncate(res.Output))
+	}
+	if res.Truncated {
+		t.Error("a whole map is not a truncated read")
+	}
+	if !res.Uncapped {
+		t.Error("the map result must opt out of the loop's backstop")
+	}
+}
+
 // The interception must never block a caller who said what they wanted.
 func TestReadTool_LongFileWithRangeIsHonoured(t *testing.T) {
 	path := longGoFile(t, 60)
@@ -230,9 +267,9 @@ func TestReadTool_LongUnmappableFileStillReads(t *testing.T) {
 }
 
 // An end_line without start_line inside a range used to be silently dropped,
-// falling back to the default unranged window (from line 1, up to
-// defaultReadLimit) with no sign the argument was ignored. It now defaults
-// start_line to 1, so the range is honoured as "from the top through end_line".
+// falling back to an unranged read from line 1 with no sign the argument was
+// ignored. It now defaults start_line to 1, so the range is honoured as "from
+// the top through end_line".
 func TestReadTool_RangeEndLineWithoutStartLine(t *testing.T) {
 	out := readWith(t, numbered(t, 20), map[string]any{"ranges": []map[string]any{{"end_line": 3}}})
 
@@ -297,46 +334,214 @@ func truncate(s string) string {
 	return s[:600] + "…"
 }
 
-// A bare limit says how much to read, never which part, so it cannot serve as a
-// range on a file the caller has never mapped. Before this, read(path,
-// limit=5000) walked straight past the interception and returned the file — the
-// same whole-file read the threshold exists to stop, reached through a
-// different argument. The sibling case above pins the other half: a limit small
-// enough to be a peek is still honoured.
-func TestReadTool_LargeBareLimitStillReturnsMap(t *testing.T) {
+// A bare limit is an explicit request: it names a window the caller chose, so
+// it is honoured at any size. Until 2026-10-25 a bare limit past the map
+// threshold was treated as the whole-file read it can degenerate into and was
+// answered with the map, which left limit=250 on a 302-line file returning an
+// outline instead of the lines it asked for. That cap went out with the byte
+// caps when reads became uncapped; an unranged read (no window argument at
+// all) still answers with the map — the sibling test above pins that half.
+func TestReadTool_LargeBareLimitIsHonoured(t *testing.T) {
 	path := longGoFile(t, 60)
 
-	out := readWith(t, path, map[string]any{"limit": 5000})
+	args, _ := json.Marshal(map[string]any{"path": path, "limit": 5000})
+	res, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
 
-	if !strings.Contains(out, "too long to read in full") {
-		t.Errorf("a bare limit past the threshold bypassed the map guard:\n%s", truncate(out))
+	if strings.Contains(res.Output, "too long to read in full") {
+		t.Errorf("a bare limit was intercepted by the map:\n%s", truncate(res.Output))
+	}
+	if !strings.Contains(res.Output, "return 7") {
+		t.Errorf("bare limit returned no contents:\n%s", truncate(res.Output))
+	}
+	if res.Truncated {
+		t.Error("a limit past the file's end reads the whole file and must not report truncation")
 	}
 }
 
-// The boundary itself, both sides. At or under the threshold a bare limit is a
-// peek that costs no more context than a short file — which is read whole
-// already — so refusing it would contradict the threshold it is measured
-// against. Past it, the caller has to say which part.
+// The boundary the cap used to draw is gone: bare limits below, at and past
+// the threshold are all honoured as windows, and neither side of it answers
+// with the map. Until 2026-10-25 a bare limit past 200 was denied its window
+// because it "said how much to read but not which part"; that distinction was
+// dropped with the byte caps.
 func TestReadTool_BareLimitBoundary(t *testing.T) {
 	path := longGoFile(t, 60)
 
-	cases := []struct {
-		name   string
-		limit  int
-		mapped bool
-	}{
-		{"one under", rangedReadThreshold - 1, false},
-		{"exactly at", rangedReadThreshold, false},
-		{"one over", rangedReadThreshold + 1, true},
+	for _, limit := range []int{rangedReadThreshold - 1, rangedReadThreshold, rangedReadThreshold + 1} {
+		out := readWith(t, path, map[string]any{"limit": limit})
+		if strings.Contains(out, "too long to read in full") {
+			t.Errorf("limit=%d: a bare limit was intercepted by the map:\n%s", limit, truncate(out))
+		}
+		if !strings.Contains(out, "func Fn") {
+			t.Errorf("limit=%d: bare limit returned no contents:\n%s", limit, truncate(out))
+		}
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			out := readWith(t, path, map[string]any{"limit": c.limit})
-			got := strings.Contains(out, "too long to read in full")
-			if got != c.mapped {
-				t.Errorf("limit=%d: mapped=%v, want %v:\n%s", c.limit, got, c.mapped, truncate(out))
+}
+
+// The flipped bug, pinned end to end: a bare limit on a file past the map
+// threshold returns CONTENT — the plain content title, exactly limit rendered
+// lines, and the truncation footer, because a window that leaves lines unread
+// says so. offset+limit paging above the threshold is honoured the same way.
+func TestReadTool_BareLimitPagesContentPastTheThreshold(t *testing.T) {
+	path := longGoFile(t, 60) // 302 lines, past rangedReadThreshold
+
+	args, _ := json.Marshal(map[string]any{"path": path, "limit": 250})
+	res, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if res.Title != "big.go" {
+		t.Errorf("title = %q, want the plain content title, not a map", res.Title)
+	}
+	if strings.Contains(res.Output, "too long to read in full") {
+		t.Fatalf("limit=250 was intercepted by the map:\n%s", truncate(res.Output))
+	}
+	// Every rendered content line carries the number|text separator at column 7;
+	// the footer and the trailer do not.
+	shown := 0
+	for _, line := range strings.Split(res.Output, "\n") {
+		if len(line) > 6 && line[6] == lineNumberSep[0] {
+			shown++
+		}
+	}
+	if shown != 250 {
+		t.Errorf("limit=250 rendered %d lines, want exactly 250", shown)
+	}
+	if !strings.Contains(res.Output, "Showing lines 1-250 of") ||
+		!strings.Contains(res.Output, "Use offset=250 to continue.") {
+		t.Errorf("truncation footer for the unread lines missing:\n%s", truncate(res.Output))
+	}
+	if !res.Truncated {
+		t.Error("a window that leaves lines unread must report truncation")
+	}
+	if !res.Uncapped {
+		t.Error("a read must opt out of the loop's backstop")
+	}
+
+	// offset+limit paging works past the threshold too: line 251 onward.
+	paged := readWith(t, path, map[string]any{"offset": 250, "limit": 100})
+	if strings.Contains(paged, "too long to read in full") {
+		t.Fatalf("offset+limit paging was intercepted by the map:\n%s", truncate(paged))
+	}
+	if !strings.Contains(paged, fmt.Sprintf("%6d%s", 251, lineNumberSep)) {
+		t.Errorf("offset=250 must open at line 251:\n%s", truncate(paged))
+	}
+	if !strings.Contains(paged, "func Fn59") {
+		t.Errorf("offset=250 limit=100 stopped short of the file's end:\n%s", truncate(paged))
+	}
+	if strings.Contains(paged, "Showing lines") {
+		t.Errorf("a window that reaches EOF must not report truncation:\n%s", truncate(paged))
+	}
+	if strings.Contains(paged, fmt.Sprintf("%6d%s", 250, lineNumberSep)) {
+		t.Errorf("offset=250 re-showed line 250 (offset is 0-based):\n%s", truncate(paged))
+	}
+}
+
+// A negative offset or limit used to be silently ignored — offset clamped to
+// 0, limit read as "every line" — so the call ran as a different read than the
+// caller asked for with nothing to say so. Each is now refused, naming the
+// argument, in the single-file form, inside files entries, and at the top
+// level beside files (whose window check only ever saw positives).
+func TestReadTool_NegativeWindowArgsAreRefused(t *testing.T) {
+	dir := t.TempDir()
+	writeNumberedLines(t, filepath.Join(dir, "f.txt"), 20)
+
+	cases := map[string]string{
+		"offset":            `{"path":"f.txt","offset":-1}`,
+		"limit":             `{"path":"f.txt","limit":-1}`,
+		"offset and limit":  `{"path":"f.txt","offset":-5,"limit":-3}`,
+		"files entry":       `{"files":[{"path":"f.txt","offset":-2}]}`,
+		"files entry limit": `{"files":[{"path":"f.txt","limit":-2}]}`,
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ReadTool{}.Execute(context.Background(), json.RawMessage(args), Context{SessionDir: dir})
+			if err == nil {
+				t.Fatal("a negative window argument was accepted")
+			}
+			if !strings.Contains(err.Error(), "negative") {
+				t.Errorf("error should name the negative argument, got: %v", err)
 			}
 		})
+	}
+
+	// A top-level negative window beside files used to slip past the check
+	// that refuses a top-level window, because the check only saw positives.
+	topLevel, _ := json.Marshal(map[string]any{
+		"files":  []map[string]any{{"path": "f.txt"}},
+		"offset": -4,
+	})
+	_, err := ReadTool{}.Execute(context.Background(), topLevel, Context{SessionDir: dir})
+	if err == nil {
+		t.Fatal("a top-level window beside files was accepted")
+	}
+	if !strings.Contains(err.Error(), "files entries carry their own") {
+		t.Errorf("the top-level window should be refused as such, got: %v", err)
+	}
+}
+
+// An explicitly given end_line must name a real line. A value <= 0 once
+// slipped past the inverted-range check and read as "to the end of the file"
+// — silent, and the opposite of what the caller sent. Each value is now
+// refused, in the single-file form and inside a files entry; an omitted
+// end_line still runs to the end of the file (TestReadTool_RangeWithoutEndLine).
+func TestReadTool_ExplicitEndLineZeroOrNegativeIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	writeNumberedLines(t, filepath.Join(dir, "f.txt"), 20)
+
+	cases := map[string]string{
+		"end_line zero":     `{"path":"f.txt","ranges":[{"start_line":2,"end_line":0}]}`,
+		"end_line negative": `{"path":"f.txt","ranges":[{"start_line":2,"end_line":-1}]}`,
+		"end_line only":     `{"path":"f.txt","ranges":[{"end_line":-3}]}`,
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ReadTool{}.Execute(context.Background(), json.RawMessage(args), Context{SessionDir: dir})
+			if err == nil {
+				t.Fatal("a non-positive end_line was accepted")
+			}
+			if !strings.Contains(err.Error(), "end_line") {
+				t.Errorf("error should name end_line, got: %v", err)
+			}
+		})
+	}
+
+	// The same refusal inside a files entry.
+	entry := `{"files":[{"path":"f.txt","ranges":[{"start_line":1,"end_line":-2}]}]}`
+	_, err := ReadTool{}.Execute(context.Background(), json.RawMessage(entry), Context{SessionDir: dir})
+	if err == nil {
+		t.Fatal("a files entry accepted a non-positive end_line")
+	}
+	if !strings.Contains(err.Error(), "end_line") {
+		t.Errorf("error should name end_line, got: %v", err)
+	}
+}
+
+// A path surrounded by whitespace is trimmed once at entry: the same cleaned
+// value is checked and resolved, so the call reads the file instead of dying
+// as a confusing double-space stat error ("stat  f.txt ...").
+func TestReadTool_SurroundedPathIsTrimmedOnce(t *testing.T) {
+	dir := t.TempDir()
+	writeNumberedLines(t, filepath.Join(dir, "f.txt"), 3)
+
+	res, err := ReadTool{}.Execute(context.Background(), json.RawMessage(`{"path":" f.txt "}`), Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("trimmed path: %v", err)
+	}
+	if res.Title != "f.txt" || res.Output == "" {
+		t.Errorf("title = %q, output = %q, want the file read via its trimmed name", res.Title, res.Output)
+	}
+
+	// The files form gets the same one-trim treatment.
+	res, err = ReadTool{}.Execute(context.Background(), json.RawMessage(`{"files":[{"path":" f.txt "}]}`), Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("files entry trimmed path: %v", err)
+	}
+	if !strings.Contains(res.Output, "== f.txt ==") {
+		t.Errorf("output = %q, want the f.txt section header", res.Output)
 	}
 }
 
@@ -356,14 +561,20 @@ func TestReadTool_OffsetStillPagesWithoutARange(t *testing.T) {
 	}
 }
 
-// The description has to state the cap, or a caller passing limit=5000 gets the
-// map back with no way to tell whether that was the rule or a malfunction.
-func TestReadDescription_StatesTheBareLimitCap(t *testing.T) {
+// The description has to state the window rule, or a caller passing limit=5000
+// gets the map back with no way to tell whether that was the rule or a
+// malfunction. Since 2026-10-25 the rule reads the other way: a bare limit of
+// any size is honoured as a window, and the map answers only a bare whole-file
+// read. The stale claim about the 200-line cap must be gone too.
+func TestReadDescription_StatesTheWindowRule(t *testing.T) {
 	desc := ReadTool{}.Description()
-	for _, want := range []string{"200 lines", "which part", "a bare offset is a placed window", "falls through to a plain read", "with no map and no notice"} {
+	for _, want := range []string{"no window at all", "a bare offset is a placed window", "a bare limit is honoured on its own at any size", "falls through to a plain read", "with no map and no notice"} {
 		if !strings.Contains(desc, want) {
-			t.Errorf("read description missing %q; the bare-limit cap is unstated", want)
+			t.Errorf("read description missing %q; the window rule is unstated", want)
 		}
+	}
+	if strings.Contains(desc, "only up to 200") {
+		t.Error("description still claims a bare limit is honoured only up to 200 lines")
 	}
 }
 
@@ -469,23 +680,26 @@ func TestReadTool_WindowPastEOFExplains(t *testing.T) {
 	}
 }
 
-// The per-line cap slices bytes, and a slice through a multi-byte character
-// used to ship the invalid tail to the provider — corrupted content, from
-// which an edit anchor can never be copied. The cut must land on a rune
-// boundary.
-func TestReadTool_LongLineCapKeepsValidUTF8(t *testing.T) {
+// A read returns the file's lines exactly as they are. A very long line used to
+// be sliced at MaxLineLength, which could split a multi-byte character and ship
+// invalid UTF-8 to the provider; nothing is sliced now, so the whole line — and
+// the edit anchor copied from it — is intact.
+func TestReadTool_LongLineComesBackWhole(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "long.txt")
-	// A multi-byte rune straddling the MaxLineLength boundary.
-	mustWriteFile(t, path, strings.Repeat("a", MaxLineLength-1)+"→ tail\n")
+	long := strings.Repeat("a", MaxLineLength-1) + "→ tail"
+	mustWriteFile(t, path, long+"\n")
 
 	out := readWith(t, path, map[string]any{})
 
 	if !utf8.ValidString(out) {
-		t.Error("read output contains invalid UTF-8 — the line cap split a rune")
+		t.Error("read output contains invalid UTF-8")
 	}
-	if !strings.Contains(out, lineTruncatedSuffix) {
-		t.Errorf("the long line should be marked truncated:\n%q", out)
+	if !strings.Contains(out, long) {
+		t.Error("the long line came back shortened")
+	}
+	if strings.Contains(out, lineTruncatedSuffix) {
+		t.Error("the long line should not be marked truncated")
 	}
 }
 
@@ -614,9 +828,10 @@ func TestReadTool_RangesPastEOFStillServeOtherWindows(t *testing.T) {
 	}
 }
 
-// The output cap spans the whole call, not each window, or five windows could
-// each take a full cap. Whatever got no room is named rather than dropped.
-func TestReadTool_RangesRespectTheOutputCap(t *testing.T) {
+// Every window comes back whole, however much they add up to: a fan-out is one
+// deliberate call, and cutting it would hand back less than the caller asked
+// for with no way to tell which window was short.
+func TestReadTool_RangesAreNotCut(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "wide.txt")
 	var b strings.Builder
@@ -632,11 +847,16 @@ func TestReadTool_RangesRespectTheOutputCap(t *testing.T) {
 		{"start_line": 1, "end_line": 1},
 	}})
 
-	if !strings.Contains(out, "cut at the output cap") {
-		t.Fatalf("a window past the cap should say where it stopped:\n%s", truncate(out))
+	if strings.Contains(out, "cut at the output cap") || strings.Contains(out, "not shown") {
+		t.Fatalf("a window was cut at an output cap:\n%s", truncate(out))
 	}
-	if !strings.Contains(out, "not shown") {
-		t.Errorf("windows with no room left should be named, not silently dropped:\n%s", truncate(out))
+	for _, want := range []string{"wide.txt:1-80", "wide.txt:1-1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing window heading %q", want)
+		}
+	}
+	if len(out) <= MaxToolOutputBytes {
+		t.Errorf("three windows total %d bytes — the read should not be bounded at %d", len(out), MaxToolOutputBytes)
 	}
 }
 
@@ -705,20 +925,19 @@ func TestReadTool_RangesAcceptFloatLineNumbers(t *testing.T) {
 	}
 }
 
-// An omitted end_line gets the default window, not the rest of the file: the
-// schema promises a default window length, and one sloppy range should not
-// pull a long file into the context whole.
-func TestReadTool_RangesOmittedEndGetsTheDefaultWindow(t *testing.T) {
-	overLimit := defaultReadLimit + 5
-	out := readWith(t, numbered(t, overLimit), map[string]any{"ranges": []map[string]any{
+// An omitted end_line runs to the end of the file: the caller named a start and
+// left the rest open, and a read is never truncated.
+func TestReadTool_RangeWithoutEndReadsToEOF(t *testing.T) {
+	const total = 2500
+	out := readWith(t, numbered(t, total), map[string]any{"ranges": []map[string]any{
 		{"start_line": 1},
 	}})
 
-	if !strings.Contains(out, "f.txt:1-"+strconv.Itoa(defaultReadLimit)) {
-		t.Errorf("a range without end_line should stop at the default window (%d lines):\n%s",
-			defaultReadLimit, truncate(out))
+	if !strings.Contains(out, "f.txt:1-"+strconv.Itoa(total)) {
+		t.Errorf("a range without end_line should run to the end of the file:\n%s", truncate(out))
 	}
-	if strings.Contains(out, fmt.Sprintf("%6d%sline%d", defaultReadLimit+1, lineNumberSep, defaultReadLimit+1)) {
-		t.Errorf("a range without end_line read past the default window:\n%s", truncate(out))
+	last := fmt.Sprintf("%6d%sline%d", total, lineNumberSep, total)
+	if !strings.Contains(out, last) {
+		t.Errorf("range without end_line stopped short; missing %q", last)
 	}
 }

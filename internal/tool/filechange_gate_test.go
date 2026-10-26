@@ -334,3 +334,62 @@ func TestMapOnlyReadDoesNotCertifyContent(t *testing.T) {
 		t.Fatalf("the retry after a real read did not apply: file = %q", got)
 	}
 }
+
+// A files call feeds the gate for EVERY file it actually serves, not just the
+// first: a session that read two files through one call must be allowed to
+// edit both without a stale refusal. Seen returns -1 for a file never read, so
+// a bookmark of 0 is the proof that the content read registered.
+func TestReadTool_FilesStampsEveryContentRead(t *testing.T) {
+	g := newChangeGate(t)
+	a := filepath.Join(g.dir, "a.txt")
+	b := filepath.Join(g.dir, "b.txt")
+	mustWriteFile(t, a, "alpha\n")
+	mustWriteFile(t, b, "beta\n")
+
+	res, err := g.call("session-a", ReadTool{}.Execute, map[string]any{
+		"files": []map[string]any{{"path": "a.txt"}, {"path": "b.txt"}},
+	})
+	if err != nil {
+		t.Fatalf("files read: %v", err)
+	}
+	if res.Title != "2 files" {
+		t.Fatalf("title = %q, want the file count", res.Title)
+	}
+
+	for _, path := range []string{a, b} {
+		if seen := g.log.Seen(FileKey(g.dir, path), "session-a"); seen != 0 {
+			t.Errorf("%s bookmark = %d, want 0 after a content read", filepath.Base(path), seen)
+		}
+	}
+}
+
+// The map branch is per section: a long mappable entry returns structure and
+// none of its bytes, so it must leave that file's bookmark where it was while
+// the content entry beside it is stamped. Otherwise the map would certify a
+// revision the caller never saw and the next stale edit would apply over a
+// change it should have been refused by.
+func TestReadTool_FilesMapEntryDoesNotStamp(t *testing.T) {
+	g := newChangeGate(t)
+	big := filepath.Join(g.dir, "big.go")
+	var b strings.Builder
+	b.WriteString("package demo\n\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "// Fn%d does a thing.\nfunc Fn%d() int {\n\treturn %d\n}\n\n", i, i, i)
+	}
+	mustWriteFile(t, big, b.String())
+	small := filepath.Join(g.dir, "small.txt")
+	mustWriteFile(t, small, "small content\n")
+
+	if _, err := g.call("session-a", ReadTool{}.Execute, map[string]any{
+		"files": []map[string]any{{"path": "big.go"}, {"path": "small.txt"}},
+	}); err != nil {
+		t.Fatalf("files read: %v", err)
+	}
+
+	if seen := g.log.Seen(FileKey(g.dir, big), "session-a"); seen != -1 {
+		t.Errorf("map section moved the big file's bookmark to %d, want -1 (never certified)", seen)
+	}
+	if seen := g.log.Seen(FileKey(g.dir, small), "session-a"); seen != 0 {
+		t.Errorf("content section left the small file's bookmark at %d, want 0", seen)
+	}
+}
