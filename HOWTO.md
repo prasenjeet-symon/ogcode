@@ -596,7 +596,16 @@ Touches: writes a throwaway `web/vite.verify.config.ts` (delete after); spawns a
    `page.click`, and there is no `page.setViewportSize`.
 4. Click the changed control, snapshot again, and confirm the live server's real data rendered (the proxy
    means SSE and polls hit the actual sessions).
-5. Clean up: `pkill -f vite.verify.config` and `rm web/vite.verify.config.ts`. Never restart :7801 — it runs
+5. Scrolling a TRANSCRIPT view (message-list.tsx anchored scroll): `el.scrollTop = N` fights the app's
+   holdReader anchoring and snaps back. Drive REAL input over CDP instead: launch Chrome with
+   `--remote-debugging-port=<port> --user-data-dir=/tmp/x`, open a ws to the page target, and send
+   `Input.dispatchMouseEvent {type:'mouseWheel', x:850, y:800, deltaY:-190}` in small batches
+   (16 × 15 ms apart). Page.captureScreenshot accepts a `clip` of `getBoundingClientRect` coords.
+6. SAVE AND RESTORE APPEARANCE: the app syncs `localStorage['ogcode-theme-mode']` to the server-global
+   `GET/POST /api/appearance` THROUGH THE PROXY — setting it in the throwaway page flips the user's
+   machine-wide mode on :7801. Probe `curl :7801/api/appearance` BEFORE rendering, and POST the original
+   value back after; also remove the localStorage key.
+7. Clean up: `pkill -f vite.verify.config` and `rm web/vite.verify.config.ts`. Never restart :7801 — it runs
    the live session.
 
 Done when: the changed component renders real live data in the dev server and the interaction works; the

@@ -1831,3 +1831,1933 @@ Fixed the audit's 7 board/teammate bugs (two teammates: agent-side + server-side
 New pins (13, all verified by name): agent `TestRunLoop_NoticeGapRestartRidesTheNextRequestFull`, `TestLoopBoardReportsStampOnlyAtDispatch`, `TestRestoreNoticesRequeuesFreshWithoutDigestLie`; server `TestStartSessionLoopSupersedeKeepsTeammates`, `TestMintFreeHandleRetriesPastCollisions`, `TestMintFreeHandleExhaustsItsRolls`, `TestSpawnTeammateRefusesANameSomebodyHolds`, `TestWaitTeammateReturnsPromptlyWhenTheTurnIsCancelled` (~0.55s vs the 120s bound), `TestWaitTeammateKeepsWaitingWhenOnlyItsOpContextExpires` (~2.08s); store `TestRegisterFreshClaimsAnUnusedHandle`, `TestRegisterFreshRefusesATakenHandle` (original row byte-untouched), `TestRegisterFreshRefusesReservedHandles`, `TestRegisterStillUpsertsARejoin`. Rewritten pins: `TestCatchUpTeammatesReportsAnIdleSpawnerOnce` (tracked not stamped; re-push needs a fresh lc — a dead turn's lc dies with it), `TestTeammateReportUndrainedAtTurnEndStillDelivers` (drains by hand via `BoardNoticesDelivered`), `TestStopTeammateIsNotRewrittenDone` (+ exactly one "was stopped" report).
 
 Verified: `go build ./internal/... .` OK; `CGO_ENABLED=1 go test` — agent 37.9s, board 0.98s, tool 2.5s all ok, server scope `Board|Teammate|CatchUp|Wait|Stop|Spawn|Join|Mint` 36 tests 6.7s ok; gofmt clean on all eight touched files. Known leftovers: a stream cancelled between take and dispatch doesn't stamp (row re-delivers next turn — accepted, much narrower than the fixed windows); `TestServe_StopFromAnotherGoroutine` flaked once under full-suite load (live openrouter/ollama fetches at server start; passed 3/3 isolated — serve-lifecycle owned, pre-existing); one recovered panic seen once in a server test log (`tool.Registry.Get` nil deref at loop.go:738 from a subagent goroutine; test passed; none of the changed regions touch that code — pre-existing, unverified).
+
+## 2026-10-24 — Released v0.51.0
+
+First tagged release carrying the multi-agent body of work. Seven feat/chore commits landed on `feat/multi-agent` and fast-forwarded to main (tip `6e0c6e8`, "chore(release): v0.51.0"): agent board/teammates + orchestrator prompt, question & permission mirror into the parent composer, the file change gate (066), custom OpenAI-compatible providers in ogcode.json, teammate spend folded into the client-side token pill, extended cache TTL, docs/plans. Version bumped in 4 places (version.go `v0.51.0`, web/package.json + both lock entries `0.51.0`); the v0.51.0 annotated tag pushed, CI run 40083679642 green, Release run 40083933722 and Docker run 40083933674 both success. 7 assets published with edited GitHub release notes (`gh release edit --notes-file` from the top of RELEASE_NOTES.md). Done-when verified: downloaded `ogcode_0.51.0_darwin_arm64.tar.gz`, cleared quarantine, binary prints `ogcode v0.51.0` at commit 6e0c6e8.
+
+## 2026-10-24 — Agent timers (`schedule` tool, migration 068)
+
+One-shot agent reminders, built with a 3-teammate fan-out (timer-store / schedule-tool / delivery, integrated and verified by the parent). Design agreed with the developer first: one-shot only (cron recurring design ruled out), delivery as a system notice riding the board-report rails (fake user messages ruled out — would confuse turn-slicing and the transcript is append-only).
+
+- **Storage**: `internal/db/068_agent_timer.sql` — table `agent_timer` (id "t"+6hex PK, session_id intentionally NO FK so a session delete can't fail an insert, note, fire_at, status, unix-second timestamps per board convention), indexes `agent_timer_session` (session_id,status) and `agent_timer_claim` (status,fire_at). Statuses pending → due → delivered, cancelled on cancel. `ClaimDue` is a single atomic `UPDATE pending→due WHERE fire_at<=now RETURNING` — two claimers can never double-claim (store pins: claim-once, restart persistence, cancel-own-session-only, delivered-not-reclaimed, list ordering).
+- **Tool**: `internal/tool/schedule.go` mirroring teammate.go (`ScheduleFunc`/`ScheduleRequest`/`ScheduleResult`; ops create/list/cancel; refusal = Result-shaped, not error; exactly one of delaySeconds>0 or strictly-future RFC3339 fireAt, non-empty note). "schedule" added to `codingAgentTools`. Schema `required` carries op only (teammate.go convention — note is validated, not schema-required).
+- **Delivery**: `internal/server/reminder.go` — `pollReminders` ticker (10s, immediate first pass) claims due rows; if the session's loop is UP, `PushNotice` Cause `"reminder"` + `TrackBoardReport` whose mark = `MarkTimerDelivered` (BoardReport.Text byte-identical to the notice; stamp only at dispatch, same at-least-once semantics as teammate reports). If DOWN (idle/dead), the row stays `due` and the `CatchUpReminders` LoopRunner hook (build-gated like the teammate one) delivers at that session's NEXT turn start — nothing starts a turn. `loop_control.go` renders reminder fresh/digest sections beside the teammate ones (cause-based partition; all non-reminder notices byte-identical to before).
+- **Verified**: `CGO_ENABLED=1 go build ./internal/... .` + root binary ok; full test pass on timer/tool/agent/server; gofmt dirty files are pre-existing only. Memory note in MEMORY.md under Agent tools; next migration is 069.
+
+## 2026-10-24 — Why ogcode ran ~2× slower than OpenCode on the ogx bench (mechanism)
+
+Decomposed with a fit on `runs/*/wire.jsonl` (ms vs completion tokens): **ms ≈ 1.2–2.4 s per-request floor (queue+TTFT) + 3.0 s per 1K completion tokens (335 tok/s)**; residual is flat across prompt quintiles, so context size explains nothing (cache hit 87–94%). Runs in `/Users/prasenjeet/Downloads/work/ogcode-bench`, probe script `/tmp/ogx_test.py`.
+
+- **The endpoint thinks by default, and BOTH arms think.** Live probe, 3 non-streaming calls to `ogx-deepseek-v4.1-flash`: no `reasoning_effort` → 72 completion tokens / 203 reasoning chars; `reasoning_effort:"none"` → 20 tokens / 0 reasoning; `"high"` → 96 / 280. ogcode sets `Thinking:true` on every loop request but `applyEffort` writes nothing when session effort is unset, so its bench runs paid default-effort thinking; catalogue default is EffortHigh. **First framing was wrong** ("OpenCode's streams carried zero reasoning parts"): a wire relay in front of the gateway captured both clients' HTTP bodies — NEITHER sends a reasoning field (OpenCode body: `max_tokens, messages, model, stream, stream_options` + tools; ogcode: `messages, model, prompt_cache_key, stream, stream_options, tools`), so with the endpoint defaulting ON, both think. `run.json` `reasoning: 0` is an accounting artifact on both sides: ogcode's `output` already contains reasoning; OpenCode's `@ai-sdk/openai-compatible` simply does not map the gateway's `reasoning` delta, so those tokens land in its completion count (wire completion vs reported: 29292/29053, 28423/27978, 24784/24749 — ~same shape, 52–58 response bytes per completion token on both arms). ogcode `--effort none` adds `reasoning_effort:"none"` and probe output drops to 2 tokens — the knob is proven.
+- **Real difference: ogcode reasons ~2× longer per turn** (mean out/turn 836/635/559 vs OpenCode 338/379/349, r1–r3). The earlier "think on vs off" isolation arithmetic must be re-read with the parity caveat below.
+- **Arithmetic caveat — the parity pair is NOT matched**: `runs/parity-ogcode/run.json` carries `effort: "none"` while OpenCode has no effort flag and cannot be turned off. Its 17,510 (ogcode, thinking off) vs 9,329 (OpenCode, thinking on) is therefore a LOWER bound on ogcode's reasoning habit, not a like-for-like pair. A matched both-off pair is impossible on this endpoint.
+- **Latency law unchanged**: reasoning is billed inside completion and streams at the same decode rate; the extra ~2× reasoning per turn costs ~3 s per 1K tokens, which is exactly what the fit priced.
+- **Turn multiplicity**: ~1 model call per tool call. r2: ogcode 147 turns / 171 tools (96 bash ≈ one grep each, 46 read) vs OpenCode 74 turns / 81 tools with compound bash (four `sed -n` windows in one call). At a 1.2–2.4 s floor, cheap local tools are exactly what a round-trip tax punishes.
+- **Confound noted**: only the ogcode arm carried the prompt_suffix in the r1–r3 pairs, but both-suffixed historical pairs keep ~2× output tokens, and the token gap persists with matched model+endpoint — the gap is mostly turns + heavier reasoning, not harness asymmetry.
+- Earlier "big prompt / TLS handshake" explanations are not supported by the data: small-output requests already cost ~1.2 s and the prompt-quintile residual is flat.
+- **Quantified re-decomposition from wire.jsonl totals, r1–r3 (2026-10-24)**: wall clock is NOT slower — ogcode Σ 1413 s vs OpenCode Σ 1496 s (r3-opencode carried a 153 s slow-tail upstream). The real gaps are in-model time (1181 vs 715 s, +65%) and cost ($0.700 vs $0.467, +50%: +$0.112 output volume, +$0.12 uncached prompt). ~86% of the +93k output-token gap is per-turn verbosity (666 vs 357 tok/req), only ~14% is turns (270 vs 235 requests); generation throughput is equal (~150 tok/s both arms), so in-model time scales with tokens. ogcode's bookkeeping tools (update_intent 10, compact_context 8, codebase_map 3, file_map 12) = 33 calls ≈ 10% of its tool calls, each a paid round trip. Cache hit 87% ogcode vs 93–94% opencode — each compaction cliff (r1-og rows 29/55/60) re-warms the cache from scratch, ~$0.12 across the three runs. Local overhead favours ogcode (0.86 s/req vs opencode's 3.3 s/req): nothing to fix in transport or tool dispatch. Parity (`--effort none`) collapsed out/turn 666→175 (−74%) and median request latency 2930→1850 ms but FAILED the grade at the 100-turn cap still mid-task — thinking off alone makes the model too shallow for ogcode's turn structure to converge. The old "~2× slower" headline is in-model time, not wall clock.
+
+## 2026-10-24 — Bench-gap fixes shipped in parallel (effort default, adaptive effort, compound-call prompt, intent softening)
+
+Implemented steps 1–5 of the fix plan with two teammates (files kept disjoint: effort stream owned `loop.go`+`internal/provider`, prompt/intent stream owned `prompt_builder.go`+`intent_gate.go`+`internal/tool/update_intent.go`). All `CGO_ENABLED=1 go test` on provider/agent/tool passes; **the bench re-run has NOT happened — the out/turn ≈350 target is unverified**.
+
+- **Step 1 — flash-class effort default**: `applyEffort` (`internal/provider/openai_effort.go`) now defaults unset session effort to `low` when the model id contains "flash" (`defaultEffortFor`), instead of letting the endpoint default thinking-ON/high apply. Explicit effort and non-flash models unchanged.
+- **Step 2 — adaptive effort**: new `StreamRequest.StepMechanical`, set at the loop tail (`loop.go` `nextStepMechanical = toolCallsExecuted && currentText.Len() == 0`) — a step following a tool-only step. `applyEffort` holds mechanical steps to `none`, falling back to `low` when the ladder rejects none (glm-5.3-flash). This guards against the parity-run failure (thinking off alone failed to converge).
+- **Step 3 — compound tool-calls guidance**: ~~new bullet in `parallelToolCallsPrompt` — fold repeated sed/grep probes into ONE bash call ("four sed windows in one call, not four calls").~~ **STRUCK 2026-10-25**: no such bullet exists in `parallelToolCallsPrompt` (checked in full; repo-wide grep finds nothing) — it never landed in any commit.
+- **Step 5 — ritual trims**: `deepSearchPrompt` now caps the post-search report at a short synthesis; `decisionSummaryPrompt` gates `## Decisions & why` to turns with real decisions.
+- **Step 4 — update_intent softening**: the standalone-first mandate and the closing-call mandate are dropped from `tool/update_intent.go`, `prompt_builder.go:1135` and the gate reminder ("it may ride the first tool block"); the intent-gate reminder now fires ONCE PER PLANDLESS STINT
+  (`intentGate` registry keyed by sessionID, deleted by `markPlanSet`, so a session that planned once re-arms for a later planless stint — a markPlanSet-delete semantic, not strict once-ever). Correction 2026-10-25: this entry originally wrote "once per session" immediately beside "re-arms" — only the re-arms wording is accurate. Status-movement pins preserved. Pins rewritten: `TestIntentGateFiresOncePerSessionAcrossTurns`, `TestUpdateIntentDescriptionMakesTheClosingOptional`, `TestUpdateIntentDescriptionMayRideTheFirstBlock`; new wire pins `openai_effort_flash_test.go`, `effort_mechanical_test.go` (`TestRunLoop_StepMechanicalFollowsToolOnlySteps`).
+- Rejected by data (unchanged): transport/TLS, connection pooling, local tool dispatch, more teammates, prompt-context reduction (see 2026-10-24 mechanism entry). Cache (87% vs 93%) left alone, revisit only if compaction fires more often.
+
+## 2026-10-24 — HTTP compression audit: providers gzip responses, nothing else is compressed
+
+Asked whether ogcode uses gzip for request/response. Answer: only implicitly, on the provider response path.
+
+- **Provider responses ARE gzipped at transport level**, accidentally: `streamHTTPClient` (`internal/provider/provider.go:176`) leaves `DisableCompression` false and sets no `Accept-Encoding`, so Go's Transport adds `Accept-Encoding: gzip` and transparently decompresses. Proved with a local gzip test server using the same transport shape: server saw `Accept-Encoding: gzip`, client read plaintext with `resp.Uncompressed == true`.
+- **Provider requests are NOT compressed** — no `Content-Encoding`, no gzip writer anywhere in `internal/provider`. So `checkBodyFits` (`openai.go:1119`) is measuring UNCOMPRESSED bytes against the 4 MiB gateway cap; gzipping the body is unused headroom there.
+- **The local server compresses NOTHING**: `routes.go:11-26` middleware is RequestID, previewHostDispatch, RealIP, accessLog, recoverer, cors — no `middleware.Compress`. Live check: `GET /api/config` and `GET /` with `Accept-Encoding: gzip, deflate, br` both came back with no `Content-Encoding`. Incoming gzip request bodies are never decompressed by any handler.
+- **Cost of that**: `web/dist/assets/index-*.js` is 7,794,247 bytes raw, 2,314,241 gzipped (3.37×) — every page load pulls the uncompressed bundle. Behind Cloudflare the edge likely compresses JS anyway; the Go server does not, and docs/deploy carries no nginx/compression config of its own.
+- **The one explicit gzip path is search**: because browser-persona requests set their own `Accept-Encoding` (`internal/search/persona.go:64-98`), Go stops auto-decompressing, so `decompressResponse` (`internal/search/transport.go:257-330`) hand-decodes gzip/deflate/br/zstd.
+- Unrelated: log rotation gzips rotated files (`internal/logging/rotate.go`, `OGCODE_LOG_COMPRESS` default on). Controlplane worker↔master (connect-go over h2/h2c, `internal/worker/worker.go:255`) has no compression options set — library defaults only.
+
+## 2026-10-24 — flash-class effort default measured on the bench: −2.4× output, no endpoint speedup
+
+The OGX bench run `v051-ogcode` (`ogcode-bench/runs/v051-ogcode`, 87 turns, 270.3s) was run by the binary built 21:46 from the working tree that carries the uncommitted flash-class effort default, so it measures that policy, not v0.50-vs-v0.51.
+
+- **Endpoint speed unchanged.** Per-request regression over `wire.jsonl` (ms vs completion tokens, 89 requests): slope **2.845s/1K completion**, intercept **1.717s** — inside the 2.61–3.23s/1K slope and 1.72–4.05s intercept the three ogx-r\* runs give. The intercept is the only component that drifted down over the four runs (4.05 → 1.95 → 1.79 → 1.72), and it is gateway queue+TTFT, which no build of ours touches.
+- **Wall decomposed at that fit**: 218.9s model wait (81%) + 51.4s local (19%) of 270.3s. Output fell 30,725 → 23,239 (−33s of decode) but requests rose 56 → 89 (+52s of floor), so the run is **32s slower than `ogx-r3`**, not faster. The floor is per REQUEST, so trading tokens for turns loses.
+- **What the token drop is**: `applyEffort` sends `reasoning_effort: low` for a flash-named id when the session chose none, and `none` when the previous step was tool-only (`nextStepMechanical`, `loop.go:2195`). Response bytes per completion token 52–53 before, **20.6** here — the reasoning text left `completion_tokens` because the request asked for it to. `defaultEffortFor` is in the installed binary and absent from HEAD; `go test ./internal/provider -run 'Effort|Mechanical'` passes. Nothing compresses or re-bills it.
+
+## 2026-10-24 — connection reuse: one h2 connection to ogx, one per request over h1.1
+
+- `streamHTTPClient` (`internal/provider/provider.go:176`) is a single pooled client: no `DisableKeepAlives`, no
+  `req.Close`, `ForceAttemptHTTP2: true`, `IdleConnTimeout: 30s`, no `MaxIdleConnsPerHost` (Go default 2). Every
+  streaming request — OpenAI, Anthropic, OGX — goes through it. The only `CloseIdleConnections()` call is the
+  local-write-failure retry (`provider.go:211`).
+- Production ogx negotiates **HTTP/2** (probe: `GET /v1/models` → `proto=HTTP/2.0`, 401 unsigned; a second request
+  that closed the body after 10 bytes reported `GotConn.Reused=true`). Per-step requests are h2 streams on one
+  connection, so "a new connection each step" is false against the real gateway.
+- `streamEvents` (`openai.go:1217`) breaks at `data: [DONE]` and closes without draining. On HTTP/1.1 that
+  discards the socket because the chunked terminator was never read. Local probe with the same transport fields
+  and the same read pattern: 6 break-at-[DONE] requests opened 5 connections (one buffer-luck reuse); the same 6
+  drained to EOF opened 1.
+- The bench agrees independently, from a different mechanism: the tap pins ALPN to http/1.1 on both sides
+  (`benchmark.py:734,739`), and `runs/v051-ogcode.harness.log` reports **79 connections for 89 requests**
+  (1.13 req/conn, 11% reuse — the same ~1-in-6 the probe saw).
+  **Corrected**: that ratio is a property of v0.51, not of the reader — across the stored runs `v050-ogcode` is
+  400 wire rows / 501 connections (0.80 req/conn, *worse*), `v050cap-ogcode` 101/102. So the bench has never
+  shown meaningful keep-alive, and only three runs carry both a `wire.jsonl` and a harness connection count, so
+  it cannot say whether the tap is the whole story.
+- Cost of that harness artefact: a fresh handshake from this machine is `connect 0.116s + tls 0.251s = 0.367s`
+  (curl to the same host), so the tap pays a dial+TLS per tunnel — ~0.3s of every request's `ms`, roughly 20% of
+  the 1.72s intercept, ~29s of a 270s run — none of which production pays.
+  **Corrected**: 79 × 0.37s ≈ 29s is an UPPER BOUND on the tap's total TLS+connect spend, not a proven 20% of
+  each request's `ms` — the tap's upstream leg is lazy, so the delay lands on the first request of each tunnel
+  and some tunnels carry non-model traffic. The defensible claim is only: the 1.72s intercept cannot be fully
+  attributed to gateway queue, because up to ≈29s of the 270s run is harness setup.
+- Not measured: whether production step gaps exceed the 30s `IdleConnTimeout` (the capture has no timestamps).
+  That is the only route by which production re-handshakes, at ~0.37s per occurrence.
+- Candidate fix, **now APPLIED** (same date, later in the day): drain after a clean `[DONE]`, bounded — see the
+  `h1.1 stream drain applied` entry below.
+
+## 2026-10-24 — h1.1 stream drain applied: a finished SSE body now returns its socket to the pool
+
+- **The fix**: `drainFinishedStream(r io.Reader, cancel context.CancelFunc, budget time.Duration)`
+  (`internal/provider/provider.go`, after `idleWatchdog.Stop`) arms `time.AfterFunc(budget, cancel)`, then
+  `io.Copy(io.Discard, io.LimitReader(r, postDoneDrainBytes))`. `postDoneDrainBudget` = 2s (a `var`, so tests
+  shrink it; 0 falls back to the default), `postDoneDrainBytes` = 64 KiB. It cancels the REQUEST CONTEXT rather
+  than calling `body.Close()` from the timer — that is what unblocks a read parked in net/http's `persistConn`
+  without racing an in-flight `Read`.
+- **Where**: `openai.go` `streamEvents` sets `sawDone` at the `[DONE]` break and calls the drain at the very END
+  of the function, after the text-tool-call recovery block — so the `scanner.Err()` path returns first and a
+  failed stream never drains. Both of the developer's constraints are met: clean-`[DONE]` only, and bounded.
+- **The transport's 120s idle watchdog does NOT cover this case** — it fires on a socket that goes quiet between
+  reads, not one that never sends another byte, which is why the drain carries its own bound.
+- **Cost, accepted**: the drain runs before the defers, so the concurrency slot (`budgetBody`, `budget.go`) is
+  held for up to `postDoneDrainBudget`; consumers range to channel close, so a provider that hangs after `[DONE]`
+  delays that step by up to 2s. Bounded, not eliminated.
+- **`anthropic.go` deliberately unchanged**: its loop handles `message_stop` without breaking and already reads
+  to EOF, so it has no discard bug.
+- **Measurement** (independent reproduce, fresh `httptest` + `ConnState` counter, 6 requests): no-drain **6/6**
+  connections, drained **6/1** — slightly worse than the earlier probe's 6/5, same conclusion. The earlier 6/5
+  was buffer luck: the terminator happened to land in the same 64 KiB read.
+- **Test-timing caveat that makes a naive pin pass falsely**: the handler must FLUSH after `[DONE]` and then pause
+  (~50ms). With no gap the whole body lands in one read and the socket reuses even unfixed (measured 4/6 no-drain
+  at delay=0 vs 6/6 at 20–200ms). `stream_drain_test.go` pins all four: connection reuse through `streamEvents`,
+  reuse through `StreamChat` (proving the drain survives the `budgetBody` wrap and the `go`), the budget bound,
+  and no drain on the `scanner.Err()` path. RED proven by disabling the call (3 connections, want 1).
+
+## 2026-10-25 — `read` output caps audited: the file-map branch was the one uncapped path
+
+- Asked whether the new multi-file `read` lets output grow unbounded. It does not: one `readBudget`
+  (`MaxToolOutputBytes` 50 KB, `MaxToolOutputLines` 2000, `MaxLineLength` 2000 — `internal/tool/truncate.go`)
+  is shared across the whole `files=[...]` call, and there is no file-count cap by design (the byte budget is
+  the bound). Aggregate volume across parallel calls is only ADVISORY: `internal/agent/read_pressure.go`
+  (40000 tokens, `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`) asks the model to compact; it never refuses.
+- **The hole**: `readOne`'s map branch returned `mapInsteadOfWholeFile(...)` whole while setting
+  `out.truncated = true`, and `capToolOutput` (`internal/agent/loop.go`) skips any result carrying
+  `Result.Truncated` — so the loop backstop was disabled exactly where nothing else capped. Probe:
+  `codemap.Outline`+`Render` over a 116,793-byte Go file (450 funcs with long signatures) produced a
+  **88,874-byte map** (400 symbols = `MaxSymbols`, `Omitted=51`); `codemap/render.go` has no byte cap.
+- **Fix**: the map branch pipes through `fitBody`, and `fitBody` now reserves room for its own
+  `(N more line(s) not shown — the output cap was reached; …)` notice so the 50 KB is exact rather than
+  notice-overshooting. Pin `TestReadTool_MapStaysWithinTheCallBudget` (RED without the fix).
+- Lesson worth keeping: `Result.Truncated` is a promise that the tool already capped itself. Set it only
+  after `fitBody`/`capToolOutput`-equivalent truncation, never alongside an uncapped body.
+
+## 2026-10-25 — read and file_map output caps removed at the developer's request (reverses the entry above)
+
+- The developer asked for **no output cap on `file_map` or `read`**, one turn after the map branch was
+  brought under the 50 KB call budget. Removed from `internal/tool/read.go`: `readBudget`/`readCap`,
+  `fitBody`, `droppedLinesNotice`, `limitLabel`, the per-line `truncateLongLine`, and `defaultReadLimit` — so a
+  bare read returns the whole file, `files=[...]` renders every entry (no skipped files, title now `N files`),
+  and a range without `end_line` runs to EOF. `Truncated` survives only as "a paging window left lines
+  unread" (the `Use offset=` footer). Correction 2026-10-25: `internal/tool/file_map.go`'s success result
+  did NOT "lose its `Truncated`" — it already ended `Result{Title, Output}` with no `Truncated` before this
+  change; the diff only adds `Uncapped`.
+- **`Result.Uncapped`** (`json:"-"`, `internal/tool/tool.go`) is the opt-out: `capToolOutput`
+  (`internal/agent/loop.go`) returns early on `Truncated || Uncapped`, so the 50 KB / 2000-line loop backstop
+  still bounds bash/grep/glob/MCP results but never these. The map interception itself stays — it chooses
+  which answer a call gets, not how large the answer is.
+- **Trade-off accepted**: nothing now clips a read, so the only remaining bound is ogx's 4 MiB request body
+  (`ogxMaxRequestBytes = 4 << 20`, `checkBodyFits` → `ErrRequestTooLarge`, fatal — `internal/provider/openai.go:1133`).
+  A read big enough to push the next request past that fails the turn instead of arriving shortened;
+  `internal/agent/read_pressure.go` (40000 tokens) remains advisory only. A context that fills is still
+  recoverable by compaction, not by a clipped tool result.
+- Pins: `TestReadTool_MapIsReturnedWhole`, `TestReadTool_LongLineComesBackWhole`, `TestReadTool_RangesAreNotCut`,
+  `TestReadTool_RangeWithoutEndReadsToEOF`, `TestReadTool_FilesReturnsEveryFile`,
+  `TestReadTool_NoDefaultWindow`, `TestCapToolOutputHonoursUncapped` (replaces
+  `TestReadTool_MapStaysWithinTheCallBudget`, `TestReadTool_DefaultLimitAndFooter` and the budget tests).
+
+## 2026-10-25 — prompts teach the multi-file read: grep fast path, one read call per wave
+
+- Audit before the change: `files=[...]` appeared only in `parallelToolCallsPrompt`'s bullet and as a clause in
+  the workflow diagram's read line; `read`'s `Description()` buried it mid-paragraph and `file_map` said nothing
+  about batching. `.ogcode/ogcode.db` (`part` data, `"tool":"read"`) held 28,688 read parts and **0 with
+  `"files":`** — but the feature is uncommitted and the running server predates it, so that is not evidence the
+  teaching failed.
+- `internal/agent/prompt_builder.go`: the diagram maps only "every file whose shape you do not already know" and
+  reads with `read(files=[...])` — ONE call in the NEXT block; a new paragraph makes a grep that already printed
+  `path:line: text` stand in for the map (map only unknown shapes; a read answered with a map IS the map);
+  another states one read call per wave. Build step 2 (`agent.go`) names both batched shapes.
+- Contracts: `ReadTool.Description()` leads with the two shapes, `files=[...]` in its opening sentence;
+  `FileMapTool.Description()` says one call per file in the SAME block and names the grep fast path.
+- Cost: about 1.1 KB of prompt text (~280 tokens) sent with every request, against one saved round trip that
+  re-sends the whole conversation.
+- Pins: `TestWorkflowLetsASearchStandInForTheMap`, `TestWorkflowSpendsOneReadCallPerWave`,
+  `TestProcessStepTwoNamesTheBatchedCalls`, `TestReadDescription_LeadsWithTheMultiFileShape`,
+  `TestFileMapDescription_BatchesAndSkipsANeedlessMap`.
+
+## 2026-10-25 — read: a bare limit of any size honours its window (the 200-line bare-limit cap removed)
+
+- Bug (reviewer-confirmed empirically): `read(path, limit: 250)` on a 302-line mappable file returned the file
+  MAP, not content — `rangeRequested` (`internal/tool/read.go`) counted only `Limit <= rangedReadThreshold`
+  (200) as a window, so any larger bare limit fell through to `mapInsteadOfWholeFile`, contradicting the doc
+  comment promising offset/limit paging is honoured. The cliff dated from when a read cap existed; it made no
+  sense once reads went uncapped the same day.
+- Fix: `rangeRequested := len(req.Ranges) > 0 || req.Offset > 0 || req.Limit > 0` — any explicit window reads
+  content; the map answers only a bare whole-file read of a long mappable file (that case unchanged).
+  `rangedReadThreshold` survives only as the short-file cutoff inside `mapInsteadOfWholeFile`; its comment now
+  says it never qualifies a limit. `read`'s `Description()` and the `mapInsteadOfWholeFile` comment reworded.
+- Adjacent: negative offset/limit (previously silently clamped to 0 / read as "every line") are refused in
+  `validateReadWindows` with named-argument errors; the files-path top-level window check fires on
+  non-zero, not just positive, offset/limit.
+- Tests (internal/tool): rewrote `TestReadTool_LargeBareLimitStillReturnsMap` → `TestReadTool_LargeBareLimitIsHonoured`,
+  `TestReadTool_BareLimitBoundary` (below/at/above the threshold all content now), and
+  `TestReadDescription_StatesTheBareLimitCap` → `TestReadDescription_StatesTheWindowRule`; added
+  `TestReadTool_BareLimitPagesContentPastTheThreshold` (302-line file, limit=250 → exactly 250 rendered lines,
+  truncation footer, `Truncated`, `Uncapped`; offset=250+limit=100 pages to EOF above the map) and
+  `TestReadTool_NegativeWindowArgsAreRefused` (single-file, files entry, top-level-beside-files).
+  Full `CGO_ENABLED=1 go test ./internal/tool/ -count=1` green; the new paging pin verified RED with the old
+  predicate restored, GREEN with the fix; `go build ./internal/... .` clean.
+
+## 2026-10-25 — Browser takeover shipped (Option B: first-party browser_* tools + embedded skill)
+
+- One-turn vertical slice: `internal/browser/bridge.go` (WS bridge on coder/websocket v1.8.15; Dispatch
+  pending-map, 30s op budget / 60s navigate+screenshot, re-pair fails pending), `internal/tool/browser.go`
+  (browser_status/navigate/snapshot/content/click/type/key/scroll/screenshot), `internal/server/browser_routes.go`
+  (pair GET/POST, status, bridge — loopback-only + token + chrome-extension origin), embedded skill
+  `browser-takeover` in `internal/skill/embedded.go`, and the companion MV3 extension `browser-extension/`
+  (built by teammate browser-extension, session ses_01M5QPJKTFXYZRN7PVYWE73RWX).
+- Two real bugs caught by the tests: coder/websocket OriginPatterns need `://` (`chrome-extension://*`,
+  else a real extension 403s on origin); `failPending`'s string Err had to be mapped back to
+  `ErrNotConnected` in `Dispatch` or re-pair broke `errors.Is`. Also fixed a hello race in the op/result
+  test (poll version+tabs, not bare Connected).
+- Tests green: `go test ./internal/browser/ ./internal/tool/ ./internal/skill/ ./internal/server/` —
+  server suite 30.5s. Server browser routes covered: end-to-end extension dial (hello → status → close),
+  wrong token 401, non-loopback 403, token rotation, 503s without a bridge.
+- Gotcha observed once: a combined `go test` run failed building internal/server with
+  "undefined: tool.NewBrowserTools" while a fresh `go build ./internal/server/` was clean — stale test
+  build cache; rerun before debugging a phantom undefined.
+- Deliberately not done: no commit, no web Settings panel, no CLI subcommand; v1 risk-gating = skill
+  instructions (DATA-not-injections rails) + extension per-tab allowlist, not the permission manager.
+
+## 2026-10-25 — Browser takeover opens its own tab and takes it over
+
+- Gap found the morning after the ship: the extension's `executeOp` gated EVERY op behind the per-tab
+  allowlist, so the newTab navigate existed (`tabs.create` + wait) but the created tab was never granted —
+  open-only, no control. Go `browser.run()` also documented a "defaults to last granted tab" for an omitted
+  `tab` that did not exist.
+- Fix, three layers: extension auto-grants its own creation (`grantTab` persists to `grantedTabs`,
+  revocable in the panel; side panel needs nothing — it listens to storage.onChanged); the exemption is
+  **navigate + newTab + NO tab id only** (`newTab` plus a tab id means "act on that tab", gate still applies);
+  server `run()` defaults an omitted `tab` to the last Granted tab in the hello inventory (`lastGrantedTab`),
+  refuses Result-shaped when the inventory exists but nothing is granted, and passes nil through when the
+  inventory is empty (no hello yet — no tab info, old behavior).
+- Pins: `internal/tool/browser_test.go` +4 (last-granted default, newTab needs no tab, refusal carries the
+  remedy, empty-inventory passthrough; TestBrowserClickRoundTrip fake now owns a granted tab id 2).
+- Verified: `CGO_ENABLED=1 go test ./internal/tool ./internal/browser ./internal/skill` green; Browser
+  -run 16/16; `go build -o /tmp/ogcode-shipcheck .` OK; scratch vm harness on background.js
+  (`/tmp/og_bg_harness.js`, stubbed chrome.*) 6/6 — auto-grant + persistence, gate boundary on
+  newTab+tab:5, unknown-op naming before the gate. Harness traps: vm sandbox needs `URL`/`process`/`assert`
+  injected, and a host variable the fake storage reassigns must be exposed to the vm via a getter.
+- Not verified live (no Chrome on this box, same caveat as the original ship): unpacked-extension pairing
+  and a real click-through on an auto-granted tab.
+
+## 2026-10-25 — Browser tools were registered but never offered to any agent
+
+The first live extension pairing (extension connected to :7801, one granted chrome://newtab tab) exposed the
+seam instantly: a demo teammate's `browser_status` refused `tool "browser_status" is not available to the
+build agent` (the `!a.HasTool` executeTool guard, `internal/agent/loop.go`). `serve()` had registered the
+eleven browser tools alongside the board tools, but the loop's per-turn allowlist (`allowIDs`, LoopRunner turn
+setup, loop.go ~781) had no browser append — same registration, missing offer.
+
+Fix, build-only, mirroring board/teammate/schedule:
+- `internal/agent/agent.go`: `canControlBrowser()` gate `{ return a.ID == "build" }` next to `canSchedule`.
+- `internal/agent/loop.go`: `browserOffered := agent.canControlBrowser() && lr.Tools.Get("browser_status") != nil`
+  then `allowIDs = append(allowIDs, "browser_*")`. `newTurnToolset` hides only `mcp_*` globs, so `browser_*`
+  passes through to the wire, and `Registry.ForAgent` expands any glob containing `*` (sorted, dedup) — future
+  browser ops ride the same seam. CLI-safe: the CLI registry has no bridge, so the `Get("browser_status")`
+  check keeps the ids off there.
+- Pin: `internal/agent/browser_gate_test.go` (`TestBrowserOpsAreOnlyTheBuildAgent`) — build true; task,
+  subagent, memory-recall, plan, breakdown, note, index, search all false; `codingAgentTools` carries no
+  `browser_`-prefixed id.
+
+Not verifiable in-session: the running :7801 process predates the fix, so its teammates still refuse — the
+developer restarts that process on the new binary (`make -s build-server OGX_APP_SECRET=$(tr -d '\n' <
+~/.ogcode/ogx-app-secret)` done; binary at ./ogcode v0.51.0-dirty). Demo (example.com newTab + snapshot)
+deliberately deferred to the restarted server's next turn.
+
+## 2026-10-25 — the browser demo missed twice: the restart ran a stale install
+
+- The gate fix (`canControlBrowser`, shipped ~12:00) never reached the process serving :7801: the developer's
+  restarts (two "restart & pair" confirmations) left the SAME pid 57596 (started 12:03:10, launch pre-fix at
+  11:43) listening, `/api/browser/status` connected:false throughout. Root cause of the relaunch trap: from a
+  plain shell `ogcode` resolves to `~/.local/bin/ogcode` (the 11:43 install; `strings … | grep -c
+  canControlBrowser` = 0 vs 2 in the repo build) — a fix without a fresh install re-arms itself on every restart.
+- Fix applied: `cd /Users/prasenjeet/Downloads/work/ogcode && make -s install OGX_APP_SECRET=$(tr -d '\n' <
+  ~/.ogcode/ogx-app-secret)` at 12:06 (build → ad-hoc re-sign → install; verified mtime 12:06, symbol count 2).
+- Also verified the pairing contract live: the bridge token is per-boot in-memory (`internal/browser/bridge.go`
+  `New()`), and `browser-extension/background.js` `scheduleReconnect` re-dials the stored token without
+  re-fetching `/api/browser/pair`, so each server restart needs a side-panel Connect press. Prior claim that
+  "the extension auto-reconnects across a restart" (previous turn) was wrong and is corrected in MEMORY.md.
+- Third handover made self-verifying: one line that kills, checks LISTEN, and launches — so "already running /
+  held by pid" output can't be mistaken for a completed restart.
+
+## 2026-10-25 — Auto-kick relaunch lost the flock race; pairing needed a pasted token
+
+- The kicker (started 12:09:43 IST) SIGTERMed 57596, saw "port free", and launched — but the dying server's
+  graceful shutdown had freed the listener while the flock on `.ogcode/server.lock` was still held, so the
+  relaunch exited 1 (`already running … pid 57596`). No server ran until the developer's own `ogcode` at
+  13:38:24 (pid 60924, installed fixed binary — `lsof` txt = `~/.local/bin/ogcode`, strings grep = 2).
+- Verified live: `GET /api/browser/pair` returns the boot's token WITHOUT rotating (rotation is POST,
+  `handleBrowserPairRotate` → `RotateToken()`); the server's 401 text itself points there. The extension never
+  fetches it — its reconnect re-dials the stored token (background.js), so it 401s forever until re-pair:
+  Disconnect → paste new token → Connect in the side panel (sidepanel.js:73-97; `storage.onChanged` at
+  background.js:1148 also drops a live socket when the token changes).
+- Demo (example.com via navigate+newTab) still pending on the developer's "go".
+
+## 2026-10-25 — Ogweb extension prepped for Chrome Web Store submission
+
+- Assessment: `browser-extension/` is clean MV3 (no content scripts, no
+  `chrome.scripting`, no eval/`new Function`/fetch/XHR, no remote hosted code);
+  `minimum_chrome_version: "114"` matches the `sidePanel` API. Real blockers
+  were: no icons, a privacy-policy URL (website-content data use), zip
+  packaging, and the store registration itself.
+- **`host_permissions: ["<all_urls>"]` dropped from the manifest** — nothing
+  uses it (no content scripts or scripting injection, no cross-origin fetch;
+  the WebSocket dials the user-entered origin; `chrome.debugger` requires only
+  the `debugger` permission). Verified by inspection + doc research; flagged
+  UNVERIFIED at runtime until a live reload + op pass (navigate/snapshot/
+  screenshot on a granted tab).
+- Icons: `sips` resize of `docs/media/logo.png` to 16/48/128 under
+  `browser-extension/icons/`; manifest now declares top-level `icons` +
+  `action.default_icon`.
+- `make extension-zip` (Makefile) builds `ogweb-<manifest-version>.zip` from
+  INSIDE the directory so `manifest.json` sits at the zip root; 10 files;
+  `/ogweb-*.zip` gitignored.
+- Privacy page: `docs-site/src/content/docs/privacy.md` (Astro docs schema,
+  nav entry in `docs-site/src/lib/nav.ts` Guides group). Not yet deployed.
+- `browser-extension/STORE_LISTING.md`: listing copy, single-purpose sentence,
+  ready-to-paste permission justifications (debugger/tabs/storage/sidePanel),
+  data-use disclosures ("Website content" collected, never sold or shared,
+  transmitted only to the user's own local server over the paired WebSocket),
+  review notes with repro steps (`GET /api/browser/pair`), and the pre-upload
+  checklist. Public copy carries no em dashes.
+- Accepted: chrome.debugger draws extra CWS review (possibly a demo video
+  request); $5 developer registration is a manual developer step.
+
+## 2026-10-25 — Browser-takeover demo; heavy page ops kill the MV3 service worker, not pairing
+
+- Demo against the live paired Chrome (server :7801): navigate, snapshot on a small
+  page, content on a big page, scroll, network/console reads all worked; the user
+  watched the Wikipedia tab scroll under agent control.
+- Deterministic failure pattern, proven with a 100ms `GET /api/browser/status`
+  sampler (/tmp/snapwatch.sh): `browser_snapshot` on a large page and
+  `browser_screenshot` each dropped the extension's ws ~0.1–0.6 s after dispatch
+  (sample numbers 70.09→71.21, 43.49→43.57+, 23.929→24.860 for screenshot) and it
+  came back exactly ~1.0–1.1 s later = the extension's own reconnect
+  (BACKOFF_MIN_MS=1000, browser-extension/background.js:19).
+- Small-page snapshot on chrome:// surfaces returns a legit op error with the
+  connection SURVIVING ("Cannot access a chrome:// URL"), so normal op errors don't
+  kill the ws; only the heavy ones do. Suspected trigger: the in-page
+  `Runtime.evaluate` snapshot walk (ELEMENT_CAP=300) / `Page.captureScreenshot`
+  spikes the SW → Chrome suspends it. Not proven; the per-op-class determinism is.
+- The refusal text is misleading: the reconnect's `swapConn` →
+  `failPending(ErrNotConnected)` (internal/browser/bridge.go:225,229,337-343)
+  fails the in-flight op, and the tool's `unpaired()` (internal/tool/browser.go)
+  renders it as "extension not paired" though pairing was fine. Self-heal is
+  ~1.1 s, so the NEXT op succeeds — do not re-pair on this text.
+- Server read limit (maxResultFrameBytes 4 MiB, bridge.go:40) is NOT the cause;
+  op replies are capped far below it.
+- Code wart found: `dropConn` (bridge.go:269-283) comments that it fails in-flight
+  ops but does NOT call failPending — a drop with no reconnect would hang the op to
+  its 60 s timeout.
+- Fix candidates, left unimplemented (turn was a demo): screenshot via
+  `chrome.tabs.captureVisibleTab` (no debugger session needed); bridge-side
+  retry-once on the ErrNotConnected sentinel or failPending inside dropConn.
+- Restart gap measured the same morning: a SIGTERM'd server frees its port before
+  its project flock, so the scheduled relaunch exited 1 "already running" and the
+  demo sat ~90 min until a manual `ogcode` (12:10 → 13:38). Fix rule is in
+  MEMORY.md (wait for old PID to exit, not the port).
+
+## 2026-10-25 — Pair token survives restarts; auto-install research
+
+- The chrome-extension pair token is no longer minted fresh on every boot: the server
+  pins it from `.ogcode/browser-pair-token` (`browser.NewWithToken` + `loadBrowserPairToken`
+  in server.go / browser_routes.go), and every rotate persists the rotated value
+  (0600 file). Boot chain: good token file → pinned; missing/empty/corrupt → mint
+  fresh and save. Pins: `TestNewWithTokenPinsThePersistedToken` +
+  `TestNewWithTokenFallsBackToFreshOnBadInput` (bridge_test.go),
+  `TestBrowserPairTokenSurvivesARestart` + `TestBrowserPairRotatePersistsTheToken`
+  (browser_routes_test.go). This LIVE project's token was pre-seeded with the value
+  the developer's extension already holds (7e210265…6690ea) so their next restart
+  needs no re-pair at all.
+- Auto-install research (deep_search) conclusions: on-branded Chrome ≥ 137 dropped
+  `--load-extension`; external CRX install via registry/plist outside the Web Store
+  is blocked; enterprise `ExtensionInstallForcelist`/`ExtensionSettings` force-install
+  works but marks the browser managed. Sanctioned smooth path = CWS listing +
+  deep-link install (one user click), then the WS pairing is automatic since the
+  token is now stable; a native-messaging host could also auto-supply the token.
+
+## 2026-10-25 — Native-messaging host shipped (zero-paste extension pairing)
+
+- Built `internal/nativehost` (Chrome stdio host: 4-byte-LE length framing; `{"type":"pair"}` → probes
+  portmap registry, returns servers[]), `internal/cli/native_host.go` (`ogcode native-host [install|uninstall]`),
+  exported `portmap.All()`/`AllIn(path)`, and boot auto-install `nativehost.EnsureRegistered(projectDir)` in
+  server.go (warn-only, idempotent, skipped entirely by falsey `OGCODE_NATIVE_HOST_INSTALL`).
+- Extension side: manifest +`nativeMessaging` permission (v1.0.0→1.1.0); `background.js` fires
+  `autoPairThenConnect` ONCE per worker life (5 s timeout) when credentials are absent — success writes
+  `{serverOrigin, pairToken, bgConnected:true}` and connects exactly like manual Connect; failure
+  (`ok:false`, disconnect, 5 s timeout, no host installed) ⇒ unconfigured status with manual-paste hint,
+  stored values never overwritten. Harness `browser-extension/native_pair.test.js` = 34/34.
+- Extension id is Chromium path-derived (sha256 of LOWERCASED abs path → nibbles a..p): repo
+  `browser-extension/` ⇒ `cgeoedmgjadadineklkmhgpmolmnpfbn`, pinned by golden test; no unpacked extension
+  was loaded in any Chrome profile at the time, so `chrome.runtime.id` could not be cross-checked live.
+- Live verification: pipe-smoke `printf '\x0f\x00\x00\x00{"type":"pair"}' | ~/.local/bin/ogcode native-host`
+  returned the full servers[] payload (token 7e210265…6690ea, port 7801) against the then-running server —
+  note `{"type":"pair"}` is 15 bytes, framing head `\x0f`, not `\x0d`. Manifest written for Google Chrome
+  (Chromium/Brave/Edge/Vivaldi/Arc dirs absent ⇒ correctly skipped). `make -s install` v0.51.0-dirty carries
+  `com.ogcode` (5 strings hits).
+- Chrome reads native-messaging manifests at browser startup: a first-ever `com.ogcode.json` needs one
+  Chrome restart (or extension reload after restart) before connectNative succeeds.
+
+## 2026-10-25 — MEMORY.md diet: repo layout, releases and deployment pre-diet text (from MEMORY.md diet)
+
+Pre-diet MEMORY.md section bodies, byte-verbatim (line ranges noted). Moved 2026-10-25 by teammate memory-diet while compressing MEMORY.md from 66179 bytes to its ~20 KB budget, so nothing was lost: the compressed forms in MEMORY.md keep the rules, these hold the full original text.
+
+### Repo layout & git hygiene (pre-diet lines 15-23)
+
+- Root: markdown only; plans in `plans/` (refs inside bare, `plans/<name>` outside); the next migration is `069` (068 is the agent timer's, 066 the file change gate's, 065 the board's).
+- **`.gitignore` paths stay root-anchored**: `/GIT_DIFF_PLAN.md` (a bare rule ignored the tracked
+  `plans/GIT_DIFF_PLAN.md`), `/dist/` (unanchored would swallow `web/dist/`), `/agent/` (a stray duplicate of
+  the golang-* skills — `.agents/skills` is the one `internal/skill/discover.go` reads; it also breaks
+  `go build ./...`, whose examples import viper/fatih/color, so build `./internal/... .`).
+  `MEMORY.md`/`MEMORY-ARCHIVE.md` gitignored. **`AGENT.md` is tracked but 0 bytes** — a `see AGENT.md` pointer is stale.
+- **README hero is `docs/media/ogcode-demo.gif`** — GitHub renders no animated WebP and no `<video>`, so a GIF
+  is the only option; re-encode via `HOWTO.md` → Re-encode the README hero GIF, and check for leaked internal
+  paths at legible resolution (twice already).
+
+### Releases, version & install (pre-diet lines 27-41)
+
+- **Tags are immutable**: `git ls-remote --tags origin` + `gh release view vX.Y.Z` first. Bump
+  `internal/version/version.go` (`vX.Y.Z`) + both `web/package*.json` (`X.Y.Z`); steps in `HOWTO.md`.
+- **A red Linux build job blocks the release** while CI/Pages/Docker stay green: `build.zig` writes `.zig-cache`
+  beside the read-only module cache — fix = top-level `ZIG_LOCAL_CACHE_DIR: /tmp/zig-cache`.
+- **macOS re-sign**: an in-place replace keeps a stale signature → `Killed: 9`; `make install` `rm -f`s first
+  then ad-hoc signs. **It restarts nothing** — check the listening pid's start time — and `make` echoes its
+  recipe, so add `-s`. The installed file runs **~18 KB larger than `./ogcode`** — that is the embedded
+  ad-hoc signature, not divergent content (same delta every install; `spctl` "rejected" is normal too).
+- **After a code fix, `make -s install …` BEFORE handing over a restart** (2026-10-25 demo missed twice): a
+  relaunch runs `ogcode` from PATH = `~/.local/bin/ogcode`, not the repo `./ogcode` — the user's restart can
+  re-run a pre-fix installed copy. Verify the install carries the change: `strings ~/.local/bin/ogcode | grep -c <new-symbol>` (expect ≥1), and after they restart check the listener's pid actually changed (ps start time).
+- **`detectInstallCommand()`** matches **scoop → Homebrew → cargo → install.ps1 dir → winget → install.sh**;
+  Homebrew means `/Cellar/` or `/opt/homebrew/`, **never any `/usr/local/`** (`install_detect_test.go`).
+  **`check-updates` exits 1 when an update is available.** **Verify install changes on a throwaway rig** (fresh
+  HOME + temp cwd + stub `open`), expanding the binary path BEFORE exporting HOME.
+
+### Deployment & first boot (pre-diet lines 56-71)
+
+- **A project keeps its port**: `~/.ogcode/ports.json`; a bare `ogcode` reuses it (this project → **7801**), an
+  explicit `--port` overwrites it. `make -s install OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)` works
+  (the env var reaches `build-server`). **Never restart the host server unasked** — it runs the live session, so
+  killing it ends the turn mid-reply; `ask_user` and hand over `kill <pid>; cd <dir> && ogcode` (no `--port`). The
+  developer has picked "I'll restart it myself" every time since 2026-10-16; a detached script only once (09-28).
+- **One server per project dir**: an advisory flock on `<dir>/.ogcode/server.lock` before the DB opens
+  (`projectlock.go`); a second `serve` exits 1 naming the holder's pid and port. Two servers in tests need two
+  dirs. **`port free` ≠ dead** (2026-10-25 kicker): a SIGTERM'd server frees its listener before releasing the
+  flock, so a relaunch fired straight off a port check exits 1 `already running …` and nothing comes back until
+  someone runs `ogcode` again (~90 min here) — a restart script must wait for the old PID to EXIT, not the port.
+- **Listener before preflight** (133 MB embedder, after bind); `/api/config` GET JSON 200 is the health probe.
+  **End-user macOS signing is NONE**: ad-hoc, and it runs because install sets `com.apple.provenance`, not
+  `com.apple.quarantine` — `spctl` "rejected" is not "blocked" without that xattr.
+- **Docker**: install `git` (else every workspace says "not a git repository"); `HEALTHCHECK … /api/config
+  --start-period=120s`; `docker.yml` needs `type=raw,value=latest`. **ldflags traps**: `-X` on a missing symbol
+  is silent, an empty `-X` does not fall back.
+
+## 2026-10-25 — MEMORY.md diet: OGX gateway, providers and token accounting pre-diet text (from MEMORY.md diet)
+
+### OGX gateway (pre-diet lines 74-92)
+
+**Assertion**: base64url HMAC-SHA256 over `app + "\n" + ts + "\n" + method + "\n" + path` (skew 5 min) in
+`X-Client-App`/`-Timestamp`/`-Signature`. **Gate is CONDITIONAL**: no secrets ⇒ open, any secret ⇒ any failure
+⇒ 401. ogcode `appassertion.go`; oglab `internal/httpx/httpx.go`, secrets from `OGLAB_APP_SECRETS`.
+
+- **Secret**: `OGXProviderID = "ogx"`, `OGXAppID = "ogcode"`, `var OGXAppSecret` (ldflags); one live value
+  (never paste) — `~/.ogcode/ogx-app-secret` (600). **`tr -d '\n'` mandatory** (unstripped HMAC → silent 401).
+- **Provider**: `https://ogx.ogcode.in/v1`; **`/v1/models` IS the plan** — dynamic models, all
+  `ActiveByDefault`, **no static fallback**. **Registration is plan-gated, network-free** (`HasPlan()`).
+  **Priority** `anthropic, openai, openrouter, ollama, ogx` (ogx last on purpose). **`prompt_cache_key`** is the
+  session identity for token spend, not a cache hint.
+- **Bodies cap at 4 MiB** (`checkBodyFits`, `ErrRequestTooLarge`); oglab's `maxChatBodyBytes` matches, both
+  fatal. Raising it is three hops (oglab router, web `maxChatBytes`, nginx) — ship the gateway first.
+- **Composer images**: `prepareImageAttachment` → **1024 px long edge**, JPEG q0.8 / WebP, byte-identical
+  passthrough ≤512 KB AND ≤1024 px; `MAX_IMAGE_SIZE` (10 MB) is only the pick limit.
+- **JSON endpoint returning HTML = nginx routing bug** (no `/v1/` location ⇒ all to `oglab_web`); fix with
+  `upstream oglab_router` + `location /v1/` before `location /`. A 15s SSE keep-alive stops Cloudflare's ~100s
+  idle cut and stops after 90s of upstream silence.
+- **Settings tab** is `readOnly`; its not-connected fallback div needs `data-setting` or it vanishes offline.
+  **oglab's** breaker ignores `400`/`422`.
+
+### Providers, models & resolution (pre-diet lines 96-143)
+
+- **`OpenAIProvider.Models()` is a pure read** — never network; fallback until `SetCatalog`, returns a copy.
+  Fetching is `RefreshCatalog` behind `CatalogRefresher`/`CatalogSetter` (`TestModelsNeverFetches`).
+- **Resolution**: `orderedSnapshot()` sorts by `(providerRank, id)`; `ResolveProviderFor` = custom → explicit
+  provider → catalogue (`ActiveByDefault`) → highest priority; persisted as `provider` (migration 047).
+  **Trap**: a column in a `SELECT` but not in `rows.Scan` is a silent runtime error. `lookupModel` compares the
+  raw `m.ID`, so a bare `deepseek-v4.1-flash` beats OpenRouter's prefixed row.
+- **`ogx-deepseek-v4.1-flash` THINKS BY DEFAULT** (live probe 2026-10-24): a request with no `reasoning_effort` field ⇒ the endpoint streams `reasoning_content` and bills it inside completion tokens (72 vs 20 with effort=none, 96 with high — on a one-line question). ogcode's loop sets `Thinking:true` on every request (`internal/agent/loop.go`) but `applyEffort` (`internal/provider/openai_effort.go`) writes nothing unless session effort ≠ "" — unset effort = endpoint default = thinking ON; catalogue default for the model is EffortHigh. `--effort none` suppresses it. **FIXED 2026-10-24 — flash-class effort default; UPDATED 2026-10-25 (Bugs A+B)**: `defaultEffortFor(modelID, spec)` (openai_effort.go) maps flash-class ids to `low` when session effort is "", but a spec default LIGHTER than high stands (gemini-2.5-flash-lite `none`, flash-lite siblings `minimal`, gemini-3.8-flash `medium` — vendor-tuned, no deep default to claw back); a recorded default ≥high keeps the low hold (ogx-deepseek-v4.1-flash records high — a literal spec-default-wins would have re-billed reasoning); non-flash keeps "" even with a recorded default (deepseek-v4-pro pin sends nothing). The MECHANICAL CONTINUATION hold (previous step of the turn was tool-only with at least one WORK call — a round whose every call was read-only planning/exploration (`explorationOnlyCalls`: update_intent, compact_context, codebase_map, file_map, read, grep, glob, ask_user, internal/agent/loop.go:2201/2336) is exempt so the next step keeps thinking — `StreamRequest.StepMechanical`, set at the loop tail in `internal/agent/loop.go`) to `none` (fallback `low` when the ladder lacks none, e.g. glm-5.3-flash) applies ONLY to default-derived levels — an explicit user effort is NEVER rewritten by the mechanical path even when a mid-run spec change drops the level (the old code wrote `low` over explicit `high`). Pins `openai_effort_flash_test.go` + `effort_mechanical_test.go`. **BOTH bench arms think** (wire-relay capture 2026-10-24): neither client sends a reasoning field, so `reasoning: 0` in `run.json` is an accounting artifact on both sides — ogcode folds reasoning into `output`, OpenCode's SDK drops the `reasoning` delta into completion (wire completion ≈ self-reported output, r1–r3: 29292/29053, 28423/27978, 24784/24749). Real difference is ogcode reasons ~2× per turn (mean out/turn 836/635/559 vs 338/379/349). **The `parity` pair is NOT matched** — only the ogcode arm ran `--effort none` (17,510 vs 9,329 output), so it is ogcode-OFF vs OpenCode-ON and a lower bound; no matched both-off pair is possible (OpenCode has no effort flag).
+- **ogcode.json custom OpenAI-compatible providers** (2026-10-24): extra named ids
+  beyond the four slots + `ogx` register end-to-end — `config.CustomProviders()` →
+  `provider.NewOpenAICompatibleProvider(id, apiKey, baseURL, model, label)` (reserved
+  ids and non-slugs refused; collection = `label` else `collectionFromBaseURL`), wired
+  in `cli/run.go`, `cli/root.go` and `server.go loadProviderMap`, so `reloadProviders`
+  picks up edits. Entry schema: `type` (only ""/"openai"; else skipped), required
+  `baseUrl`, optional `model`/`label`; `disabled` merges ONE-WAY (project can disable,
+  never re-enable a globally-disabled one). **Trap**: `Load`'s field-by-field merge
+  dropped `Type` — every new ProviderConfig field must be copied there or a custom
+  entry silently re-types to openai (caught by server wiring test
+  `TestLoadProviderMapRegistersCustomProviders`). **UI needs nothing** (2026-10-24): the picker groups by
+  `collection` (label, or vendor inferred from the host, else the raw id) and Settings→Models spawns a
+  readOnly tab for any unknown providerId appearing in the catalogue (`models.tsx` extra-slot path) —
+  no credential rows, no add row, `isConfigured` always true. Wart left as is: a def-less tab's
+  description reads "Bundled with ogcode — no credentials required" (`models.tsx:761`).
+- **Catalogue names are aliases**: `normalizeModelID` strips the org prefix, `:latest`/`:cloud` and the
+  OpenRouter variant suffix; first-claim-wins. `gemini-4-argon`: `RejectsSampling`, `MaxOutputTokens: 32_768`.
+- **The Ollama slot lists only what the local endpoint serves**; the community free pool is REMOVED
+  (`freepool.go`, `OGCODE_FREE_KEYS_URL`), `needsOnboarding` hardcoded false.
+- **Budget**: `OGCODE_PROVIDER_MAX_CONCURRENT` 8, reserve 2; index takes `indexGate` then `total`, interactive
+  only `total`. **`streamEvents` defer order** `close(ch); body.Close(); cancel()` — a slot held across the
+  channel close 429'd OGX's concurrency-1 tier.
+- **`write tcp …: result too large` is ERANGE from the LOCAL `write(2)`** (macOS VPN/content filter), not the
+  gateway; `sendStreamingRequest` retries once on a fresh connection, a mid-stream RST only when no text and no
+  tool call exists, and IPv6 fallback counts ECONNRESET too, two strikes narrowing to `tcp4`.
+- **Connections: ONE pooled h2 conn to ogx in production; h1.1 sockets are now DRAINED, not dropped.**
+  `streamHTTPClient` (`internal/provider/provider.go:176`) is a single pooled client — no `DisableKeepAlives`,
+  no `req.Close`, `ForceAttemptHTTP2: true`, `IdleConnTimeout: 30s`, no `MaxIdleConnsPerHost` (Go default 2).
+  ogx negotiates **HTTP/2** (probe: `proto=HTTP/2.0`; a body closed after 10 bytes still reported
+  `GotConn.Reused=true`), so a step is an h2 STREAM on one connection. On HTTP/1.1 a body closed before EOF
+  discarded the socket (6 break-at-`[DONE]` requests → 6 conns); `drainFinishedStream` (`provider.go`) now runs
+  at the END of `streamEvents` gated on `sawDone` only — never on the `scanner.Err()` path — with
+  `postDoneDrainBudget` 2 s (bounded by cancelling the request context) and `postDoneDrainBytes` 64 KiB.
+  **Anthropic needs nothing**: its loop handles `message_stop` without breaking, so it already reads to EOF.
+  **A test that wants to observe the discard must put a gap (~20–50 ms) between the sentinel and the end of the
+  response** — otherwise the whole body lands in one read and the socket reuses by luck, so the test passes
+  against the unfixed code. Pins: `internal/provider/stream_drain_test.go` (reader + `StreamChat` end-to-end;
+  both RED with the drain disabled). **The bench tap pins ALPN to http/1.1 on both sides**
+  (`benchmark.py:734,739`), so its runs are the h1.1 case; per-run req/conn (v050 0.80, v051 1.13) is not a
+  property of this reader, and each tunnel's dial+TLS (~0.37 s here) is an UPPER BOUND on harness setup, not a
+  measured share of the 1.72 s intercept.
+
+### Token accounting (pre-diet lines 147-167)
+
+- **Reasoning is billed INSIDE `output`, never separately**: `ModelPrice.Cost` takes no reasoning term (`internal/provider/pricing.go`), `TokenCounts.Consumed/Effective` leave it out to avoid double-counting (`internal/session/message.go`), and `usageFromOAI` folds Gemini's total-only thinking into output. It is a display count only — output is ~1% of all tokens, so cache-hit rate, not effort, is the spend lever.
+- `tokens.input` is UNCACHED: bill `input + cacheRead`; a cache hit is `prompt_tokens_details.cached_tokens`
+  when > 0, else `prompt_cache_hit_tokens`. The pill totals the transcript from `GET /api/session/{id}/token`.
+- **Title generation inherits the session model** — with `model == ""` it skips `ResolveProviderFor`, so a test
+  must set `defaultProvider`. **Gemini `thought_signature` must be echoed verbatim** from `extra_content.google`
+  on every replayed tool call or the second turn 400s (`EchoesToolExtra()`).
+- **Teammate spend is counted, but only on the child**: a teammate is a real `build` session (`board.go`
+  `spawnTeammate` → `startSessionLoop`), so its steps land on its own messages + `usage_event` (kind=step) and
+  its utility calls on `session.utility_*` — same project bucket (one ledger per workspace, `server.go`
+  `NewLedger(global, s.dir)`), so Settings→Usage totals include it. `foldChildUsage` (`agent/usage_charge.go`)
+  is for EPHEMERAL task/memory children only; a teammate is never deleted or folded (a fold would double it in
+  session views). Verified live: 6 teammate sessions, all with step+utility ledger rows.
+- **The parent's token pill folds teammates in on the CLIENT, never in the DB**: `/session/{id}/token` and
+  `/usage` each carry a `teammates` array (always `[]`) beside session-only headline totals; `token-pill.tsx`
+  sums them into its figures — input/output/cache AND `utility` (a subtotal inside effective/total, never added
+  on top). A teammate child whose read ERRORS is skipped per-child with a warn (parent-side reads still 500; pin
+  `TestSessionTokensSkipsATeammateWhoseReadErrors`). `spawnedTeammates` (`server/board.go`) enumerates via
+  `board.BySession` + roster `KindTeammate && SpawnedBy == parent.Handle` — there is no parent column on
+  `session`; a deleted child is skipped while its roster row stays. Pinned by `session_token_test.go` /
+  `usage_routes_test.go`.
+- **Ollama Cloud meter**: `GET https://ollama.com/api/usage` with `OLLAMA_API_KEY`.
+
+## 2026-10-25 — MEMORY.md diet: permissions, agent memory files and prompt caching pre-diet text (from MEMORY.md diet)
+
+### Permissions (pre-diet lines 171-215)
+
+- **The ruleset gates, not the mode**: `Ruleset.Evaluate` runs BEFORE the mode switch and only read/glob/grep
+  are `Allow` by default — bash/write/edit are `Ask`, and the catch-all rule `Allow`s every other tool in
+  **every** mode. **Yolo only changes what would have been Ask** (skips the classifier entirely) — an explicit
+  `Deny` still denies; `isDangerousCommand` is a separate layer. **There is no Deny tier**: classifier outputs
+  are only Safe/Ask/Unclear. PATCHing a session's mode ALSO `SetDefaultMode`s machine-wide. **Grants never
+  expire** and the pattern is the verbatim string (`./f.go` ≠ `/abs/f.go`), not a glob.
+- **`riskLLMMaxTokens = 1024`** is calibrated; an unanswered check warns, returns Ask and is not cached. Ask =
+  `rm`/`sudo`/`git push`; Safe = read/build/test; the rest (incl. `curl`, unknown) = Unclear, the only tier
+  reaching the LLM.
+- **A teammate's Ask reaches the HUMAN, in the PARENT's composer** (never the parent AGENT): the child's loop is
+  gated exactly like a parent's (`startSessionLoop` → `WithPermissionGating`, `resume_routes.go`) on the SAME
+  server-global `permission.Manager` (`server.go:533`, one shared `loopRunner`), tagged with the CHILD's sessionID;
+  mode is inherited, not reset (`board.go` `Permission: parent.Permission`). **The mirror is SERVER-side**, so a
+  reload restores it too: `LoopRunner.ParentSessionOf` (`agent/loop.go:163`, wired to `server.parentSessionOf`,
+  `board.go:726`, which climbs `SpawnedBy` to the first non-teammate session, depth 32) makes `requestPermission`
+  publish a second `permission.requested` with `sessionId` = ROOT session, `ownerSessionId` = the child and
+  `teammate` = the child's handle (cancel mirrors `permission.replied` "cancelled"); the parent's
+  `GET /session/{id}/permission` appends `pendingTeammatePermissions` (BFS over the roster, any depth), and a reply
+  is delivered by permissionID alone yet clears EVERY queue holding it — the path session, the owner and the
+  owner's root, so answering from the child's page does not leave a stale prompt in the parent's composer
+  (`permission_routes.go`, `TestReplyingFromTheChildPageClearsTheParentQueue`). Client: the queue
+  still renders only the ACTIVE session's (`session.tsx` `pendingPermissions()`), so the chip in
+  `permission-prompt.tsx` marks a mirrored one and `respondPermission` posts to `entry.sessionId` (the owner).
+  **Teammate `ask_user` IS offered and MIRRORS into the parent's composer** (2026-10-23, the build-1e15 evening
+  run — it REVERSED the same-evening exclusion written at ~23:00, replaced 23:12-23:16; the on-disk `file_change`
+  ledger rows 22:53→23:19 tell the arc): `askUserOffered` (`internal/agent/loop.go`) needs only an interactive
+  loop + Questions manager — no teammate carve-out (`isTeammateSession` deleted). Mechanics = the permission
+  mirror's: `mirrorQuestion` (loop.go, right after `mirrorPermission`) republishes `question.requested` with
+  `SessionID`=parent + `OwnerSessionID`=owner and `Request.Teammate`=child handle (cancellation mirrors
+  `question.replied` "cancelled"); `GET /api/session/{id}/question` appends the SUBTREE's batches via BFS
+  `teammateChildrenOf` (shared with permission routes — a mid-tree session lists its children's questions, a
+  leaf only its own); the reply POST is addressed to the OWNER and three-way notifies path+owner+owner's root
+  (dedup by sessionId) so every queue clears from whichever page answered — pages BEYOND those three
+  that already GET-fetched the subtree keep a stale copy until their reply 404s or they reload (the identical
+  hole exists for the permission mirror, so it is parity, not a bug). Client: mirrored entries file under
+  the PARENT keyed `ownerSessionId || sessionId`, reply posted to that owner, teammate chip in
+  `ask-user-dialog.tsx`. `teammatePrompt` (`internal/server/board.go:455`) directs a blocked child to ASK rather
+  than end its turn early. The child blocks until the human answers (no timeout) — but the dialog is answerable
+  live, so no child-hang. Pins: `TestRunLoop_AskUserOfferedForTeammate` (the old absent-pin no longer exists),
+  `TestTeammateQuestionMirrorsToTheParentSession` (+cancellation/+silent-without-parent, `question_mirror_test.go`),
+  `TestParentSessionListsTeammateQuestions`, `TestReplyingAQuestionFromTheParentUnblocksTheTeammate`
+  (`question_routes_test.go`).
+- **Grants and mode are machine-wide** in `~/.ogcode/config.db` (migration 048); grain is the exact
+  command/path/skill, never `"*"`. **Trap**: `serve_lifecycle_test.go` does not set HOME, so `go test ./...`
+  advances the real config DB — isolate HOME and the working dir.
+
+### Agent memory files (pre-diet lines 219-222)
+
+- **Caps: none by default** (`OGCODE_MEMORY_MD_MAX_BYTES`/`OGCODE_AGENT_MD_MAX_BYTES`; `limit <= 0` is
+  uncapped) — a positive budget is head-biased, so curate instead. `staticSystemPrompt` carries **one constant
+  pointer per file, never content or a heading index**; turn digests carry tool names and the final response
+  only, so procedures go to `HOWTO.md`, not the scribe.
+
+### Prompt caching, read pressure & context windows (pre-diet lines 226-234)
+
+- Anthropic `cache_control` on the last tool def and first system block (min 1024 tokens, 4096 on Opus 4.5+,
+  5-min TTL); OpenAI automatic. **Entry [0] stays byte-identical** — the date rides `systemReminderPrompt`.
+- Read pressure: `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS` 40000; `OGCODE_RESEND_COST_WINDOW_MULTIPLE` 1.
+- **History is TURN-SCOPED**: only `sliceTurn(messages, findLastTextUserMessageIndex(...))` is sent, so a prior
+  turn's images never re-send; within a turn images repeat and ride the last-message cache breakpoint.
+- **The turn's prompt and images survive compaction, tool images do not** — name them in the summary or
+  re-read. **The ask_user Q&A must survive verbatim** on all three surfaces.
+- `OGCODE_COMPACT_CONTEXT`: unset/empty = ON, falsey = off. `maxCompactions = 2`, `compactionKeepRecent = 12`,
+  unknown window → 128000. **Learned windows** are kept only when `learned > promptTokens`.
+
+## 2026-10-25 — MEMORY.md diet: agent tools & prompt and MCP/search pre-diet text (from MEMORY.md diet)
+
+### Agent tools & prompt (pre-diet lines 238-298)
+
+- **`schedule` tool = one-shot agent timers** (2026-10-24): ops `create` (delaySeconds OR strictly-future RFC3339 `fireAt` + required `note`)/`list`/`cancel` in `internal/tool/schedule.go`; refusals are Result-shaped, not errors. Server store `internal/timer` (migration `068`, table `agent_timer`, statuses pending→due→delivered/cancelled; `ClaimDue` is one atomic `UPDATE … RETURNING` so two claimers can never double-claim). Ticker `pollReminders` (10s, `internal/server/reminder.go`) claims due rows and delivers via the board-report rails: `PushNotice` Cause `"reminder"` + `TrackBoardReport` with mark=`MarkTimerDelivered` (byte-identical Text in both). Idle session → row stays `due`, `CatchUpReminders` hook (LoopRunner field, build-gated beside `CatchUpTeammates`) delivers at the next turn start of THAT session — never starts a turn. If nobody holds the loop, delivery logs and leaves the row due (catch-up later). If the server restarts, pending timers survive in the DB and due-but-undelivered ones arrive via catch-up — at-least-once. **FIXED 2026-10-25 (was the schedule gap)**: `schedule` no longer rides `codingAgentTools` — it is on `buildAgentTools` (`internal/agent/agent.go`), offered only to BuildAgent; TaskAgent/subagent and every other non-build agent never see it (`canSchedule()` gate, `agent.ID == "build"`, beside `canUseBoard`/`canSpawnTeammate`). Pins: `TestScheduleIsOnlyTheBuildAgent` + `TestScheduleLeftCodingAgentToolsShared` (`internal/agent/schedule_gate_test.go`); `TestBuildVsTaskAgent_Framing` pins build = task + exactly `schedule`.
+- **`update_intent` rides the first work block** (2026-10-24, no longer standalone-first): state the plan
+  before the first meaningful exploration, and it MAY ride the first tool block alongside other calls; a
+  closing status update is welcome but NOT mandatory. `intent_gate.go` appends `intentGateReminder` ONCE PER
+  SESSION when no plan is set (process-lifetime registry keyed by sessionID, deleted by `markPlanSet`, so a
+  session that planned once re-arms for a later planless stint). Whole-list replace of 1–7 steps, persisted
+  in `session.intent` (migration 064); a closed plan never invites another call. **Descent gate**
+  (`descent_gate.go`): a `grep`/`glob` landing before any `codebase_map(subdir=…)`/`read`/`file_map` gets
+  `descentGateReminder`, once per turn, armed only when `indexedFiles > 0`; a root map is not a descent.
+- **Matcher**: ONE routing completion per block for a newly added step, **no cap**; scores skills + one entry
+  per MCP SERVER; failures silent. **A step with no `description`, or not pending/active, is never routed.**
+- **Chip identity is the step LABEL, not its description**; counts persist through `done`/`dropped` until the
+  step leaves the list or the next `RunLoop` clears. **Nothing closes the plan at turn end**, so
+  `updateIntentPrompt()`/`Description()`/the `status` schema demand STATUS movement, not a restatement
+  (`intent_test.go`). **Status moves land mid-turn** (2026-10-23): "a status move is a plan change" — active
+  before a step's first block, done after its last, not banked for the closing call; schema says "Move it as
+  the work moves", no longer "Move this on every call". Pins: the softened-contract wants in
+  `intent_test.go`, `update_intent_test.go` `TestUpdateIntentDescriptionMakesTheClosingOptional` +
+  `TestUpdateIntentDescriptionMayRideTheFirstBlock`, `intent_gate_test.go`
+  `TestIntentGateFiresOncePerSessionAcrossTurns` (the per-turn gate pin and
+  `TestUpdateIntentDescriptionRidesTheWork` were rewritten for the softened contract).
+- **The build agent has no upfront skill or MCP list** (`turnTools` withholds the `mcp_*` glob), and a bare
+  `skill` call is refused in a matcher session. **Rich output** is fenced declarative specs (mermaid,
+  plotly/rough, LaTeX, sandboxed HTML); `motion` declined; `## Decisions & why` only for real decisions.
+- **`read` takes `files=[{path,ranges,offset,limit}]`** (2026-10-24): exclusive with top-level `path`
+  (neither / both refused); each entry is exactly the single-file shape; per-file error sections and
+  `== path ==` headings relative to SessionDir; every entry rendered whole (title `N files`, base name for
+  one); bookmark stamped per CONTENT section only — never for a map, listing, binary or error — captured
+  before ReadFile; single-file output unchanged.
+  Pins `read_files_test.go`, `TestReadTool_FilesStampsEveryContentRead`,
+  `TestReadTool_FilesMapEntryDoesNotStamp`, `TestReadTool_FilesReturnsEveryFile`.
+- **`read` and `file_map` are UNCAPPED by design** (2026-10-25, the developer's call, reversing the day-old
+  `fitBody` cap): no byte/line/per-line limit, no shared call budget, and **no default window** — a bare read
+  returns the whole file and a range without `end_line` runs to EOF; `Truncated` now only means "a paging
+  window left lines unread" (the `Use offset=` footer). **A bare `limit` of ANY size is a window past the
+  map** (same-day fix: `rangeRequested` = ranges || offset>0 || limit>0 in `read.go`, so `limit: 250` on a
+  302-line file reads content, not the map; negative offset/limit are refused in `validateReadWindows`; the
+  map answers only a bare whole-file read). Pins the flip: `TestReadTool_BareLimitPagesContentPastTheThreshold`,
+  `TestReadTool_NegativeWindowArgsAreRefused`.
+  Both set **`Result.Uncapped`** (`json:"-"`, beside
+  `Truncated` in `tool.go`), and `capToolOutput` (`internal/agent/loop.go`) returns early on
+  `Truncated || Uncapped`, so the 50 KB loop backstop still bounds bash/grep/glob/MCP but never these two.
+  **The one bound left on a read is ogx's 4 MiB request body** (`ogxMaxRequestBytes`, `checkBodyFits` →
+  `ErrRequestTooLarge`, fatal): an oversized read now fails the request instead of being clipped, and
+  `read_pressure.go` (40000 tokens) is only advisory. Pins `TestReadTool_MapIsReturnedWhole`,
+  `TestReadTool_FilesReturnsEveryFile`, `TestReadTool_NoDefaultWindow`,
+  `TestCapToolOutputHonoursUncapped`. Kept: the map interception itself (`mapInsteadOfWholeFile`, the
+  200-line `rangedReadThreshold`) — it decides which answer you get, not how big it is.
+- **The prompts make `files=[...]` the primary read shape** (2026-10-25): the exploration diagram's read step,
+  build step 2, and the first sentence of `read`'s `Description()` all name ONE `files` call for several files;
+  the map section adds a **grep fast path** (a search that printed `path:line: text` has already located the
+  code — map only files whose shape is unknown, and a read answered with a map IS the map) and the **one read
+  call per wave** rule. Pins: `TestWorkflowLetsASearchStandInForTheMap`, `TestWorkflowSpendsOneReadCallPerWave`,
+  `TestProcessStepTwoNamesTheBatchedCalls`, `TestReadDescription_LeadsWithTheMultiFileShape`,
+  `TestFileMapDescription_BatchesAndSkipsANeedlessMap`.
+- **Tool contracts the schemas do not show**: a blank ask_user answer to a content question is unanswered;
+  **pathlock** forbids write-vs-edit on one file but allows batched edits; **codemap** is one level per call
+  with **no size threshold** (the old <10-file expansion was deleted — `project_index.go`), `dirPrefixFilter` needs `ESCAPE '\'`, **HCL is outlineOnly**, and a Swift `as?` + newline
+  + `??` misparses.
+- **Images** are stripped for non-vision models (`IsImageRejection` is resumable); MCP images go to a temp
+  file. **Skills** `requires:` env names are filled by `skills.env` via `setIfUnset`.
+
+### MCP & search (pre-diet lines 302-310)
+
+- **`OGCODE_SEARCH_ENABLED=false` removes `web_search`, `fetch_page` AND `deep_search`**; to suppress only
+  deep_search, add a prompt clause.
+- **MCP**: transport is INFERRED (`Command` ⇒ stdio, `URL` ⇒ streamable-http; `"transport"` overrides) — **no
+  `type` key**. Tool ids `mcp_<server>/<name>`; connect is lazy. A URL server with no `headers` gets OAuth
+  (`~/.ogcode/mcp-tokens/`); `headers` means static bearer. Penpot's `…/mcp/stream` needs streamable-http.
+- **Search** results carry a `Provider` stamp set before the TTL cache. Config is `/settings/search`, a
+  FULL-STRUCT replace; `""` = HTTP first, `safari`/`chrome` = browser first (`chrome` on macOS means Safari).
+  macOS prefers headless Chromium with a Safari fallback; Windows Chrome/Edge is unverified — check with
+  `GOOS=windows CGO_ENABLED=0 go build ./internal/search/`.
+
+## 2026-10-25 — MEMORY.md diet: data/migrations/transcript, file change gate, web UI, theme and preview pre-diet text (from MEMORY.md diet)
+
+### Data, migrations & transcript (pre-diet lines 314-330)
+
+- **Migrations**: goose keys by VERSION NUMBER only, so a number taken by a branch that never landed silently
+  SKIPS your file. Check `git log --all -- internal/db/0NN*` AND the real `goose_db_version`. Gaps resolved
+  (2026-10-23): 019–021 = callgraph migrations (landed then removed, 65fb5d6); 031 was first `posthog_config`
+  (removed 8fa5af3) before model_collection reused it; 057 = You.com search provider that never landed (its branch
+  briefly renumbered itself to 059, also unlanded). Next free number = next integer past the highest file.
+- **The transcript is append-only**; the only bound is `capToolOutput` (50 KB; skipped by `Result.Truncated`
+  and `Result.Uncapped`);
+  the only deletes are `Store.Delete`/`DeleteMessage`. Compaction changes what is re-sent, never what is stored.
+  **Nothing prunes and nothing vacuums**: `db.go` sets only WAL/foreign_keys/busy_timeout — no `auto_vacuum`,
+  no `VACUUM` anywhere in the repo — so deleting sessions only fills the freelist and the file never shrinks;
+  reclaiming needs an explicit `VACUUM` (~DB size in temp space). Measured shape: `part` 92% of the project DB,
+  `build` sessions 89% of that (1.3 MB/session vs 34 KB for an `index` session); `file_change` 0.07%. Details in `HISTORY.md`.
+- **FK 787 mid-turn ⇒ another writer deleted the session**: `handleDeleteSession` cancels and waits up to 5s
+  before `store.Delete`; `Store.Get` returns `(nil, nil)`; `classifyInterruption` maps it and
+  `ErrRequestTooLarge` to `InterruptFatal`.
+- **Session DB**: `.ogcode/ogcode.db` / `~/.ogcode/config.db`; `message` is metadata, content in `part.data`.
+  **`GetMessages` must return `Parts` as `[]`**; pagination is `?before=<id>` + `X-Has-Older` at 300 rows.
+
+### File change gate (pre-diet lines 334-368)
+
+- **Migration 066 + `internal/filechange`**: a `file_change` history row per `write`/`edit`/`bash` plus a
+  per-(session,file) bookmark (`seen` revision); history is ring-capped at `RingPerFile` (50) per file; read API
+  `GET /api/file-changes` (`file_change_routes.go`, 503 when `s.fileChanges == nil`) — **no web client calls it yet** (`plans/CONFLICT_FREE_MUTATIONS_PLAN.md:319` left the panel out of v1), so the stored `diff` has one live consumer: the gate's own refusal after a restart (`log.go:287` `covered` false ⇒ `History`), the ring being memory-only.
+- **The gate refuses in `write`/`edit`** (`internal/tool/staleness.go` `staleRefusal`): a file changed by
+  ANOTHER session since this session last read it refuses, and the refusal is a `Result` (not an error) that
+  shows the diff — same shape as the board-claim refusal. `Stale` drops the caller's own changes and refuses
+  nothing when `Seen < 0` (never read). **`Seen` returns -1, not 0**, for never-read — 0 is a real bookmark
+  (a file seeded outside the tools is read at revision 0), pinned by `TestBookmarkAtRevisionZeroStillRefuses`.
+  **The ring explains nothing when it is empty** (a restart): `covered := len(ring) > 0 && ring[0].Rev <= seen+1`,
+  so an empty ring always falls through to the `History` query — a bookmark of 0 was otherwise counted as
+  `dropped` and refused every previously-read file (`TestRestartRefusesABookmarkOfRevisionZero`).
+- **`bash` is COVERED, by fingerprint not by parsing** (`internal/tool/bash_observe.go` `observeShell`, called at
+  the end of `BashTool.Execute`): after every command it stats each file the log already tracks
+  (`Log.Files()`/`Fingerprint{Size,MTime}`/`FingerprintOf`) and records a change (tool `bash`, note = the
+  command, `DiffOmitted`) for any that moved — a deletion included, since a missing file is a zero fingerprint.
+  **It records the change UNATTRIBUTED (no `Session`), so no bookmark moves** and the session that ran the
+  command is refused by its own shell until it re-reads: size+mtime cannot say whether this command, another
+  session or an unseen process wrote the bytes, and crediting the caller would launder exactly the foreign change
+  it must be refused by (`bash_gate_test.go` `TestOwnShellChangeRefusesUntilReRead`,
+  `TestUnrelatedCommandDoesNotLaunderAForeignChange`). Nothing auto-claims, and an **untracked** file is skipped
+  (no bookmark ⇒ it can stale nobody).
+- **`description` is required on `write`/`edit` now** — it is the history note; a bash row's note is the command.
+- **A nil `FileLog` is a no-op** (`filechange.NewLog(ctx, nil)` still gates from memory), so tests and other
+  embedders need not wire the store; `observeShell` too.
+- **Remaining blind spots**: MCP tools, `latex_to_pdf`'s `.tex` write, and a change made outside the agent
+  (an `go test` that rewrites fixtures) until the next `bash` call stats it. `file_map` is NOT a read (a summary
+  would suppress the diff exactly when it is wanted). A **map-only read does NOT stamp the bookmark** — the
+  map-vs-content decision runs ABOVE `log.Read` (`read.go`; pin `TestMapOnlyReadDoesNotCertifyContent`) — but a
+  map-only read that is the gate's first contact leaves the file untracked (no fingerprint), so bash observation
+  records nothing for it until a content read.
+- **It FAILS OPEN when the history row is missing**: with no change to show there is no catch-up to explain a
+  refusal, so the write proceeds (warn-logged).
+- **Cross-process staleness appears only after a restart**: bookmarks and fingerprints are in-process memory,
+  not re-read per mutation — `serve` + a separate `run` on one dir can each miss the other's changes while both
+  are up.
+
+### Web UI: composer, sidebar & navigation (pre-diet lines 372-380)
+
+- **Composer drafts/attachments are per session**; **the running pause glyph IS the stop control**; the `+`
+  attach menu renders in a `Portal`. **The plan-mode flag gates only the warning banner**; mode comes from
+  `GET /api/mode`. **The session-row dot reports task status** (`session.status`), not the provider, and a
+  hand-seeded session row must set `permission` or `Store.List` 500s. **`⌘K` is guarded on `offsetParent`**
+  (the shell renders twice).
+- **Virtualization and scroll memory** in `message-list.tsx`/`scroll-memory.ts`: pad-based windowing keyed by
+  message id, rows estimated from running per-role totals over all rows measured so far (averaging the mounted
+  window remounted ~1,000×/s); the id-change effect must call `restore()`, and ResizeObserver must not
+  `holdAnchor` when `anchoredByList`.
+
+### Theme, contrast & light mode (pre-diet lines 384-390)
+
+- **Light mode is server-global**: `GET/POST /api/appearance` off **`s.globalDB`** — a throwaway rig flips the
+  USER's machine-wide mode, so save before an audit and restore after. `web/index.html` pre-paints from
+  `localStorage['ogcode-theme-mode']`. **Settings General is `/settings`.**
+- **Muted-text floor: 4.5:1 on the LIGHTEST surface the token can sit on** (`--bg-hover`), not the darkest;
+  every muted/label/zinc token is calibrated to it. Exact values: `HISTORY.md`.
+- **Default accent is brand orange `#ff5e1f`**; **accent ink is its own per-mode token**, never `--accent`.
+  **`onPrimary` is `labelFor`** (max of the minimum ratio over `--accent` AND `--accent-hover`), recomputed on
+
+### Preview, public serving & device panel (pre-diet lines 395-398)
+
+- **The Preview page lists only announced ports** (`<port>.<PreviewDomain()>`); `recordAnnouncedPorts` reads
+  **PartText only** at turn end for the build agent; manually `?ports=`. `previewHostDispatch` strips
+  `X-Frame-Options` + CSP `frame-ancestors` or a frame-guarded app renders blank.
+- `/public` serves `<data-dir>/public` with **HEAD mapped explicitly**. **scrcpy** deep links need
+
+## 2026-10-25 — MEMORY.md diet: browser takeover pre-diet text, native-messaging block excluded (from MEMORY.md diet)
+
+The protected native-messaging block (pre-diet lines 482-497) was left untouched in MEMORY.md, so it is not archived here — it is unchanged in both places.
+
+### Browser takeover (pre-diet lines 403-480)
+
+- **Option B, shipped 2026-10-25** (developer chose built-in skills, not MCP): the agent drives the user's
+  real logged-in Chrome via a first-party MV3 extension in `browser-extension/` (vanilla JS, no build)
+  paired over a WS bridge to serve. Pieces: `internal/browser/bridge.go` (Dispatch/pending-map over
+  coder/websocket), `internal/tool/browser.go` (11 tools: status/navigate/snapshot/content/click/type/key/
+  scroll/screenshot + network/console), `internal/server/browser_routes.go`, embedded skill `browser-takeover`
+  (`internal/skill/embedded.go`). Tools are registered for every turn like board (unpaired calls return
+  Result-shaped pairing refusals, never errors); screenshot rides `Result.Image` png and is refused when
+  `!ModelSupportsImages`. Ops budget 30s (60s navigate/screenshot).
+- **Endpoints**: `GET /api/browser/pair` → `{token, url}` (Host echoed; wss under TLS), POST rotates;
+  `GET /api/browser/status` always 200 (zero Status when no bridge); `GET /api/browser/bridge?token=…`
+  accepts only loopback + chrome-extension origin + token (401/403/503 otherwise).
+- **coder/websocket origin trap**: OriginPatterns match the BARE origin host unless the pattern contains
+  `://` — use `"chrome-extension://*"`, not `"chrome-extension:*"` (a real extension 403s on the latter).
+- **Re-pair fails every pending op with ErrNotConnected**: `failPending` ships the sentinel as a plain
+  string, so `Dispatch` maps `res.Err == ErrNotConnected.Error()` back to the sentinel (errors.Is must
+  keep holding); extension-op errors keep the `"browser: %s"` text path.
+- **Hello version is a bare JSON NUMBER** (`version: 1`, not `"1"`): `helloFrame.Version` is `any` +
+  `versionString()` (strconv.FormatFloat) — a `string` field unmarshal-errors and hello drops silently,
+  leaving the extension stuck on "connecting" with no error on either side.
+- **FIXED 2026-10-25 — the 32 KiB websocket read limit killed every screenshot/snapshot**: coder/websocket
+  defaults read to 32769 bytes; a snapshot/screenshot REPLY frame (base64 PNG, DOM dump) is hundreds of KB, so
+  `message too big: read limited at 32769 bytes` killed the conn (the extension re-dials silently in ~1.3s
+  bursts — one hour saw 119 "paired" logs vs 15 logged deaths, overwhelmingly client-initiated close/swap, no
+  server WARN — and failPending drops every in-flight op). Fix: const `maxResultFrameBytes = 4 << 20` +
+  `conn.SetReadLimit(maxResultFrameBytes)` in `internal/browser/bridge.go` `Serve` (line 237) before the
+  read loop; pin `TestBridgeAcceptsAResultFarPastTheOldDefaultLimit` in `internal/browser/bridge_test.go`.
+- **navigate `newTab` opens an auto-granted tab** (2026-10-25, the open-without-control gap): exemption is
+  navigate + newTab + NO tab id — `grantTab` adds to `grantedIds`, persists sorted to `grantedTabs`,
+  revocable in the panel (side panel needs nothing, listens to storage.onChanged); `newTab` PLUS a tab id
+  means "act on that tab", gate still applies. Server `run()` defaults an omitted `tab` to the last Granted
+  tab in the hello inventory (`lastGrantedTab`), refuses Result-shaped with the panel remedy when tabs exist
+  but none granted, passes nil through on an empty inventory (no hello yet). Pins: browser_test.go
+  (TestBrowserNavigateNewTabNeedsNoTabAtAll + 3 more).
+- **Watch capture: `browser_network` + `browser_console`** (2026-10-25, same-day followup): the FIRST op on
+  a GRANTED tab attaches a PERSISTENT chrome.debugger session (`ensureWatch`: Network/Runtime/Log.enable,
+  never detached while watched — the debug banner stays up the whole time) and fills per-tab in-memory
+  rings — network 300, console 300, evict-oldest, emptied by an MV3 service-worker restart (re-arms on the
+  next op). `browser_network` lists last-N (default 100) with a `url` substring filter; `requestId` fetches
+  the body (cap 65536, `bodyTruncated`, `base64Encoded`); `browser_console` filters level/source exactly.
+  Watch-drop hooks: ungrant rides storage.onChanged (no runtime message exists), tab close, and
+  debugger onDetach (user Cancels the banner → next op re-attaches fresh). **CDP timestamps are epoch
+  SECONDS** (`cdpIso` ×1000); `Log.entryAdded`/`startedAt` carry no CDP ts → wall-clock — don't unify.
+  Pins: browser_test.go TestNewBrowserToolsElevenUniqueIDs + 7 capture tests; extension logic pinned only
+  by a throwaway vm harness — **VERIFIED LIVE 2026-10-25 against real Chrome** (hello, grant + watch banner all
+  served; a probe conn was swap-kicked "replaced by a new pairing" in 1.2 s by the real extension's retry, so
+  the loop does dial). The panel's "Reconnecting — connection lost — retrying in Ns" is `scheduleReconnect`'s
+  backoff text (`background.js:249`, panel renders it at `sidepanel.js:160`); it is NORMAL for one or two
+  rounds after any drop (extension reload, re-pair press rewrites origin/token storage and closes the live
+  socket by design). If it sits unchanged on the screen: the service worker died mid-retry (a killed SW sends
+  no more statuses) — reopen the side panel, whose `get-status` wakes it, and it self-heals + re-syncs.
+**FIXED 2026-10-25 — a server restart no longer breaks pairing**: the pair token is persisted at
+  `.ogcode/browser-pair-token` (0600, in the project dir's data dir) — `server.go` boots the bridge with
+  `browser.NewWithToken(loadBrowserPairToken(s.dir))` and re-saves after every rotate (`RotateToken`); the
+  extension's reconnect re-dials the SAME stored token, so it now reconnects automatically across restarts.
+  Empty/malformed file ⇒ fresh mint + save (pinned by
+  `TestNewWithTokenPinsThePersistedToken`, `TestBrowserPairTokenSurvivesARestart`,
+  `TestBrowserPairRotatePersistsTheToken`). HISTORICAL behaviour (now gone): the token was in-memory only (`bridge.go`
+  `New()` minted one per boot) — **Re-pair = paste the NEW token, then Connect** (press the button once first —
+  "reconnecting" shows as Disconnect, pressing it stops the loop; sidepanel.js:73-97). The agent can hand the user the
+  token: `GET /api/browser/pair` returns the boot's token WITHOUT rotating; POST rotates (and now persists).
+- **FIXED 2026-10-25 — registered but never offered**: browser tools are registered in `serve()` (server.go
+  ~436) but the LOOP's per-turn allowlist had no append, so every op refused `tool %q is not available to the
+  build agent` (loop.go executeTool guard). Fix: `canControlBrowser()` (agent.go, build-only, mirrors
+  canSchedule) + `browserOffered := agent.canControlBrowser() && lr.Tools.Get("browser_status") != nil`
+  appending `browser_*` (ForAgent expands any glob; new browser ops ride the same seam; CLI-safe — its
+  registry has no bridge so the Get check fails there). Pin: `internal/agent/browser_gate_test.go`.
+- **Snapshot on a big DOM and screenshot KILL the SW, not pairing — don't re-pair on "extension not paired"** (2026-10-25, live-verified with a 100ms /api/browser/status sampler): a heavy page op drops the ws ~0.1–0.6 s after dispatch; the extension's own reconnect (BACKOFF_MIN_MS=1000, background.js:19) restores it ~1.1 s later, and `swapConn` → `failPending(ErrNotConnected)` (bridge.go:225,229,337-343) fails the in-flight op — the tool wraps that as the misleading `unpaired()` refusal (tool/browser.go) though pairing was fine. Small-page snapshot, content, navigate, scroll, network/console read fine; a legit op error ("Cannot access a chrome:// URL") does NOT drop the conn — only heavy ops do. Suspect the in-page `Runtime.evaluate` snapshot walk (ELEMENT_CAP=300) / `Page.captureScreenshot` suspending the SW (unproven mechanism). Wart: `dropConn` (bridge.go:269-283) comments it fails in-flight ops but doesn't call failPending. Fix candidates, not implemented: screenshot via `chrome.tabs.captureVisibleTab`; bridge retry-once on the sentinel or failPending in dropConn. Evidence + numbers: `HISTORY.md` 2026-10-25.
+- **CWS submission kit (2026-10-25)**: `browser-extension/` prepped for the Chrome Web Store — icons
+  `browser-extension/icons/icon{16,48,128}.png` (from `docs/media/logo.png`), manifest got `icons` +
+  `action.default_icon`; listing copy + permission justifications + pre-upload checklist in
+  `browser-extension/STORE_LISTING.md`; privacy page `docs-site/src/content/docs/privacy.md` (nav slug
+  `/privacy`, public URL `https://ogcode.in/docs/privacy/` — deploy via docs/DEPLOY.md before the store
+  form). Zip: `make extension-zip` → `ogweb-<ver>.zip`, manifest at ZIP ROOT (zip from inside the dir),
+  gitignored `/ogweb-*.zip`. **`host_permissions: ["<all_urls>"]` was DROPPED (2026-10-25) — nothing
+  uses it** (no content scripts/scripting/cross-origin fetch; WS dials the user-entered origin;
+  chrome.debugger needs only `debugger`). NEVER re-add <all_urls>; the drop is VERIFIED-BY-INSPECTION
+  only until a live reload+op pass (navigate/snapshot/screenshot on a granted tab). chrome.debugger
+  draws extra CWS review; bump manifest version before every re-upload.
+
+## 2026-10-25 — MEMORY.md diet: build loop, indexing, controlplane, infrastructure and board pre-diet text (from MEMORY.md diet)
+
+### Build & dev loop (pre-diet lines 45-52)
+
+- `make build` = `build-web` (npm build → `web/dist`) then `build-server` (`CGO_ENABLED=1 go build -o ./ogcode .`;
+  repo-root `main.go`). `make dev` :9595; `make dev-web` Vite :5173.
+- **`CGO_ENABLED=1` mandatory** (cgo Swift grammar); `make test` omits it. OGX-signed build:
+  `make build-server OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)` — else the gateway 401s.
+- `ogcode version` (no `--version`); dirty builds print `…-dirty`; no linter, gofmt files touched.
+- **`ogcode run --max-turns` defaults to `0` = no limit** (→ `MaxStepsUncapped = -1` → `math.MaxInt`). **A
+  literal `MaxSteps == 0` still means the 1000-step default** — a zero-value `LoopRunner` depends on it. The
+  server loop (10000, 2 auto-resumes) and `ogcode index` (50) stay capped (`step_budget_test.go`).
+
+### Indexing & the document index (pre-diet lines 501-506)
+
+- Auto-index is gated by `OGCODE_AUTO_INDEX_MAX_FILES` (500, env-only) + consent (migration 061); **manual
+  builds are never gated**. The post-turn guard is `agentID == "build"` **and** `Directory == ProjectID`;
+  `OGCODE_AUTO_INDEX` is the kill switch. It must run on the turn's resolved model AND provider.
+- **Labels are LLM-made, not embeddings**: `IndexAgent` (one tool, `submit_doc_index`) labels a page from a
+  local keyword corpus (`text.go`/`pdf.go`); there is no vector store anywhere in `internal/indexer`.
+- **`.ogcode/` is skipped unconditionally**; **39** default excludes match directory names and basenames
+
+### Controlplane, remote workers & Incus (pre-diet lines 511-515)
+
+- **Nested module** `controlplane/`: one in-process `server.Server` per worktree on the worker daemon.
+  **`HostSession` must `store.Get` first** (`Store.Create` violates UNIQUE on re-delivery); routes key
+  `<workerID>-<route>`, lookup **exact whole-label**. **bbolt**: a byte-truncated file SEGFAULTS at `bolt.Open`
+  (`checkDBFile` validates the meta page), a restore must set `status=offline` + `LastSeen=boot time` or
+  `ReapStale` kills every worker, and it is **single-writer**. Workers, accounts, Incus: `HISTORY.md`.
+
+### Infrastructure, feature flags & telemetry (pre-diet lines 519-531)
+
+- **Homepage is `docs/index.html`** (hand-written; nav `.nav-menu`, mobile `#navSheet` — add links to both).
+  **Public copy carries NO em dashes**; a `: ` in an unquoted YAML frontmatter `description:` breaks the
+  `docs-site` build — quote it. Docs nav lives in **`docs-site/src/lib/nav.ts`**, deploy in `docs/DEPLOY.md`,
+  and `ogcode serve` binds all interfaces with **no auth** (a proxy MUST NOT buffer). Brand button `#d1440c`.
+- **Cloudflare**: `ogx`/`oglab` A → `162.19.81.108`; **origin nginx listens only on 40009**, so those vhosts
+  need `origin.port=40009`. Box access is password-only (`sshpass … -p 20009`); edit `sites-available`, then
+  `nginx -t && systemctl reload`.
+- **PostHog `497411`**: **never send content**; headless browsers drop every event (patch UA + `webdriver`).
+  `ogcode_turn_resources` is one event per turn with `distinct_id` = `s.installID`; logs need
+  `OGCODE_POSTHOG_LOGS`. **Install-id**: `VAR=x cmd | sh` does not pass `VAR` — `export OGCODE_IID='…'; curl …
+  | sh`.
+- **Feature flags**: one `/decide` per refresh, fail-safe OFF. Notes also drops its prompt section;
+  device-panel 404s routes and proxy; plan-mode gates only the banner. Serve tests use `stubFeatureFlagsOn(t)`.
+
+### Agent board & teammates (pre-diet lines 535-648)
+
+- **The board IS the agent tree, not a message log** (migration `067_agent_tree.sql`): `board_agent` rows carry
+  `spawned_by` (the tree edge), `status`, `notified_at`; **`board_post` is dropped**. `internal/board` (store +
+  migrations) behind `internal/server/board.go` + `board_routes.go`; tools are `internal/tool/board.go` (**one op,
+  `roster`** → `treeText`) and `teammate.go` (spawn/stop). Routes: `GET /api/board/roster` →
+  `{"agents":[…]}` and `POST /api/board/teammate/{handle}/stop`. `plans/MULTI_AGENT_COMMS_PLAN.md` and
+  `plans/BOARD_PUSH_PLAN.md` are HISTORICAL (posts, push pump, claims — all deleted).
+- **The header drawer is GONE — the board now has a dedicated Agents page** (2026-10-25, the developer's
+  call): the session header carries no drawer node; instead `web/src/pages/agents.tsx` at route `/agents`
+  (registered before `/preview` in app.tsx), nav label "Agents" from session-sidebar + plan-sidebar (nav
+  button + rail icon button, active = `startsWith('/agents')`). `board-drawer.tsx` DELETED;
+  `board-drawer-row.tsx` KEPT and reused by the page, which ported the drawer's whole logic (SSE 150ms
+  debounce via `server.lastEvent()`, 15s poll, filter, showFinished, collapse, two-press stop).
+- The former drawer was a filterable, collapsible tree (2026-10-24, now the Agents page's tree card): filter +
+  `Finished N` tick toggle + collapsed set over `board-drawer-row.tsx` (indent rails, elbow, `you` pill,
+  `animate-pulse-ring` on a running dot, two-step Stop), with the pure logic in `web/src/lib/board-tree.ts`
+  (`buildTree`, `decorateRows`, `matchesQuery`, `rosterSummary`). **Header chips must stay DISJOINT:
+  `running = live − idle`, because `live` ⊃ `idle`** — "live · idle · finished" read 42 for a 28-agent roster.
+  Rows show the session **title + model joined per row** in `board_routes.go` (`boardRosterRow` embeds
+  `board.Handle`, `s.store.Get` per row guarded, `omitempty` so a deleted session serializes as before; flat
+  JSON — a board row has no title of its own).
+- **An op-less teammate call self-heals**: ogx flash models (glm-5.3-flash, adhyay 2026-10-23) dropped the
+  required `op` on spawn calls → 8-retry loops; `teammate` now infers `spawn` when `prompt` is present
+  (output says `op omitted — treated as "spawn"`) and the empty-op refusal is shape-aware —
+  `handles`/`timeout`→`wait`, `handle`→`stop`/`status`, `name`→`spawn` (`missingOpHint`,
+  `internal/tool/teammate.go`), pinned by `internal/tool/teammate_test.go`.
+- **A child reports back by FINISHING; there is no mid-task channel in either direction** — a teammate cannot ask
+  its parent, a parent cannot ask a running child. Child loop end → `status=done` + `updated_at`; spawner
+  RUNNING gets a turn-scoped `LoopControl` notice carrying the child's last assistant message **whole — no byte
+  cap** (the old 4 KB `teammateReportBytes` cut is gone; `DrainNotices`' `maxNoticeBytes` 2 KB only bounds a
+  BATCH, and an oversized notice is always taken alone, so its text is never clipped) + `/session/<id>`) then
+  `MarkReported`; spawner IDLE keeps `notified_at < updated_at` and `CatchUpTeammates`
+  (`server/board.go:263`, hooked in `loop.go:384`) hands it over at the parent's next turn start. **Nothing starts
+  a turn on its own** (developer's explicit choice); `CatchUpBoard`/`AckBoard`/`DeliverDirected` are gone.
+  Pin: `TestUnreportedUntilMarkedReported`, `TestCatchUpTeammatesReportsAnIdleSpawnerOnce`.
+- **A terminal status is claimed BEFORE the loop is cancelled** (`board.Store.SetStatusUnlessTerminal`, a
+  `WHERE status NOT IN (done,stopped,stale)` UPDATE): `stopTeammate`/`stopTeammatesOf` claim first and skip
+  `cancelLoop` when the claim misses, `leaveBoard` returns early the same way. Cancelling first let a finishing
+  child write `done` over the `stopped`, and its `updated_at` bump re-delivered the old report as new.
+  Pin: `TestStopTeammateIsNotRewrittenDone`, `TestStopTeammateOfAFinishedTeammateChangesNothing`.
+- **That pending report is durable, delivery is not automatic**: `notified_at`/`spawned_by` are in the project
+  DB's `board_agent` (067) and `Register`'s ON CONFLICT leaves `notified_at` alone, so a restart neither loses
+  nor re-delivers a report (reopen probe, 2026-10-23). Startup `reconcileBoard` (`server.go:691`) demotes a
+  teammate left `running` to `stale` — terminal, so it is delivered as a stale report; nothing starts the
+  parent's turn, so it waits for the user. **Marking is at DISPATCH** (2026-10-24, was at drain, was at push
+  before that): RunLoop takes notices into loop-local `wireFresh`/`wireDigest` (loop.go ~1163) and stamps via
+  `lr.BoardNoticesDelivered` ONLY inside the dispatch-success block (~1356); the drain sites stamp nothing, and
+  the pre-stream gap restart calls the new `lc.RestoreNotices(wireFresh)` (`loop_control.go:301`, restores to the
+  FRONT of `unshown`, idempotent, leaves `deliveredNotices` alone so a digest never shadows restored full text) —
+  the old path re-shipped a one-line "already given above" digest pointing at text no request carried, with the
+  row already stamped. `catchUpTeammates` tracks its pushes the same way (`TrackBoardReport` + Mark closure;
+  nil-runner fallback stamps at push); a turn or provider-retry exhaustion that dies before the first dispatch
+  leaves rows unreported → next-turn catch-up. Crashes re-deliver = at-least-once (accepted); narrow accepted
+  window: a stream cancelled between take and dispatch doesn't stamp. Pins:
+  `TestLoopBoardReportsStampOnlyAtDispatch`, `TestRunLoop_NoticeGapRestartRidesTheNextRequestFull`,
+  `TestRestoreNoticesRequeuesFreshWithoutDigestLie`, `TestTeammateReportUndrainedAtTurnEndStillDelivers`
+  (rewritten to drain by hand), `TestLoopBoardNoticesDeliveredMarkTheReport`, `TestLoopBoardReportsDieWithTheirTurn`.
+  **Delivered notices re-inject as HEADLINE digests after their first step** (2026-10-24):
+  `TakeNoticesForInjection` (`internal/agent/loop_control.go`) returns fresh notices full-text once
+  (sourced from `unshown[]`, filled by `DrainNotices`) and everything already shown as
+  `Notice.Headline()` under `noticesDigestLabel`; re-shipping the full report every step made a flash
+  model re-acknowledge it and narrate re-checks at every step. Pin:
+  `TestLoopControl_AReportReadsFullOnceThenDigests`. The interrupt path
+  (`InterruptForNotice`/`ArmNoticeInterrupt`/`interruptArmed`) was DELETED as dead code — reports drain per-step,
+  the stream interrupt never fired.
+- **Handles mint FRESH; stops REPORT; waits RESPECT the turn's cancel** (2026-10-24, the 7-bug sweep):
+  `board.RegisterFresh` = insert-once (`ErrHandleTaken`; UNIQUE-violation mapped; `Register`'s upsert untouched) +
+  server `mintFreeHandle(ctx, reg, attempts, newName)` (board.go:103) rolls a 4-hex suffix up to
+  `boardHandleAttempts`=8 — wired into `joinBoard`, `spawnTeammate`'s random path (claims the handle BEFORE the
+  child session is created, so the title built from it stays truthful), `spawnBackgroundTask`; typed names keep
+  the friendly Get pre-check then go through RegisterFresh. `stopTeammate` reports "was stopped" via
+  `reportTeammateDone` (board.go:935, guarded on `SpawnedBy`/`SessionID`) — drawer and tool stops both land
+  there; `stopTeammatesOf` (abort/delete cascade) stays report-free and its rows ride the next catch-up.
+  `waitTeammate` breaks its 250ms slice on `ctx.Err()==context.Canceled` (board.go:791 — abort/superseding
+  prompt/delete) but NOT on `DeadlineExceeded` (the op bound; long waits keep working). Supersede via
+  `startSessionLoop` does NOT stop teammates — the cascade lives only in `handleAbortSession`/delete/hosted
+  cancelLoop; pinned `TestStartSessionLoopSupersedeKeepsTeammates`, `TestMintFreeHandleRetriesPastCollisions`,
+  `TestWaitTeammateReturnsPromptlyWhenTheTurnIsCancelled`, store pins `TestRegisterFresh…`/`TestRegisterStillUpsertsARejoin`.
+- **Build-only by AGENT ID at every seam**, not by tool absence: `codingAgentTools` is shared with `TaskAgent`, so
+  `canUseBoard`/`canSpawnTeammate` (`agent/agent.go:496,505`), `joinBoard` and the `CatchUpTeammates` hook all
+  test `agentID == "build"`; the prompt section sits in the `if !task` branch of `codingAgentSystem`. Coverage:
+  `internal/server/board_test.go` + `board_routes_test.go` and `TestStartSessionLoopJoinsAnEmptyAgentAsBuild`.
+- **The prompt casts the build agent as an ORCHESTRATOR** (`boardPrompt`, `agent/agent.go`): "You orchestrate;
+  teammates do the work" — decide the fan-out before the first read, hand streams out, and spend its own time on
+  the next decision, shared files, verification and user questions (watching with `teammate wait`, never polling
+  roster/status). Solo only for strict sequence, one shared file, an edit too small to brief, or research (`task`).
+  **Parallel-first default stated outright** (2026-10-23, `TestBoardPromptPrefersTheSplit`): side-by-side streams
+  are "the default, not an upgrade", spawned in one tool block **right after `update_intent` states the plan**
+  (the plan goes first — before the fan-out — but MAY ride the first tool block, 2026-10-24
+  contract; the standalone-first mandate is itself on the pins' STALE list), one teammate per independent stream, and the fan-out's only cap is
+  verifiability, not cost.
+  Two currencies, wall-clock (one teammate per independent file/package) and tokens (a child's greps/reads are
+  billed in its own window, and the parent re-sends less history every step). Two rails live ONLY in the prompt:
+  **do not end the turn while a spawned teammate is still working** (nothing starts the parent's turn for it) and
+  **a teammate briefed to implement one stream implements it** (no recursive delegation). The rail names its two
+  exits: `teammate stop <handle>` (wrong/duplicated/stuck brief; cascades to what it spawned) and **parking** a
+  legitimately long child when the reply no longer depends on it — end the turn, nothing is cancelled, the
+  finished report arrives via CatchUpTeammates at the next turn's start; the pins' wording also calls short-wait
+  chaining "polling with a timer". Process step 1
+  (interactive only) points at it. `TestBoardPromptPrefersTheSplit` pins the wording, decision-before-mechanics
+  order, and that no non-build agent prompt mentions `teammate`.
+- **`startSessionLoop` normalizes `agentName == ""` → `"build"`**: the web client never sends `agent`, and
+  `joinBoard` refuses any name but `"build"`, so without it NO interactive session joins the roster
+  (`internal/server/resume_routes.go`).
+- **`board.Store.Get` returns the ZERO Handle with a nil error** when nobody holds the name — check
+  `h.Handle == ""` yourself before acting on it.
+- **Rails**: **no spawn depth limit, no live-teammate cap** — any `build` session spawns, a teammate
+  included (`TestSpawnTeammateAllowsNestingAndCapsNothing` asserts roster rows, never `liveTeammates`, which
+  drops as children exit to `done`). **Steps are uncapped** — `stepBudgetFor` returns
+  `agent.MaxStepsUncapped` (`-1` → `hardMax = math.MaxInt` via `overrideStepBudgets`, `internal/agent/loop.go`),
+  so the old 300/0-auto-resume rail is gone; spawn = `Ask`; `cancelLoop` cascades down every
+  nesting level. Claims (`Claim`/`HeldBy`/`claimHolder`) and the post budget (8 KB, 20/turn) died with the posts:
+  **conflict-freedom comes from the file change gate, not the board**.
+- **Task tool async (`"background": true`)**: `spawnBackgroundTask` (`server/board.go`) registers a READ-ONLY board KindTask child — child session type `"subagent"`, Role `subagent`, Title `Task: …`, prompt `backgroundTaskPrompt`, model/permission inherited — and returns a `task-*` handle + `/session/…` URL at once; sync `task` is unchanged and default (CLI `run.go` registers no Spawn → background refuses). Delivery reuses the teammate-report pipeline: `leaveBoard` → "Background task" notice to a RUNNING parent, `CatchUpTeammates` otherwise; `teammate wait <handle>` blocks early; `stopTeammate`/board route/drawer accept KindTask; budget = sync parity (`stepBudgetFor` KindTask → `agent.DefaultMaxSteps`, 0 resumes).
+- **Task children are ungated on purpose and NOT permission-mirrored**: `resume_routes` skips `WithPermissionGating` for `agentName == "subagent"`; the teammate BFS in permission_routes and `ParentSessionOf` stayed teammate-only (task children never request perms). Pins: `TestTaskBackgroundRouting`, `TestSpawnBackgroundTaskRegistersATaskChild`, `TestLeaveBoardReportsABackgroundTaskToARunningSpawner`, `TestStepBudgetForATaskChildMatchesTheSyncSubAgent`; `boardPrompt` teaches the mode off the research clause.
+
+
+## 2026-10-25 — MEMORY.md diet: mid-diet snapshot (pass-1 wording; pre-diet originals archived above)
+
+# Project Long-Term Memory
+
+**Admission test.** A line earns a place only if a future session needs it *before acting*: a gotcha with its
+fix, an invariant with its pinning test, a canonical value, or a decision and why. **Procedures live in
+`HOWTO.md`; measurements and long-form subsystem detail in `HISTORY.md`**; the pre-split text is in
+`MEMORY-ARCHIVE.md`. Budget **~20 KB** — re-read every turn on the cached prefix; curate rather than truncate.
+
+**Standing conventions.** **Developer preference: needs SPEED — parallel by default** — batch every independent read/search in one block, and fan out teammates/task agents per independent stream instead of working serially (stated 2026-10-24). Working tree usually dirty — read hunks, never `git add -A`, stage explicit paths; nothing is committed unless asked. `web/dist` is served from an `embed.FS` (`internal/server/static.go`), so a
+shipped web change needs a Go rebuild — but a live visual check does NOT: run a vite dev instance with a
+throwaway config proxying `/api` to the live server (HOWTO.md: "Verify a web change against the live server
+without restarting it"); Go rebuild only needed before shipping.
+
+## Repo layout & git hygiene
+
+- Root: markdown only; plans in `plans/` (refs inside bare, `plans/<name>` outside); next migration `069`.
+- **`.gitignore` paths stay root-anchored**: `/GIT_DIFF_PLAN.md` (a bare rule ignored the tracked
+  `plans/GIT_DIFF_PLAN.md`), `/dist/` (unanchored would swallow `web/dist/`), `/agent/` (duplicate of the
+  golang-* skills — `.agents/skills` is the one `internal/skill/discover.go` reads; it also breaks
+  `go build ./...`, so build `./internal/... .`). `MEMORY.md`/`MEMORY-ARCHIVE.md` gitignored;
+  **`AGENT.md` is tracked but 0 bytes** (a `see AGENT.md` pointer is stale).
+- **README hero is `docs/media/ogcode-demo.gif`** (GitHub renders neither animated WebP nor `<video>`);
+  re-encode via `HOWTO.md`; check for leaked internal paths at legible resolution.
+
+## Releases, version & install
+
+- **Tags are immutable**: `git ls-remote --tags origin` + `gh release view vX.Y.Z` first; bump
+  `internal/version/version.go` (`vX.Y.Z`) + both `web/package*.json`; steps in `HOWTO.md`.
+- **A red Linux build job blocks the release** while CI/Pages/Docker stay green: fix = top-level
+  `ZIG_LOCAL_CACHE_DIR: /tmp/zig-cache`.
+- **macOS re-sign**: in-place replace keeps a stale signature → `Killed: 9`; `make install` `rm -f`s first
+  then ad-hoc signs; it restarts nothing (check the listening pid's start time — `make` echoes its recipe,
+  add `-s`). The installed file runs ~18 KB larger than `./ogcode` — the embedded ad-hoc signature, not
+  divergent content (`spctl` "rejected" is normal).
+- **After a code fix, `make -s install …` BEFORE handing over a restart** (2026-10-25): the relaunch runs
+  `~/.local/bin/ogcode` (PATH), not the repo `./ogcode` — the restart can re-run a pre-fix copy. Verify the
+  install carries the change: `strings ~/.local/bin/ogcode | grep -c <new-symbol>` ≥1; after restart, the
+  listener's pid actually changed (ps start time).
+- **`detectInstallCommand()`** matches scoop → Homebrew → cargo → install.ps1 dir → winget → install.sh;
+  Homebrew means `/Cellar/` or `/opt/homebrew/`, **never any `/usr/local/`** (`install_detect_test.go`);
+  `check-updates` exits 1 when an update is available; verify install changes on a throwaway rig (fresh HOME
+  + temp cwd + stub `open`), expanding the binary path BEFORE exporting HOME.
+
+## Build & dev loop
+
+- `make build` = `build-web` (npm build → `web/dist`) then `build-server` (`CGO_ENABLED=1 go build -o ./ogcode .`;
+  repo-root `main.go`). `make dev` :9595; `make dev-web` Vite :5173.
+- **`CGO_ENABLED=1` mandatory** (cgo Swift grammar); `make test` omits it. OGX-signed build:
+  `make build-server OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)` — else the gateway 401s.
+- `ogcode version` (no `--version`); dirty builds print `…-dirty`; no linter, gofmt files touched.
+- **`ogcode run --max-turns` defaults to `0` = no limit** (→ `MaxStepsUncapped = -1` → `math.MaxInt`). **A
+  literal `MaxSteps == 0` still means the 1000-step default** — a zero-value `LoopRunner` depends on it. The
+  server loop (10000, 2 auto-resumes) and `ogcode index` (50) stay capped (`step_budget_test.go`).
+
+## Deployment & first boot
+
+- **A project keeps its port**: `~/.ogcode/ports.json`; a bare `ogcode` reuses it (this project → **7801**),
+  explicit `--port` overwrites it; `make -s install OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)`
+  works. **Never restart the host server unasked** — it runs the live session (killing it ends the turn
+  mid-reply); `ask_user` and hand over `kill <pid>; cd <dir> && ogcode` (no `--port`).
+- **One server per project dir**: advisory flock on `<dir>/.ogcode/server.lock` before the DB opens
+  (`projectlock.go`); a second `serve` exits 1 naming the holder. **`port free` ≠ dead** (2026-10-25): a
+  SIGTERM'd server frees the listener before the flock, so a relaunch off a port check exits 1 `already
+  running …` — wait for the old PID to EXIT, not the port.
+- **Listener before preflight** (133 MB embedder, after bind); `/api/config` GET JSON 200 is the health probe.
+  **End-user macOS signing is NONE**: ad-hoc, runs via `com.apple.provenance` (not quarantine); `spctl`
+  "rejected" is not "blocked" without that xattr.
+- **Docker**: install `git` (else every workspace says "not a git repository"); `HEALTHCHECK … /api/config
+  --start-period=120s`; `docker.yml` needs `type=raw,value=latest`. **ldflags traps**: `-X` on a missing
+  symbol is silent; an empty `-X` does not fall back.
+## OGX gateway
+
+**Assertion**: base64url HMAC-SHA256 over `app + "\n" + ts + "\n" + method + "\n" + path` (skew 5 min) in
+`X-Client-App`/`-Timestamp`/`-Signature`. **Gate is CONDITIONAL**: no secrets ⇒ open, any secret ⇒ any failure
+⇒ 401. ogcode `appassertion.go`; oglab `internal/httpx/httpx.go`, secrets from `OGLAB_APP_SECRETS`.
+
+- **Secret**: `OGXProviderID = "ogx"`, `OGXAppID = "ogcode"`, `var OGXAppSecret` (ldflags); one live value
+  (never paste) — `~/.ogcode/ogx-app-secret` (600). **`tr -d '\n'` mandatory** (unstripped HMAC → silent 401).
+- **Provider**: `https://ogx.ogcode.in/v1`; **`/v1/models` IS the plan** — dynamic models, all
+  `ActiveByDefault`, **no static fallback**. **Registration is plan-gated, network-free** (`HasPlan()`).
+  **Priority** `anthropic, openai, openrouter, ollama, ogx` (ogx last on purpose). **`prompt_cache_key`** is the
+  session identity for token spend, not a cache hint.
+- **Bodies cap at 4 MiB** (`checkBodyFits`, `ErrRequestTooLarge`); oglab's `maxChatBodyBytes` matches, both
+  fatal. Raising it is three hops (oglab router, web `maxChatBytes`, nginx) — ship the gateway first.
+- **Composer images**: `prepareImageAttachment` → **1024 px long edge**, JPEG q0.8 / WebP, byte-identical
+  passthrough ≤512 KB AND ≤1024 px; `MAX_IMAGE_SIZE` (10 MB) is only the pick limit.
+- **JSON endpoint returning HTML = nginx routing bug** (no `/v1/` location ⇒ all to `oglab_web`); fix with
+  `upstream oglab_router` + `location /v1/` before `location /`. A 15s SSE keep-alive stops Cloudflare's ~100s
+  idle cut and stops after 90s of upstream silence.
+- **Settings tab** is `readOnly`; its not-connected fallback div needs `data-setting` or it vanishes offline.
+  **oglab's** breaker ignores `400`/`422`.
+
+## Providers, models & resolution
+
+- **`OpenAIProvider.Models()` is a pure read** — never network; fallback until `SetCatalog`, returns a copy; fetching is `RefreshCatalog` behind `CatalogRefresher`/`CatalogSetter` (`TestModelsNeverFetches`).
+- **Resolution**: `orderedSnapshot()` sorts by `(providerRank, id)`; `ResolveProviderFor` = custom → explicit provider → catalogue (`ActiveByDefault`) → highest priority; persisted as `provider` (migration 047). **Trap**: a column in a `SELECT` but not in `rows.Scan` is a silent runtime error. **Catalogue names are aliases** — `normalizeModelID` strips org prefix, `:latest`/`:cloud`, OpenRouter variant suffix (first-claim-wins); `lookupModel` compares the raw `m.ID`, so a bare id beats a prefixed row. `gemini-4-argon`: `RejectsSampling`, `MaxOutputTokens: 32_768`.
+- **`ogx-deepseek-v4.1-flash` THINKS BY DEFAULT** (2026-10-24): no `reasoning_effort` ⇒ the endpoint streams/bills `reasoning_content` inside completion; the loop sets `Thinking:true` always but `applyEffort` (openai_effort.go) writes nothing unless session effort ≠ "" — unset = endpoint default = ON; `--effort none` suppresses.
+- **flash-class effort default (FIXED 2026-10-24/25)**: `defaultEffortFor(modelID, spec)` maps flash-class ids to `low` when effort is "", unless a spec default LIGHTER than high stands (gemini-2.5-flash-lite `none`, flash-lite siblings `minimal`, gemini-3.8-flash `medium`); a recorded default ≥high keeps the low hold (ogx-deepseek-v4.1-flash = EffortHigh); non-flash keeps "". Pins `openai_effort_flash_test.go` + `effort_mechanical_test.go`.
+- **MECHANICAL CONTINUATION hold** (`StreamRequest.StepMechanical`, set at the loop tail): after a tool-only step with ≥1 WORK call, default-derived effort drops to `none` (fallback `low` when the ladder lacks none); read-only-exploration rounds are exempt; applies ONLY to default-derived levels — an explicit user effort is NEVER rewritten.
+- **Bench parity (2026-10-24)**: BOTH arms think (neither client sends a reasoning field — `reasoning: 0` is an accounting artifact; ogcode folds reasoning into `output`) and the `parity` pair is NOT matched (only the ogcode arm ran `--effort none`). Probe/wire numbers: `HISTORY.md` 2026-10-24.
+- **ogcode.json custom OpenAI-compatible providers** (2026-10-24): extra ids beyond the four slots + `ogx` register via `config.CustomProviders()` → `provider.NewOpenAICompatibleProvider(id, apiKey, baseURL, model, label)` (collection = `label` else `collectionFromBaseURL`), wired in `cli/run.go`/`cli/root.go`/`server.go loadProviderMap` so `reloadProviders` picks up edits. Entry: `type` only ""/"openai", required `baseUrl`, optional `model`/`label`; reserved ids and non-slugs refused; `disabled` merges ONE-WAY. **Trap**: `Load` must copy EVERY new ProviderConfig field (it once dropped `Type` silently) — pin `TestLoadProviderMapRegistersCustomProviders`. UI needs nothing (picker groups by `collection`).
+- **The Ollama slot lists only what the local endpoint serves**; free pool REMOVED (`freepool.go`), `needsOnboarding` hardcoded false.
+- **Budget**: `OGCODE_PROVIDER_MAX_CONCURRENT` 8, reserve 2; index takes `indexGate` then `total`, interactive only `total`; `streamEvents` defer order `close(ch); body.Close(); cancel()` (a slot held past the close 429'd OGX's concurrency-1 tier).
+- **`write tcp …: result too large` is ERANGE from the LOCAL `write(2)`** (VPN/content filter), not the gateway; `sendStreamingRequest` retries once on a fresh connection; a mid-stream RST only when no text and no tool call exists; IPv6 fallback counts ECONNRESET too, two strikes narrow to `tcp4`.
+- **Connections: ONE pooled h2 conn to ogx (`streamHTTPClient`); h1.1 sockets DRAINED, not dropped**: no `DisableKeepAlives`, `ForceAttemptHTTP2: true`, `IdleConnTimeout: 30s`; `drainFinishedStream` runs at the END of `streamEvents` gated on `sawDone` ONLY (never on the `scanner.Err()` path; budget 2 s / 64 KiB) — Anthropic needs nothing (reads to EOF). A test observing the discard needs a ~20–50 ms gap before the response end, else the socket reuses by luck and passes against the unfixed code. Pins `internal/provider/stream_drain_test.go`. Bench tap pins ALPN http/1.1 — per-run req/conn: `HISTORY.md` 2026-10-24.
+
+## Token accounting
+
+- **Reasoning is billed INSIDE `output`, never separately**: `ModelPrice.Cost` takes no reasoning term (`internal/provider/pricing.go`), `TokenCounts.Consumed/Effective` leave it out to avoid double-counting (`internal/session/message.go`), and `usageFromOAI` folds Gemini's total-only thinking into output. It is a display count only — output is ~1% of all tokens, so cache-hit rate, not effort, is the spend lever.
+- `tokens.input` is UNCACHED: bill `input + cacheRead`; a cache hit is `prompt_tokens_details.cached_tokens`
+  when > 0, else `prompt_cache_hit_tokens`. The pill totals the transcript from `GET /api/session/{id}/token`.
+- **Title generation inherits the session model** — with `model == ""` it skips `ResolveProviderFor`, so a test
+  must set `defaultProvider`. **Gemini `thought_signature` must be echoed verbatim** from `extra_content.google`
+  on every replayed tool call or the second turn 400s (`EchoesToolExtra()`).
+- **Teammate spend is counted, but only on the child**: a teammate is a real `build` session (`board.go`
+  `spawnTeammate` → `startSessionLoop`), so its steps land on its own messages + `usage_event` (kind=step) and
+  its utility calls on `session.utility_*` — same project bucket (one ledger per workspace, `server.go`
+  `NewLedger(global, s.dir)`), so Settings→Usage totals include it. `foldChildUsage` (`agent/usage_charge.go`)
+  is for EPHEMERAL task/memory children only; a teammate is never deleted or folded (a fold would double it in
+  session views).
+- **The parent's token pill folds teammates in on the CLIENT, never in the DB**: `/session/{id}/token` and
+  `/usage` each carry a `teammates` array (always `[]`) beside session-only headline totals; `token-pill.tsx`
+  sums them into its figures — input/output/cache AND `utility` (a subtotal inside effective/total, never
+  added on top). A teammate child whose read ERRORS is skipped per-child with a warn (parent-side reads still
+  500); `spawnedTeammates` (`server/board.go`) enumerates via `board.BySession` + roster
+  `KindTeammate && SpawnedBy == parent.Handle` — no parent column on `session`; a deleted child is skipped
+  while its roster row stays. Pinned by `session_token_test.go` / `usage_routes_test.go`
+  (`TestSessionTokensSkipsATeammateWhoseReadErrors`).
+- **Ollama Cloud meter**: `GET https://ollama.com/api/usage` with `OLLAMA_API_KEY`.
+
+## Permissions
+
+- **The ruleset gates, not the mode**: `Ruleset.Evaluate` runs BEFORE the mode switch; only read/glob/grep are `Allow` by default (bash/write/edit `Ask`), and the catch-all rule `Allow`s every other tool in EVERY mode. **Yolo only changes what would have been Ask** (skips the classifier) — an explicit `Deny` still denies; `isDangerousCommand` is a separate layer. **No Deny tier from the classifier** (Safe/Ask/Unclear only). PATCHing a session's mode ALSO `SetDefaultMode`s machine-wide. **Grants never expire**; the pattern is the verbatim string (`./f.go` ≠ `/abs/f.go`), not a glob.
+- **`riskLLMMaxTokens = 1024`** is calibrated; an unanswered check warns, returns Ask and is not cached. Ask = `rm`/`sudo`/`git push`; Safe = read/build/test; the rest (incl. `curl`, unknown) = Unclear, the only tier reaching the LLM.
+- **A teammate's Ask and `ask_user` reach the HUMAN in the PARENT's composer, never the parent agent** (2026-10-23) — the mirror is SERVER-side, so a reload restores it too: the child's loop is gated exactly like a parent's on the SAME shared `permission.Manager`; `LoopRunner.ParentSessionOf` climbs `SpawnedBy` (depth 32) so `requestPermission` and `mirrorQuestion` republish with `sessionId` = ROOT session, `ownerSessionId` = the child, `teammate` = its handle; `GET /session/{id}/permission|question` BFS-append the SUBTREE's pending items; a reply by id clears EVERY queue holding it — path session, owner, owner's root (`TestReplyingFromTheChildPageClearsTheParentQueue`); pages beyond those three keep a stale copy until their reply 404s or they reload (parity hole, accepted). Client: mirrored entries file under the PARENT keyed `ownerSessionId || sessionId`, replies post to the owner (chip in `permission-prompt.tsx`/`ask-user-dialog.tsx`). `teammatePrompt` directs a blocked child to ASK rather than end early; the child blocks until the human answers (no timeout — the dialog is answerable live). Pins: `TestTeammateQuestionMirrorsToTheParentSession` (+cancel/+silent, `question_mirror_test.go`), `TestParentSessionListsTeammateQuestions`, `TestReplyingAQuestionFromTheParentUnblocksTheTeammate`.
+- **Grants and mode are machine-wide** in `~/.ogcode/config.db` (migration 048); grain is the exact command/path/skill, never `"*"`. **Trap**: `serve_lifecycle_test.go` does not set HOME, so `go test ./...` advances the real config DB — isolate HOME and the working dir.
+
+## Agent memory files
+
+- **Caps: none by default** (`OGCODE_MEMORY_MD_MAX_BYTES`/`OGCODE_AGENT_MD_MAX_BYTES`; `limit <= 0` is
+  uncapped) — a positive budget is head-biased, so curate instead. `staticSystemPrompt` carries **one constant
+  pointer per file, never content or a heading index**; turn digests carry tool names and the final response
+  only, so procedures go to `HOWTO.md`, not the scribe.
+
+## Prompt caching, read pressure & context windows
+
+- Anthropic `cache_control` on the last tool def and first system block (min 1024 tokens, 4096 on Opus 4.5+,
+  5-min TTL); OpenAI automatic. **Entry [0] stays byte-identical** — the date rides `systemReminderPrompt`.
+- Read pressure: `OGCODE_READ_PRESSURE_THRESHOLD_TOKENS` 40000; `OGCODE_RESEND_COST_WINDOW_MULTIPLE` 1.
+- **History is TURN-SCOPED**: only `sliceTurn(messages, findLastTextUserMessageIndex(...))` is sent, so a prior
+  turn's images never re-send; within a turn images repeat and ride the last-message cache breakpoint.
+- **The turn's prompt and images survive compaction, tool images do not** — name them in the summary or
+  re-read. **The ask_user Q&A must survive verbatim** on all three surfaces.
+- `OGCODE_COMPACT_CONTEXT`: unset/empty = ON, falsey = off. `maxCompactions = 2`, `compactionKeepRecent = 12`,
+  unknown window → 128000. **Learned windows** are kept only when `learned > promptTokens`.
+
+## Agent tools & prompt
+
+- **`schedule` tool = one-shot agent timers** (2026-10-24): ops `create` (delaySeconds OR strictly-future RFC3339 `fireAt` + required `note`)/`list`/`cancel` in `internal/tool/schedule.go`; refusals are Result-shaped, not errors. Server store `internal/timer` (migration `068`, table `agent_timer`, statuses pending→due→delivered/cancelled; `ClaimDue` is one atomic `UPDATE … RETURNING` so two claimers can never double-claim). Ticker `pollReminders` (10s, `internal/server/reminder.go`) claims due rows and delivers via the board-report rails: `PushNotice` Cause `"reminder"` + `TrackBoardReport` with mark=`MarkTimerDelivered` (byte-identical Text in both). Idle session → row stays `due`; `CatchUpReminders` hook (LoopRunner field, build-gated beside `CatchUpTeammates`) delivers at the next turn start of THAT session — never starts a turn; nobody holding the loop → delivery logs and leaves the row due; a server restart keeps pending timers in the DB and due-but-undelivered ones arrive via catch-up (at-least-once). **Offered only to BuildAgent** (FIXED 2026-10-25): `schedule` is on `buildAgentTools` (`internal/agent/agent.go`) gated by `canSchedule()`, `agent.ID == "build"`, beside `canUseBoard`/`canSpawnTeammate` — TaskAgent/subagent and every other non-build agent never see it. Pins: `TestScheduleIsOnlyTheBuildAgent` + `TestScheduleLeftCodingAgentToolsShared` (`internal/agent/schedule_gate_test.go`); `TestBuildVsTaskAgent_Framing` pins build = task + exactly `schedule`.
+- **`update_intent` rides the first work block** (2026-10-24): state the plan before the first meaningful
+  exploration, and it MAY ride the first tool block alongside other calls; a closing status update is welcome
+  but NOT mandatory. `intent_gate.go` appends `intentGateReminder` ONCE PER SESSION when no plan is set
+  (process-lifetime registry keyed by sessionID, deleted by `markPlanSet` — a session that planned once re-arms
+  for a later planless stint). Whole-list replace of 1–7 steps, persisted in `session.intent` (migration 064);
+  a closed plan never invites another call. **Descent gate** (`descent_gate.go`): a `grep`/`glob` landing
+  before any `codebase_map(subdir=…)`/`read`/`file_map` gets `descentGateReminder`, once per turn, armed only
+  when `indexedFiles > 0`; a root map is not a descent.
+- **Matcher**: ONE routing completion per block for a newly added step, **no cap**; scores skills + one entry
+  per MCP SERVER; failures silent. **A step with no `description`, or not pending/active, is never routed.**
+- **Chip identity is the step LABEL, not its description**; counts persist through `done`/`dropped` until the
+  step leaves the list or the next `RunLoop` clears. **Nothing closes the plan at turn end**, so
+  `updateIntentPrompt()`/`Description()`/the `status` schema demand STATUS movement, not a restatement.
+  **Status moves land mid-turn**: active before a step's first block, done after its last, not banked for the
+  closing call. Pins: `update_intent_test.go` `TestUpdateIntentDescriptionMakesTheClosingOptional` +
+  `TestUpdateIntentDescriptionMayRideTheFirstBlock`; `intent_gate_test.go`
+  `TestIntentGateFiresOncePerSessionAcrossTurns`.
+- **The build agent has no upfront skill or MCP list** (`turnTools` withholds the `mcp_*` glob), and a bare
+  `skill` call is refused in a matcher session. **Rich output** is fenced declarative specs (mermaid,
+  plotly/rough, LaTeX, sandboxed HTML); `motion` declined; `## Decisions & why` only for real decisions.
+- **`read` takes `files=[{path,ranges,offset,limit}]`** (2026-10-24): exclusive with top-level `path` (neither /
+  both refused); each entry is exactly the single-file shape; per-file error sections and `== path ==` headings
+  relative to SessionDir; every entry rendered whole; bookmark stamped per CONTENT section only — never for a
+  map, listing, binary or error — captured before ReadFile. Pins `TestReadTool_FilesStampsEveryContentRead`,
+  `TestReadTool_FilesMapEntryDoesNotStamp`, `TestReadTool_FilesReturnsEveryFile` (`read_files_test.go`).
+- **`read` and `file_map` are UNCAPPED by design** (2026-10-25, the developer's call): no byte/line/per-line
+  limit, no shared call budget, and **no default window** — a bare read returns the whole file and a range
+  without `end_line` runs to EOF; `Truncated` only means "a paging window left lines unread". **A bare `limit`
+  of ANY size is a window past the map** (`rangeRequested` = ranges || offset>0 || limit>0 in `read.go`;
+  negative offset/limit refused). Both set **`Result.Uncapped`** (`json:"-"` in `tool.go`), so `capToolOutput`
+  (`internal/agent/loop.go`) returns early on `Truncated || Uncapped` — the 50 KB loop backstop still bounds
+  bash/grep/glob/MCP but never these two. **The one bound left on a read is ogx's 4 MiB request body**
+  (`ogxMaxRequestBytes`, `checkBodyFits` → `ErrRequestTooLarge`, fatal); `read_pressure.go` (40000 tokens) is
+  advisory. Kept: the map interception itself (`mapInsteadOfWholeFile`, the 200-line `rangedReadThreshold`).
+  Pins `TestReadTool_MapIsReturnedWhole`, `TestReadTool_NoDefaultWindow`,
+  `TestReadTool_BareLimitPagesContentPastTheThreshold`, `TestReadTool_NegativeWindowArgsAreRefused`,
+  `TestCapToolOutputHonoursUncapped`.
+- **The prompts make `files=[...]` the primary read shape** (2026-10-25): ONE `files` call for several files
+  in the exploration diagram, build step 2 and `read`'s `Description()`; the map section adds a **grep fast
+  path** (a search that printed `path:line: text` has already located the code — map only files whose shape is
+  unknown) and the **one read call per wave** rule. Pins: `TestWorkflowLetsASearchStandInForTheMap`,
+  `TestWorkflowSpendsOneReadCallPerWave`, `TestProcessStepTwoNamesTheBatchedCalls`,
+  `TestReadDescription_LeadsWithTheMultiFileShape`, `TestFileMapDescription_BatchesAndSkipsANeedlessMap`.
+- **Tool contracts the schemas do not show**: a blank ask_user answer to a content question is unanswered;
+  **pathlock** forbids write-vs-edit on one file but allows batched edits; **codemap** is one level per call
+  with **no size threshold** (the old <10-file expansion was deleted — `project_index.go`), `dirPrefixFilter` needs `ESCAPE '\'`, **HCL is outlineOnly**, and a Swift `as?` + newline
+  + `??` misparses.
+- **Images** are stripped for non-vision models (`IsImageRejection` is resumable); MCP images go to a temp
+  file. **Skills** `requires:` env names are filled by `skills.env` via `setIfUnset`.
+
+## MCP & search
+
+- **`OGCODE_SEARCH_ENABLED=false` removes `web_search`, `fetch_page` AND `deep_search`**; to suppress only
+  deep_search, add a prompt clause.
+- **MCP**: transport is INFERRED (`Command` ⇒ stdio, `URL` ⇒ streamable-http; `"transport"` overrides) — **no
+  `type` key**. Tool ids `mcp_<server>/<name>`; connect is lazy. A URL server with no `headers` gets OAuth
+  (`~/.ogcode/mcp-tokens/`); `headers` means static bearer. Penpot's `…/mcp/stream` needs streamable-http.
+- **Search** results carry a `Provider` stamp set before the TTL cache. Config is `/settings/search`, a
+  FULL-STRUCT replace; `""` = HTTP first, `safari`/`chrome` = browser first (`chrome` on macOS means Safari).
+  macOS prefers headless Chromium with a Safari fallback; Windows Chrome/Edge is unverified — check with
+  `GOOS=windows CGO_ENABLED=0 go build ./internal/search/`.
+
+## Data, migrations & transcript
+
+- **Migrations**: goose keys by VERSION NUMBER only, so a number taken by a branch that never landed silently
+  SKIPS your file. Check `git log --all -- internal/db/0NN*` AND the real `goose_db_version`. Next free number
+  = next integer past the highest file.
+- **The transcript is append-only**; the only bound is `capToolOutput` (50 KB; skipped by `Result.Truncated`
+  and `Result.Uncapped`);
+  the only deletes are `Store.Delete`/`DeleteMessage`. Compaction changes what is re-sent, never what is stored.
+  **Nothing prunes and nothing vacuums**: `db.go` sets only WAL/foreign_keys/busy_timeout — no `auto_vacuum`,
+  no `VACUUM` anywhere in the repo — so deleting sessions only fills the freelist and the file never shrinks;
+  reclaiming needs an explicit `VACUUM` (~DB size in temp space). Measured shape: `HISTORY.md` 2026-10-24.
+- **FK 787 mid-turn ⇒ another writer deleted the session**: `handleDeleteSession` cancels and waits up to 5s
+  before `store.Delete`; `Store.Get` returns `(nil, nil)`; `classifyInterruption` maps it and
+  `ErrRequestTooLarge` to `InterruptFatal`.
+- **Session DB**: `.ogcode/ogcode.db` / `~/.ogcode/config.db`; `message` is metadata, content in `part.data`.
+  **`GetMessages` must return `Parts` as `[]`**; pagination is `?before=<id>` + `X-Has-Older` at 300 rows.
+
+## File change gate
+
+- **Migration 066 + `internal/filechange`**: a `file_change` history row per `write`/`edit`/`bash` plus a
+  per-(session,file) bookmark (`seen` revision); history is ring-capped at `RingPerFile` (50) per file; read API
+  `GET /api/file-changes` (`file_change_routes.go`, 503 when `s.fileChanges == nil`) — **no web client calls it
+  yet** (`plans/CONFLICT_FREE_MUTATIONS_PLAN.md:319`), so the stored `diff` has one live consumer: the gate's own
+  post-restart refusal (`log.go:287` `covered` false ⇒ `History`), the ring being memory-only.
+- **The gate refuses in `write`/`edit`** (`internal/tool/staleness.go` `staleRefusal`): a file changed by
+  ANOTHER session since this session last read it refuses, and the refusal is a `Result` (not an error) that
+  shows the diff — same shape as the board-claim refusal. `Stale` drops the caller's own changes and refuses
+  nothing when `Seen < 0`; **`Seen` returns -1, not 0**, for never-read (0 is a real revision), pinned by
+  `TestBookmarkAtRevisionZeroStillRefuses`. **The ring explains nothing when it is empty** (a restart):
+  `covered := len(ring) > 0 && ring[0].Rev <= seen+1` — an empty ring always falls through to the `History`
+  query (pin `TestRestartRefusesABookmarkOfRevisionZero`).
+- **`bash` is COVERED, by fingerprint not by parsing** (`internal/tool/bash_observe.go` `observeShell`, end of
+  `BashTool.Execute`): after every command it stats each file the log already tracks
+  (`Log.Files()`/`Fingerprint{Size,MTime}`/`FingerprintOf`) and records a change (tool `bash`, note = the
+  command, `DiffOmitted`) for any that moved — a deletion included (missing file = zero fingerprint).
+  **Unattributed (no `Session`), so no bookmark moves** — the session that ran the command is refused by its
+  own shell until it re-reads. Nothing auto-claims; an **untracked** file is skipped. Pins
+  `TestOwnShellChangeRefusesUntilReRead`, `TestUnrelatedCommandDoesNotLaunderAForeignChange`.
+- **`description` is required on `write`/`edit` now** — it is the history note; a bash row's note is the command.
+- **A nil `FileLog` is a no-op** (`filechange.NewLog(ctx, nil)` still gates from memory), so tests and other
+  embedders need not wire the store; `observeShell` too.
+- **Remaining blind spots**: MCP tools, `latex_to_pdf`'s `.tex` write, and a change made outside the agent
+  until the next `bash` call stats it. `file_map` is NOT a read (a summary would suppress the diff exactly when
+  it is wanted). A **map-only read does NOT stamp the bookmark** (`read.go`; pin `TestMapOnlyReadDoesNotCertifyContent`)
+  — but a first-contact map-only read leaves the file untracked, so bash observation records nothing until a
+  content read.
+- **It FAILS OPEN when the history row is missing**: with no change to show there is no catch-up to explain a
+  refusal, so the write proceeds (warn-logged).
+- **Cross-process staleness appears only after a restart**: bookmarks and fingerprints are in-process memory,
+  not re-read per mutation — `serve` + a separate `run` on one dir can each miss the other's changes while both
+  are up.
+
+## Web UI: composer, sidebar & navigation
+
+- **Composer drafts/attachments are per session**; **the running pause glyph IS the stop control**; the `+`
+  attach menu renders in a `Portal`. **The plan-mode flag gates only the warning banner**; mode comes from
+  `GET /api/mode`. **The session-row dot reports task status** (`session.status`), not the provider, and a
+  hand-seeded session row must set `permission` or `Store.List` 500s. **`⌘K` is guarded on `offsetParent`**
+  (the shell renders twice).
+- **Virtualization and scroll memory** in `message-list.tsx`/`scroll-memory.ts`: pad-based windowing keyed by
+  message id, rows estimated from running per-role totals over measured rows (remount ~1,000×/s); the
+  id-change effect must call `restore()`, and ResizeObserver must not `holdAnchor` when `anchoredByList`.
+
+## Theme, contrast & light mode
+
+- **Light mode is server-global**: `GET/POST /api/appearance` off **`s.globalDB`** — a throwaway rig flips the
+  USER's machine-wide mode, so save before an audit and restore after. `web/index.html` pre-paints from
+  `localStorage['ogcode-theme-mode']`; Settings General is `/settings`. **Muted-text floor: 4.5:1 on the
+  LIGHTEST surface the token can sit on** (`--bg-hover`); exact values `HISTORY.md`. Default accent is brand
+  orange `#ff5e1f`; **accent ink is its own per-mode token**, never `--accent`; **`onPrimary` is `labelFor`**
+  (max of the minimum ratio over `--accent` AND `--accent-hover`), recomputed on read.
+
+## Preview, public serving & device panel
+
+- **The Preview page lists only announced ports** (`<port>.<PreviewDomain()>`); `recordAnnouncedPorts` reads
+  **PartText only** at turn end for the build agent; manually `?ports=`. `previewHostDispatch` strips
+  `X-Frame-Options` + CSP `frame-ancestors` or a frame-guarded app renders blank.
+- `/public` serves `<data-dir>/public` with **HEAD mapped explicitly**. **scrcpy** deep links need
+  `action`/`udid`/`player`/`ws`; **use `resolvedUdid()`**, never raw `udid()`.
+
+## Browser takeover (bridge + extension)
+
+- **Option B (2026-10-25)**: the agent drives the user's real logged-in Chrome via a first-party MV3 extension in `browser-extension/` (vanilla JS) paired over a WS bridge — pieces `internal/browser/bridge.go` (Dispatch/pending-map over coder/websocket), `internal/tool/browser.go` (11 tools), `internal/server/browser_routes.go`, skill `browser-takeover`. Registered every turn like board (unpaired ⇒ Result-shaped pairing refusals); screenshot rides `Result.Image`, refused when `!ModelSupportsImages`; ops budget 30s (60s navigate/screenshot).
+- **Endpoints**: `GET /api/browser/pair` → `{token, url}`, POST rotates (token persisted, below); `/api/browser/status` always 200; `/api/browser/bridge?token=…` accepts only loopback + chrome-extension origin + token.
+- **Bridge traps**: OriginPatterns match the BARE origin host unless the pattern contains `://` — use `"chrome-extension://*"`, never `"chrome-extension:*"`; `failPending` ships the ErrNotConnected sentinel as a plain string, so `Dispatch` maps `res.Err == ErrNotConnected.Error()` back to it (errors.Is must keep holding); hello `version` is a bare JSON NUMBER — a string field unmarshal-errors and hello drops silently (extension stuck "connecting", no error either side).
+- **FIXED 2026-10-25 — the 32 KiB websocket read limit killed every snapshot/screenshot** (reply frames run hundreds of KB ⇒ `message too big` dropped the conn): `maxResultFrameBytes = 4<<20` + `conn.SetReadLimit(maxResultFrameBytes)` in `bridge.go` `Serve`; pin `TestBridgeAcceptsAResultFarPastTheOldDefaultLimit`.
+- **navigate `newTab` opens an auto-granted tab**: exemption = navigate + newTab + NO tab id (`grantedIds` persists to `grantedTabs`, revocable in the panel); newTab WITH a tab id means "act on that tab" (gate applies). Omitted `tab` defaults to the last Granted tab; tabs-but-none-granted ⇒ Result-shaped refusal; empty inventory passes nil. Pin `TestBrowserNavigateNewTabNeedsNoTabAtAll` (browser_test.go).
+- **Watch capture (`browser_network`/`browser_console`)**: the FIRST op on a GRANTED tab attaches a persistent chrome.debugger session (`ensureWatch`) and fills per-tab rings — network 300, console 300, evict-oldest, emptied by an SW restart (re-arms on the next op). network lists last-N (default 100) with a `url` filter; `requestId` fetches the body (cap 65536, `bodyTruncated`); console filters level/source exactly. Drop hooks: ungrant (storage.onChanged), tab close, debugger onDetach (next op re-attaches). **CDP timestamps are epoch SECONDS** (`cdpIso` ×1000); `Log.entryAdded`/`startedAt` have no CDP ts → wall-clock — don't unify. Extension logic is pinned only by the throwaway vm harness.
+- **Pair token survives restarts (FIXED 2026-10-25)**: persisted at `.ogcode/browser-pair-token` (0600) — boot `browser.NewWithToken(loadBrowserPairToken(s.dir))`, re-saved on rotate; empty/malformed ⇒ fresh mint (pins `TestNewWithTokenPinsThePersistedToken`/`TestBrowserPairTokenSurvivesARestart`/`TestBrowserPairRotatePersistsTheToken`). `GET /api/browser/pair` returns the token WITHOUT rotating; POST rotates.
+- **Offered build-only (FIXED 2026-10-25)**: `canControlBrowser()` (agent.go) + `browserOffered := agent.canControlBrowser() && lr.Tools.Get("browser_status") != nil` appending `browser_*` to the loop allowlist (CLI-safe: its registry has no bridge). Pin `internal/agent/browser_gate_test.go`.
+- **A heavy op (big-DOM snapshot, screenshot) KILLS the extension's service worker, not pairing — don't re-pair on "extension not paired"** (2026-10-25): the op drops the ws ~0.1–0.6 s after dispatch, the extension reconnects ~1.1 s later and `swapConn`/`failPending(ErrNotConnected)` surfaces the in-flight op as the tool's misleading `unpaired()` refusal; light ops and real op errors never drop the conn. Wart: `dropConn` comments it fails in-flight ops but doesn't call failPending; fix candidates (unimplemented): `chrome.tabs.captureVisibleTab` screenshot, bridge retry-once on the sentinel. Evidence: `HISTORY.md` 2026-10-25. The panel's "Reconnecting — retrying in Ns" is `scheduleReconnect`'s normal backoff text for 1–2 rounds after any drop; if it sits unchanged the SW died mid-retry — reopen the side panel (its `get-status` wakes it).
+- **CWS kit (2026-10-25)**: icons `browser-extension/icons/icon{16,48,128}.png`, manifest got `icons` + `action.default_icon`; listing copy + justifications in `browser-extension/STORE_LISTING.md`; privacy page `https://ogcode.in/docs/privacy/` (deploy via docs/DEPLOY.md before the store form). Zip: `make extension-zip` → `ogweb-<ver>.zip`, manifest at ZIP ROOT. **`host_permissions: ["<all_urls>"]` DROPPED — nothing uses it; NEVER re-add** (verified-by-inspection only). chrome.debugger draws extra CWS review; bump manifest version before every re-upload.
+
+**Native-messaging host = the zero-paste pair path** (`com.ogcode`, 2026-10-25): `ogcode native-host`
+(stdio host, 4-byte-LE framing; `{"type":"pair"}` → `{"ok",\"version",\"servers":[{origin,url,token,port,project}]}`
+— registry = `portmap.All()`, each candidate probed `GET /api/browser/pair` 750 ms, sorted port-then-project,
+stale entries filtered); `ogcode native-host install [--extension-id …]` / `uninstall`; boot auto-installs
+idempotently via `nativehost.EnsureRegistered(projectDir)` (server.go, warn-only) writing `com.ogcode.json`
+into every browser dir whose PARENT exists (mac: Chrome/Chromium/Brave/Edge/Vivaldi/Arc). **Extension id is
+PATH-DERIVED** (`ExtensionIDForPath` = Chromium GenerateIdForPath: sha256 of the LOWERCASED abs path, nibbles
+→ a..p): repo `browser-extension/` ⇒ `cgeoedmgjadadineklkmhgpmolmnpfbn` — loading the same code from a
+different dir ⇒ different id ⇒ Chrome refuses to launch the host. Extra ids: `--extension-id` flag and
+`OGCODE_EXTENSION_IDS`; `WebStoreExtensionID=""` reserved until CWS publish. **Extension pair leg** (v1.1.0,
++`nativeMessaging`): `background.js` `autoPairThenConnect` fires ONCE per worker life (5 s) when credentials
+are absent — success writes `{serverOrigin, pairToken, bgConnected:true}` then connects like manual Connect;
+failure ⇒ unconfigured status "no ogcode app — paste token to pair", NEVER retries/overwrites. Chrome reads
+native-messaging manifests at browser STARTUP — a first-ever com.ogcode.json needs one Chrome restart.
+Pins: `internal/nativehost/*_test.go`, `portmap/all_test.go`, `cli/native_host_test.go`, harness
+`browser-extension/native_pair.test.js` (34 checks).
+
+## Indexing & the document index
+
+- Auto-index is gated by `OGCODE_AUTO_INDEX_MAX_FILES` (500, env-only) + consent (migration 061); **manual
+  builds are never gated**. The post-turn guard is `agentID == "build"` **and** `Directory == ProjectID`;
+  `OGCODE_AUTO_INDEX` is the kill switch. It must run on the turn's resolved model AND provider.
+- **Labels are LLM-made, not embeddings**: `IndexAgent` (one tool, `submit_doc_index`) labels a page from a
+  local keyword corpus (`text.go`/`pdf.go`); there is no vector store anywhere in `internal/indexer`.
+- **`.ogcode/` is skipped unconditionally**; **39** default excludes match directory names and basenames
+  anywhere (`excludes.go`, pinned by `excludes_test.go`); `doc_page_index.mod_time` drives the refresh.
+
+## Controlplane, remote workers & Incus
+
+- **Nested module** `controlplane/`: one in-process `server.Server` per worktree on the worker daemon.
+  **`HostSession` must `store.Get` first** (`Store.Create` violates UNIQUE on re-delivery); routes key
+  `<workerID>-<route>`, lookup **exact whole-label**. **bbolt**: a byte-truncated file SEGFAULTS at `bolt.Open`
+  (`checkDBFile` validates the meta page), a restore must set `status=offline` + `LastSeen=boot time` or
+  `ReapStale` kills every worker, and it is **single-writer**. Workers, accounts, Incus: `HISTORY.md`.
+
+## Infrastructure, feature flags & telemetry
+
+- **Homepage is `docs/index.html`** (hand-written; nav `.nav-menu`, mobile `#navSheet` — add links to both).
+  **Public copy carries NO em dashes**; a `: ` in an unquoted YAML frontmatter `description:` breaks the
+  `docs-site` build — quote it. Docs nav lives in **`docs-site/src/lib/nav.ts`**, deploy in `docs/DEPLOY.md`,
+  and `ogcode serve` binds all interfaces with **no auth** (a proxy MUST NOT buffer). Brand button `#d1440c`.
+- **Cloudflare**: `ogx`/`oglab` A → `162.19.81.108`; **origin nginx listens only on 40009**, so those vhosts
+  need `origin.port=40009`. Box access is password-only (`sshpass … -p 20009`); edit `sites-available`, then
+  `nginx -t && systemctl reload`.
+- **PostHog `497411`**: **never send content**; headless browsers drop every event (patch UA + `webdriver`).
+  `ogcode_turn_resources` is one event per turn with `distinct_id` = `s.installID`; logs need
+  `OGCODE_POSTHOG_LOGS`. **Install-id**: `VAR=x cmd | sh` does not pass `VAR` — `export OGCODE_IID='…'; curl …
+  | sh`.
+- **Feature flags**: one `/decide` per refresh, fail-safe OFF. Notes also drops its prompt section;
+  device-panel 404s routes and proxy; plan-mode gates only the banner. Serve tests use `stubFeatureFlagsOn(t)`.
+
+## Agent board & teammates
+
+- **The board IS the agent tree, not a message log** (migration `067_agent_tree.sql`): `board_agent` rows carry
+  `spawned_by`/`status`/`notified_at`; `internal/board` (store + migrations) behind `internal/server/board.go`
+  + `board_routes.go`; tools `internal/tool/board.go` (**one op, `roster`** → `treeText`) + `teammate.go`
+  (spawn/stop); routes `GET /api/board/roster` + `POST /api/board/teammate/{handle}/stop`.
+- **The board now has a dedicated Agents page** (2026-10-25, the developer's call): `web/src/pages/agents.tsx`
+  at route `/agents` (registered before `/preview` in app.tsx), nav label "Agents" from session-sidebar +
+  plan-sidebar; `board-drawer-row.tsx` KEPT and reused — the page ports the drawer's whole logic (SSE 150ms
+  debounce via `server.lastEvent()`, 15s poll, filter, showFinished, collapse, two-press stop), pure logic in
+  `web/src/lib/board-tree.ts` (`buildTree`, `decorateRows`, `matchesQuery`, `rosterSummary`). **Header chips
+  stay DISJOINT: `running = live − idle`, because `live` ⊃ `idle`**. Rows show the session **title + model
+  joined per row** (`boardRosterRow` embeds `board.Handle`; flat JSON).
+- **An op-less teammate call self-heals**: `teammate` infers `spawn` when `prompt` is present and the empty-op
+  refusal is shape-aware (`handles`/`timeout`→`wait`, `handle`→`stop`/`status`, `name`→`spawn`;
+  `missingOpHint`, `internal/tool/teammate.go`), pinned by `internal/tool/teammate_test.go`.
+- **A child reports back by FINISHING; there is no mid-task channel in either direction** — a teammate cannot
+  ask its parent, a parent cannot ask a running child. Child loop end → `status=done` + `updated_at`; spawner
+  RUNNING gets a turn-scoped `LoopControl` notice with the child's last assistant message **whole — no byte
+  cap** (`DrainNotices`' 2 KB `maxNoticeBytes` bounds a BATCH only — an oversized notice is taken alone, never
+  clipped), then `MarkReported`; spawner IDLE keeps `notified_at < updated_at` and `CatchUpTeammates`
+  (`server/board.go:263`, hooked in `loop.go:384`) hands it over at the parent's next turn start. **Nothing
+  starts a turn on its own**. Pins `TestUnreportedUntilMarkedReported`,
+  `TestCatchUpTeammatesReportsAnIdleSpawnerOnce`.
+- **A terminal status is claimed BEFORE the loop is cancelled** (`board.Store.SetStatusUnlessTerminal`):
+  `stopTeammate`/`stopTeammatesOf` claim first and skip `cancelLoop` when the claim misses; `leaveBoard` too —
+  cancelling first let a finishing child rewrite `stopped` and re-deliver its old report. Pins
+  `TestStopTeammateIsNotRewrittenDone`, `TestStopTeammateOfAFinishedTeammateChangesNothing`.
+- **That pending report is durable, delivery is not automatic**: `notified_at`/`spawned_by` are in the project
+  DB's `board_agent` (067) and `Register`'s ON CONFLICT leaves `notified_at` alone (a restart neither loses
+  nor re-delivers a report). Startup `reconcileBoard` (`server.go:691`) demotes a teammate left `running` to
+  `stale` — terminal, so it is delivered as a stale report. **Marking is at DISPATCH** (2026-10-24): RunLoop
+  keeps notices loop-local (`wireFresh`/`wireDigest`) and stamps via `lr.BoardNoticesDelivered` ONLY inside
+  the dispatch-success block; the pre-stream gap restart calls `lc.RestoreNotices(wireFresh)` (restores to the
+  FRONT of `unshown`, idempotent — a digest never shadows restored full text); `catchUpTeammates` tracks its
+  pushes the same way; a turn dying before the first dispatch leaves rows unreported → next-turn catch-up
+  (crashes re-deliver = at-least-once). Pins: `TestLoopBoardReportsStampOnlyAtDispatch`,
+  `TestRunLoop_NoticeGapRestartRidesTheNextRequestFull`, `TestRestoreNoticesRequeuesFreshWithoutDigestLie`,
+  `TestTeammateReportUndrainedAtTurnEndStillDelivers`, `TestLoopBoardNoticesDeliveredMarkTheReport`,
+  `TestLoopBoardReportsDieWithTheirTurn`.
+- **Delivered notices re-inject as HEADLINE digests after their first step** (2026-10-24):
+  `TakeNoticesForInjection` (`internal/agent/loop_control.go`) returns fresh notices full-text once (from
+  `unshown[]`) and everything already shown as `Notice.Headline()` under `noticesDigestLabel`; the notice
+  interrupt path (`InterruptForNotice`/`ArmNoticeInterrupt`) was deleted as dead code. Pin
+  `TestLoopControl_AReportReadsFullOnceThenDigests`.
+- **Handles mint FRESH; stops REPORT; waits RESPECT the turn's cancel** (2026-10-24):
+  `board.RegisterFresh` = insert-once (`ErrHandleTaken`; `Register`'s upsert untouched) + server
+  `mintFreeHandle(ctx, reg, attempts, newName)` (board.go:103) rolls a 4-hex suffix up to 8 attempts — wired
+  into `joinBoard`, `spawnTeammate`'s random path (claims the handle BEFORE the child session is created, so
+  the title built from it stays truthful) and `spawnBackgroundTask`; typed names keep the friendly Get
+  pre-check. `stopTeammate` reports "was stopped" via `reportTeammateDone` (board.go:935, guarded on
+  `SpawnedBy`/`SessionID`) — drawer and tool stops both land there; `stopTeammatesOf` (abort/delete cascade)
+  stays report-free and its rows ride the next catch-up. `waitTeammate` breaks its 250ms slice on
+  `ctx.Err()==context.Canceled` (board.go:791 — abort/superseding prompt/delete) but NOT on
+  `DeadlineExceeded` (the op bound). Supersede via `startSessionLoop` does NOT stop teammates — the cascade
+  lives only in `handleAbortSession`/delete/hosted `cancelLoop`. Pins
+  `TestStartSessionLoopSupersedeKeepsTeammates`, `TestMintFreeHandleRetriesPastCollisions`,
+  `TestWaitTeammateReturnsPromptlyWhenTheTurnIsCancelled`, store pins `TestRegisterFresh…`/
+  `TestRegisterStillUpsertsARejoin`.
+- **Build-only by AGENT ID at every seam**, not by tool absence: `codingAgentTools` is shared with `TaskAgent`,
+  so `canUseBoard`/`canSpawnTeammate` (`agent/agent.go:496,505`), `joinBoard` and the `CatchUpTeammates` hook
+  all test `agentID == "build"`; the prompt section sits in the `if !task` branch of `codingAgentSystem`.
+  Coverage: `internal/server/board_test.go` + `board_routes_test.go` and
+  `TestStartSessionLoopJoinsAnEmptyAgentAsBuild`.
+- **The prompt casts the build agent as an ORCHESTRATOR** (`boardPrompt`, `agent/agent.go`): "You orchestrate;
+  teammates do the work" — decide the fan-out before the first read, hand streams out, and spend its own time
+  on the next decision, shared files, verification and user questions (watching with `teammate wait`, never
+  polling roster/status); solo only for strict sequence, one shared file, an edit too small to brief, or
+  research (`task`). **Parallel-first default stated outright** (2026-10-23): side-by-side streams are "the
+  default, not an upgrade", spawned in one tool block **right after `update_intent` states the plan** (which
+  MAY ride the first tool block); one teammate per independent stream; the fan-out's only cap is
+  verifiability, not cost. Two currencies: wall-clock (one teammate per independent file/package) and tokens
+  (a child's greps/reads are billed in its own window). Two rails live ONLY in the prompt: **do not end the
+  turn while a spawned teammate is still working**; **a teammate briefed to implement one stream implements
+  it**. Rail exits: `teammate stop <handle>` (cascades to what it spawned) or parking a legitimately long
+  child (end the turn; CatchUpTeammates delivers at the next turn start). Process step 1 (interactive only)
+  points at it. `TestBoardPromptPrefersTheSplit` pins the wording, decision-before-mechanics order, and that
+  no non-build agent prompt mentions `teammate`.
+- **`startSessionLoop` normalizes `agentName == ""` → `"build"`**: the web client never sends `agent`, and
+  `joinBoard` refuses any name but `"build"`, so without it NO interactive session joins the roster
+  (`internal/server/resume_routes.go`). **`board.Store.Get` returns the ZERO Handle with a nil error** when
+  nobody holds the name — check `h.Handle == ""` yourself before acting on it.
+- **Rails**: **no spawn depth limit, no live-teammate cap** — any `build` session spawns, a teammate included
+  (pin `TestSpawnTeammateAllowsNestingAndCapsNothing`); **steps are uncapped** — `stepBudgetFor` returns
+  `agent.MaxStepsUncapped` (`-1` → `hardMax = math.MaxInt` via `overrideStepBudgets`, `internal/agent/loop.go`);
+  spawn = `Ask`; `cancelLoop` cascades down every nesting level; claims and the post budget died with the
+  posts — **conflict-freedom comes from the file change gate, not the board**.
+- **Task tool async (`"background": true`)**: `spawnBackgroundTask` (`server/board.go`) registers a READ-ONLY
+  board KindTask child — session type `"subagent"`, Title `Task: …`, prompt `backgroundTaskPrompt`,
+  model/permission inherited — and returns a `task-*` handle + `/session/…` URL at once; sync `task` is
+  unchanged and default (CLI `run.go` registers no Spawn → background refuses). Delivery reuses the
+  teammate-report pipeline ("Background task" notice to a RUNNING parent, `CatchUpTeammates` otherwise);
+  `teammate wait <handle>` blocks early; `stopTeammate`/board route/drawer accept KindTask; budget = sync
+  parity (`agent.DefaultMaxSteps`, 0 resumes). **Task children are ungated on purpose and NOT
+  permission-mirrored** — `resume_routes` skips `WithPermissionGating` for `agentName == "subagent"`; the
+  teammate BFS in permission_routes and `ParentSessionOf` stayed teammate-only. Pins:
+  `TestTaskBackgroundRouting`, `TestSpawnBackgroundTaskRegistersATaskChild`,
+  `TestLeaveBoardReportsABackgroundTaskToARunningSpawner`, `TestStepBudgetForATaskChildMatchesTheSyncSubAgent`.
+
+## 2026-10-25 — MEMORY.md diet pass-7 archive (full pass-6 working text, 23777 bytes; pre-diet originals in the diet sections above)
+
+# Project Long-Term Memory
+
+**Admission test.** A line earns a place only if a future session needs it *before acting*: a gotcha with its
+fix, an invariant with its pinning test, a canonical value, or a decision and why. **Procedures live in
+`HOWTO.md`; measurements and long-form subsystem detail in `HISTORY.md`**; the pre-split text is in
+`MEMORY-ARCHIVE.md`. Budget **~20 KB** — re-read every turn on the cached prefix; curate rather than truncate.
+
+**Standing conventions.** **Developer preference: needs SPEED — parallel by default** — batch every independent read/search in one block, and fan out teammates/task agents per independent stream instead of working serially (stated 2026-10-24). Working tree usually dirty — read hunks, never `git add -A`, stage explicit paths; nothing is committed unless asked. `web/dist` is served from an `embed.FS` (`internal/server/static.go`), so a
+shipped web change needs a Go rebuild — but a live visual check does NOT: run a vite dev instance with a
+throwaway config proxying `/api` to the live server (HOWTO.md: "Verify a web change against the live server
+without restarting it"); Go rebuild only needed before shipping.
+
+## Repo layout & git hygiene
+
+- Root: markdown only; plans in `plans/` (bare inside); next migration `069`.
+- **`.gitignore` paths stay root-anchored** (`/GIT_DIFF_PLAN.md`, `/dist/`, `/agent/` — `.agents/skills` is
+  what `internal/skill/discover.go` reads; build `./internal/... .`). `AGENT.md` is tracked but 0 bytes.
+- **README hero = `docs/media/ogcode-demo.gif`** (no WebP/video on GitHub); re-encode via `HOWTO.md`; check
+  for leaked internal paths at legible resolution.
+
+## Releases, version & install
+
+- **Tags are immutable**: `git ls-remote --tags origin` + `gh release view vX.Y.Z` first; bump `internal/version/version.go` + both `web/package*.json`.
+- **A red Linux build job blocks a release**: `ZIG_LOCAL_CACHE_DIR: /tmp/zig-cache` (else `.zig-cache` lands beside the read-only module cache).
+- **macOS re-sign**: a stale in-place signature → `Killed: 9`; `make install` `rm -f`s first, ad-hoc signs, restarts nothing (check the listener pid's start time).
+- **`make -s install …` BEFORE handing over a restart**: a relaunch runs `~/.local/bin/ogcode`, not repo `./ogcode`; verify `strings ~/.local/bin/ogcode | grep -c <new-symbol>` ≥1, then the pid changed.
+- **`detectInstallCommand()`** = scoop → Homebrew → cargo → install.ps1 dir → winget → install.sh; Homebrew = `/Cellar/` or `/opt/homebrew/`, **never `/usr/local/`**; verify on a throwaway rig, expanding the binary path BEFORE exporting `HOME`.
+## Build & dev loop
+
+- `make build` = `build-web` (npm → `web/dist`) then `build-server` (`CGO_ENABLED=1 go build -o ./ogcode .`); `make dev` :9595; `make dev-web` Vite :5173; `ogcode version` (no `--version`); dirty builds print `…-dirty`; no linter; gofmt touched files.
+- **`CGO_ENABLED=1` mandatory** (cgo Swift grammar); `make test` omits it; OGX-signed build: `make build-server OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)`.
+- **`ogcode run --max-turns` defaults to `0` = no limit; a literal `MaxSteps == 0` still means the 1000-step default** (zero-value `LoopRunner`); the server loop (10000, 2 auto-resumes) and `ogcode index` (50) stay capped (`step_budget_test.go`).
+## Deployment & first boot
+
+- **A project keeps its port**: `~/.ogcode/ports.json`; a bare `ogcode` reuses it (this project → **7801**); `--port` overwrites. **Never restart the host server unasked** — hand over `kill <pid>; cd <dir> && ogcode` (no `--port`).
+- **One server per dir**: advisory flock on `<dir>/.ogcode/server.lock`; a second `serve` exits 1 naming the holder; **`port free` ≠ dead** (SIGTERM frees the listener before the flock) — wait for the old PID to EXIT.
+- Listener before preflight; `GET /api/config` 200 = health probe; end-user macOS signing is NONE (ad-hoc; runs via `com.apple.provenance`).
+- **Docker**: install `git`; `HEALTHCHECK … /api/config --start-period=120s`; `docker.yml` needs `type=raw,value=latest`; ldflags `-X`: missing symbol = silent, empty = no fallback.
+## OGX gateway
+
+**Assertion**: HMAC-SHA256 (base64url) over `app + "\n" + ts + "\n" + method + "\n" + path` (skew 5 min) in `X-Client-App`/`-Timestamp`/`-Signature` — ogcode `appassertion.go`, oglab `internal/httpx/httpx.go`. **Gate CONDITIONAL**: no secrets ⇒ open; any secret ⇒ any failure ⇒ 401.
+
+- **Secret**: `~/.ogcode/ogx-app-secret` (600, never paste); **`tr -d '\n'` mandatory** (unstripped HMAC → silent 401).
+- **Provider**: `https://ogx.ogcode.in/v1`; **`/v1/models` IS the plan** (dynamic, all `ActiveByDefault`, no static fallback); priority `anthropic, openai, openrouter, ollama, ogx`; **`prompt_cache_key` = session identity for token spend**; **bodies cap 4 MiB** (`checkBodyFits`, fatal; oglab matches — raising = 3 hops, gateway first).
+- **Composer images**: 1024 px long edge, JPEG q0.8/WebP; passthrough ≤512 KB AND ≤1024 px; `MAX_IMAGE_SIZE` (10 MB) = pick limit.
+- **HTML from a JSON endpoint = nginx routing bug**: `upstream oglab_router` + `location /v1/` first; 15s SSE keep-alive beats Cloudflare's idle cut; settings tab `readOnly`, not-connected div needs `data-setting`; oglab breaker ignores `400`/`422`.
+## Providers, models & resolution
+
+- **`OpenAIProvider.Models()` is a pure read — never network** (pin `TestModelsNeverFetches`); fetching is `RefreshCatalog`.
+- **Resolution**: `orderedSnapshot()` sorts `(providerRank, id)`; `ResolveProviderFor` = custom → explicit → catalogue (`ActiveByDefault`) → highest priority; persisted as `provider` (migration 047); a `SELECT` column missing from `rows.Scan` = silent runtime error; `lookupModel` compares raw `m.ID`; **catalogue names are aliases** (`normalizeModelID` strips org prefix/`:latest`/`:cloud`/OpenRouter variants, first-claim-wins); `gemini-4-argon`: `RejectsSampling`, `MaxOutputTokens: 32_768`.
+- **`ogx-deepseek-v4.1-flash` THINKS BY DEFAULT** (2026-10-24): `defaultEffortFor` holds flash-class ids at `low` when session effort is "" unless the spec default is LIGHTER (a recorded ≥high keeps the hold) + `StreamRequest.StepMechanical` (loop tail) drops default-derived effort to `none`/`low` after a tool-only step with ≥1 WORK call (exploration-only exempt; user-set effort NEVER rewritten); pin `openai_effort_flash_test.go`.
+- **ogcode.json custom providers**: extra ids via `config.CustomProviders()` → `NewOpenAICompatibleProvider`, wired `cli/run.go` + `loadProviderMap`; entry = `type` ""/"openai" + `baseUrl` (+ optional `model`/`label`); `disabled` merges ONE-WAY; **`Load` must copy every new ProviderConfig field** (dropped `Type` once).
+- **Ollama slot lists only endpoint models**; budget `OGCODE_PROVIDER_MAX_CONCURRENT` 8, reserve 2 (index: `indexGate` then `total`); defer order `close(ch); body.Close(); cancel()`; **`write tcp …: result too large` = ERANGE from the LOCAL `write(2)`** (VPN/filter) — retry once on a fresh conn; **ONE pooled h2 conn to ogx, h1.1 sockets DRAINED not dropped** (`drainFinishedStream` gated on `sawDone`; discard tests need a ~20–50 ms tail gap).
+## Token accounting
+
+- **Reasoning is billed INSIDE `output`, never separately** (`ModelPrice.Cost`, `TokenCounts`, `usageFromOAI` exclude it — display count); output ≈ 1% of tokens: cache-hit rate, not effort, drives spend; **Ollama Cloud meter**: `GET https://ollama.com/api/usage` + `OLLAMA_API_KEY`.
+- `tokens.input` is UNCACHED: bill `input + cacheRead`; a hit is `prompt_tokens_details.cached_tokens` (>0) else `prompt_cache_hit_tokens`; the pill totals `GET /api/session/{id}/token`.
+- **Title generation inherits the session model**; **Gemini `thought_signature` must be echoed verbatim** from `extra_content.google` on every replayed tool call or turn 2 400s.
+- **Teammate spend counts on the CHILD** (its own step+utility ledger rows); **NEVER `foldChildUsage` a teammate** (double-counts); the pill folds teammates on the CLIENT (`teammates` arrays from `/session/{id}/token` + `/usage`, `utility` = a subtotal; errored child read skipped per-child; `spawnedTeammates` = `board.BySession` + roster `KindTeammate && SpawnedBy == parent.Handle`).
+## Permissions
+
+- **The ruleset gates, not the mode**: `Ruleset.Evaluate` runs BEFORE the mode switch; only read/glob/grep `Allow` by default (bash/write/edit `Ask`); the catch-all `Allow`s every other tool in EVERY mode; **Yolo only changes what would have been Ask**; **no Deny tier** (Safe/Ask/Unclear — only Unclear reaches the LLM; `riskLLMMaxTokens` 1024; an unanswered check warns → Ask, uncached); PATCHing a mode also `SetDefaultMode`s machine-wide; **grants never expire**; pattern = the verbatim string.
+- **A teammate's Ask AND `ask_user` mirror into the PARENT's composer** (SERVER-side): `ParentSessionOf` climbs `SpawnedBy`; `GET /session/{id}/permission|question` BFS-append the SUBTREE; a reply by id clears EVERY queue holding it (path/owner/root; pages beyond go stale until reload — accepted); the child blocks until answered (no timeout; dialog answerable live).
+- **Grants + mode are machine-wide** in `~/.ogcode/config.db` (migration 048), grain = the exact command/path/skill; **test trap**: `serve_lifecycle_test.go` doesn't set HOME — isolate HOME + cwd.
+## Agent memory files
+
+- **Caps: none by default** (`OGCODE_MEMORY_MD_MAX_BYTES`/`OGCODE_AGENT_MD_MAX_BYTES`; `limit <= 0` is
+  uncapped) — a positive budget is head-biased, so curate instead. `staticSystemPrompt` carries **one constant
+  pointer per file, never content or a heading index**; turn digests carry tool names and the final response
+  only, so procedures go to `HOWTO.md`, not the scribe.
+
+## Prompt caching, read pressure & context windows
+
+- Anthropic `cache_control` on the last tool def + first system block (min 1024 tokens, 4096 on Opus 4.5+, 5-min TTL); OpenAI automatic; **entry [0] stays byte-identical** (the date rides `systemReminderPrompt`).
+- Read pressure: 40000 tokens (`OGCODE_READ_PRESSURE_THRESHOLD_TOKENS`); resend multiple 1 (`OGCODE_RESEND_COST_WINDOW_MULTIPLE`).
+- **History is TURN-SCOPED** (`sliceTurn(findLastTextUserMessageIndex)`): prior-turn images never re-send; within a turn they repeat, riding the last-message cache breakpoint.
+- **The turn's prompt and images survive compaction; tool images do not**; the ask_user Q&A must survive verbatim on all three surfaces.
+- `OGCODE_COMPACT_CONTEXT` unset/empty = ON; `maxCompactions` 2, `compactionKeepRecent` 12, unknown window → 128000; learned windows kept only when `learned > promptTokens`.
+## Agent tools & prompt
+
+- **`schedule` = one-shot agent timers** (2026-10-24): `create` (`delaySeconds` OR strictly-future `fireAt` + required `note`)/`list`/`cancel`; store `internal/timer` (migration `068`, atomic `ClaimDue`); ticker `pollReminders` (10s) delivers via board-report rails; an idle session's row waits for `CatchUpReminders` at THAT session's next turn start — never starts a turn; restarts keep rows (at-least-once); refusals Result-shaped; **build-only via `canSchedule()`**.
+- **`update_intent` rides the first work block**; planless reminder ONCE per session (re-arms via `markPlanSet`); 1–7 steps in `session.intent` (migration 064); **descent gate**: `grep`/`glob` before any map/read reminds once per turn; **matcher**: one routing completion per block, silent failures, no cap; no `description`/not pending-active ⇒ never routed; **chip = the step label; statuses move MID-TURN; nothing closes the plan at turn end**; the build agent has **no upfront skill/MCP list** (`turnTools` withholds `mcp_*`; bare `skill` refused in a matcher session); rich output = fenced declarative specs.
+- **`read` takes `files=[{path,ranges,offset,limit}]`** (2026-10-24; the prompts' primary shape): exclusive with `path`; bookmarks stamp per CONTENT section only; **`read`/`file_map` UNCAPPED** (2026-10-25): no limits, no default window (bare read = whole file; missing `end_line` = EOF; any `limit` = a window); both set `Result.Uncapped` (50 KB backstop skips); one bound: ogx's 4 MiB body.
+- **Hidden contracts**: blank ask_user = unanswered; **pathlock** bars write-vs-edit on one file, batched edits OK; **codemap** = one level per call, no threshold; `dirPrefixFilter` needs `ESCAPE '\'`; **HCL is outlineOnly**; Swift `as?`+newline+`??` misparses; non-vision models lose images (resumable); MCP images → temp file; `requires:` envs via `skills.env`.
+## MCP & search
+
+- **`OGCODE_SEARCH_ENABLED=false` removes `web_search`, `fetch_page` AND `deep_search`**; to suppress only deep_search, add a prompt clause.
+- **MCP: transport is INFERRED** (`Command` ⇒ stdio, `URL` ⇒ streamable-http; `"transport"` overrides — no `type` key); tool ids `mcp_<server>/<name>`; lazy connect; a URL server without `headers` gets OAuth (`~/.ogcode/mcp-tokens/`), with `headers` = static bearer.
+- **Search** results carry a `Provider` stamp before the TTL cache; `/settings/search` is a FULL-STRUCT replace; `""` = HTTP first, `safari`/`chrome` = browser first (`chrome` on macOS = Safari); Windows check: `GOOS=windows CGO_ENABLED=0 go build ./internal/search/`.
+## Data, migrations & transcript
+
+- **Migrations**: goose keys by VERSION NUMBER only — a number taken by a never-landed branch silently SKIPS your file; check `git log --all -- internal/db/0NN*` AND the real `goose_db_version`; next free = next integer past the highest file.
+- **The transcript is append-only**; the only bound is `capToolOutput` (50 KB, skipped by `Truncated`/`Uncapped`); only deletes are `Store.Delete`/`DeleteMessage`; compaction changes what is re-sent, never what is stored; **nothing prunes or vacuums** — deletes fill the freelist; reclaiming needs a manual `VACUUM`.
+- **FK 787 mid-turn ⇒ another writer deleted the session** (`handleDeleteSession` waits ≤5s; `Store.Get` returns `(nil, nil)`; `classifyInterruption` maps it and `ErrRequestTooLarge` to `InterruptFatal`).
+- **Session DB**: `.ogcode/ogcode.db` / `~/.ogcode/config.db`; `message` = metadata, content in `part.data`; **`GetMessages` must return `Parts` as `[]`**; pagination `?before=<id>` + `X-Has-Older` at 300 rows.
+## File change gate
+
+- **Migration 066 + `internal/filechange`**: a row per `write`/`edit`/`bash` + a per-(session,file) bookmark (`seen`); ring `RingPerFile` (50); `GET /api/file-changes` (503 when nil) — no web client calls it yet; the `diff`'s one live consumer is the gate's post-restart refusal.
+- **A foreign change since this session's last read refuses `write`/`edit`** (`staleness.go`), as a Result showing the diff; `Seen` = **-1 for never-read** (0 is a real bookmark); an empty ring falls through to the `History` query; **`bash` is COVERED by fingerprint** (`bash_observe.go`): every command stats tracked files, records UNATTRIBUTED changes (deletions too) — the session is refused by its own shell until it re-reads.
+- **`description` required on `write`/`edit`**; a nil `FileLog` is a no-op; **fails OPEN when the history row is missing**; blind spots: MCP tools, `latex_to_pdf`'s `.tex`, outside-agent changes until the next `bash`; `file_map` is NOT a read; a map-only read does NOT stamp the bookmark; **cross-process staleness appears only after a restart**.
+## Web UI: composer, sidebar & navigation
+
+- **Composer drafts/attachments are per session**; **the running pause glyph IS the stop control**; the `+` attach menu renders in a `Portal`; the plan-mode flag gates only the warning banner; mode comes from `GET /api/mode`; **the session-row dot reports task status** (a hand-seeded row must set `permission` or `Store.List` 500s); **`⌘K` is guarded on `offsetParent`**.
+- **Virtualization/scroll memory** (`message-list.tsx`/`scroll-memory.ts`): pad-based windowing keyed by message id; the id-change effect must call `restore()`; ResizeObserver must not `holdAnchor` when `anchoredByList`.
+## Theme, contrast & light mode
+
+- **Light mode is server-global**: `GET/POST /api/appearance` off **`s.globalDB`** — a throwaway rig flips
+  the USER's machine-wide mode (save + restore around audits); `web/index.html` pre-paints from
+  `localStorage['ogcode-theme-mode']`; Settings General is `/settings`.
+- **Muted-text floor: 4.5:1 on the LIGHTEST surface the token can sit on** (`--bg-hover`); defaults:
+  accent `#ff5e1f`, **accent ink is its own per-mode token**, **`onPrimary` = `labelFor`** over `--accent`
+  AND `--accent-hover`.
+
+## Preview, public serving & device panel
+
+- **The Preview page lists only announced ports** (`<port>.<PreviewDomain()>`; `recordAnnouncedPorts` reads
+  PartText only at turn end; manual `?ports=`); `previewHostDispatch` strips `X-Frame-Options` + CSP
+  `frame-ancestors` or a frame-guarded app renders blank.
+- `/public` serves `<data-dir>/public` with **HEAD mapped explicitly**; **scrcpy** deep links need
+  `action`/`udid`/`player`/`ws` — use `resolvedUdid()`, never raw `udid()`.
+
+## Browser takeover (bridge + extension)
+
+- **Option B**: a first-party MV3 extension (`browser-extension/`) drives the user's real Chrome over a WS bridge; 11 `browser_*` tools ride every turn (unpaired ops refuse Result-shaped); ops 30s (60s navigate/snapshot); build-only via `canControlBrowser()`; pair GET echoes the token WITHOUT rotating (POST rotates; status always 200); **pair token persists at `.ogcode/browser-pair-token` (0600)**.
+- **Traps**: OriginPatterns need `://` (`"chrome-extension://*"`); **hello `version` = bare JSON NUMBER** (a string drops hello silently); the 32 KiB read limit killed big replies — fix `maxResultFrameBytes = 4<<20` + `SetReadLimit`; re-pair fails pending ops with the ErrNotConnected sentinel; **navigate `newTab` with no tab id auto-grants the tab** (persisted; panel-revocable; omitted `tab` = last Granted).
+- **Watch capture**: first op on a granted tab attaches chrome.debugger; rings 300/300, body cap 65536, **CDP timestamps are epoch SECONDS**. **A heavy op can KILL the service worker, not pairing — don't re-pair on "extension not paired"**; unchanged "Reconnecting — retrying in Ns" = SW died mid-retry — reopen the side panel. **CWS kit**: `make extension-zip` (manifest at ZIP ROOT); **`<all_urls>` dropped — never re-add**; evidence: `HISTORY.md` 2026-10-25.
+**Native-messaging host = the zero-paste pair path** (`com.ogcode`, 2026-10-25): `ogcode native-host`
+(stdio host, 4-byte-LE framing; `{"type":"pair"}` → `{"ok",\"version",\"servers":[{origin,url,token,port,project}]}`
+— registry = `portmap.All()`, each candidate probed `GET /api/browser/pair` 750 ms, sorted port-then-project,
+stale entries filtered); `ogcode native-host install [--extension-id …]` / `uninstall`; boot auto-installs
+idempotently via `nativehost.EnsureRegistered(projectDir)` (server.go, warn-only) writing `com.ogcode.json`
+into every browser dir whose PARENT exists (mac: Chrome/Chromium/Brave/Edge/Vivaldi/Arc). **Extension id is
+PATH-DERIVED** (`ExtensionIDForPath` = Chromium GenerateIdForPath: sha256 of the LOWERCASED abs path, nibbles
+→ a..p): repo `browser-extension/` ⇒ `cgeoedmgjadadineklkmhgpmolmnpfbn` — loading the same code from a
+different dir ⇒ different id ⇒ Chrome refuses to launch the host. Extra ids: `--extension-id` flag and
+`OGCODE_EXTENSION_IDS`; `WebStoreExtensionID=""` reserved until CWS publish. **Extension pair leg** (v1.1.0,
++`nativeMessaging`): `background.js` `autoPairThenConnect` fires ONCE per worker life (5 s) when credentials
+are absent — success writes `{serverOrigin, pairToken, bgConnected:true}` then connects like manual Connect;
+failure ⇒ unconfigured status "no ogcode app — paste token to pair", NEVER retries/overwrites. Chrome reads
+native-messaging manifests at browser STARTUP — a first-ever com.ogcode.json needs one Chrome restart.
+Pins: `internal/nativehost/*_test.go`, `portmap/all_test.go`, `cli/native_host_test.go`, harness
+`browser-extension/native_pair.test.js` (34 checks).
+
+## Indexing & the document index
+
+- Auto-index is gated by `OGCODE_AUTO_INDEX_MAX_FILES` (500) + consent (migration 061); manual builds are
+  never gated; the post-turn guard is `agentID == "build"` AND `Directory == ProjectID`;
+  `OGCODE_AUTO_INDEX` is the kill switch; it must run on the turn's resolved model AND provider.
+- **Labels are LLM-made, not embeddings** (`IndexAgent`, no vector store in `internal/indexer`); `.ogcode/`
+  is skipped unconditionally; 39 default excludes (`excludes.go`); `doc_page_index.mod_time` drives the
+  refresh.
+
+## Controlplane, remote workers & Incus
+
+- **Nested module `controlplane/`**: one in-process `server.Server` per worktree; **`HostSession` must
+  `store.Get` first** (`Store.Create` violates UNIQUE on re-delivery); routes key `<workerID>-<route>`,
+  exact whole-label lookup; **bbolt is single-writer**, a byte-truncated file SEGFAULTS at `bolt.Open`; a
+  restore must set `status=offline` + `LastSeen=boot time` or `ReapStale` kills every worker;
+  workers/accounts/Incus: `HISTORY.md`.
+
+## Infrastructure, feature flags & telemetry
+
+- **Homepage is `docs/index.html`** (nav `.nav-menu`, mobile `#navSheet` — add to BOTH). Public copy: NO em dashes; `: ` in unquoted YAML `description:` breaks the `docs-site` build — quote it; docs nav `docs-site/src/lib/nav.ts`; deploy per `docs/DEPLOY.md`; `ogcode serve` binds all interfaces, **no auth**, a proxy MUST NOT buffer; brand button `#d1440c`.
+- **Cloudflare**: `ogx`/`oglab` A → `162.19.81.108`; origin nginx listens ONLY on 40009 (`origin.port=40009`); box access via `sshpass … -p 20009`; edit `sites-available` then `nginx -t && systemctl reload`.
+- **PostHog `497411`**: NEVER send content; headless browsers drop events (patch UA + `webdriver`); `ogcode_turn_resources` = 1 event/turn, `distinct_id` = `s.installID`; logs need `OGCODE_POSTHOG_LOGS`; install-id: `export OGCODE_IID='…'` before a curl|sh.
+- **Feature flags**: one `/decide` per refresh, fail-safe OFF; Notes drops its prompt section; device-panel 404s; plan-mode gates only the banner; serve tests `stubFeatureFlagsOn(t)`.
+## Agent board & teammates
+
+- **The board IS the agent tree, not a message log** (migration `067`): rows carry `spawned_by`/`status`/`notified_at`; `internal/board` behind `server/board.go`; tools `tool/board.go` (one op, `roster`) + `tool/teammate.go`; route `GET /api/board/roster`; Agents page (`/agents`) reuses `board-drawer-row.tsx`; **header chips: `running = live − idle` (DISJOINT)**.
+- **A child reports by FINISHING — no mid-task channel**: RUNNING spawner gets the last message whole then `MarkReported`, IDLE via `CatchUpTeammates`; **nothing starts a turn on its own**; stamping at DISPATCH (`BoardNoticesDelivered`); gap-restart re-queues via `RestoreNotices(wireFresh)`; delivered notices re-inject as HEADLINE digests (`TakeNoticesForInjection`); claim terminal status BEFORE cancelling; boot `reconcileBoard` demotes `running` → `stale`.
+- **Handles mint FRESH; stops REPORT; waits respect cancel; supersede stops nobody** (`RegisterFresh`+`mintFreeHandle` claim BEFORE the child session exists; `waitTeammate` breaks on `context.Canceled`, not `DeadlineExceeded`); **build-only by AGENT ID at every seam**; **`boardPrompt` = ORCHESTRATOR, parallel-first**: fan-out before the first read, spawn right after `update_intent`, rails prompt-only; `startSessionLoop` normalizes `agentName == ""` → `"build"`; `board.Store.Get` = zero Handle, nil error when free; op-less calls self-heal via `missingOpHint`.
+- **Rails**: no depth limit, no live cap, **steps uncapped** (`MaxStepsUncapped` → `math.MaxInt`); spawn = `Ask`; `cancelLoop` cascades; conflict-freedom = the file change gate; **Task `"background": true`** = READ-ONLY KindTask child (`type:"subagent"`), ungated, NOT permission-mirrored.
+
+## 2026-10-25 — MEMORY.md diet: verbatim line archive (pre-diet lines not covered by the sections above)
+
+  read.
+
+## 2026-10-25 — MEMORY.md diet completed (66179 B → 21991 B; teammate memory-diet pass-8; every removed byte is verbatim in the diet sections + pass-7 archive + line archive above)
+
+## 2026-10-25 — MEMORY.md diet final recount (pass-10: the pass-8 size check counted characters, not UTF-8 bytes; 11 further micro-trims, all content already archived above; final = 21883 bytes)
+
+## 2026-10-25 — Native-host auto-pair silently broken: Chrome hashes the unpacked path AS SPELLED
+
+**Symptom**: ogweb side panel stuck on "no ogcode app — paste token to pair" even with the server up;
+native-messaging auto-pair never filled in origin+token.
+
+**Root cause, verified on disk** (not inferred):
+- Chrome 156.0.8078.48 on macOS 15.5 recorded the repo unpacked copy (`~/Downloads/work/ogcode/browser-extension`)
+  with id `lgecpjpmljakfjgcgboknboioblifleg` in Chrome's `extensions.settings` path. That equals
+  `sha256("/Users/prasenjeet/Downloads/work/ogcode/browser-extension")`[:16] nibble→a..p — path hashed WITH its
+  original casing. The old `ExtensionIDForPath` lowercased first (`cgeoedmgjadadineklkmhgpmolmnpfbn`) — an id
+  Chrome never assigned — so the boot-written manifest's `allowed_origins` matched no installed extension and
+  Chrome refused to launch `ogcode native-host` for it.
+- Compounding: Chrome was running since 11:38 while the manifest was (re)written 15:39; Chrome only reads
+  native-messaging manifests at STARTUP, so no manifest change takes effect for a running Chrome session.
+
+**Fixes**:
+- `internal/nativehost/extension_id.go`: dropped `strings.ToLower` (hash as spelled); `extension_id_test.go`
+  pins mixed-case hashing + a case-PRESERVATION test replacing the old case-INSENSITIVITY pin (which pinned
+  the bug). `go test ./internal/nativehost/ ./internal/cli/` green.
+- Machine fixed immediately without rebuilding: `ogcode native-host install --extension-id
+  lgecpjpmljakfjgcgboknboioblifleg` (run from the repo root so the derivation's id also stays allowlisted);
+  manifest now lists both origins. Pair host verified healthy separately by piping a 4-byte-LE-framed
+  `{"type":"pair"}` into `ogcode native-host` — answered `{ok:true, servers:[…port 7801…]}`.
+
+**Compounding cause (found when the user reported still broken after the Chrome restart)**: Chrome launches
+the manifest's path BARE — argv[1] is the origin `chrome-extension://<id>/` (+ optional `--parent-window=N`),
+NEVER a `native-host` subcommand. `~/.local/bin/ogcode 'chrome-extension://lgecp…/'` printed
+"Error: unknown command … for ogcode" and the host exited instantly, so the extension's nativePairRequest
+got "Native host has exited" and fell back to paste-token even with the manifest correct. Neither test layer
+could catch it: `native_pair.test.js` stubs `chrome.runtime.connectNative`, and the Go tests only pinned the
+subcommand form.
+
+**Fix (round 2)**: `internal/cli/native_host.go` adds exported `IsBrowserLaunched(argv []string)` (true on a
+`chrome-extension://` argv[0], or `--parent-window=` with a second arg); `internal/cli/root.go` `Execute()`
+short-circuits to `nativehost.Run(os.Stdin, os.Stdout)` BEFORE cobra when it fires. Pin:
+`cli/native_host_test.go` `TestExecuteRoutesChromeLaunchToTheHost` drives the real `Execute` with pipes
+(framed `{"type":"probe"}` → framed error reply; gotcha: `io.ReadAll` on an os.Pipe blocks until ALL writer
+ends close — close stdinW before Execute and stdoutW right after it returns). Verified end to end:
+`printf '\017\000\000\000{"type":"pair"}' | ~/.local/bin/ogcode 'chrome-extension://lgecp…/'
+--parent-window=0` → framed `{ok:true, version:v0.51.0-dirty, servers:[(7801,…/ogcode),(9603,…/oglab)]}`.
+Installed by rebuilding + `rm -f ~/.local/bin/ogcode` + copy + ad-hoc codesign. An earlier full-suite run
+timed out at 300s only because my first test version deadlocked in that ReadAll — no other fallout.
+
+**Aftermath (confirmed working 2026-10-25)**: a manifest change needs a FULL Chrome quit/reopen (manifests
+read at startup), but once the manifest was already correct an EXTENSION RELOAD sufficed — a reload is a
+fresh worker life, which re-fires `autoPairThenConnect` (it never retries after a failure within one worker
+life). The host fix itself needs no restart of anything — Chrome execs the current binary file at every host
+launch. User confirmed auto-pair working end to end; `browser_status` from the server shows `connected:true`.
+**Rejected**: re-loading the extension from the repo dir to match the old id — ids follow the load path's
+spelling, so the durable fix is allowing the observed id (or fixing the derivation), not chasing the id.
+
+## 2026-10-25 — Per-turn context cost of the 11 browser tools (feasibility probe for lazy gating)
+
+- Measured by a throwaway `go test` in `internal/tool` (json.Marshal of `{name, description,
+  input_schema}` per tool, then deleted): the 11 `browser_*` definitions total **8106 bytes ≈ 2000 tokens
+  riding every build-agent turn**. Biggest: `browser_network` 1076 B, `browser_console` 966 B,
+  `browser_type` 918 B; smallest `browser_content` 502 B. Prompt-cache reads pay ~10% of that per turn on
+  a warm prefix; cache misses pay full.
+- Feasibility finding: the lazy seam already exists — `newTurnToolset`/`offer` (internal/agent/
+  intent_tools.go:510-558) hides `mcp_*` off the wire until the intent matcher names it, and
+  `browserOffered` (internal/agent/loop.go:788) only gates build-agent vs registry, not per-turn. Making
+  `browser_*` lazy = extend `offer()` past the `mcp_` prefix and surface via the (already matching)
+  embedded `browser-takeover` skill or a kept-on-wire `browser_status` sentinel. Skill bodies CANNOT
+  carry executable tools — tools must reach the wire; the skill supplies only the knowledge. Not
+  implemented this turn (advisory only).
+
+## 2026-10-25 — Lazy browser wiring shipped: the 11 browser_* tools ride the wire only when the turn needs them
+
+- Implemented the probe above. The family stays OFF the wire until it is needed; the allowlist (`allowIDs`) still carries the `browser_*` glob, so the permission surface and `executeTool`'s HasTool check are unchanged (grants never expire, patterns unchanged).
+- `tool.BrowserToolIDs()` (internal/tool/browser.go) is the family in registration order, single source for the offer.
+- Matcher path: the intent matcher now also matches the embedded **browser-takeover skill** — when a plan step matches it and the browser registry holds the bridge, `formatIntentHint` (internal/agent/intent_tools.go) puts all 11 ids in `intentHint.OfferIDs` (renamed from `MCPIDs`) plus a hint line pointing at browser_status; `suggestIntentTools` offers them via the widened `turnToolset.offer` (now accepts concrete `mcp_*` AND `browser_*` ids; no-ops when the base id or a base glob already covers one, so a non-matcher turn pays nothing).
+- Skill-load path: `RunLoop`/`executeReadyToolCalls` (internal/agent/loop.go) reverse-walks the block's executed tool calls; a successful `skill` call with `{"name":"browser-takeover"}` offers the whole family for the rest of the turn — this also covers planless turns the matcher never routes.
+- Sentinel fix found BY the new end-to-end test: `allowIDs` gained only the `browser_*` glob, so a real matcher turn dropped it and browser_status was off the wire too (the unit test had used a synthetic allowlist). Fix: loop.go appends `browser_status` concretely BEFORE the glob, so `newTurnToolset`'s glob drop keeps the sentinel from step one of every matcher turn.
+- Non-matcher turns (intentOffered=false — e.g. CLI/headless loop where update_intent isn't registered) keep full glob expansion, so they see the whole family as before; safe fallback.
+- Pins: `internal/agent/loop_browser_lazy_test.go` `TestRunLoop_BrowserSkillLoadPutsFamilyOnWire` (full RunLoop: call 1 = sentinel only, call 2 = whole family after the skill load); `browser_gate_test.go` `TestMatcherTurnKeepsTheBrowserSentinelOnly`; `intent_tools_test.go` family-offer tests; `internal/tool/browser_test.go` `TestBrowserToolIDsMatchesRegistration`. All green (`go test ./internal/agent ./internal/tool ./internal/skill ./internal/server -count=1`), build clean, go vet clean.
+
+## 2026-10-25 — ogweb Chrome Web Store submission prepared
+
+- Privacy policy published first (CWS requires a public URL): `docs-site/src/content/docs/privacy.md` committed as `4d0f37d`, pushed, `pages.yml` dispatched (run 40197100252, green), verified `https://ogcode.in/docs/privacy/` → 200.
+- Verified `<all_urls>` removal was sufficient: drove the granted tab to example.com — navigate + snapshot + screenshot all work with host-only permissions.
+- Zip: `make extension-zip` → `ogweb-1.1.0.zip`, manifest at ZIP ROOT, 10 files, perms `["debugger","tabs","sidePanel","storage","nativeMessaging"]`, no host_permissions. gitignored at repo root.
+- CWS developer account: user registered + paid $5 at chromewebstore.google.com (publisher prasenjeetsymon@gmail.com, account id 908afb76-d0bd-40be-b2bc-3d466a7f7907). Dashboard interaction is manual only — our browser tools get "The extensions gallery cannot be scripted" even for snapshot; chrome-extension:// navigation is also refused, so drive by URL only.
+- Listing screenshots made with `screencapture -x` (OS-level, 3420x2214) while the user opened the real ogweb side panel in Chrome, then `sips` crop (top 70 px menubar removed, `-c 2137 3420 --cropOffset 70 0`) + `-z 800 1280` → exactly 1280x800. Saved to `cws-listing/`: `ogweb-hero-1280x800.png` (ogcode.in + connected panel, pair token masked) and `ogweb-debug-banner-1280x800.png` (Google News with the "ogweb started debugging this browser" banner, showing the declared-permission flow).
+- Finding: `screencapture` captures the FRONTMOST window only, so the user had to bring the Chrome window forward; `browser_navigate` to a real site updates the side panel's ALLOW row automatically (no user re-check needed).
+- Listing text from `browser-extension/STORE_LISTING.md` (no em dashes), category Developer Tools, single-purpose + five permission justifications prepared; chrome.debugger means the slow review lane (a week+, possibly a justification follow-up).
+
+## 2026-10-25 — browser-extension v1.2.0: click/type pipeline rework (6 fixes, 3 parallel streams)
+
+All fixes land in `background.js` (the whole `browser-extension/` dir is untracked — no git diff):
+locate→sleep(80ms)→rect collapsed into ONE `aimExpression` eval; `elementFromPoint` hit-test refuses
+covered targets (`click point blocked by overlay: <tag> "<text>"`); click point clamped into the
+element box THEN viewport (tall elements clicked on-element; fully off-viewport → dedicated
+offscreen error); refs drift-gated against stored `tn`+text (`refMeta` in `opSnapshot`, tag-only
+gate — text threaded but not gated to avoid false positives on live labels); snapshot covers open
+shadow roots (depth ≤ 6, ` >> ` selector chains via shared `Q_SOURCE`), adds `[onclick]`,
+`[tabindex]:not([tabindex="-1"])`, `[aria-labelledby]` label resolution, `disabled` flag; click
+result gains `url`/`title`/`changed` (post-click read-back, fallback + changed:true on read
+failure); type refuses disabled/read-only fields and read-backs `value` (capped 300, before submit
+Enter).
+
+Deviations from the original tiered plan: text drift gate deliberately NOT enforced; `sleep()`
+helper and `RECT_WAIT_MS`/`locateExpression`/`rectExpression` deleted (zero repo references).
+Version bumped 1.1.0 → 1.2.0 (manifest.json + native_pair.test.js MANIFEST_VERSION + README/PROTOCOL).
+Streams: bg-pipeline (code), bg-tests (new `pipeline.test.js`, 27 checks), bg-docs — both suites
+green after review (27/27 + 34/34, run independently).
+
+## 2026-10-25 — Browser snapshot/token reduction: options A+B+C shipped
+
+- **A (Go-only)**: `browser_snapshot` results render as a compact header + one line
+  per element (`[1] a "Sign in" href`, `[2] textbox "Email" placeholder "…"`, `(truncated)`)
+  in `internal/tool/browser.go` — `selector`/`tn`/empty fields stripped from the MODEL VIEW only;
+  wire format untouched. `browserBase.run()` gained an optional `render` func; non-snapshot
+  payloads still fall back to old pretty-JSON. Measured ~79% smaller (~50k→~10k billed tokens/flow).
+- **B**: `browser_snapshot` gains `query` (case-insensitive substring over tag/text/placeholder/href/value + exact tokens "checked"/"unchecked") and `limit` (first N AFTER filtering, DOM order); applied INSIDE the extension's snapshot expression (background.js ~824–940), so the payload is genuinely smaller on the wire; refs NOT renumbered; optional top-level `totalMatching` when a query was applied; Go header renders `showing N of M`.
+- **C**: screenshot re-encodes to JPEG q0.8, long edge ≤1024 (`SCREENSHOT_EDGE_MAX`/`SCREENSHOT_JPEG_QUALITY`, `encodeScreenshotJpeg`, OffscreenCanvas in SW); request `format` field still validates `png` (CDP capture intermediate).
+- **Integration bug found + fixed**: `browser.go` hardcoded `MediaType: "image/png"`; now honors the response `format` field, falls back to png for older extensions (pin `TestBrowserScreenshotHonorsReturnedImageFormat`).
+- Pins: `browser_test.go` (4 new snapshot tests + format pin), `pipeline.test.js` now 58/58, `native_pair.test.js` 34/34. PROTOCOL.md rows updated. `make build` green; extension reload required before B/C take effect in Chrome.
+
+## 2026-10-25 — Teammate pane (variant D) folded into the transcript
+
+- Teammate tool calls (tool id `teammate`, ops spawn/wait/stop/status) now render as the approved
+  "variant D · Terminal LED pane" instead of generic tool rows, grouped per run of consecutive
+  teammate parts. `teammateSegments(msg)` in `web/src/components/message-item.tsx` (~line 435)
+  emits {kind:'teammates',parts} vs {kind:'part',part}; rendered with Solid `<Index>` (the callback's
+  2nd arg is a PLAIN NUMBER, unlike `For`'s accessor — used for rail stagger −(i×0.45)s).
+- Per-line state comes from `parsePartData<ToolPartData>(p.data)` — **bug fixed this session: parsing
+  the whole Part `p` (not `p.data`) left state undefined → `DEFAULT_TOOL_STATE` → every line showed
+  ✗/err**. Match how ToolPartDisplay does it; `data?.state ?? DEFAULT_TOOL_STATE`.
+- Pane CSS appended to `web/src/styles/index.css` (.teammate-pane/.tp-* + @keyframes tpFlow, reduced-motion
+  rules) using theme tokens, so both modes work; `.tp-name` got `white-space: nowrap` after the dark capture
+  showed `rev-provider` wrapping to two lines.
+- Verified live: vite verify rig + real Chrome headless (CDP); captures in `public/teammate-row/`
+  (variant-d-live.png, variant-d-live-open.png). Programmatic `scrollTop` fights the chat-scroll anchor
+  (message-list.tsx holdReader) — real CDP wheel events work (see HOWTO entry).
+- GOTCHA hit + fixed: the throwaway vite page syncs `localStorage['ogcode-theme-mode']` to the
+  SERVER-GLOBAL /api/appearance on :7801 through the proxy — flipped the user's machine-wide mode to
+  dark mid-audit; restored by POSTing {"mode":"light"} back. Save the probe before, restore after.
+- Earlier "light" capture (`/tmp/pane-live.png`, pre-fix) showed the bug state (6 ✗/"6 ERRORS"), which
+  incidentally confirmed light-mode tokens render; not published.
+
+## 2026-10-26 — Agents page redesigned as node graph view
+
+- `/agents` board rows replaced by a graph: cluster per depth-0 root family (tinted region + truncated
+  label), bezier edges parent-bottom → child-top colored by CHILD status, animated dashes on running
+  subtrees.
+- New files: `web/src/lib/board-graph.ts` (pure layout + `statusColor`; NODE_W=196/H=56, V_GAP=68,
+  H_GAP=22, cluster label truncation `maxChars=max(8,min(28,floor((maxX-minX-34)/6)))`),
+  `web/src/components/agent-graph.tsx` (`AgentGraph`: zoom 50–175% pill w/ backdrop-blur outside the
+  scroll area, +N collapse, hover-subtree highlight, hover actions open/stop).
+- `agents.tsx`: `graphRows` memo + legend row (Running/Idle/Done/Stopped/Stale); graph shown only when
+  rows exist.
+- Bug found in verify: `stoppable` declared as boolean but called `stoppable()` → "not a function" killed
+  the whole page render; now a thunk.
+- Verified via headless Chrome (`--headless --timeout` works; `--headless=new --virtual-time-budget`
+  hangs) against vite :5199 proxying :7801. `npm run build` + `make build-server` pass; binary rebuilt
+  with the graph embedded (server restart needed to serve it — not done unasked).
+
+## 2026-10-26 — Agents graph rebuilt as a force-directed canvas (force-graph)
+
+- Card-graph replaced: `agent-graph.tsx` + `board-graph.ts` left in tree UNUSED; new
+  `web/src/components/agent-force-graph.tsx` + `.css` on `force-graph@1.52.0` (new web dep). Neo4j-style:
+  status-tinted circular nodes with in-bubble labels (fixed 12px screen-space font, ellipsis-clipped to
+  2.1r), curved edges + arrowheads colored by CHILD status, directional particles on running links, hover
+  lights ancestor+descendant subtree and dims the rest, Portal'd hover card (Open session / arm→Stop).
+- Gotcha: force-graph `accessorFn` props treat a plain STRING as node-property access —
+  `nodeCanvasObjectMode('replace')` reads `node.replace` → undefined → custom paint silently skipped and
+  the builtin `rgba(31,120,180,.92)` disc painter runs. Constants must ride functions:
+  `.nodeCanvasObjectMode(() => 'replace')`.
+- Gotcha: v1.52 PAUSES its d3 engine on every graphData set (kapsule update()) and nothing restarts it —
+  call `graph.d3ReheatSimulation()` explicitly after each graphData, or the sim never ticks (no engineStop,
+  static seed spiral).
+- Gotcha: a hidden/background Chrome tab never fires rAF so an rAF-driven engine sits frozen —
+  `.warmupTicks(240)` ticks the sim synchronously inside update() on every graphData set, so layout
+  converges before any painted frame regardless (alphaDecay .032 → alpha ≈4.5e-4 after 240).
+- Gotcha: post-convergence the engine burned ~600 idle ticks to the cooldownTicks floor;
+  `.d3AlphaMin(0.005)` stops it at convergence.
+- Physics recipe (final): charge `-(12 + r*1.5)` with distanceMax 120 (small reach separates families,
+  compact bbox → zoomToFit zoom high); link distance 28; gather-force spring `n.vx -= n.x*0.04*alpha`;
+  family-cluster seed (connected components: golden-angle-spiral centres 52·√ci, member ring 7√m + r·.66,
+  singletons central cloud 11·√k); stable z-sort before graphData so running paints on top;
+  `d3VelocityDecay 0.4`; settle-fit inside the gather force at gatherTicks>120 && alpha<0.012
+  (onEngineStop kept as unreliable backstop).
+- Verify: vite :5199 (`vite.config.verify.ts`, since deleted) proxying /api→:7801 + Chrome takeover
+  screenshots on granted tabs; console via CDP (ring caps at 300 and stale entries persist — match by
+  bundle `?t=` URL). `npm run build` passed; :7801 restart left to the developer.
+
+## 2026-10-26 — Agents page graph redesign
+
+- `/agents`: removed the stat cards (Running/Idle/Finished/Total), the filter box + "Finished N" toggle, and the bordered section card + 880px cap → header band + full-bleed graph (`h-dvh` flex chain; graph rows = `buildTree(agents())`, everything always shown; `summary()` kept for the caption only).
+- `agent-force-graph.tsx`: nodes are now SMALL UNIFORM UNLABELED discs (`NODE_R = 6`, solid status hue + darker rim; zero `fillText`/`strokeText` left) — status is color-only (running accent / idle gray / stale amber / done green / stopped red). Hover tooltip (Portal) and zoom/pan kept; `counts` prop dropped; `d3ReheatSimulation`/`warmupTicks(240)`/`d3AlphaMin(0.005)` untouched.
+- Latent bug found + fixed: `agent-force-graph.tsx` rendered `<Portal>` without `import { Portal } from 'solid-js/web'` → runtime crash on first hover. Pre-existing TS18048 in `positionTip` fixed (`hostEl?.getBoundingClientRect()` + early return).
+- Verify: `cd web && ./node_modules/.bin/tsc --noEmit` clean; `npm run build` ✓ 16.45s; live visual via throwaway `web/vite.verify.config.ts` on :5199 (HOWTO recipe) — full-bleed canvas, color-only discs confirmed in granted tab.
+- All three edited files (`web/src/pages/agents.tsx`, `web/src/components/agent-force-graph.tsx` + `.css`) are git-UNTRACKED — `git diff` shows nothing; review by reading the files. Shipping = `make build` (web/dist is embed.FS).
+
+## 2026-10-26 — Edit tool: bare "old_string not found" now carries guidance; anchors taught as verbatim copies
+
+- Measured on this repo's own history (`.ogcode/ogcode.db`): 5,278 edit calls, 338 errors = 6.4%, spread across ALL model families (glm-5.3-flash ~11%, deepseek-v4.1-flash 3.8-7.6%, gpt-5.6-luna 19% small n) — not one family's problem. Classes: 185 bare not-found (zero guidance), 43 stringified-edits shape, 34 ambiguous match, 32 whitespace-rescued misses, 37 user-cancelled, 7 parse-args oddities.
+- After a failure the NEXT edit call failed again 342x vs succeeded 329x — models retry blind without re-reading. Diagnosed the bare misses from part JSON: 144/185 multiline, 57 with no leading whitespace anywhere — anchors RETYPED from memory instead of copied from a read window.
+- Fix — no full worked JSON example added: the call shape is already stated in the schema, two prompt sections, and a tailored stringified-edits error; the dominant failure is byte-copying, not JSON shape. (1) `old_string` schema description now says copy-from-read / never retype from memory; (2) bare not-found (`notFoundHint` case 0) returns a re-read directive plus a first-line locator `firstLineMatches` (trimmed containment both ways, 4-char minimum line, >5 hits = generic); (3) Hard-rules bullet; (4) `parallelToolCallsPrompt` canWriteFiles paragraph. Pins: `TestEditTool_BareMissPointsAtTheReRead` + extended `TestParallelToolCallsPrompt_SameFileEditGuidance`.
+- `TestEditTool_NotFoundHintsWhitespace` pins an invariant the new wording was built around: a genuine miss must not read as a whitespace complaint — the bare branches say "dropping every difference in spacing it still matches nowhere" and deliberately avoid "indentation".
+
+## 2026-10-26 — End-to-end review of the working tree (browser bridge, timers, native host, web UI): 4 majors, ~22 minors, no tests broken
+
+- Review turn ran 5 parallel teammates over the uncommitted change set (55 files, ~4.7k insertions + new browser/timer/nativehost areas); build/vet/tsc and 10 Go test packages plus both extension harnesses (34/34, 58/58) all green.
+- MAJOR, confirmed by parent read: `internal/server/browser_routes.go` gates the bridge handshake on client-supplied `r.Host` (never `r.RemoteAddr`) and the pair GET has no peer gate — a LAN client can fetch the token then connect with `Host: localhost…` and take over the bridge slot (server binds all interfaces, no auth by design).
+- MAJOR, confirmed by parent read: `internal/browser/bridge.go` `dropConn` never touches `b.pending` despite its doc "fails every in-flight op" — after a disconnect, pending browser ops hang until their 30/60s timers and surface "timed out" instead of `ErrNotConnected` (`swapConn` already has the right shape).
+- MAJOR (extension, per stream): no `chrome.alarms` reconnect fallback (SW suspends during backoff and reconnect silently dies); `openSocket()` has no in-flight guard (double-connect orphans a live socket); a mid-flight `Disconnect` can be overridden by `onopen`/`autoPairThenConnect`; granted tab ids persist in `chrome.storage.local` across browser restarts while Chrome recycles tab ids (contradicts the STORE_LISTING claim).
+- Dead code, confirmed by parent grep: `web/src/components/board-drawer-row.tsx` has zero importers after the `board-drawer.tsx` deletion; prune with it the orphaned `lib/board-tree.ts` exports (`decorateRows`, `DrawerRow`, `formatAge`).
+- Minors worth the cheap fixes: read.go negative `end_line` silently means EOF + dead clamp/unused ctx/dead `readOutcome.display`; `schedule` refusal wording for negative `delaySeconds`; browser pair response reads `Token()` twice (can disagree with the URL after a rotate) and derives wss only from `r.TLS` (wrong behind a TLS-terminating tunnel); reminder notice renders dateless `15:04` (366-day cap); nativehost double `registryFor()` read + serial 750ms probes; extension `minimum_chrome_version` 114 but WS-keepalive needs 116; `tabLocks` never cleared on `onRemoved`; `setPanelBehavior` only in `onInstalled`; store zip `ogweb-1.1.0.zip` predates manifest 1.2.0.
+- Optimizations flagged (correctness fine, fix if profiling warrants): extension JSON-cap loop re-stringifies the whole payload per popped node (~15 MB worst case per snapshot); sidepanel full re-render per tabs event (debounce); `teammateSegments` rebuild per part re-diff; `turnStepCount` O(n) rescan per append; `intentReminderSeen` map grows unbounded for never-planned sessions.
+- Clean areas verified: timer store (migration 068 matches all queries, RETURNING fine on modernc sqlite, atomic claim), effort/flash hold + drainFinishedStream, Uncapped plumbing, filechange stamp ordering, server armStopCh move, native host framing/token security, route registration, force-graph changes, no dangling BoardDrawer references.
+
+## 2026-10-26 — Review fix batch landed: 5 parallel streams, all green
+
+- Streams (all integrated): web-prune ses_01M5VV96P7T443BKMZ70S7K01Q; go-tool-hygiene ses_01M5VV96PAQ00B3G2EXN5Y6AAA; ext-sw-lifecycle ses_01M5VV96PAQ00B3G2EXHZF4SAB; go-server-security ses_01M5VV96PCJ6B0K8TY586HXX25; go-agent-core ses_01M5VV96P8W0SDPCBG74ADYSEC. Parent additions at integration: `read_docx_page` in `explorationToolNames`; token-pill.tsx stale comment reworded.
+- Gates green: `CGO_ENABLED=1 go build ./internal/... .` + vet; tests internal/{tool,agent,browser,nativehost} + HOME-isolated internal/server; harnesses native_pair **45/45** (was 34) + pipeline **77/77** (was 58); web `tsc --noEmit` clean; gofmt clean on all touched files. Nothing committed (working tree stays dirty by convention).
+- MAJOR 1 (bridge security): `internal/server/browser_routes.go` gates pair GET (line 53), rotate (70), bridge (146) on the PEER — `isLoopbackPeer` = RemoteAddr → net.SplitHostPort → ParseIP → IsLoopback, fail-closed (172-184), `refuseForeignPeer` 403 (189-193); the old gate checked client-supplied `r.Host` (spoofable). Pair URL now honors `X-Forwarded-Proto` (wss behind a TLS edge); pair response reads the token once (a rotate between two reads could disagree with the URL). Pins: TestBrowserPairGateIsPeerBased / TestBrowserBridgeGates / TestIsLoopbackPeer / TestBrowserPairAdvertisesWssBehindATlsEdge. Stand-up E2E (fresh build on :7975, scratch HOME) 8/8 exact: LB pair 200 + 64-hex token; wrong-token bridge 401; XFP https ⇒ wss URL; LAN pair 403 with NO token in body; LAN + spoofed Host 403; LAN bridge with REAL token 403; LB-peer→LAN-dest 200 (control); LAN-peer→LB-dest 403.
+- MAJOR 2: `internal/browser/bridge.go` dropConn now swaps `b.pending` out under the lock and fails everything with `ErrNotConnected` immediately (was: pending ops hung on a dead conn until their 30/60s timer). Pin TestBridgeDisconnectFailsPendingOpsImmediately.
+- Extension hardening (browser-extension/ is git-UNTRACKED — verified via node harnesses only): chrome.alarms 1-min reconnect fallback (ALARM_RECONNECT + "alarms" permission — without it the SW suspends during long backoff and reconnect silently dies); minimum_chrome_version 114→**116** (114/115 drop the WS every ~30s); openSocket in-flight guard; connectEpoch (a mid-flight Disconnect wins over onopen/autoPairThenConnect); onStartup clears grantedTabs + tabLocks (Chrome reuses tab ids); tabs.onRemoved evicts; attachAttempts map so open DevTools ≠ our leftover session; setPanelBehavior at top level; navigate with both `tab` and `newTab` errors; JSON-cap binary search; sidepanel renderTabs 150ms debounce. **Manifest changed ⇒ user must reload the extension once in chrome://extensions; ogweb-1.2.0.zip regenerated at repo root.**
+- nativehost: buildPairReply parses ports.json once (was twice); candidate probes concurrent, 8-worker bound, port-then-project order kept. Pins TestPairReplyProbesConcurrentlyWithinABound / TestPairReplyKeepsPortOrderWhenProbesFinishOutOfOrder.
+- tool: browser.go — all 11 tools nil-dispatcher guarded via browserBase.status(); screenshot skip detection reads structured Metadata["connected"]==false (string sniffing removed); browser_status `tab` schema param dropped. read.go — end_line ≤0 refused (was: silently meant EOF), path TrimSpace'd once, dead clamp/unused ctx/dead display field removed. schedule.go:156 wording `delaySeconds must be a positive number of seconds` byte-identical to server/reminder.go:82 (pins tool/schedule_test.go:123, server/reminder_test.go:313); reminder notices render "Jan 2, 15:04".
+- agent: explorationToolNames += read_pdf_page, pdf_index, docx_index, read_docx_page, memory_recall, project_memory_recall, check_syntax (PDF/recall-only steps no longer demote the next step mechanical); canSchedule() wired at the loop seam (slices.DeleteFunc + scheduleOffered); agent.ReminderCause shared with server (reminders keep their heading); intentReminderSeen now map[SessionID]time.Time + sweepIntentReminderSeen (24h TTL) at 3 turn-end sites.
+- web: board-drawer-row.tsx deleted + lib/board-tree.ts dead exports pruned; formatDuration negative clamp; teammateSegments memoized; turnStepCount single backward sweep; .tp-led/.tp-state warn → var(--warning); stale drawer comments reworded (session-sidebar.tsx, token-pill.tsx).
+- 404-during-E2E saga (not a bug — infra): a 2.5-day-old leaked pre-takeover server (`~/.local/bin/ogcode serve --port 7899`, PID 48395) still held 7899; new throwaway servers PORT-WALK ("port in use, trying next", server.go:806-816), so `/api/config` answered 200 from the ZOMBIE while `/api/browser/*` 404'd on its old routeset. Routes do mount unconditionally (routes.go:99-102; the browser mount is relative "/browser/…" inside /api). Lesson: **before any E2E, lsof the port — a live /api/config does not prove it is your build.** Killed 48395, 56377 (:7900), 56413 (:7897), 20514; host server (7801, PID 42234) untouched. /tmp/og-e2e binary left on disk.
+- Left untouched deliberately: gofmt of pre-existing task.go/task_test.go/loop_browser_steer_test.go (developer's files, gofmt -l owns them, not this change); repo-wide `go build ./...` still broken by agent/skills/golang-cli/assets/examples imports (pre-existing; real build path unaffected).
+
+## 2026-10-26 — MEMORY.md curated: takeover narrative compressed
+
+- MEMORY.md was 26,139 B (> ~20 KB budget): the browser-takeover/native-host paragraphs compressed to the durable gotchas. Details that moved out already live in the 2026-10-25 entries above (pair flow, autoPairThenConnect story ~2221/3198/3476/3566, ToLower story 3528-3566, CWS facts 2135/3601-3603) and in the fix-batch entry above. Removed a malformed 2026-10-25 literal (`{"ok",\"version",\"servers"…` — stray backslashes, invalid JSON; the real reply is built by nativehost.buildPairReply). Flash-effort, edit-anchor and agent-graph lines tightened; every invariant + pin test kept. Result: ≤ ~21 KB.
+
+## 2026-10-26 — Docs review fixes landed (4 parallel teammates + 1 orchestrated cleanup)
+
+Findings came from a v0.51.0 accuracy review of the three public surfaces. Fixes:
+
+- privacy.md:14 + landing FAQ: the false `OGCODE_POSTHOG` opt-out claim replaced with the verified truth (analytics always on, source: internal/server/server.go:776 "Analytics is always on; there is no user-facing toggle"; `OGCODE_POSTHOG_LOGS` is the only telemetry switch, logs-only opt-in). No server opt-out feature was added — follow-up opportunity.
+- install.sh:117 + install.ps1 + the tracked `docs/install.sh` copy: `OLLAMA_BASE_URL=https://api.ollama.com/v1` → `https://ollama.com/v1`. Proof: resolveBaseURL passes an env-set value through verbatim (internal/cli/run.go:133-141, internal/server/server.go:1015-1023); PreferLiveOllamaEndpoint explicitly refuses explicit env values (internal/provider/ollama_detect.go:170-192); `api.ollama.com` appears nowhere in Go source. install.ps1 gained a Quick start examples block (Write-Host, `$env:` backtick-escaped).
+- Landing page: version pill v0.39.1 → v0.51.0 (internal/version/version.go; the JS guard is a generic prefix match on data-release, no logic change); 4 dead `#remember-the-work` links repointed to real anchors (`#what-you-can-do-with-ogcode` on README / docs-site memory page); provider belt now shows the 6 catalog-first-class names minus logos (Anthropic/OpenAI/…-line: Gemini, DeepSeek, Mistral, NVIDIA, GLM, Qwen per internal/provider/models_catalog.go) and reworded to attach Groq/Cerebras/Together/SambaNova to the custom OpenAI-compatible slot.
+- New docs page `docs-site/src/content/docs/agents-and-teammates.md` (~200 lines) + nav.ts registration, fully source-backed: teammate/task/board ops, file change gate incl. `/api/file-changes`, custom providers in ogcode.json (`ProviderConfig`: baseUrl/apiKey/type/model/label/disabled), one-liners for `schedule` and `update_intent`. docs-site `npm run build` green; Pagefind indexed the page.
+- README.md: 13 em dashes removed (grep count 0 now), quickstart bullets for `ogcode run --max-turns` (0 = no limit) and `ogcode index`, Security bullet now points at GitHub Issues instead of a nonexistent SECURITY.md; docs/DEPLOY.md and docs/_config.yml em dashes gone; docs/_config.yml:2.
+- internal/cli/run.go:52 agent help now lists all 9 GetAgent names (build, plan, task, breakdown, note, index, search, subagent, memory-recall, agent.go:646-667); `go build ./internal/cli/` green.
+- `git mv docs/ARCHITECTURE_AUDIT.md plans/ARCHITECTURE_AUDIT.md` (repo-wide grep found no readers of the old path).
+- Gotchas recorded in MEMORY.md: `docs/install.sh` is a hand-synced copy; docs-site rebuild regenerates `docs/docs/`.
+- Not done (deliberate/deferred): no code-level analytics opt-out (feature request for a future turn); landing announce text "Now with live service preview" left (feature exists).
