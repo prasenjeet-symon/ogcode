@@ -93,6 +93,13 @@ func (s *Server) routes() http.Handler {
 		r.Get("/resources", s.handleResources)
 		r.Get("/scrcpy/status", s.handleScrcpyStatus)
 		r.Get("/scrcpy/devices", s.handleScrcpyDevices)
+
+		// Browser takeover: the pairing surface and the websocket the companion
+		// extension connects on.
+		r.Get("/browser/status", s.handleBrowserStatus)
+		r.Get("/browser/pair", s.handleBrowserPairGet)
+		r.Post("/browser/pair", s.handleBrowserPairRotate)
+		r.Get("/browser/bridge", s.handleBrowserBridge)
 		r.Get("/preview/services", s.handlePreviewServices)
 		r.Post("/preview/ports", s.handlePublishPreviewPort)
 		r.Delete("/preview/ports/{port}", s.handleUnpublishPreviewPort)

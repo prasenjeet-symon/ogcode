@@ -38,7 +38,7 @@ func TestCompactionThresholdTokens_SmallWindowClampsReserve(t *testing.T) {
 
 func TestEffectiveRequestTokens(t *testing.T) {
 	tests := []struct {
-		name           string
+		name            string
 		estimatedTokens int
 		reportedTokens  int
 		want            int

@@ -297,10 +297,12 @@ func (f *intentFinder) annotate(intent *session.SessionIntent) {
 
 // suggestIntentTools runs one routing call over the plan's described steps and
 // returns a note to append to the update_intent tool result, plus the concrete
-// MCP tools the matcher named. The note is "" when there is nothing to say — no
-// catalogue, no described step, nothing new to route, no match, or any failure;
-// the ids are what the caller then offers on the wire. Every failure is a no-op:
-// the finder is a nudge, and losing it must never cost the turn.
+// tools the matcher named (an MCP server's tools, and the whole browser_*
+// takeover family when it named the browser-takeover skill). The note is ""
+// when there is nothing to say — no catalogue, no described step, nothing new
+// to route, no match, or any failure; the ids are what the caller then offers
+// on the wire. Every failure is a no-op: the finder is a nudge, and losing it
+// must never cost the turn.
 func (lr *LoopRunner) suggestIntentTools(ctx context.Context, sessionID session.SessionID, model, providerID string, agent Agent, workDir string, steps []session.IntentStep, finder *intentFinder) (string, []string) {
 	catalogue := lr.intentCatalogue(agent, workDir)
 	if len(catalogue) == 0 {
@@ -369,9 +371,24 @@ func (lr *LoopRunner) suggestIntentTools(ctx context.Context, sessionID session.
 		slog.Debug("intent tool finder found nothing", "session", sessionID, "steps", len(described), "reasoningChars", reasoningChars)
 		return "", nil
 	}
-	hint := formatIntentHint(steps, catalogue, matches)
+	hint := formatIntentHint(steps, catalogue, matches, browserTakeoverOfferIDs(lr, agent))
 	finder.remember(steps, hint.Counts)
-	return hint.Text, hint.MCPIDs
+	return hint.Text, hint.OfferIDs
+}
+
+// browserTakeoverSkillName is the embedded walkthrough skill for driving the
+// user's Chrome. Naming it in a plan step — or loading it through the skill
+// tool — is what puts the browser_* takeover ops on the wire for the turn.
+const browserTakeoverSkillName = "browser-takeover"
+
+// browserTakeoverOfferIDs reports the takeover tool ids the agent may put on
+// the wire: nil unless this is the interactive build agent whose registry
+// actually holds the family (the same gate the loop uses to attach the glob).
+func browserTakeoverOfferIDs(lr *LoopRunner, agent Agent) []string {
+	if !agent.canControlBrowser() || lr.Tools == nil || lr.Tools.Get("browser_status") == nil {
+		return nil
+	}
+	return tool.BrowserToolIDs()
 }
 
 // intentMatchResult is the router's JSON answer.
@@ -417,23 +434,26 @@ type intentStepMatch struct {
 }
 
 // intentHint is one routing answer after validation: the note to append to the
-// tool result, the MCP tools to offer on the wire, and the per-step counts the
-// loop stamps onto the persisted plan.
+// tool result, the tools to offer on the wire (an MCP server's tools, plus the
+// whole browser_* takeover family when the browser-takeover skill was named),
+// and the per-step counts the loop stamps onto the persisted plan.
 type intentHint struct {
-	Text   string
-	MCPIDs []string
+	Text     string
+	OfferIDs []string
 	// Counts is keyed by the step's index in the plan.
 	Counts map[int]intentStepMatch
 }
 
 // formatIntentHint turns the router's per-step names into the note appended to
-// the tool result, and reports the MCP tools it named so the caller can offer
-// them on the wire. Names are resolved against the catalogue — a name the model
+// the tool result, and reports the tools it named so the caller can offer them
+// on the wire. Names are resolved against the catalogue — a name the model
 // invented is dropped rather than suggested — and a repeated name is listed
 // once. Every surviving match is listed: there is no per-step cap, so a step
 // that genuinely fits several skills and servers shows all of them. The counts
 // and names it returns are over the matches that survived those filters.
-func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, matches map[int][]string) intentHint {
+// browserTools is the takeover family the agent may offer; when the router
+// names the browser-takeover skill for a step, all of it is offered too.
+func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, matches map[int][]string, browserTools []string) intentHint {
 	byName := make(map[string]intentCandidate, len(catalogue))
 	for _, c := range catalogue {
 		byName[c.Name] = c
@@ -441,6 +461,7 @@ func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, m
 	var b strings.Builder
 	offered := map[string]bool{}
 	counts := map[int]intentStepMatch{}
+	browserFamily := false
 	for i, s := range steps {
 		names := matches[i]
 		if len(names) == 0 {
@@ -460,6 +481,15 @@ func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, m
 				label += " (skill)"
 				count.Skills++
 				count.SkillNames = append(count.SkillNames, c.Name)
+				if c.Name == browserTakeoverSkillName && len(browserTools) > 0 {
+					// The plan naming the takeover skill is the turn deciding to
+					// drive the user's Chrome: put the whole family on the wire
+					// now rather than making the model load tools one op at a time.
+					browserFamily = true
+					for _, id := range browserTools {
+						offered[id] = true
+					}
+				}
 			} else {
 				label += " (MCP server)"
 				count.MCPs++
@@ -488,21 +518,28 @@ func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, m
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	text := "\n\nPossible tools for these steps — a matcher compared each step's description against the skills and MCP servers you can reach. An MCP server named here has all of its tools offered to you from now on; a skill is loaded through the \"skill\" tool. Use a match when it fits the step; if you skip one, say in one line why it does not fit rather than ignoring it silently.\n" + b.String()
+	if browserFamily {
+		text += "\nThe browser takeover tools are part of this app and are already on the wire for the rest of the turn; start with browser_status to check pairing before using them.\n"
+	}
 	return intentHint{
-		Text:   "\n\nPossible tools for these steps — a matcher compared each step's description against the skills and MCP servers you can reach. An MCP server named here has all of its tools offered to you from now on; a skill is loaded through the \"skill\" tool. Use a match when it fits the step; if you skip one, say in one line why it does not fit rather than ignoring it silently.\n" + b.String(),
-		MCPIDs: ids,
-		Counts: counts,
+		Text:     text,
+		OfferIDs: ids,
+		Counts:   counts,
 	}
 }
 
 // turnToolset is the set of tools offered on the wire for one turn.
 //
 // The agent's allowlist (Agent.Tools) is the authority on what it may call —
-// executeTool checks it — and it carries the "mcp_*" glob. For the build agent
-// the wire is narrower: a concrete MCP tool is offered only once the intent
-// matcher has named it for the turn's plan, so it begins a turn knowing no MCP
-// tool at all. That is the point of the feature — tools arrive with the task,
-// not before it. Every other agent's turn list is its allowlist unchanged.
+// executeTool checks it — and for the build agent it carries both the "mcp_*"
+// and the "browser_*" glob. For the build agent the wire is narrower: a
+// concrete MCP tool is offered only once the intent matcher has named it for
+// the turn's plan, and the browser takeover ops are offered once the matcher
+// names the browser-takeover skill (or the agent loads it) — browser_status
+// stays on the wire from step one, so even a turn the matcher never routes can
+// check whether the bridge is paired. Tools arrive with the task, not before
+// it. Every other agent's turn list is its allowlist unchanged.
 //
 // version moves whenever the offered set changes, and the loop re-resolves the
 // provider tool array on it exactly as it does on the registry's generation.
@@ -515,15 +552,18 @@ type turnToolset struct {
 
 // newTurnToolset narrows an allowlist to the wire list a turn starts with.
 //
-// hideMCP drops the MCP glob: ForAgent would expand it to every MCP tool the
-// registry happens to hold, which is the upfront knowledge the intent feature
-// keeps out — so only an agent that runs the matcher can safely set it. With it
-// false every id is kept, and the glob expands from the first step as it always
-// did.
-func newTurnToolset(allow []string, hideMCP bool) *turnToolset {
+// matcherTurn drops the globs whose expansion would be upfront knowledge the
+// intent matcher keeps out: the "mcp_*" glob (ForAgent would expand it to every
+// MCP tool the registry happens to hold) and the "browser_*" glob (the
+// takeover ops ride the wire only once the family is offered). browser_status
+// is concrete, so it is kept either way. Only an agent that runs the matcher
+// can safely set it — with it false every id is kept, and the globs expand
+// from the first step as they always did.
+func newTurnToolset(allow []string, matcherTurn bool) *turnToolset {
 	base := make([]string, 0, len(allow))
 	for _, id := range allow {
-		if hideMCP && strings.HasPrefix(id, "mcp_") && strings.Contains(id, "*") {
+		if matcherTurn && strings.Contains(id, "*") &&
+			(strings.HasPrefix(id, "mcp_") || strings.HasPrefix(id, "browser_")) {
 			continue
 		}
 		base = append(base, id)
@@ -531,12 +571,26 @@ func newTurnToolset(allow []string, hideMCP bool) *turnToolset {
 	return &turnToolset{base: base}
 }
 
-// offer adds one concrete MCP tool to the turn's wire list. A repeated name, a
-// non-MCP id, or an empty one is a no-op, so a matcher naming the same tool for
-// two steps costs nothing.
+// offer adds one concrete tool to the turn's wire list — an MCP tool named by
+// the intent matcher, or a browser takeover op surfaced when the matcher named
+// the browser-takeover skill for the plan or the agent loaded that skill. A
+// repeated id, a glob rather than a concrete id, an empty one, or an id the
+// base already covers (exactly, or through a glob it carries) is a no-op, so
+// a matcher naming the same tool for two steps costs nothing.
 func (t *turnToolset) offer(id string) {
-	if !strings.HasPrefix(id, "mcp_") {
+	if id == "" || strings.Contains(id, "*") {
 		return
+	}
+	if !strings.HasPrefix(id, "mcp_") && !strings.HasPrefix(id, "browser_") {
+		return
+	}
+	for _, have := range t.base {
+		if have == id {
+			return
+		}
+		if strings.HasSuffix(have, "*") && strings.HasPrefix(id, strings.TrimSuffix(have, "*")) {
+			return
+		}
 	}
 	for _, have := range t.suggested {
 		if have == id {

@@ -227,6 +227,16 @@ type LoopRunner struct {
 	// override either way (see tuning).
 	SearchFetchTopK int
 	SearchPageChars int
+	// BrowserStatus, when set, reports the live state of the browser takeover
+	// bridge: whether the companion extension is connected and how many tabs
+	// the user has granted. RunLoop consults it once per turn and, when a
+	// connection is live, appends a system entry steering current-web checks
+	// to the takeover tools while deep_search stays available for synthesis.
+	// It is a closure rather than the bridge itself because the bridge lives in
+	// the server (internal/browser), which this package must not import. nil
+	// (CLI, tests) leaves the prompt silent and the deep_search guidance
+	// unchanged — exactly the behaviour the steer refines, never removes.
+	BrowserStatus func() (connected bool, granted int)
 	// IndexedFileCount, when set, reports how many files the project index holds
 	// for a directory. It lets the system prompt state up front whether
 	// codebase_map has anything to return, instead of making every session in an
@@ -295,6 +305,12 @@ type LoopRunner struct {
 	// It never starts a turn and never fails the turn: nil (CLI, tests) leaves
 	// it unwired.
 	CatchUpTeammates func(ctx context.Context, sessionID session.SessionID, dir string) error
+	// CatchUpReminders, when set, hands this turn the one-shot reminders its
+	// session scheduled that came due while the session was between turns, as
+	// pending notices, before the history is loaded. They reach the model at
+	// the tail of the first request. Like CatchUpTeammates it never starts a
+	// turn and never fails the turn: nil (CLI, tests) leaves it unwired.
+	CatchUpReminders func(ctx context.Context, sessionID session.SessionID, dir string) error
 	// StepBudgetFor, when set, overrides the step limits for one session. This
 	// runner owns no board of its own to know which sessions are teammates, so
 	// the server answers for it. Returning zero leaves stepBudgets' answer in
@@ -556,6 +572,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			slog.Warn("teammate catch-up failed", "session", sessionID, "err", derr)
 		}
 	}
+	// Reminders the session scheduled while it was not running arrive the same
+	// way: queued as notices here, injected at the tail of the first request.
+	// Build only, via canSchedule — the same gate that offers schedule where the
+	// offered vars are read, so arming and delivery cannot drift apart.
+	if lr.CatchUpReminders != nil && agent.canSchedule() {
+		if rerr := lr.CatchUpReminders(ctx, sessionID, workDir); rerr != nil {
+			slog.Warn("reminder catch-up failed", "session", sessionID, "err", rerr)
+		}
+	}
 
 	// Config-driven ask/deny rules have to be in the session's ruleset before the
 	// first skill call, or the default catch-all Allow answers for them. Seeding
@@ -765,6 +790,36 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// PlanAgent is read-only and has no board section in its prompt.
 	boardOffered := agent.canUseBoard() && lr.Tools.Get("board") != nil
 	teammateOffered := agent.canSpawnTeammate() && lr.Tools.Get("teammate") != nil
+	// schedule is the one-shot agent-timer tool, offered to the interactive
+	// build agent alone (see canSchedule), the way board and teammate are: both
+	// delivery paths (the poller push and the catch-up hook above) pay off only
+	// a build session, so a task or plan session holding the tool would arm
+	// timers nothing ever delivers.
+	scheduleOffered := agent.canSchedule() && lr.Tools.Get("schedule") != nil
+	// The browser tools are the Chrome-takeover ops, offered to the interactive
+	// build agent alone (see canControlBrowser), the way board and teammate are:
+	// every server registry registers the family, but the loop only puts it on
+	// the turn when the registry holds the bridge — the CLI's registry does not,
+	// so its build agent never sees ids it could never reach. The glob rides the
+	// allowlist: executeTool checks HasTool against it at call time, so a new
+	// browser op needs no change here; the WIRE keeps only the browser_status
+	// sentinel on a matcher turn, and the ops arrive when the matcher names the
+	// browser-takeover skill or the agent loads it (newTurnToolset and the
+	// skill-load hook below).
+	browserOffered := agent.canControlBrowser() && lr.Tools.Get("browser_status") != nil
+	// The takeover steer is live-state, resolved once per turn here and carried
+	// through as a fixed per-turn system entry (it is appended where the other
+	// per-turn entries are). It refines, never hides: deep_search stays on the
+	// wire and in the prompt, so an extension that disconnects mid-turn
+	// degrades to the tools' own pair-up refusals instead of blinding the
+	// agent — and the loop does not depend on re-checking bridge health
+	// per step.
+	browserSteer := ""
+	if browserOffered && hasDeepSearch && lr.BrowserStatus != nil {
+		if connected, granted := lr.BrowserStatus(); connected {
+			browserSteer = browserSteerPrompt(granted)
+		}
+	}
 	allowIDs := append([]string{}, agent.Tools...)
 	if compactContextOffered {
 		allowIDs = append(allowIDs, "compact_context")
@@ -781,6 +836,21 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	if teammateOffered {
 		allowIDs = append(allowIDs, "teammate")
 	}
+	if browserOffered {
+		// The concrete sentinel first: newTurnToolset drops the glob below on a
+		// matcher turn, so browser_status must ride as its own id to stay on the
+		// wire from step one — a planless turn must still be able to check whether
+		// the bridge is paired. The glob stays only to keep the allowlist (not the
+		// wire) covering every op for executeTool's HasTool check.
+		allowIDs = append(allowIDs, "browser_status")
+		allowIDs = append(allowIDs, "browser_*")
+	}
+	// schedule rides agent.Tools (buildAgentTools holds it), not this seam — so
+	// the gate strips it back off the allowlist when scheduleOffered says no,
+	// keeping the boolean and the toolset in lockstep either way.
+	if !scheduleOffered {
+		allowIDs = slices.DeleteFunc(allowIDs, func(id string) bool { return id == "schedule" })
+	}
 	// The agent as this turn actually sees it. executeTool checks its Tools as an
 	// allowlist, so it must cover every tool that can reach the wire — including
 	// an MCP tool the matcher suggests later in the turn. allowIDs is turn-constant
@@ -788,8 +858,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	effectiveAgent := agent
 	effectiveAgent.Tools = allowIDs
 
-	// The wire list: the allowlist minus the MCP glob for the build agent, plus
-	// whatever the matcher names for the plan as the turn goes on.
+	// The wire list: the allowlist minus the upfront knowledge the matcher keeps
+	// out for the build agent — the MCP glob and the browser takeover ops — plus
+	// whatever it names for the plan as the turn goes on.
 	turnTools := newTurnToolset(allowIDs, intentOffered)
 	// One routing budget for the whole turn: a restated plan must not become one
 	// more completion every time the agent touches its list.
@@ -869,6 +940,18 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// step, so a per-step counter would reset itself on every retry and a
 	// permanently broken connection would spin forever.
 	midStreamRetries := 0
+
+	// Effort shaping for the NEXT step. A step that follows a tool-only step
+	// of this turn is a mechanical continuation — the model already spent its
+	// plan on the step that produced the calls, and this step only carries the
+	// results forward — so providers that shape effort hold it to the lightest
+	// level the model takes (applyEffort). Tool-only is judged on the tools
+	// themselves: a round whose every call was read-only planning or
+	// exploration (explorationOnlyCalls) gathered what the next step has to
+	// think about, so it is never mechanical. The first step of a turn, and
+	// any step that follows a text-final one, is planning work and never
+	// mechanical. Assigned at the loop tail, from the step's outcome.
+	nextStepMechanical := false
 
 	for step := 1; step <= hardMax; step++ {
 		if step == maxSteps && hardMax > maxSteps {
@@ -998,6 +1081,8 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				}
 				slog.Info("agent loop breaking", "session", sessionID, "reason", "last assistant finished", "finish", finish, "totalMessages", len(messages))
 				exitReason = finish
+				// Turn-end registry sweep for the intent gate (intent_gate.go).
+				sweepIntentReminderSeen()
 				if turnMemoryActive {
 					lr.writeTurnMemory(ctx, sessionID, p, modelID)
 				}
@@ -1113,6 +1198,15 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			if u := ServerURLFromContext(ctx); u != "" {
 				systemPrompts = appendSystemEntry(systemPrompts, agent, strings.TrimSpace(serverURLPrompt(u)))
 			}
+		}
+		// The takeover steer, resolved once per turn above and fixed for the
+		// rest of it: on the endpoints that cache by longest common prefix a
+		// prompt that could change mid-turn would end the cached region at its
+		// own position, so a bridge state that flips during a turn is reflected
+		// on the NEXT turn, not this one — the tools' own unpaired refusals
+		// cover the gap in between.
+		if browserSteer != "" {
+			systemPrompts = appendSystemEntry(systemPrompts, agent, browserSteer)
 		}
 		// Last of the system entries, because it is the only one that can change
 		// DURING a turn: compaction fires mid-loop and rewrites this summary,
@@ -1244,6 +1338,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// The session's chosen depth, already checked against the model
 			// ("" runs it at its default).
 			Effort: effort,
+			// Whether the previous step of this turn ended in tool calls with no
+			// final text (see nextStepMechanical): effort defaults key off it.
+			StepMechanical: nextStepMechanical,
 		}
 
 		// Per-step, not per-run: the proactive check may fire on every step
@@ -2167,6 +2264,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 		}
 		toolCallsExecuted := len(readyCalls) > 0
+		// A round whose every call was read-only planning/exploration did not
+		// carry work forward — the next step usually has to think about what it
+		// just learned — so it is exempt from the mechanical continuation.
+		nextStepMechanical = toolCallsExecuted && currentText.Len() == 0 && !explorationOnlyCalls(readyCalls)
 
 		if toolCallsExecuted {
 			// Execute against the tools this step actually offered, not the
@@ -2261,6 +2362,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			}
 			slog.Info("agent loop complete", "session", sessionID, "steps", step, "reason", finishReason)
 			exitReason = finishReason
+			sweepIntentReminderSeen()
 			if turnMemoryActive {
 				lr.writeTurnMemory(ctx, sessionID, p, modelID)
 			}
@@ -2288,11 +2390,54 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// message or Resume picks up from here with a fresh budget. A distinct exit
 	// reason keeps an extended-then-stopped turn from being read as a clean finish.
 	exitReason = "step_limit"
+	sweepIntentReminderSeen()
 	if turnMemoryActive {
 		lr.writeTurnMemory(ctx, sessionID, p, modelID)
 	}
 	lr.autoIndexTurn(agent.ID, sessionID, modelID, providerID)
 	return nil
+}
+
+// explorationToolNames are the read-only planning and exploration tools: the
+// ones a step calls only to gather what the NEXT step will think about —
+// mapping the codebase, mapping a file's structure, reading files and search
+// hits, reading indexed document pages, recalling memory, checking syntax,
+// restating the plan, reclaiming context, or asking the user. Nothing one of
+// these calls produced is work carried forward, so a step composed only of
+// them does not mark the next step a mechanical continuation.
+var explorationToolNames = map[string]bool{
+	"codebase_map":          true,
+	"file_map":              true,
+	"read":                  true, // the files form included — the tool is ID'd "read" either way
+	"grep":                  true,
+	"glob":                  true,
+	"read_pdf_page":         true,
+	"pdf_index":             true,
+	"read_docx_page":        true,
+	"docx_index":            true,
+	"memory_recall":         true,
+	"project_memory_recall": true,
+	"check_syntax":          true,
+	"update_intent":         true,
+	"compact_context":       true,
+	"ask_user":              true,
+}
+
+// explorationOnlyCalls reports whether every call in the batch was one of
+// explorationToolNames. A round that mixes even one work call (write, edit,
+// bash, teammate, task, skill, MCP, …) into its batch did act, so its next
+// step stays a mechanical continuation as before. An empty batch is not
+// exploration — the caller only reaches this when a call was ready to run.
+func explorationOnlyCalls(calls []pendingToolCall) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	for _, tc := range calls {
+		if !explorationToolNames[tc.Name] {
+			return false
+		}
+	}
+	return true
 }
 
 // drainStreamEvents consumes any remaining events from a stream channel that the
@@ -3154,6 +3299,31 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		break
 	}
 
+	// Loading the browser-takeover skill is the agent deciding to drive the
+	// user's Chrome: put the takeover ops on the wire for the rest of the turn,
+	// the way a matcher turn's naming of the same skill does. This runs even on
+	// a planless turn (the matcher never routed), and offer is a no-op when the
+	// base already covers the family, so a non-matcher turn pays nothing here.
+	if agent.canControlBrowser() && lr.Tools.Get("browser_status") != nil {
+		for i := len(execInfos) - 1; i >= 0; i-- {
+			if toolCtx.Err() != nil {
+				break
+			}
+			if execInfos[i].err != nil || execInfos[i].tc.Name != "skill" {
+				continue
+			}
+			var args struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(execInfos[i].tc.Input, &args) != nil || args.Name != browserTakeoverSkillName {
+				continue
+			}
+			for _, id := range tool.BrowserToolIDs() {
+				turnTools.offer(id)
+			}
+		}
+	}
+
 	results = make(map[string]tool.Result, len(execInfos))
 	for _, info := range execInfos {
 		if info.err == nil {
@@ -3810,14 +3980,15 @@ func skillPermissionRules(reg *skill.Registry) permission.Ruleset {
 }
 
 // capToolOutput is the global backstop that bounds any tool result before it
-// enters the model context. Tools that already truncated themselves (read,
-// bash) set Result.Truncated and are left untouched; everything else — grep,
-// glob, and any future or MCP-style tool — is capped to
+// enters the model context. Tools that already truncated themselves set
+// Result.Truncated and are left untouched; tools whose output is the answer
+// itself (read, file_map) set Result.Uncapped and are left untouched too.
+// Everything else — grep, glob, and any future or MCP-style tool — is capped to
 // tool.MaxToolOutputBytes/MaxToolOutputLines, keeping the head. This stops a
 // single oversized result from dominating the turn and being re-sent on every
 // later step.
 func capToolOutput(res tool.Result) tool.Result {
-	if res.Truncated || res.Output == "" {
+	if res.Truncated || res.Uncapped || res.Output == "" {
 		return res
 	}
 	output, truncated := tool.TruncateOutput(res.Output, tool.KeepHead)

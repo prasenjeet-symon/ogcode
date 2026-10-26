@@ -24,9 +24,25 @@ type Agent struct {
 }
 
 // codingAgentTools is the shared full-access toolset used by both the
-// interactive BuildAgent and the headless TaskAgent — they differ only in their
-// system prompt framing, not their capabilities.
+// interactive BuildAgent and the headless TaskAgent. They differ in exactly one
+// tool beyond their system-prompt framing: `schedule` (buildAgentTools) rides
+// with the build agent alone, because a reminder is deliverable only to a build
+// session running in the project directory.
 var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task", "skill", "mcp_*"}
+
+// buildAgentTools is the BuildAgent's toolset: codingAgentTools plus `schedule`.
+// A reminder reaches its session two ways — the per-session catch-up hook at the
+// next turn start, which requires agentID == "build" (loop.go), and the server's
+// reminder poller, which scans only the server's own directory. A task session
+// runs in a disposable worktree under <project>/.ogcode/worktrees, so neither
+// path can ever reach it: its timer is claimed due and then delivered never, and
+// nothing prunes the abandoned rows. TaskAgent therefore keeps codingAgentTools,
+// which carries no schedule. The pinned gate behind the split is
+// (Agent).canSchedule, and the tests are TestScheduleIsOnlyTheBuildAgent and
+// TestScheduleLeftCodingAgentToolsShared. Cloning before the append keeps the
+// two lists from sharing a backing array, so this can never drift back into
+// TaskAgent's list.
+var buildAgentTools = append(append([]string{}, codingAgentTools...), "schedule")
 
 // codingAgentSystem builds the full-access coding-agent system prompt. The two
 // modes share the same body but differ in framing:
@@ -81,7 +97,7 @@ func codingAgentSystem(mode string) string {
 
 ` + step1 + `
 
-2. **Explore before you write.** Map every file the request mentions and read the parts that bear on the change before making it, following the rules above — thorough means every relevant file, not every line of each. Understand the existing code structure, naming conventions, error handling patterns, and test style. If it references a file or symbol that doesn't exist or has moved, investigate the actual codebase and adapt — do not invent paths.
+2. **Explore before you write.** Map every file the request mentions and read the parts that bear on the change before making it, following the rules above — thorough means every relevant file, not every line of each. Batch it: every "file_map" call in one block, then ONE "read" with files=[{"path": ..., "ranges": [...]}, ...] for every window the wave needs, because each round trip re-sends the conversation. Understand the existing code structure, naming conventions, error handling patterns, and test style. If it references a file or symbol that doesn't exist or has moved, investigate the actual codebase and adapt — do not invent paths.
 
 3. **Implement focused, minimal changes.** Only implement what is required. Do not refactor unrelated code, rename things that aren't broken, or add features that weren't requested. If you spot an unrelated bug, leave it alone unless it blocks the work.
 
@@ -113,6 +129,7 @@ When asked to review work — your own included — hold every conclusion to the
 - Never commit secrets, .env files, build artifacts, or generated files unless they were explicitly requested.
 - Every "edit" passes its changes in the "edits" array — one change is an array of one, there is no other form, and several changes to one file belong in a single call. The full contract, including the one forbidden pair, is in **Parallel tool calls** above.
 - An "edit" needs its "old_string" to match ONE place in the file. Repeated blocks — the same step in several CI jobs, the same call in several functions — need neighbouring lines added until the anchor is unique, or "replace_all" when every copy really should change. Judge that from the whole file, not from the region you happened to read.
+- Copy "edit" anchors from the read, not from memory: "old_string" and "new_string" carry the file's own bytes — leading whitespace exactly as the read shows it, no line-number prefix, no truncation marker. On "old_string not found", re-read the region and copy the anchor from the fresh window; the same text rebuilt and resent is the next failure, not the fix.
 - Never break existing tests — if a test fails because of your change, fix the code or the test (whichever is correct), not both arbitrarily.
 ` + scopeRule + `
 - If you are blocked by something genuinely outside your control (missing credentials, infrastructure not available), stop cleanly and describe the blocker clearly in your final message.
@@ -126,14 +143,16 @@ var BuildAgent = Agent{
 	ID:          "build",
 	Name:        "Build",
 	Description: "Full-access coding agent",
-	Tools:       codingAgentTools,
+	Tools:       buildAgentTools,
 	System:      codingAgentSystem("interactive"),
 }
 
 // TaskAgent is the headless variant of BuildAgent used to execute a single
-// breakdown task inside a disposable git worktree. Same tools as BuildAgent; the
-// prompt treats the task description as authoritative and requires a commit,
-// because the worktree is discarded once the task finishes.
+// breakdown task inside a disposable git worktree. Same tools as BuildAgent
+// except `schedule` (buildAgentTools — its reminders only ever reach a build
+// session in the project directory, never this worktree); the prompt treats the
+// task description as authoritative and requires a commit, because the worktree
+// is discarded once the task finishes.
 var TaskAgent = Agent{
 	ID:          "task",
 	Name:        "Task",
@@ -507,6 +526,48 @@ func (a *Agent) canUseBoard() bool { return a.ID == "build" }
 // nesting has no depth limit.
 func (a *Agent) canSpawnTeammate() bool { return a.ID == "build" }
 
+// canSchedule reports whether this agent may arm a one-shot reminder through the
+// schedule tool.
+//
+// Build-only for the same reason as canUseBoard, with a second edge beyond
+// reachability: delivery itself is build-only in both paths. A reminder reaches
+// its session either through the per-session catch-up hook at the next turn
+// start — which requires agentID == "build" (loop.go) — or through the server's
+// reminder poller, which scans only the server's own directory. TaskAgent shares
+// BuildAgent's toolset shape but runs in a disposable worktree under
+// <project>/.ogcode/worktrees, so its timer would be claimed due and delivered
+// never, sticking there forever (nothing prunes one). A teammate passes here too:
+// teammatehood is a property of the session, not the agent, and a teammate runs
+// as "build" in the project directory.
+//
+// The loop gates schedule at the same seam as canControlBrowser: scheduleOffered
+// (loop.go) strips the id from the turn's allowlist when this gate or the live
+// registry disagrees, and the reminder catch-up hook at turn start rides this
+// gate too, so the boolean cannot drift away from the actual enforcement — the
+// static split it stands on (schedule rides buildAgentTools, TaskAgent keeps
+// codingAgentTools with none) is the list side it still pins.
+func (a *Agent) canSchedule() bool { return a.ID == "build" }
+
+// canControlBrowser reports whether this agent may drive the user's real
+// Chrome through the browser-takeover tools (internal/tool/browser.go):
+// navigate, snapshot, click, type, key, scroll, screenshot, and the
+// network/console watchers on a driven tab.
+//
+// Build-only for the same reason as canUseBoard: the tools act on the user's
+// own browser, and the extension grants every tab by a tick in the side panel
+// that only the user can flip, so the gate is accountability, not reachability
+// — only the interactive build agent (and a teammate running as "build") can
+// be held to a grant it used. TaskAgent shares BuildAgent's toolset but runs
+// headless in a disposable worktree with nobody watching a real browser, and
+// the read-only agents must not fire input events anywhere.
+//
+// The loop offers tools from the turn's allowlist, so live enforcement is the
+// per-turn append (the ask_user/board shape): browserOffered rides this gate
+// AND a live registry entry (loop.go). A built server whose registry holds no
+// browser tools — the CLI's loop — never sees the ids at all, so the gate
+// alone cannot put a callable name in front of an agent with no bridge.
+func (a *Agent) canControlBrowser() bool { return a.ID == "build" }
+
 // boardPrompt is the system-prompt section that teaches the build agent the
 // agent tree and the teammates it can spawn. It is a pointer, not an enumeration
 // of the tree's state: the roster is one call away and changes while a turn runs.
@@ -541,7 +602,7 @@ You can share this project directory with other agents. ` + "`board roster`" + `
 - **Speed** — independent streams (separate files, separate packages, one per test case or per question) finish in the time of the slowest, not the sum. A stream's clock starts when you spawn it, so every step you spend before spawning delays every stream by that much.
 - **Tokens** — a teammate carries its own context window, so its greps, reads and dead ends are billed there, and what comes back is a conclusion instead of a survey. Your window stays small, and every step you take re-sends less history. Even when a read looks quick, ask whether it belongs in your history at all — ten cheap greps by the parent cost more than one child reporting the conclusion.
 
-**How many, and which.** One teammate per stream that can run without the others — when the work splits into streams, take every stream, not just the obvious one. Give each a disjoint set of files — two agents editing one file collide — and keep the shared surface (the integration point, the router, the go.mod) for yourself or name it in exactly one brief. **Spawn the batch in one tool block**, right after ` + "`update_intent`" + ` states your plan (the plan goes first, and alone), and say in a line which stream each one takes — streams that start together finish together; the same work dribbled out one after another gets the serial schedule the batch existed to avoid. A brief you can state in a sentence is a brief a teammate can act on, so if you can say what the child would do, spawn it. Nothing caps how many run at once, and a teammate may spawn its own — but a teammate briefed to implement one stream implements it, and splits further only when its own brief turns out to be several.
+**How many, and which.** One teammate per stream that can run without the others — when the work splits into streams, take every stream, not just the obvious one. Give each a disjoint set of files — two agents editing one file collide — and keep the shared surface (the integration point, the router, the go.mod) for yourself or name it in exactly one brief. **Spawn the batch in one tool block**, right after ` + "`update_intent`" + ` states your plan (the plan goes first — before the fan-out — but it may ride the first tool block alongside the turn's other calls, rather than stand alone in its own block), and say in a line which stream each one takes — streams that start together finish together; the same work dribbled out one after another gets the serial schedule the batch existed to avoid. A brief you can state in a sentence is a brief a teammate can act on, so if you can say what the child would do, spawn it. Nothing caps how many run at once, and a teammate may spawn its own — but a teammate briefed to implement one stream implements it, and splits further only when its own brief turns out to be several.
 
 **What you do with your own time.** Never run serially what could run together — while your teammates work, keep working: take the next decision, the shared files you kept out of every brief, the verification, the question for the user. With nothing of yours left, ` + "`teammate wait`" + ` — do not poll ` + "`board roster`" + ` or ` + "`status`" + ` in a loop, and do not re-read an area a teammate has already read. And do not end the turn while a teammate you spawned is still working: a running turn hears a completion the moment it lands, but a turn that has already ended leaves the report queued until the developer's next message, because nothing starts your turn for you. The rail has two named exits: ` + "`teammate stop <handle>`" + ` cancels a child whose brief is wrong, duplicated or stuck — cascading to whatever it spawned — so a mid-turn turnabout never has to wait the child out; and a child that legitimately works long past everything of yours can be parked, when your reply no longer depends on its result — say so plainly and end the turn: nothing is cancelled, and the finished report is delivered to you at your next turn's start. Chaining short ` + "`wait`" + ` calls to hold the rail open is not parking; that is polling with a timer.
 

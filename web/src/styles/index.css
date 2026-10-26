@@ -2553,3 +2553,84 @@ body.drawer-open {
   .intent-pop .dot { animation: none; }
   .intent-pop { animation: none; }
 }
+
+/* Terminal LED pane: the transcript's run of consecutive teammate tool calls
+   (spawn/wait/stop/status) folds into one tmux-flavoured pane — a title bar
+   with the working/finished counts, one monospace line per call with a status
+   LED and a flow-swept rail, and the group's elapsed clock on the bar's right. */
+.teammate-pane {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+.teammate-pane .tp-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+.tp-btn { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); flex: none; }
+.tp-btn.on { background: var(--accent); }
+.tp-title {
+  margin-left: 7px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.tp-clock { margin-left: auto; font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tp-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 14px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.tp-line:hover { background: var(--bg-hover); }
+.tp-led { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--border-strong); }
+.tp-led.run {
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: pulse 1.4s infinite;
+}
+.tp-led.done { background: var(--success); }
+.tp-led.err { background: var(--danger); }
+.tp-led.warn { background: var(--warning); }
+.tp-cmd { color: var(--text-muted); }
+.tp-arrow { color: var(--border-strong); }
+.tp-name { color: var(--text-primary); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+.tp-arg { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tp-rail { flex: 1; height: 1px; background: var(--border-subtle); position: relative; overflow: hidden; min-width: 40px; }
+.tp-rail i {
+  position: absolute;
+  top: -1px;
+  height: 2.5px;
+  width: 26%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: tpFlow 1.5s infinite linear;
+}
+@keyframes tpFlow {
+  from { left: -26%; }
+  to { left: 100%; }
+}
+.tp-state { margin-left: auto; font-size: 10.5px; flex: none; font-variant-numeric: tabular-nums; }
+.tp-state.run { color: var(--accent-ink); }
+.tp-state.done { color: var(--success); }
+.tp-state.err { color: var(--danger); }
+.tp-state.warn { color: var(--warning); }
+.tp-state.pend { color: var(--text-muted); }
+.tp-detail { padding: 2px 14px 10px 24px; }
+@media (prefers-reduced-motion: reduce) {
+  .tp-led.run { animation: none; }
+  .tp-rail i { animation: none; opacity: 0; }
+}

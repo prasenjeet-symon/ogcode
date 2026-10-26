@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
+	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
 
@@ -65,8 +67,8 @@ func TestFormatIntentHintDropsUnknown(t *testing.T) {
 	steps := []session.IntentStep{{Step: "read the sheet", Status: session.IntentActive}}
 
 	matches := map[int][]string{0: {"excel", "srv_a", "srv_b", "srv_c", "srv_d", "invented"}}
-	hint := formatIntentHint(steps, catalogue, matches)
-	got, offered := hint.Text, hint.MCPIDs
+	hint := formatIntentHint(steps, catalogue, matches, nil)
+	got, offered := hint.Text, hint.OfferIDs
 	if !strings.Contains(got, "Possible tools for these steps") {
 		t.Errorf("hint does not carry its lead-in: %q", got)
 	}
@@ -108,17 +110,103 @@ func TestFormatIntentHintDropsUnknown(t *testing.T) {
 	}
 
 	// A repeated name is listed once.
-	dup := formatIntentHint(steps, catalogue, map[int][]string{0: {"srv_a", "srv_a", "excel"}}).Text
+	dup := formatIntentHint(steps, catalogue, map[int][]string{0: {"srv_a", "srv_a", "excel"}}, nil).Text
 	if n := strings.Count(dup, "srv_a (MCP server)"); n != 1 {
 		t.Errorf("a repeated name appeared %d times, want 1: %q", n, dup)
 	}
 
 	// Nothing kept means no note at all.
-	if got := formatIntentHint(steps, catalogue, nil).Text; got != "" {
+	if got := formatIntentHint(steps, catalogue, nil, nil).Text; got != "" {
 		t.Errorf("no matches produced a hint: %q", got)
 	}
-	if got := formatIntentHint(steps, catalogue, map[int][]string{0: {"invented"}}).Text; got != "" {
+	if got := formatIntentHint(steps, catalogue, map[int][]string{0: {"invented"}}, nil).Text; got != "" {
 		t.Errorf("only invented names produced a hint: %q", got)
+	}
+}
+
+// TestFormatIntentHintOffersBrowserFamilyForTakeoverSkill pins the takeover
+// trigger: a step the matcher names for browser-takeover puts the whole
+// browser_* family on the wire and says so, while any other skill — or the
+// same skill with no family to offer — offers nothing at all.
+func TestFormatIntentHintOffersBrowserFamilyForTakeoverSkill(t *testing.T) {
+	family := tool.BrowserToolIDs()
+	catalogue := []intentCandidate{
+		{Kind: "skill", Name: browserTakeoverSkillName, Description: "drive the user's Chrome"},
+		{Kind: "skill", Name: "excel", Description: "read spreadsheets"},
+	}
+	steps := []session.IntentStep{{Step: "click through the app", Status: session.IntentActive}}
+
+	hint := formatIntentHint(steps, catalogue, map[int][]string{0: {browserTakeoverSkillName}}, family)
+	want := append([]string{}, family...)
+	sort.Strings(want)
+	if !reflect.DeepEqual(hint.OfferIDs, want) {
+		t.Errorf("OfferIDs = %v, want the whole takeover family", hint.OfferIDs)
+	}
+	if !strings.Contains(hint.Text, browserTakeoverSkillName+" (skill)") {
+		t.Errorf("hint does not name the matched takeover skill: %q", hint.Text)
+	}
+	if !strings.Contains(hint.Text, "already on the wire") {
+		t.Errorf("hint does not say the takeover ops arrived: %q", hint.Text)
+	}
+
+	// A different skill offers nothing.
+	if got := formatIntentHint(steps, catalogue, map[int][]string{0: {"excel"}}, family); len(got.OfferIDs) != 0 {
+		t.Errorf("an unrelated skill offered %v", got.OfferIDs)
+	}
+	// No family to offer is knowledge only: the hint still names the skill.
+	none := formatIntentHint(steps, catalogue, map[int][]string{0: {browserTakeoverSkillName}}, nil)
+	if len(none.OfferIDs) != 0 {
+		t.Errorf("an offerless agent was offered %v", none.OfferIDs)
+	}
+	if !strings.Contains(none.Text, browserTakeoverSkillName+" (skill)") {
+		t.Errorf("takeover match lost its label with no family to offer: %q", none.Text)
+	}
+	if strings.Contains(none.Text, "already on the wire") {
+		t.Errorf("an offerless agent was told the ops are on the wire: %q", none.Text)
+	}
+}
+
+// TestSuggestIntentToolsOffersBrowserFamily pins the end-to-end path: a real
+// routing completion naming the takeover skill, through the catalogue the
+// agent actually holds (the embedded skills, plus a registry carrying only the
+// sentinel), returns the takeover ids for the loop to offer.
+func TestSuggestIntentToolsOffersBrowserFamily(t *testing.T) {
+	p := &riskScriptProvider{scripts: [][]provider.StreamEvent{
+		textVerdict(fmt.Sprintf(`{"matches":[{"step":0,"names":[%q]}]}`, browserTakeoverSkillName)),
+	}}
+	lr, sessionID, _ := utilityLoopRunner(t, p)
+	lr.Tools = tool.NewRegistry()
+	lr.Tools.Register(fakeCatalogTool{id: "browser_status", desc: "reports pairing"})
+	lr.Skills = skill.NewLoader(skill.Config{})
+
+	agent := Agent{ID: "build", Tools: []string{"skill", "browser_status"}}
+	steps := []session.IntentStep{{Step: "click through the app", Status: session.IntentActive, Description: "drive Chrome through the takeover flow"}}
+
+	got, ids := lr.suggestIntentTools(context.Background(), sessionID, "mock-model", "", agent, lr.Dir, steps, newIntentFinder())
+	if !strings.Contains(got, browserTakeoverSkillName+" (skill)") {
+		t.Fatalf("hint does not name the matched takeover skill: %q", got)
+	}
+	if !strings.Contains(got, "already on the wire") {
+		t.Errorf("hint does not say the takeover ops arrived: %q", got)
+	}
+	want := append([]string{}, tool.BrowserToolIDs()...)
+	sort.Strings(want)
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("offered ids = %v, want the whole takeover family", ids)
+	}
+
+	// Outside the gate the takeover family is knowledge only: the hint still
+	// names the matched skill, but nothing is offered to ride the wire.
+	headless := Agent{ID: "task", Tools: []string{"skill"}}
+	got, ids = lr.suggestIntentTools(context.Background(), sessionID, "mock-model", "", headless, lr.Dir, steps, newIntentFinder())
+	if !strings.Contains(got, browserTakeoverSkillName+" (skill)") {
+		t.Fatalf("headless hint does not name the matched takeover skill: %q", got)
+	}
+	if len(ids) != 0 {
+		t.Errorf("a headless agent was offered %v", ids)
+	}
+	if strings.Contains(got, "already on the wire") {
+		t.Errorf("a headless agent was told the ops are on the wire: %q", got)
 	}
 }
 
@@ -267,19 +355,20 @@ func TestSuggestIntentToolsNoops(t *testing.T) {
 	})
 }
 
-// TestTurnToolsetHidesMCPUntilOffered pins the wire-narrowing at its source: the
-// MCP glob never expands onto the wire, an offered MCP tool is added once and in
-// order, and a non-MCP id is refused. hideMCP is the build agent's switch — an
-// agent without the intent matcher keeps the glob on the wire from step one.
-func TestTurnToolsetHidesMCPUntilOffered(t *testing.T) {
+// TestTurnToolsetNarrowsUntilOffered pins the wire-narrowing at its source:
+// the MCP and browser globs never expand onto a matcher turn's wire, an
+// offered concrete tool is added once and in order, and a non-offerable id is
+// refused. matcherTurn is the build agent's switch — an agent without the
+// intent matcher keeps every glob on the wire from step one.
+func TestTurnToolsetNarrowsUntilOffered(t *testing.T) {
 	tt := newTurnToolset([]string{"grep", "mcp_*", "skill"}, true)
 	if got := strings.Join(tt.wireIDs(), ","); got != "grep,skill" {
 		t.Fatalf("the MCP glob must not reach the wire, got %q", got)
 	}
 	v0 := tt.version
-	tt.offer("skill") // not an MCP id: refused
+	tt.offer("skill") // neither an MCP nor a browser id: refused
 	if tt.version != v0 {
-		t.Errorf("a non-MCP id must not bump the version")
+		t.Errorf("a non-offerable id must not bump the version")
 	}
 	tt.offer("mcp_b/two")
 	tt.offer("mcp_a/one")
@@ -291,11 +380,37 @@ func TestTurnToolsetHidesMCPUntilOffered(t *testing.T) {
 		t.Errorf("two distinct offers must bump the version twice, got %d", tt.version)
 	}
 
+	// The takeover family narrows the same way: only the concrete browser_status
+	// sentinel rides the wire, a concrete op is offered mid-turn, and a glob or
+	// an id the base already carries is a no-op.
+	matcher := newTurnToolset([]string{"grep", "browser_*", "browser_status"}, true)
+	if got := strings.Join(matcher.wireIDs(), ","); got != "grep,browser_status" {
+		t.Fatalf("on a matcher turn only the browser_status sentinel rides the wire, got %q", got)
+	}
+	v0 = matcher.version
+	matcher.offer("browser_status") // already in base: no-op
+	matcher.offer("browser_*")      // a glob, not a concrete id: refused
+	matcher.offer("browser_click")
+	matcher.offer("browser_click") // duplicate: no-op
+	if got := strings.Join(matcher.wireIDs(), ","); got != "grep,browser_status,browser_click" {
+		t.Errorf("offered takeover ops must land after the base, got %q", got)
+	}
+	if matcher.version != v0+1 {
+		t.Errorf("one distinct takeover offer must bump the version once, got %d", matcher.version)
+	}
+
 	// Only the build agent narrows the wire. Every other agent has no plan to
-	// read intent from, so its MCP glob must stay exactly as the allowlist has it.
-	full := newTurnToolset([]string{"grep", "mcp_*", "skill"}, false)
-	if got := strings.Join(full.wireIDs(), ","); got != "grep,mcp_*,skill" {
-		t.Errorf("an agent without the matcher must keep the MCP glob, got %q", got)
+	// read intent from, so its globs must stay exactly as the allowlist has them.
+	full := newTurnToolset([]string{"grep", "mcp_*", "browser_*", "skill"}, false)
+	if got := strings.Join(full.wireIDs(), ","); got != "grep,mcp_*,browser_*,skill" {
+		t.Errorf("an agent without the matcher must keep the globs, got %q", got)
+	}
+	full.offer("browser_click") // the glob already carries it: no-op
+	if full.version != 0 {
+		t.Errorf("offering an id a base glob covers must not bump the version")
+	}
+	if got := strings.Join(full.wireIDs(), ","); got != "grep,mcp_*,browser_*,skill" {
+		t.Errorf("an offer covered by a base glob must not land twice, got %q", got)
 	}
 }
 

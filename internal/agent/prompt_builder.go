@@ -125,8 +125,8 @@ Task received
   → codebase_map()                        ← indexed projects only: MANDATORY FIRST EXPLORATION STEP (update_intent comes before it, for agents that state a plan) — top level, every folder one labeled line
   → codebase_map(subdir="<folder>")       ← descend into the folder whose labels match the task
   → codebase_map(subdir="<folder>/<sub>") ← repeat until the files you want are listed
-  → file_map(path) × every file you expect to touch ← ALWAYS, indexed or not: all of them in ONE block
-  → read(path, ranges=[{start_line, end_line}]) × the regions you need ← ALWAYS: all of them in the NEXT block (a later wave may also carry file_map calls for the files those reads revealed — map-before-read holds file by file, not block by block)
+  → file_map(path) × every file whose shape you do not already know ← indexed or not: all of them in ONE block
+  → read(files=[{"path": ..., "ranges": [...]}, ...]) × every window the wave needs ← ALWAYS: ONE call, in the NEXT block — one file is read(path, ranges=[...]), two or more are never two calls (a later wave may also carry file_map calls for the files those reads revealed — map-before-read holds file by file, not block by block)
 ` + workflowEnd + `
 
 **The loop is not one pass.** Exploration ends when you can answer the question, not when the first read returns — two or three rounds are normal. A read routinely names a caller, a config key, a struct, or a test in an area you have not opened: go back to "codebase_map" for that area, descend it the same way, and run the flow again — every new "file_map" in ONE block, then their ranges in the NEXT — though a later read wave may also carry "file_map" calls for the files those reads revealed, because map-before-read holds file by file, not block by block. Let the labels steer; the second branch is the one the first read pointed at. A read that still leaves you guessing what else touches the code is a map you have not asked for yet.
@@ -134,6 +134,8 @@ Task received
 ### Map a file before reading it
 
 Before reading a source file you do not already know, call "file_map" on it, then read only the range you need. Read one in full only when it is short, or when the map shows you genuinely need all of it — every line you pull in is re-sent on every step for the rest of the turn, and "read" on a file longer than 200 lines with no range returns that file's map instead of its contents — when the mapper finds symbols in the file; long prose, data or config has nothing to map and is read as raw content instead. Demanding the whole file still works — a single range from line 1 past its last — but it should be rare and deliberate.
+
+**A grep that already printed "path:line: text" has answered where in the file to look.** Read that window directly; map only the files whose shape is still unknown — a large file, a call whose enclosing declaration you need, a symbol nothing has located yet. The map buys boundaries, and when the search already handed you the boundaries it buys nothing. If a read answers with a map instead of contents, that is your map: choose the ranges from it and read on — never map the same file a second time.
 
 "file_map" returns every declaration with its 1-based line range and doc comment, and those ranges go straight into "read":
 
@@ -143,6 +145,8 @@ Before reading a source file you do not already know, call "file_map" on it, the
   read("internal/tool/read.go", ranges=[{"start_line":37,"end_line":159}])
 
 The "start_line" and "end_line" keys of a range are inclusive and use exactly the numbering "file_map" prints, so copy a range across as-is — never convert it to "offset"; one region is a one-entry ranges list. A range already covers the declaration's doc comment. Indented entries are nested inside the entry above them, so you can jump to one method or handler instead of reading its whole container.
+
+**One read call per wave.** Every window the wave already knows, across every file, travels in a single call — read(files=[{"path": "a.go", "ranges": [...]}, {"path": "b.go", "ranges": [...]}]) — each entry taking the single-file form above. One file is plain path; two or more are never two calls.
 
 ` + remap + `"file_map" itself is never stale — it parses the file on each call and consults no index, so it works in any project, indexed or not.` + shellRule
 }
@@ -203,8 +207,37 @@ If the task requires current external knowledge — library docs, APIs, versions
 
 Never guess about APIs, versions, or behaviour — search first.
 
-After calling "deep_search", always write the research findings as your own text response to the user — do not just return the tool result silently. Present the answer clearly in your message.`
+After calling "deep_search", report the findings as your own SHORT synthesis — the conclusions in a few sentences, carrying whatever settles your decision — not a restatement of the sub-agent's full answer. Never return the result silently, and never repeat it wholesale.`
 	}
+}
+
+// browserSteerPrompt is the conditional takeover guidance RunLoop appends as a
+// per-turn system entry when the browser bridge is live. It is the complement
+// deepSearchPrompt assumes: the search agent answers from sources that can be
+// stale, and a granted tab in the user's own Chrome is ground truth for live
+// state — their logged-in session, JavaScript-rendered pages, sites that block
+// robots. The steer names deep_search rather than claiming to replace it: the
+// fallback must survive an extension that disconnects mid-session, so the
+// section says where each tool is the right spend instead of hiding one.
+//
+// RunLoop calls it only when the bridge reports connected; not-connected yawns
+// and no section is emitted, leaving deepSearchPrompt standing alone.
+// granted is the number of tabs the extension has granted; 0 is still worth
+// saying, because browser_navigate with newTab opens a tab granted
+// automatically.
+func browserSteerPrompt(granted int) string {
+	if granted > 0 {
+		return fmt.Sprintf(`## Browser at hand
+
+The user's Chrome is connected to this server and %d tab(s) are granted for takeover (browser_status lists them). That tab is ground truth for the live web: their logged-in session, JavaScript-rendered pages, sites that block robots.
+
+For a check of CURRENT web state — today's news, a price, a specific article or page — drive the granted tab (browser_navigate, then browser_snapshot) before calling "deep_search" first. Keep "deep_search" for what it is built for: broad multi-source synthesis of a topic. When a deep_search answer hinges on one specific article being current, verify it in the granted tab before presenting it as the latest.`, granted)
+	}
+	return `## Browser at hand
+
+The user's Chrome is connected to this server, but no tab has been granted for takeover yet in the extension's side panel. browser_navigate with newTab opens a tab that is granted automatically.
+
+For a check of CURRENT web state — today's news, a price, a specific article or page — drive a tab (browser_navigate, then browser_snapshot) before calling "deep_search" first. Keep "deep_search" for what it is built for: broad multi-source synthesis of a topic; verify a specific article it names in the tab before presenting it as the latest.`
 }
 
 // indexStatusPrompt states whether the project index holds anything, so the
@@ -430,13 +463,15 @@ func decisionSummaryPrompt() string {
 
 Your final reply for a completed turn is what a short, durable memory note is written from — a future agent reads that note to understand why the work went the way it did, with no access to this conversation. Your internal reasoning is not part of it, so state the rationale here when it matters.
 
-When a turn involved real decisions — a non-obvious approach, a trade-off, an implementation you tried and rejected — end your reply with a short ` + "`## Decisions & why`" + ` section:
+The section is for turns with real decisions only — a non-obvious approach, a trade-off you weighed, an implementation you tried and rejected. Most turns have none: a one-line answer, a pure lookup, or a change with only one sensible way to make it gets no section at all, and opening one anyway inflates the closing prose for nothing.
+
+When a turn did hinge on a decision, end your reply with a short ` + "`## Decisions & why`" + ` section:
 
 - The choice you made, and the reason for it.
 - Approaches you ruled out and what ruled them out, so a later turn does not retry them.
 - Decisions the developer may want to revisit or reverse.
 
-Keep it to a few lines: what a future reader needs, not a transcript of your thinking. Omit the section entirely when there was nothing to decide — a one-line answer, a pure lookup, or a change with only one sensible way to make it.`
+Keep it to a few lines: what a future reader needs, not a transcript of your thinking.`
 }
 
 // latexEnv holds information about the detected LaTeX installation.
@@ -859,8 +894,14 @@ Batch aggressively:
 
 - Exploring several files → all the "file_map" calls together, then all the "read" calls together — and a read wave may carry "file_map" calls for the files those reads revealed
 - Reading several parts of one file → every range in the same block; reads of one file run together
+- Reading several files → ONE "read" call with files=[{"path": ..., "ranges": [...]}, ...] — each entry takes the single-file form, so a post-grep fan-out is one call, not one call per file
 - Checking a hypothesis → "glob" and "grep" in the same block, not one then the other
 - Confirming a name exists in several places → one "grep" per place, all at once
+- Searching for several names or shapes → ONE "grep", patterns alternated — "foo|bar|baz" matches all three in a single pass
+
+**Widen the call before you reach for another one.** A wide call costs one round trip; two narrow calls cost two. Search the area the map has already named and read the ranges that matter, rather than one file at a time; ask one "grep" for every spelling of the thing you are chasing instead of one per symbol; give "read" every range you need, across every file, in one call instead of reading around it in pieces.
+
+**Spend round trips on the work, not on the searching.** The turn is done when the request is answered and the answer is verified — not when every corner has been looked at, every plausible file opened, or every finding restated. Ask what the next call would still change about your answer; when the honest answer is nothing, stop exploring and reply. A step taken only to feel sure is a round trip you did not need.
 
 **The exception:** a genuine data dependency — you need a path from a grep before you can read it. That is a real reason to take two blocks. "It feels tidier one at a time" is not.`
 	} else {
@@ -872,6 +913,10 @@ Batch aggressively:
 - Reading what you found → every "fetch_page" you selected in one block
 - Cross-checking a claim → one search per source, all at once
 
+**Widen the query before you reach for another one.** One "web_search" asking every angle at once costs a round trip; two narrow queries cost two. Cross-check the claims that could change the answer, not every claim you can state.
+
+**Spend round trips on the work, not on the searching.** The turn is done when the question is answered, not when every source has been opened. When the next query would not change your answer, stop and write it. A search taken only to feel sure is a round trip you did not need.
+
 **The exception:** a genuine data dependency — you need a URL from a search before you can fetch it. That is a real reason to take two blocks. "It feels tidier one at a time" is not.`
 	}
 
@@ -881,6 +926,8 @@ Batch aggressively:
 **Calls on the same file run in the order you write them; calls on different files run at the same time.** A "read", "file_map" or "check_syntax" written after an "edit" of that file sees the edit, so changing a file and checking it can share one block, and edits to different files batch freely.
 
 **Several changes to one file belong in one "edit" call.** Every change goes in its "edits" array — a single change is an array of one, and the tool takes no other form. They apply in order against each other's results, and all-or-nothing — if any anchor is missing or ambiguous, nothing is written and the error names which entry failed. That is one round trip and cannot half-apply a refactor. Separate same-file "edit" calls in one block remain safe — the runtime serializes mutations to the same path, in the order you wrote them, so each re-reads after the last applied — but they commit independently, and an anchor an earlier one changed fails cleanly — "old_string not found" when it was consumed, or an ambiguity error if its replacement duplicated it — so re-issue that one after seeing the result. **Never batch a "write" with an "edit" to the same file** — the edit would anchor on content the write replaces, which you have not seen.
+
+**"old_string" is copied from the file, not composed.** Take it from the read you are working from — leading spaces and tabs exactly as printed, no line-number prefix, no truncation marker — and extend it with neighbouring lines rather than guessing at what sits beyond the window. When an edit fails with "old_string not found", re-read the region and copy the anchor from the fresh window; the same text rebuilt from memory and resent is the next failure, not the fix.
 
 **The shell is the one thing the runtime cannot order.** It cannot tell which files a "bash" command touches, so a command that changes files — a formatter, a code generator, a "git checkout" — runs alongside everything else in its block. Give such a command a block of its own, and read, edit or check what it changed in the next. Commands that depend on each other — install then test, add then commit — belong in one command joined with "&&", not in parallel calls.
 
@@ -1124,19 +1171,17 @@ func updateIntentPrompt() string {
 
 The user watching your transcript sees each action only once it is done, so the plan in your head never reaches them — they cannot tell what you are about to do from what you have already done. State it up front instead, with update_intent.
 
-**When to call it: first — before "codebase_map", before any read, before anything else in the turn.** This is the one call that must not wait for orientation. It runs the matcher that compares your steps against the skills and MCP tools you hold, and its result is the only place the relevant ones are named. A plan stated after you have already looked around spends that match on work that is done; a turn that never states one never gets the match at all. State the plan you are starting from, marking the first step active, even when it is rough — the exploration that follows is where you refine it, and a step that names real files, packages and commands matches best.
+**When to call it: before the first meaningful exploration or work of the turn — it may ride the first tool block alongside its other calls.** It runs the matcher that compares your steps against the skills and MCP tools you hold, and its result is the only place the relevant ones are named. A plan stated after you have already looked around spends that match on work that is done; a turn that never states one never gets the match at all. State the plan you are starting from, marking the first step active, even when it is rough — the exploration that follows is where you refine it, and a step that names real files, packages and commands matches best.
 
-**Then explore as usual.** The plan says where the turn is going; the map says where the code is. Reading whatever comes to mind has guessed at the project anyway.
+**Then explore as usual.** The plan says where the turn is going; the codebase map says where the code is — in an indexed project, codebase_map locates the area and descending by folder names the files, so find the files before reading any of them.
 
 Call it again only when the plan changes — and a status move is a plan change. Start a step: the call marking it active stands before that step's first work block. Finish one: the next call marks it done. Drop one: mark it dropped the moment you know. These calls ride the work, not banked for the end of the turn — a plan that only moves once the work stops has been telling the user the wrong thing for the entire turn. Send the complete list every time — the call replaces the plan, so a step you leave out is gone. The tool echoes the plan back to you; copy that list and change only what moved, so a step you already finished stays finished.
 
 **Never call "skill" with no name to see what is available.** A full skill list is context you do not need: the matcher already compares your steps against every skill you hold and names the ones that fit. Load a skill by name only when the matcher names it, or when the user does.
 
-**Call it on its own.** A block carrying update_intent carries no other call — no read, no bash, no edit beside it. The work the plan describes goes in the next block, so the user sees the direction before the first action lands, and anything the plan's result points at is available for that work instead of arriving after the block that would have used it.
-
 Keep each step's label to a few words and the list to a handful; it is a map of the turn, not a script of it. A step may also carry a description — a sentence or two on what the step actually involves: the file types, the library, the command. The user never sees it; a matcher reads it to suggest the skills and MCP tools that could carry the step out, so write it to name the concrete things the step touches rather than to restate the label. A description that says "do the thing" gives the matcher nothing to work with.
 
-**Keep the statuses updated — the status is what the user reads.** The pill counts "done" steps, not labels, so a call that re-sends the list with every status unchanged has updated nothing. Set each status to what has actually happened: "active" on the one step you are working on now, "done" on a step that finished, "dropped" on one you abandoned, "pending" only on what is genuinely still ahead. A step left pending, or left active after you have moved past it, tells the user something untrue about where you are — and an abandoned plan nobody has marked up reads as worse than no plan at all. **Nothing closes the plan for you**, so this includes the last step: before the message that ends the turn, call update_intent one final time with every step's real status, so the pill ends where the work ended instead of on the plan you opened with. A step still active once you have stopped reads as work you are still doing.
+**Keep the statuses updated — the status is what the user reads.** The pill counts "done" steps, not labels, so a call that re-sends the list with every status unchanged has updated nothing. Set each status to what has actually happened: "active" on the one step you are working on now, "done" on a step that finished, "dropped" on one you abandoned, "pending" only on what is genuinely still ahead. A step left pending, or left active after you have moved past it, tells the user something untrue about where you are — and an abandoned plan nobody has marked up reads as worse than no plan at all. **The plan does not survive the turn** — it is turn-scoped: the stored intent is cleared when a new turn starts, so a turn that begins without a fresh update_intent runs planless. A next turn therefore owes a new call; restating or adjusting the list then is a call, not noise. A closing status update before the message that ends the turn is welcome but not mandatory; when you do send one, give every step's real status so the pill ends where the work ended. A step still active once you have stopped reads as work you are still doing.
 
 Do not also narrate the steps in prose: the update_intent call is the narration, and a sentence repeating what the plan already shows is noise.`
 }

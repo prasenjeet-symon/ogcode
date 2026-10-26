@@ -1,0 +1,178 @@
+/* agent-force-graph.css — the force-graph canvas styles the component cannot
+   express as Tailwind classes: the flat plotting surface, the frosted control
+   cluster and the hover tooltip. Every colour is a theme variable so light and
+   dark both work. */
+
+.afg-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-base);
+  overflow: hidden;
+}
+
+.afg-host canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+/* Frosted overlay cluster (fit / zoom buttons). */
+.afg-float {
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
+}
+
+.afg-ctl {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  z-index: 3;
+}
+
+.afg-ctl button {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  outline: none;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.afg-ctl button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.afg-ctl button:hover {
+  background: color-mix(in srgb, var(--text-tertiary) 12%, transparent);
+  color: var(--text-primary);
+}
+
+.afg-ctl button:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+/* Hover tooltip — frosted, anchored near its node. Teleported to <body> so
+   it must not depend on the host's stacking/positioning context. */
+.afg-tip {
+  position: fixed;
+  z-index: 4;
+  width: 228px;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.1),
+    0 12px 28px rgb(0 0 0 / 0.16);
+}
+
+.afg-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.afg-tip-handle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.afg-tip-kind {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 99px;
+  padding: 1px 6px;
+}
+
+.afg-tip-title {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.afg-tip-meta {
+  font-size: 9.5px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.afg-tip-actions {
+  display: flex;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.afg-btn {
+  flex: 1;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.afg-btn:hover {
+  border-color: var(--border-default);
+}
+
+.afg-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+/* Destructive: armed turns the button red before it acts. */
+.afg-btn-stop {
+  flex: 0 1 auto;
+}
+
+.afg-btn-stop.afg-armed,
+.afg-btn-stop:hover {
+  border-color: #f87171;
+  color: #f87171;
+  background: color-mix(in srgb, #f87171 12%, var(--bg-base));
+}
+
+.afg-btn-stop:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

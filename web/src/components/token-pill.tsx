@@ -175,7 +175,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
 
   // A board event is what announces a teammate starting, posting or stopping —
   // the moments its spend can have moved. Deferred so the first render is not a
-  // reason to refetch what it just read, and debounced like the board drawer:
+  // reason to refetch what it just read, and debounced:
   // the burst one spawn produces folds into one read, not one per event.
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   createEffect(on(events.eventTick, () => {

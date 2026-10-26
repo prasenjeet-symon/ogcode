@@ -180,26 +180,30 @@ func TestUpdateIntentAcceptsAPlan(t *testing.T) {
 }
 
 // The description is the only place the timing rule reaches the model when the
-// per-turn prompt section is not in view, so it must state the first-call rule
-// rather than the deferred boundary it replaced.
+// per-turn prompt section is not in view, so it must state the softened
+// contract: the plan comes before the first meaningful exploration or work,
+// and it may ride the first tool block alongside other calls rather than
+// stand alone.
 func TestUpdateIntentDescriptionPutsThePlanFirst(t *testing.T) {
 	desc := NewUpdateIntentTool().Description()
 	for _, want := range []string{
-		"first, alone in your first block of every turn",
-		"before codebase_map, grep or any read",
-		"Call it on its own",
+		"before the first meaningful exploration or work of the turn",
+		"may ride the first tool block alongside other calls",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("Description missing %q", want)
 		}
 	}
 	for _, gone := range []string{
-		"before the first edit, write or bash call",
+		"first, alone in your first block of every turn",
+		"before codebase_map, grep or any read",
+		"Call it on its own",
+		"a block that carries no other tool call",
 		"by your fifth tool call",
 		"otherwise orient first",
 	} {
 		if strings.Contains(desc, gone) {
-			t.Errorf("Description still carries the deferred rule %q", gone)
+			t.Errorf("Description still carries the standalone mandate %q", gone)
 		}
 	}
 }
@@ -269,20 +273,30 @@ func TestUpdateIntentIDIsStable(t *testing.T) {
 	}
 }
 
-// TestUpdateIntentDescriptionClosesThePlan pins the rule that nothing but the
-// agent's own call closes the plan: the description must tell it to make a final
-// call before the message that ends the turn, or the last step lingers as active
-// after the turn finishes (nothing at turn end touches the intent).
-func TestUpdateIntentDescriptionClosesThePlan(t *testing.T) {
+// TestUpdateIntentDescriptionMakesTheClosingOptional pins the softened closing
+// contract: nothing closes the plan automatically, and the agent's own final
+// status update is welcome but optional. What is preserved is the rule a real
+// update must obey — the statuses it reports are the pill's truth, so a closing
+// call that is made still carries every step's real status.
+func TestUpdateIntentDescriptionMakesTheClosingOptional(t *testing.T) {
 	got := NewUpdateIntentTool().Description()
 	for _, want := range []string{
-		"before the message that ends the turn",
+		"Nothing closes the plan for you",
+		"a closing status update is welcome but not mandatory",
 		// The closing call is only worth making if it moves the statuses: a
 		// list re-sent unchanged leaves the pill on the plan it opened with.
-		"with every step's real status",
+		"every step's real status",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("description does not tell the agent to close its plan (%q missing): %q", want, got)
+			t.Errorf("description does not state the optional closing (%q missing): %q", want, got)
+		}
+	}
+	for _, gone := range []string{
+		"make one final call before the message that ends the turn",
+		"call update_intent one final time",
+	} {
+		if strings.Contains(got, gone) {
+			t.Errorf("description still mandates the closing call %q: %q", gone, got)
 		}
 	}
 }
@@ -304,13 +318,16 @@ func TestUpdateIntentDescriptionRidesTheWork(t *testing.T) {
 	}
 }
 
-// TestUpdateIntentDescriptionAsksForItsOwnBlock pins the sequencing rule. The
-// plan is what tells the user where the turn is heading, so a call batched with
-// the work it describes arrives after that work has already run — and any tool
-// the matcher names in the plan's result is offered too late to be used in it.
-func TestUpdateIntentDescriptionAsksForItsOwnBlock(t *testing.T) {
-	if got := NewUpdateIntentTool().Description(); !strings.Contains(got, "a block that carries no other tool call") {
-		t.Errorf("description does not ask for the call to stand alone: %q", got)
+// TestUpdateIntentDescriptionMayRideTheFirstBlock pins the softened sequencing
+// rule: the standalone-block mandate is gone, and the description must allow
+// the call to ride the first tool block alongside the calls the plan steers.
+func TestUpdateIntentDescriptionMayRideTheFirstBlock(t *testing.T) {
+	got := NewUpdateIntentTool().Description()
+	if !strings.Contains(got, "may ride the first tool block alongside other calls") {
+		t.Errorf("description does not allow the call to ride the first block: %q", got)
+	}
+	if strings.Contains(got, "carries no other tool call") {
+		t.Errorf("description still mandates a block of its own: %q", got)
 	}
 }
 

@@ -24,23 +24,22 @@ func TestCanUpdateIntentIsOnlyTheBuildAgent(t *testing.T) {
 }
 
 // TestUpdateIntentPromptCarriesTheTimingContract pins the rules the feature
-// rests on: the plan is the FIRST call of the turn — before codebase_map, before
-// any read — because the matcher's answer has to arrive before the exploration
-// it is meant to steer; the usual exploration path follows it (the map, then
-// every file map in one block, then every ranged read in the next); the call
-// stands in a block of its own so the plan lands before the work it describes;
-// a status move is a plan change, so the repeat calls land while the work runs
-// — active before a step's first block, done after its last — not banked for
-// the closing call; the plan the user is reading must be kept honest (a step is
-// done or dropped, never left active after the agent has moved on); and the
-// next call copies the list the tool echoed back rather than re-deriving one
-// from memory.
+// rests on: the plan comes before the first meaningful exploration or work of
+// the turn, and it may ride the first tool block alongside the calls it steers
+// rather than stand alone; a status move is a plan change, so the repeat calls
+// land while the work runs — active before a step's first block, done after
+// its last — not banked for the end of the turn; the plan the user is reading
+// must be kept honest (a step is done or dropped, never left active after the
+// agent has moved on); nothing closes the plan and the closing status update is
+// optional; and the next call copies the list the tool echoed back rather than
+// re-deriving one from memory.
 func TestUpdateIntentPromptCarriesTheTimingContract(t *testing.T) {
 	p := updateIntentPrompt()
 	for _, want := range []string{
 		"## Saying where you are heading",
 		"update_intent",
-		"**When to call it: first — before \"codebase_map\", before any read, before anything else in the turn.**",
+		"**When to call it: before the first meaningful exploration",
+		"may ride the first tool block alongside its other calls",
 		"spends that match on work that is done",
 		"runs the matcher",
 		"never gets the match at all",
@@ -50,17 +49,29 @@ func TestUpdateIntentPromptCarriesTheTimingContract(t *testing.T) {
 		"not banked for the end of the turn",
 		"**Then explore as usual.**",
 		"codebase_map",
-		"**Call it on its own.**",
 		"replaces the plan",
 		"copy that list and change only what moved",
 		"dropped",
 		"Do not also narrate",
 		"the status is what the user reads",
-		"before the message that ends the turn",
-		"with every step's real status",
+		"**The plan does not survive the turn**",
+		"welcome but not mandatory",
+		"every step's real status",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("updateIntentPrompt is missing %q", want)
+		}
+	}
+	// The standalone-block mandate and the mandatory closing call are gone:
+	// the plan may ride the first tool block, and the closing status update is
+	// the agent's choice.
+	for _, gone := range []string{
+		"Call it on its own",
+		"carries no other call",
+		"call update_intent one final time",
+	} {
+		if strings.Contains(p, gone) {
+			t.Errorf("updateIntentPrompt still carries the old mandate %q", gone)
 		}
 	}
 	// The deferred rule is gone: no read-only orientation ahead of the plan, and

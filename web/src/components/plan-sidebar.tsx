@@ -151,6 +151,20 @@ function PlanSidebarInner() {
             </svg>
           </button>
           <button
+            onClick={() => navigate('/agents')}
+            title="Agents"
+            aria-label="Agents"
+            class={`w-8 h-8 rounded-lg flex items-center justify-center transition
+              ${location.pathname.startsWith('/agents')
+                ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)]'
+                : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
+              }`}
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4M12 8H6v4M12 8h6v4M6 12v4M18 12v4M4 16h4M16 16h4" />
+            </svg>
+          </button>
+          <button
             onClick={() => navigate('/settings', { state: { from: location.pathname } })}
             title="Settings"
             aria-label="Settings"
@@ -386,6 +400,20 @@ function PlanSidebarInner() {
             <span>Device</span>
           </button>
         </Show>
+        <button
+          type="button"
+          onClick={() => navigate('/agents')}
+          class={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition
+            ${location.pathname.startsWith('/agents')
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
+              : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
+            }`}
+        >
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4M12 8H6v4M12 8h6v4M6 12v4M18 12v4M4 16h4M16 16h4" />
+          </svg>
+          <span>Agents</span>
+        </button>
         <button
           type="button"
           onClick={() => navigate('/preview')}

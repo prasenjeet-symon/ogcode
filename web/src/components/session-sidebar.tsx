@@ -170,14 +170,65 @@ function SessionSidebarInner() {
     }
   };
 
+  // Cluster chips (design of the same name in the sidebar-grouping mockups):
+  // the session list joins the agent roster — the one the Agents page shows —
+  // without any API change. Every agent on the roster climbs its
+  // spawned_by edge to the root row the build session joined the board as, and
+  // the chip on that session's row counts the descendants; clicking the chip
+  // folds them in beneath the row. Sessions with no agents render exactly as
+  // before. The session's own root row is not a chip member: the chip counts
+  // only who the session spawned, not the session itself.
+  const [roster, setRoster] = createSignal<BoardHandle[]>([]);
+  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
+
+  const teamsById = createMemo(() => {
+    const byHandle = new Map<string, BoardHandle>();
+    for (const h of roster()) if (h.handle !== 'user') byHandle.set(h.handle, h);
+    const teams = new Map<string, { rootHandle: string; members: BoardHandle[] }>();
+    for (const h of byHandle.values()) {
+      // Climb cycle-safely: two rows naming each other — nothing writes that,
+      // but a hand-edited database could hold it — must not hang the memo.
+      const seen = new Set<string>([h.handle]);
+      let root: BoardHandle | undefined = h;
+      while (root && root.spawnedBy && byHandle.has(root.spawnedBy) && !seen.has(root.spawnedBy)) {
+        seen.add(root.spawnedBy);
+        root = byHandle.get(root.spawnedBy);
+      }
+      if (!root || root === h || !root.sessionId) continue;
+      const team = teams.get(root.sessionId) ?? { rootHandle: root.handle, members: [] as BoardHandle[] };
+      team.members.push(h);
+      teams.set(root.sessionId, team);
+    }
+    return teams;
+  });
+
+  // A session the board trees beneath another — every roster agent that climbs
+  // to a root other than itself — must not ALSO float as a main session row:
+  // it renders only as a team row under its root's chip. Search lifts the
+  // grouping, so a teammate session stays findable by name.
+  //
+  // But only a team whose ROOT session still exists may hide its members:
+  // roster rows are never deleted, so once the root's session is, its
+  // board_agent row would keep them grouped under a row that never renders —
+  // gone from the list with no chip left to unfold them under. A member of a
+  // dead-root team therefore floats as a main session row again, exactly like
+  // a session no one ever grouped.
+  const childSessionIds = createMemo(() => {
+    const ids = new Set<string>();
+    const exists = new Set(session.sessions().map((s) => s.id));
+    for (const [rootSessionId, team] of teamsById()) {
+      if (!exists.has(rootSessionId)) continue;
+      for (const m of team.members) if (m.sessionId) ids.add(m.sessionId);
+    }
+    return ids;
+  });
+
   const filtered = createMemo(() => {
     const q = query().trim().toLowerCase();
-    const list = session.sessions();
-    if (!q) return list;
-    return list.filter((s) =>
-      (s.title || '').toLowerCase().includes(q) ||
-      (s.model || '').toLowerCase().includes(q)
-    );
+    const matches = (s: Session) =>
+      !q || (s.title || '').toLowerCase().includes(q) || (s.model || '').toLowerCase().includes(q);
+    const childIds = childSessionIds();
+    return session.sessions().filter((s) => matches(s) && (q || !childIds.has(s.id)));
   });
 
   // Sessions arrive newest-first, so bucketing them by age keeps that order
@@ -210,38 +261,6 @@ function SessionSidebarInner() {
 
   const pinnedSessions = createMemo(() => filtered().filter((s) => pinned().has(s.id)));
 
-  // Cluster chips (design of the same name in the sidebar-grouping mockups):
-  // the session list joins the agent board — the roster the board drawer
-  // renders — without any API change. Every agent on the roster climbs its
-  // spawned_by edge to the root row the build session joined the board as, and
-  // the chip on that session's row counts the descendants; clicking the chip
-  // folds them in beneath the row. Sessions with no agents render exactly as
-  // before. The session's own root row is not a chip member: the chip counts
-  // only who the session spawned, not the session itself.
-  const [roster, setRoster] = createSignal<BoardHandle[]>([]);
-  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
-
-  const teamsById = createMemo(() => {
-    const byHandle = new Map<string, BoardHandle>();
-    for (const h of roster()) if (h.handle !== 'user') byHandle.set(h.handle, h);
-    const teams = new Map<string, { rootHandle: string; members: BoardHandle[] }>();
-    for (const h of byHandle.values()) {
-      // Climb cycle-safely: two rows naming each other — nothing writes that,
-      // but a hand-edited database could hold it — must not hang the memo.
-      const seen = new Set<string>([h.handle]);
-      let root: BoardHandle | undefined = h;
-      while (root && root.spawnedBy && byHandle.has(root.spawnedBy) && !seen.has(root.spawnedBy)) {
-        seen.add(root.spawnedBy);
-        root = byHandle.get(root.spawnedBy);
-      }
-      if (!root || root === h || !root.sessionId) continue;
-      const team = teams.get(root.sessionId) ?? { rootHandle: root.handle, members: [] as BoardHandle[] };
-      team.members.push(h);
-      teams.set(root.sessionId, team);
-    }
-    return teams;
-  });
-
   const toggleTeam = (e: MouseEvent, id: string) => {
     e.stopPropagation();
     setExpanded((prev) => {
@@ -252,7 +271,7 @@ function SessionSidebarInner() {
     });
   };
 
-  // The chip has to be live: the same refresh pattern as the board drawer —
+  // The chip has to be live: the same refresh pattern as the Agents page —
   // board.* SSE events folded into one debounced read 150 ms later, a resync
   // on reconnect (events published while the stream was down never arrived),
   // and a 15 s poll as backstop for moves that publish no event of their own.
@@ -455,8 +474,8 @@ function SessionSidebarInner() {
             class="group/row relative flex items-center gap-2 h-6 rounded-md pr-1.5 text-meta cursor-pointer
                    text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-hover)] hover:text-[color:var(--text-primary)]"
           >
-            {/* Indent rail + elbow, drawn from the depth, one pair per level
-                — the guide lines the board drawer's rows draw. */}
+            {/* Indent rail + elbow, drawn from the depth, one pair per level —
+                the rail-and-elbow guide a nested tree row carries. */}
             <span aria-hidden="true" class="absolute top-0 bottom-0 w-px bg-[color:var(--border-default)]" style={{ left: `${railX}px` }} />
             <span aria-hidden="true" class="absolute top-1/2 -translate-y-1/2 h-px w-2.5 bg-[color:var(--border-default)]" style={{ left: `${railX}px` }} />
             <span role="img" aria-label={meta.label} class={`w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot}`} />
@@ -538,6 +557,20 @@ function SessionSidebarInner() {
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+            </svg>
+          </button>
+          <button
+            onClick={() => navigate('/agents')}
+            title="Agents"
+            aria-label="Agents"
+            class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
+              ${location.pathname.startsWith('/agents')
+                ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)]'
+                : 'text-zinc-500 hover:text-zinc-100 hover:bg-[color:var(--bg-hover)]'
+              }`}
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4M12 8H6v4M12 8h6v4M6 12v4M18 12v4M4 16h4M16 16h4" />
             </svg>
           </button>
           <button
@@ -702,6 +735,20 @@ function SessionSidebarInner() {
             <span>Device</span>
           </button>
         </Show>
+        <button
+          type="button"
+          onClick={() => navigate('/agents')}
+          class={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-ui transition-colors
+            ${location.pathname.startsWith('/agents')
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
+              : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
+            }`}
+        >
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v4M12 8H6v4M12 8h6v4M6 12v4M18 12v4M4 16h4M16 16h4" />
+          </svg>
+          <span>Agents</span>
+        </button>
         <button
           type="button"
           onClick={() => navigate('/preview')}

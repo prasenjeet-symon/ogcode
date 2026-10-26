@@ -102,6 +102,10 @@ interface SessionContextValue {
    *  still writing their arguments — in transcript order. Empty when none are,
    *  or when the turn they belong to has ended without finishing them. */
   liveTools: () => ToolPartData[];
+  /** How many loop steps the current turn has taken — one assistant message
+   *  is created per iteration, so counting them after the turn's user prompt
+   *  mirrors the server's own turn slice. Zero when no turn is in flight. */
+  turnStepCount: () => number;
   compacted: () => boolean;
   /** Where mid-loop guidance stands for the active session: waiting for the
    *  loop's next iteration, just picked up by it, or nothing in flight. */
@@ -1085,6 +1089,40 @@ export const SessionProvider: ParentComponent = (props) => {
     return data ?? undefined;
   }
 
+  // How many loop steps the current turn has taken. The server slices the turn
+  // at findLastTextUserMessageIndex (internal/agent/loop.go) — the most recent
+  // user message holding a text part with non-empty text — and creates exactly
+  // one assistant message per loop step, so counting assistant messages after
+  // that boundary mirrors the step number of the request the model sees.
+  //
+  // One backward sweep instead of the old find-the-boundary-then-count pair:
+  // every assistant message read before the boundary is reached is one the
+  // second loop would have counted again. A remembered start index would be
+  // cheapest in the steady stream, but the boundary is not a stable index —
+  // guidance lands mid-turn as a new text user message, and merges can shift
+  // positions — so the sweep walks from the tail every time. It still costs
+  // O(messages since the boundary), the current turn's span, and stops there.
+  const turnStepCount = createMemo(() => {
+    const msgs = messagesRaw();
+    let steps = 0;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.info.role === 'assistant') {
+        steps++;
+        continue;
+      }
+      if (m.info.role !== 'user') continue;
+      const hasText = (m.parts || []).some((p) => {
+        if (p.type !== 'text') return false;
+        const data: any = p.data;
+        const text = typeof data === 'string' ? data : (toolData(p) as any)?.text;
+        return typeof text === 'string' && text !== '';
+      });
+      if (hasText) return steps;
+    }
+    return 0;
+  });
+
   // Fast poll: 3 s, runs only while the agent loop is active.
   // Stops itself (reverts to background poll) when the loop is done.
   function startPolling(sessionId: string) {
@@ -1669,6 +1707,7 @@ export const SessionProvider: ParentComponent = (props) => {
     loadOlder,
     hasRunningTools,
     liveTools,
+    turnStepCount,
     compacted,
     guidanceStatus,
     loopError,

@@ -430,6 +430,58 @@ func TestParallelToolCallsPrompt_PushesBatchingAsTheDefault(t *testing.T) {
 	}
 }
 
+// Batching alone does not shorten a turn: a model that batches perfectly but
+// keeps searching after the answer is in hand still spends the steps. Every
+// code-facing agent has to be told to widen a call instead of multiplying calls,
+// and to stop when nothing is owed — the code-facing wording names the tools
+// that make each of those concrete.
+func TestParallelToolCallsPrompt_SpendsRoundTripsOnTheWork(t *testing.T) {
+	writer := parallelToolCallsPrompt(true, true)
+	for _, want := range []string{
+		"Widen the call before you reach for another one",
+		"Spend round trips on the work",
+		"stop exploring and reply",
+		`"foo|bar|baz"`, // the multi-pattern grep its schema documents
+	} {
+		if !strings.Contains(writer, want) {
+			t.Errorf("writer prompt missing %q", want)
+		}
+	}
+
+	// The read-only variant gets the same economy in its own terms, and must
+	// still not name a tool it cannot call.
+	readOnly := parallelToolCallsPrompt(false, true)
+	for _, want := range []string{"Widen the call", "Spend round trips on the work"} {
+		if !strings.Contains(readOnly, want) {
+			t.Errorf("read-only prompt missing %q", want)
+		}
+	}
+
+	// The web variant cannot grep a package, so its economy has to come without
+	// the code-facing examples the SearchAgent loop does not offer it.
+	web := parallelToolCallsPrompt(false, false)
+	if !strings.Contains(web, "Widen the query before you reach for another one") {
+		t.Error("web variant lost the widen-the-query guidance")
+	}
+	if !strings.Contains(web, "Spend round trips on the work") {
+		t.Error("web variant lost the step-economy guidance")
+	}
+}
+
+// A post-grep fan-out across several files is the shape the files array exists
+// for: without it the model spends one round trip per file, however well it
+// batches them into one block.
+func TestParallelToolCallsPrompt_NamesTheMultiFileRead(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		p := parallelToolCallsPrompt(canWrite, true)
+		for _, want := range []string{"Reading several files", `files=[{"path"`} {
+			if !strings.Contains(p, want) {
+				t.Errorf("code-facing prompt (canWriteFiles=%v) missing %q", canWrite, want)
+			}
+		}
+	}
+}
+
 // The runtime serializes same-file mutations behind a per-path mutex
 // (internal/tool/pathlock.go): the second edit re-reads fresh content after the
 // first applies, and an overlapping anchor fails cleanly ("old_string not
@@ -445,6 +497,8 @@ func TestParallelToolCallsPrompt_SameFileEditGuidance(t *testing.T) {
 		"serializes mutations to the same path",    // the runtime contract the permission rests on
 		"old_string not found",                     // the clean-failure message and how to recover
 		"Never batch a \"write\" with an \"edit\"", // the one combination still forbidden
+		"copied from the file, not composed",       // anchors carry the file's bytes, not a retyped recollection
+		"copy the anchor from the fresh window",    // the recovery on a not-found is another read, not a resend
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q", want)
@@ -916,14 +970,18 @@ func TestGetAgent(t *testing.T) {
 	}
 }
 
-// TestBuildVsTaskAgent_Framing locks in the fix that BuildAgent (interactive
-// Build Mode) and TaskAgent (headless worktree execution) share tools but frame
-// commits and the source-of-truth differently. The interactive agent must NOT
-// tell the developer their uncommitted work will be lost or that it must commit.
+// TestBuildVsTaskAgent_Framing locks in that BuildAgent (interactive
+// Build Mode) and TaskAgent (headless worktree execution) share the toolset
+// except `schedule` (canSchedule — its reminders only reach a build session,
+// never a worktree) while framing commits and the source-of-truth differently.
+// The interactive agent must NOT tell the developer their uncommitted work will
+// be lost or that it must commit.
 func TestBuildVsTaskAgent_Framing(t *testing.T) {
-	// Same capabilities.
-	if len(BuildAgent.Tools) != len(TaskAgent.Tools) {
-		t.Fatalf("BuildAgent and TaskAgent should share the same toolset")
+	// Near-identical capabilities: the shared list for the task agent, and the
+	// build agent one tool ahead — schedule alone. TestScheduleIsOnlyTheBuildAgent
+	// pins every other agent's view of the split.
+	if TaskAgent.HasTool("schedule") || !BuildAgent.HasTool("schedule") || len(BuildAgent.Tools) != len(TaskAgent.Tools)+1 {
+		t.Fatalf("BuildAgent and TaskAgent should share the toolset except schedule (canSchedule): build holds %d tools, task %d", len(BuildAgent.Tools), len(TaskAgent.Tools))
 	}
 
 	// Task-only framing must appear in TaskAgent and NOT in BuildAgent.
@@ -1439,6 +1497,28 @@ func TestExplorationIsMapThenBatchedReadsInEveryProject(t *testing.T) {
 	for _, want := range []string{"glob and grep", "exploration flow as usual"} {
 		if !strings.Contains(empty, want) {
 			t.Errorf("empty-index status line missing %q", want)
+		}
+	}
+}
+
+// Step 2 told the agent to explore but never named the shape that makes it
+// cheap, so "map every file and read the parts" still ran one file per round
+// trip. The step has to name the batched calls it is asking for.
+func TestProcessStepTwoNamesTheBatchedCalls(t *testing.T) {
+	p := codingAgentSystem("build")
+	start := strings.Index(p, "2. **Explore before you write.**")
+	end := strings.Index(p, "3. **Implement focused, minimal changes.**")
+	if start < 0 || end <= start {
+		t.Fatal("process list lost its exploration or implementation step")
+	}
+
+	step := p[start:end]
+	for _, want := range []string{
+		`every "file_map" call in one block`,
+		`files=[{"path"`,
+	} {
+		if !strings.Contains(step, want) {
+			t.Errorf("exploration step missing %q", want)
 		}
 	}
 }

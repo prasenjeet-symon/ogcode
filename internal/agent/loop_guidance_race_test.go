@@ -23,11 +23,11 @@ import (
 // verify whether guidance was injected (now appended to the user message
 // content rather than the system prompt).
 type blockingStreamProvider struct {
-	mu        sync.Mutex
-	calls     int
-	systems   [][]string
-	messages  [][]provider.ModelMessage
-	entered   chan int
+	mu       sync.Mutex
+	calls    int
+	systems  [][]string
+	messages [][]provider.ModelMessage
+	entered  chan int
 
 	// gateForCall blocks the stream goroutine of the given call number until
 	// closed. nil means no blocking. The goroutine also unblocks on ctx.Done.
@@ -213,14 +213,14 @@ func TestRunLoop_GuidanceWithoutCancelNotLost(t *testing.T) {
 // exiting (Bug 1: guidance dropped at loop exit). It records the messages of
 // every call so the test can verify guidance was injected.
 type finishThenBlockProvider struct {
-	mu          sync.Mutex
-	calls       int
-	systems     [][]string
-	messages    [][]provider.ModelMessage
-	entered     chan int
+	mu       sync.Mutex
+	calls    int
+	systems  [][]string
+	messages [][]provider.ModelMessage
+	entered  chan int
 	// started signals that a stream goroutine has begun (before any gate).
 	// Buffered so it never blocks the goroutine. Index by call number.
-	started      chan int
+	started chan int
 	// gateForCall1 blocks the first stream until closed. This lets the test
 	// push guidance while the first stream is deterministically in flight,
 	// avoiding a race where the fast-completing first stream finishes and the

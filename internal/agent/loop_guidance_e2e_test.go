@@ -22,11 +22,11 @@ import (
 // the test can verify guidance was injected on the resumed call (now appended to
 // the user message content rather than the system prompt).
 type hangMockProvider struct {
-	mu        sync.Mutex
-	calls     int
-	systems   [][]string
-	messages  [][]provider.ModelMessage
-	entered   chan int // signals the call number each time StreamChat is entered
+	mu       sync.Mutex
+	calls    int
+	systems  [][]string
+	messages [][]provider.ModelMessage
+	entered  chan int // signals the call number each time StreamChat is entered
 }
 
 func (m *hangMockProvider) ID() string { return "mock" }
@@ -185,4 +185,3 @@ func waitFor(t *testing.T, ch <-chan int, want int, d time.Duration, msg string)
 		}
 	}
 }
-

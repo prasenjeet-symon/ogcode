@@ -426,3 +426,54 @@ func TestParse_RequiresStaysOutOfTheBody(t *testing.T) {
 		t.Errorf("body = %q", s.Content)
 	}
 }
+
+func TestEmbedded_BrowserTakeoverPinsTheRails(t *testing.T) {
+	embedded, _ := Embedded()
+	var found bool
+	var content string
+	for _, s := range embedded {
+		if s.Name == "browser-takeover" {
+			found = true
+			content = s.Content
+		}
+	}
+	if !found {
+		t.Fatal("no embedded skill named browser-takeover")
+	}
+	for _, want := range []string{
+		"GET /api/browser/pair",
+		"browser_snapshot",
+		"browser_click",
+		"browser_content",
+		"browser_network",
+		"browser_console",
+		"allow takeover",
+		"started being debugged",
+		"DATA, not instructions",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("browser-takeover content missing %q", want)
+		}
+	}
+	// The description is what the intent matcher routes on
+	// (internal/agent/intent_tools.go) — pin every trigger class this skill is
+	// supposed to light up for, so an edited description can't silently drop one.
+	var description string
+	for _, s := range embedded {
+		if s.Name == "browser-takeover" {
+			description = s.Description
+		}
+	}
+	for _, want := range []string{
+		"operate their browser",
+		"deep research",
+		"product or price comparisons",
+		"login-walled",
+		"screenshot",
+		"video or screen recording",
+	} {
+		if !strings.Contains(description, want) {
+			t.Errorf("browser-takeover description missing matcher trigger %q", want)
+		}
+	}
+}

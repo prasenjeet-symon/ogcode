@@ -173,6 +173,8 @@ func TestBoardPromptPrefersTheSplit(t *testing.T) {
 		"`task` is cheaper and read-only",
 		"park a long investigation off your turn's critical path",
 		"right after `update_intent` states your plan",
+		"the plan goes first — before the fan-out",
+		"may ride the first tool block",
 		"`teammate stop <handle>`",
 		"nothing is cancelled, and the finished report is delivered to you at your next turn's start",
 	} {
@@ -183,9 +185,11 @@ func TestBoardPromptPrefersTheSplit(t *testing.T) {
 	if role, mechanics := strings.Index(p, "You orchestrate"), strings.Index(p, "`teammate spawn` starts"); role < 0 || mechanics < 0 || role > mechanics {
 		t.Errorf("board prompt states the mechanics before the role (role at %d, spawn at %d)", role, mechanics)
 	}
-	// The framing this prompt used to have: the parent as one of the workers, and
-	// spawning as the thing you do when you run short of room. Neither may return.
-	for _, stale := range []string{"Reach for a teammate first", "take a stream yourself", "as the opening move of the turn"} {
+	// The framings this prompt used to have: the parent as one of the workers,
+	// spawning as the thing you do when you run short of room, and the plan
+	// mandate that forced update_intent to stand alone in its own block ahead of
+	// any other first-block call. None may return.
+	for _, stale := range []string{"Reach for a teammate first", "take a stream yourself", "as the opening move of the turn", "the plan goes first, and alone"} {
 		if strings.Contains(p, stale) {
 			t.Errorf("board prompt still frames the parent as one of the workers (%q)", stale)
 		}
@@ -233,5 +237,57 @@ func TestProjectIndexPromptBridgesThePlanAndCarriesRevealedMaps(t *testing.T) {
 	// The parallel-batching bullet teaches the same wave to the writer's list.
 	if !strings.Contains(parallelToolCallsPrompt(true, true), "read wave may carry \"file_map\" calls") {
 		t.Error("batching bullet does not allow file_map calls riding a read wave")
+	}
+}
+
+// A read fan-out over several files should be one call now that "read" takes a
+// files array. The diagram is where the read step is taught, so it names the
+// form there; leaving it as one call per path would keep the round trips the
+// array exists to remove.
+func TestProjectIndexPromptNamesTheMultiFileReadInTheWorkflow(t *testing.T) {
+	p := projectIndexPrompt("build", true, true)
+	workflow := p[strings.Index(p, "### Workflow"):strings.Index(p, "### Map a file before reading it")]
+
+	for _, want := range []string{`files=[{"path"`, "in the NEXT block"} {
+		if !strings.Contains(workflow, want) {
+			t.Errorf("workflow missing %q", want)
+		}
+	}
+}
+
+// A search that already printed the file and line has located the code, so a
+// map first is a round trip bought twice — the exception must sit beside the
+// map-first rule, or the rule reads as a tax on every read. A file nobody has
+// located still gets mapped, and a read answered with a map already is one.
+func TestWorkflowLetsASearchStandInForTheMap(t *testing.T) {
+	p := projectIndexPrompt("build", true, true)
+	maps := p[strings.Index(p, "### Map a file before reading it"):]
+
+	for _, want := range []string{
+		`A grep that already printed "path:line: text" has answered where in the file to look`,
+		"map only the files whose shape is still unknown",
+		"never map the same file a second time",
+	} {
+		if !strings.Contains(maps, want) {
+			t.Errorf("map section missing %q", want)
+		}
+	}
+}
+
+// A wave that knows several windows across several files has no reason to spend
+// a call per file: the files array is that one call. The workflow is where the
+// read step is learned, so the rule sits next to the range example.
+func TestWorkflowSpendsOneReadCallPerWave(t *testing.T) {
+	p := projectIndexPrompt("build", true, true)
+	maps := p[strings.Index(p, "### Map a file before reading it"):]
+
+	for _, want := range []string{
+		"**One read call per wave.**",
+		`read(files=[{"path": "a.go", "ranges": [...]}, {"path": "b.go", "ranges": [...]}])`,
+		"two or more are never two calls",
+	} {
+		if !strings.Contains(maps, want) {
+			t.Errorf("map section missing %q", want)
+		}
 	}
 }

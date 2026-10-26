@@ -1,0 +1,432 @@
+/* agent-graph.css — the graph canvas styles the component cannot express as
+   Tailwind classes: the dotted plotting surface, the frosted overlays, the
+   HTML-card nodes inside <foreignObject>, and the edge/cluster SVG fills.
+   Every colour is a theme variable so light and dark both work. */
+
+/* Plotting canvas: quiet surface with a faint dot grid. */
+.ag-canvas {
+  background-color: var(--bg-base);
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--text-tertiary) 16%, transparent) 1px,
+    transparent 1.2px
+  );
+  background-size: 20px 20px;
+}
+
+.ag-canvas:focus-visible {
+  outline: none;
+}
+
+/* Frosted overlay pills (legend / zoom). */
+.ag-float {
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* The transform wrapper holding the whole graph. Cursor comes from
+   component state (grab / grabbing), not here. */
+.ag-view {
+  will-change: transform;
+}
+
+/* --- nodes -------------------------------------------------------------- */
+
+.ag-dim {
+  opacity: 0.25;
+  filter: grayscale(0.4);
+}
+
+.ag-card {
+  display: flex;
+  width: 200px;
+  height: 60px;
+  gap: 8px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--ag-c, var(--accent));
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.08),
+    0 4px 14px rgb(0 0 0 / 0.08);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.ag-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.1),
+    0 10px 24px rgb(0 0 0 / 0.14);
+}
+
+.ag-card:focus-visible {
+  border-color: var(--accent-ring);
+  box-shadow:
+    0 0 0 3px var(--accent-ring),
+    0 10px 24px rgb(0 0 0 / 0.14);
+}
+
+.ag-card.ag-me {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 4px 14px rgb(0 0 0 / 0.08);
+}
+
+.ag-card.ag-armed {
+  border-color: #f87171;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, #f87171 30%, transparent),
+    0 10px 24px rgb(0 0 0 / 0.14);
+}
+
+/* Avatar tile tinted by status colour. */
+.ag-ava-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.ag-ava {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--ag-c, var(--accent));
+  background: color-mix(in srgb, var(--ag-c, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ag-c, var(--accent)) 30%, transparent);
+}
+
+.ag-ava svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Live pulse dot on running agents. */
+.ag-pulse {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--ag-c, var(--accent));
+  box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 4px color-mix(in srgb, var(--ag-c, var(--accent)) 25%, transparent);
+  animation: ag-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes ag-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Body: title + meta line. */
+.ag-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ag-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary, var(--color-text));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ag-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ag-status {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.ag-kind {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ag-c, var(--accent));
+  background: color-mix(in srgb, var(--ag-c, var(--accent)) 12%, transparent);
+}
+
+.ag-model {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ag-time {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+/* Collapse toggle (chevron or +N pill). */
+.ag-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ag-toggle:hover {
+  background: color-mix(in srgb, var(--text-tertiary) 12%, transparent);
+  color: var(--text-primary, var(--color-text));
+}
+
+.ag-n {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stop control (replaces the toggle on hover/armed). */
+.ag-stop {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, #f87171 50%, transparent);
+  border-radius: 9999px;
+  background: transparent;
+  cursor: pointer;
+  color: #f87171;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ag-stop:hover,
+.ag-stop-armed {
+  background: #f87171;
+  color: #fff;
+}
+
+.ag-stop-icon {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ag-stop-word {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.ag-stop-spin {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 9999px;
+  animation: ag-spin 0.7s linear infinite;
+}
+
+@keyframes ag-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Nodes glide between layout positions when the roster changes. */
+.ag-node {
+  transition: transform 0.3s ease;
+}
+
+/* Terminal cards stay visible but recede. */
+.ag-faded {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+
+.ag-card.ag-faded:hover {
+  opacity: 0.85;
+  filter: saturate(0.7);
+}
+
+/* Standalone strip: top-level chat sessions without children, listed under
+   the canvas as a collapsible set of chips. */
+.ag-strip {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+}
+
+.ag-strip summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.ag-strip summary::marker,
+.ag-strip summary::-webkit-details-marker {
+  content: '';
+  display: none;
+}
+
+.ag-strip summary:hover {
+  color: var(--text-primary, var(--color-text));
+}
+
+.ag-strip-count {
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--text-tertiary) 14%, transparent);
+  font-weight: 600;
+}
+
+.ag-strip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 10px 10px;
+}
+
+.ag-chip {
+  display: inline-flex;
+  max-width: 260px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  background: var(--bg-elevated);
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.ag-chip:hover {
+  border-color: var(--accent-ring);
+  color: var(--text-primary, var(--color-text));
+}
+
+.ag-chip-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+}
+
+.ag-chip-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ag-chip-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* --- edges & family hulls ------------------------------------------------ */
+
+/* Base edge: a straight status-coloured link; a soft glow and a moving dash
+   run under running subtrees only. Endpoints sit under the opaque cards. */
+.ag-edge {
+  fill: none;
+  stroke-width: 2;
+  stroke-opacity: 0.65;
+  transition: stroke-opacity 0.15s ease;
+}
+
+.ag-edge-glow {
+  fill: none;
+  stroke-width: 5;
+  stroke-opacity: 0.18;
+  filter: blur(3px);
+  pointer-events: none;
+}
+
+.ag-edge-flow {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-opacity: 0.9;
+  stroke-dasharray: 4 10;
+  pointer-events: none;
+  animation: ag-flow 1.1s linear infinite;
+}
+
+@keyframes ag-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+/* Family cluster: a soft tinted rounded rect behind one root family. Fill
+   and stroke colours arrive inline (theme-resolved per status). */
+.ag-cluster {
+  fill-opacity: 0.06;
+  stroke-opacity: 0.35;
+}
+
+.ag-hull-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  opacity: 0.9;
+  user-select: none;
+  paint-order: stroke;
+  stroke: var(--bg-base);
+  stroke-width: 8;
+  stroke-linejoin: round;
+}

@@ -26,6 +26,7 @@ import NotesPage from './pages/notes';
 import NoteDetailPage from './pages/note-detail';
 import DocIndexPage from './pages/docindex';
 import DevicePage from './pages/device';
+import AgentsPage from './pages/agents';
 import PreviewPage from './pages/preview';
 import SettingsLayout from './pages/settings/layout';
 import GeneralSettings from './pages/settings/general';
@@ -62,6 +63,9 @@ export default function App() {
       <Show when={deviceOn()}>
         <Route path="/device" component={DevicePage} />
       </Show>
+      {/* The agent roster is public to the workspace — the drawer it replaces
+          in the session header needed no gate, and neither does its page. */}
+      <Route path="/agents" component={AgentsPage} />
       <Route path="/preview" component={PreviewPage} />
       {/* A legacy /preview/<port>/ link is a client-side navigation that lands
           here with the port in the path. The page normalizes it to

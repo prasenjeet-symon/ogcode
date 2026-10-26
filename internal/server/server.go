@@ -20,6 +20,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/board"
+	"github.com/prasenjeet-symon/ogcode/internal/browser"
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/config"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
@@ -29,6 +30,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/memfile"
+	"github.com/prasenjeet-symon/ogcode/internal/nativehost"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
 	"github.com/prasenjeet-symon/ogcode/internal/plan"
@@ -39,6 +41,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 	"github.com/prasenjeet-symon/ogcode/internal/task"
+	"github.com/prasenjeet-symon/ogcode/internal/timer"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 	"github.com/prasenjeet-symon/ogcode/internal/usage"
 	"github.com/prasenjeet-symon/ogcode/internal/version"
@@ -53,19 +56,24 @@ const (
 )
 
 type Server struct {
-	port            atomic.Int32 // written once by Serve after bind, read cross-goroutine via Port()
-	dir             string
-	mode            ServerMode
-	db              *db.DB
-	globalDB        *db.DB // shared config DB at ~/.ogcode/config.db
-	usage           *usage.Ledger
-	bus             *bus.Bus
-	store           *session.Store
-	planStore       *plan.Store
-	taskStore       *task.Store
-	noteStore       *note.Store
-	docindexStore   *docindex.Store
-	board           *board.Store
+	port          atomic.Int32 // written once by Serve after bind, read cross-goroutine via Port()
+	dir           string
+	mode          ServerMode
+	db            *db.DB
+	globalDB      *db.DB // shared config DB at ~/.ogcode/config.db
+	usage         *usage.Ledger
+	bus           *bus.Bus
+	store         *session.Store
+	planStore     *plan.Store
+	taskStore     *task.Store
+	noteStore     *note.Store
+	docindexStore *docindex.Store
+	board         *board.Store
+	// timers holds this project's scheduled reminders: one-shot deadlines a
+	// session asked to be told about, delivered back into its own loops.
+	// Opened beside the board and nil-tolerated the same way — a server without
+	// a project DB (tests, other embedders) silently has no reminders.
+	timers          *timer.Store
 	fileChanges     *filechange.Store
 	fileLog         *filechange.Log
 	registry        *provider.Registry
@@ -75,6 +83,10 @@ type Server struct {
 	questions       *question.Manager
 	skillLoader     *skill.Loader
 	mcpManager      *mcp.Manager
+	// browserBridge is the takeover link the companion extension pairs to. It
+	// is always built; the browser tools answer refusal-shaped results until
+	// an extension actually connects (see internal/server/browser_routes.go).
+	browserBridge *browser.Bridge
 	// toolRegistry is the live tool set the agent loop reads each step. Held so
 	// the MCP settings toggle can register a newly enabled server's tools and
 	// remove a disabled one's, taking effect on the next turn.
@@ -265,6 +277,17 @@ func (s *Server) Port() int {
 }
 
 func (s *Server) serve(ctx context.Context) error {
+	// armStopCh BEFORE anything slow: a supervisor may call Stop() the moment
+	// it sees the port listen (or even before), and the select below can only
+	// observe a close of the channel Stop captured. Assigning it here — under
+	// the same mutex Stop reads — closes the window where Stop's nil guard
+	// no-ops and the select blocks for good. A failed early return leaves the
+	// channel set; that only means the server is spent, which the Serve-twice
+	// guard already asserts.
+	s.stopMu.Lock()
+	s.stopCh = make(chan struct{})
+	s.stopMu.Unlock()
+
 	// One server per project directory: two instances share .ogcode/ogcode.db,
 	// and each only knows its own running loops, so one deleting a session the
 	// other is running would strand that turn writing to a deleted row. The lock
@@ -335,6 +358,10 @@ func (s *Server) serve(ctx context.Context) error {
 	// this directory. Scoped by directory, and its rows outlive the sessions
 	// that wrote them.
 	s.board = board.Open(database, s.dir)
+	// The one-shot reminder schedule, over the same project DB with the same
+	// story as the board: project-scoped rows that outlive the process, opened
+	// exactly where the process owns project services.
+	s.timers = timer.Open(database)
 	// The file-change gate behind write and edit: a path another session changed
 	// after this one last read it is refused rather than overwritten. One gate
 	// per process, like pathlock; the rows live in the project DB, so a restart
@@ -403,6 +430,29 @@ func (s *Server) serve(ctx context.Context) error {
 	// headless task or a plan session never sees them.
 	toolRegistry.Register(tool.BoardTool{Run: s.boardTool})
 	toolRegistry.Register(tool.TeammateTool{Run: s.teammateTool})
+	// The reminder scheduler sits beside them on the same shared registry; the
+	// loop offers it per agent the way it offers the board.
+	toolRegistry.Register(tool.ScheduleTool{Run: s.scheduleTool})
+
+	// Browser takeover: the bridge and the tool set that drives it. Registered
+	// for every turn sharing this registry the way the board tools are — an
+	// unpaired bridge makes each call a pairing instruction, not an error. The
+	// token is loaded from the last boot so an extension paired to a previous
+	// one reconnects without re-pairing; a first boot mints and saves one.
+	s.browserBridge = browser.NewWithToken(loadBrowserPairToken(s.dir))
+	saveBrowserPairToken(s.dir, s.browserBridge.Token())
+	// Auto-register the Chrome native-messaging host when this project entitles
+	// an extension id (the unpacked companion, OGCODE_EXTENSION_IDS, or a
+	// published web store id): Chrome can then launch `ogcode native-host` and
+	// pair this server without a manual paste. Best-effort and idempotent —
+	// a manifest that cannot be written warns and never blocks the boot — and
+	// OGCODE_NATIVE_HOST_INSTALL falsey skips the write entirely.
+	if err := nativehost.EnsureRegistered(s.dir); err != nil {
+		slog.Warn("browser: native host registration", "err", err)
+	}
+	for _, t := range tool.NewBrowserTools(s.browserBridge) {
+		toolRegistry.Register(t)
+	}
 
 	// Skills: the "skills" section of ogcode.json decides which extra
 	// directories and remote manifests are consulted; the standard project and
@@ -582,6 +632,17 @@ func (s *Server) serve(ctx context.Context) error {
 			}
 			return len(paths)
 		},
+		// The live takeover state behind the per-turn browser steer in the
+		// system prompt. The bridge is always built (loadBrowserPairToken above)
+		// and Status() is a safe read even before the extension has paired, so
+		// the closure never needs a nil check of its own: not connected reads as
+		// false and the steer section is simply not emitted. The granted count
+		// is the latest hello's inventory, which is exactly what the takeover
+		// tools would act on this turn.
+		BrowserStatus: func() (connected bool, granted int) {
+			st := s.browserBridge.Status()
+			return st.Connected, st.GrantedCount()
+		},
 		// Report the resources a turn consumed — resident memory, CPU,
 		// goroutines — as one analytics event per turn the user asked for.
 		// The sampler collects only while a watcher is held, so the turn holds
@@ -637,6 +698,11 @@ func (s *Server) serve(ctx context.Context) error {
 		// loop injects at the tail of the request. Gated on the build agent
 		// inside RunLoop.
 		CatchUpTeammates: s.catchUpTeammates,
+		// Reminder catch-up at the top of a build turn: reminders that came due
+		// while the session was between turns are queued as notices at the tail
+		// of the first request. Gated on the build agent inside RunLoop, beside
+		// CatchUpTeammates' own gate.
+		CatchUpReminders: s.catchUpReminders,
 		// A file another session changed since this one read it is refused by
 		// edit/write, with the changes to catch up on.
 		FileLog: s.fileLog,
@@ -797,15 +863,19 @@ func (s *Server) serve(ctx context.Context) error {
 	// /scrcpy proxy, and every turn's system prompt.
 	s.startFeatureFlagRefresh(ctx)
 
+	// Poll due reminders for the sessions' own schedules: the ticker claims
+	// deadlines that have passed and pushes each into its session's running
+	// loop; an idle session keeps the row for its next turn's catch-up. A
+	// reminder is injected into a live turn at the step boundary like a
+	// teammate's report — it must not cut the stream out from under it.
+	go s.pollReminders(ctx)
+
 	// signalCh owns process signals; stopCh is the programmatic Stop() path, so
 	// a ctx-driven caller (the worker hosting N servers) is never torn down by a
 	// signal meant for some other component.
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signalCh)
-	s.stopMu.Lock()
-	s.stopCh = make(chan struct{})
-	s.stopMu.Unlock()
 	s.draining = make(chan struct{})
 
 	go func() {

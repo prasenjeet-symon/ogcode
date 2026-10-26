@@ -24,7 +24,9 @@ function formatTime(ts: number): string {
 // `precise` (used for a finished total) keeps one decimal under a minute; the
 // live-ticking form uses whole seconds.
 function formatDuration(ms: number, precise: boolean): string {
-  const sec = ms / 1000;
+  // Clamped like the other elapsed renderers: a part stamped a hair ahead of
+  // the caller's clock must read '0s', not '-1s'.
+  const sec = Math.max(0, ms) / 1000;
   if (sec < 60) return precise ? `${sec.toFixed(1)}s` : `${Math.floor(sec)}s`;
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
@@ -94,11 +96,25 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   const tool = (): string => props.data.tool || 'unknown';
   const [expanded, setExpanded] = createSignal(state().status === 'running');
   const status = () => state().status;
-  const title = () => state().title || tool();
+  // bash, grep and glob hand back Result.Title = their own input, so the
+  // collapsed row would print the command/pattern twice — once as the title
+  // (never truncated, shoving the other chips out) and again as the summary.
+  // When the title duplicates what the summary already shows, fall back to the
+  // tool name and let the summary span carry the command itself.
+  const title = () => {
+    const t = state().title || tool();
+    const s = summaryInput();
+    if (s) {
+      const stem = s.replace(/…$/, '');
+      if (t === stem || t.startsWith(stem)) return tool();
+    }
+    return t;
+  };
   const summary = () => {
     if (isDeepSearch() && state().status === 'completed') return 'Search results';
-    return summarizeInput(tool(), state().input);
+    return summaryInput();
   };
+  const summaryInput = () => summarizeInput(tool(), state().input);
   const hasOutput = () => !!state().output;
   const outputLineCount = () => (state().output || '').split('\n').length;
 
@@ -394,6 +410,227 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
           </div>
         </div>
       </Show>
+    </div>
+  );
+}
+
+// One pane line's settled shape, computed from the tool part it came from.
+type PaneLine = {
+  status: ToolState['status'];
+  op: string;
+  target: string;
+  arg: string;
+  ledClass: string;
+  stateClass: string;
+  stateLabel: string;
+  state: ToolState;
+};
+
+type PaneSegment =
+  | { kind: 'part'; part: Part }
+  | { kind: 'teammates'; parts: Part[] };
+
+// The message's parts as render segments: runs of consecutive teammate tool
+// calls collapse into one pane segment, every other part renders on its own.
+// "Consecutive" means adjacent in the parts list — a note between two spawns
+// splits the panes, which reads as one pane per fan-out beat.
+function teammateSegments(msg: MessageWithParts): PaneSegment[] {
+  const out: PaneSegment[] = [];
+  for (const part of msg.parts) {
+    if (part.type === 'tool' && parsePartData<ToolPartData>(part.data)?.tool === 'teammate') {
+      const last = out[out.length - 1];
+      if (last && last.kind === 'teammates') last.parts.push(part);
+      else out.push({ kind: 'teammates', parts: [part] });
+    } else {
+      out.push({ kind: 'part', part });
+    }
+  }
+  return out;
+}
+
+// A segment and its previous version cover the same run when the kind matches
+// and every part reference is the same at the same position. The transcript's
+// merge (lib/transcript.ts) replaces only the parts that changed and keeps
+// the rest by reference, so reference equality is the whole comparison.
+function samePaneSegment(a: PaneSegment, b: PaneSegment): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'part') {
+    return b.kind === 'part' && a.part === b.part;
+  }
+  return b.kind === 'teammates' && a.parts.length === b.parts.length &&
+    a.parts.every((p, i) => p === b.parts[i]);
+}
+
+// A run of consecutive teammate tool calls (spawn / wait / stop / status),
+// folded into one terminal-style pane instead of a row of generic tool rows:
+// a tmux-flavoured title bar carrying the working/finished counts and the
+// group's elapsed clock, one monospace line per call with a status LED and a
+// rail swept by the running flow, and the call's outcome on the right. The
+// pane reads tool-part data alone (status, input, timestamps) — the same data
+// a generic tool row had — so nothing new is fetched. Clicking a line
+// discloses that call's input/output exactly like a generic tool row does.
+function TeammatePane(props: { parts: Part[] }) {
+  const [nowTick, setNowTick] = createSignal(Date.now());
+  const [openIdx, setOpenIdx] = createSignal(-1);
+
+  // Re-read every second while any line is running so its elapsed read ticks
+  // (the same clock every tool row shows, one interval for the whole pane).
+  const lines = createMemo<PaneLine[]>(() => {
+    return props.parts.map((p) => {
+      // parsePartData takes the part's DATA (as ToolPartDisplay does), not the
+      // part itself — parsing the whole part yields an object with no `state`
+      // and every line falls into the malformed-part default (✗ with no op).
+      const data = parsePartData<ToolPartData>(p.data);
+      const st: ToolState = data?.state ?? DEFAULT_TOOL_STATE;
+      const input = (st.input && typeof st.input === 'object' ? st.input : {}) as Record<string, unknown>;
+      // op comes from the input; history before the field existed falls back
+      // to the Result title, which the tool set to "teammate: <op>" (or bare
+      // "teammate" on a run-level error, where no op ever resolved).
+      const op = String(input.op ?? '').trim() ||
+        ((st.title ?? '').match(/^teammate:\s*(\w+)/)?.[1] ?? '');
+      const target = op === 'spawn'
+        ? String(input.name ?? '')
+        : op === 'wait'
+          ? (Array.isArray(input.handles) && input.handles.length > 0
+            ? (input.handles as unknown[]).filter(Boolean).join(', ')
+            : 'all spawned')
+          : String(input.handle ?? '');
+      let arg = '';
+      if (op === 'spawn' && typeof input.prompt === 'string' && input.prompt.trim()) {
+        const pr = input.prompt.trim().replace(/\s+/g, ' ');
+        arg = pr.length > 56 ? pr.slice(0, 53) + '…' : pr;
+      } else if (op === 'wait' && Number(input.timeout) > 0) {
+        arg = `${input.timeout}s cap`;
+      }
+      const t = st.time;
+      // A settled line's span from its own timestamps; a running one reads the
+      // shared nowTick. No clock where the tool never stamped a start.
+      const ms = t?.start != null
+        ? (t.end ?? (st.status === 'running' ? nowTick() : undefined) ?? 0) - t.start
+        : null;
+      let ledClass = '';
+      let stateClass = '';
+      let stateLabel = '';
+      switch (st.status) {
+        case 'running':
+          ledClass = 'run'; stateClass = 'run';
+          stateLabel = ms != null && ms >= 0 ? `${formatDuration(ms, false)} ▸ running` : 'running';
+          break;
+        case 'completed':
+          ledClass = 'done'; stateClass = 'done';
+          stateLabel = ms != null && ms >= 0 ? `${formatDuration(ms, false)} ✓` : '✓';
+          break;
+        case 'error':
+          ledClass = 'err'; stateClass = 'err';
+          stateLabel = ms != null && ms >= 0 ? `${formatDuration(ms, false)} ✗` : '✗';
+          break;
+        case 'denied':
+          ledClass = 'warn'; stateClass = 'warn';
+          stateLabel = 'denied';
+          break;
+        default:
+          ledClass = ''; stateClass = 'pend';
+          stateLabel = 'queued';
+      }
+      return { status: st.status, op, target, arg, ledClass, stateClass, stateLabel, state: st };
+    });
+  });
+
+  const anyRunning = createMemo(() => lines().some((l) => l.status === 'running'));
+  createEffect(() => {
+    if (!anyRunning()) return;
+    setNowTick(Date.now());
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    onCleanup(() => clearInterval(id));
+  });
+
+  const barLabel = () => {
+    const l = lines();
+    const seg: string[] = [];
+    const running = l.filter((x) => x.status === 'running').length;
+    const pending = l.filter((x) => x.status === 'pending').length;
+    const done = l.filter((x) => x.status === 'completed').length;
+    const err = l.filter((x) => x.status === 'error').length;
+    const denied = l.filter((x) => x.status === 'denied').length;
+    if (running > 0) seg.push(`${running} working`);
+    if (done > 0) seg.push(`${done} done`);
+    if (pending > 0) seg.push(`${pending} queued`);
+    if (err > 0) seg.push(`${err} error${err === 1 ? '' : 's'}`);
+    if (denied > 0) seg.push(`${denied} denied`);
+    return seg.length > 0 ? `teammates · ${seg.join(' · ')}` : 'teammates';
+  };
+
+  // The bar's right-hand clock: the pane's span, start of the earliest line to
+  // the latest settled end — or now, while any line still runs.
+  const clockLabel = () => {
+    let min = Infinity;
+    let max = 0;
+    for (const l of lines()) {
+      const t = l.state.time;
+      if (t?.start == null) continue;
+      min = Math.min(min, t.start);
+      if (l.status === 'running') max = Math.max(max, nowTick());
+      else if (t.end != null) max = Math.max(max, t.end);
+    }
+    if (min === Infinity || max <= min) return '';
+    return formatDuration(max - min, false);
+  };
+
+  return (
+    <div class="teammate-pane my-1.5">
+      <div class="tp-bar">
+        <span class="tp-btn on" />
+        <span class="tp-btn" />
+        <span class="tp-btn" />
+        <span class="tp-title">{barLabel()}</span>
+        <Show when={clockLabel()}>
+          <span class="tp-clock">{clockLabel()}</span>
+        </Show>
+      </div>
+      <Index each={lines()}>
+        {(l, i) => (
+          <>
+            <button
+              type="button"
+              class="tp-line"
+              aria-expanded={openIdx() === i}
+              title={`teammate ${l().op || ''}`.trim()}
+              onClick={() => setOpenIdx(openIdx() === i ? -1 : i)}
+            >
+              <span class={`tp-led ${l().ledClass}`} />
+              <span class="tp-cmd">{l().op ? `teammate:${l().op}` : 'teammate'}</span>
+              <Show when={l().target}>
+                <span class="tp-arrow" aria-hidden="true">→</span>
+                <span class="tp-name">{l().target}</span>
+              </Show>
+              <Show when={l().arg}>
+                <span class="tp-arg">· {l().arg}</span>
+              </Show>
+              <span class="tp-rail">
+                <Show when={l().status === 'running'}>
+                  <i style={{ 'animation-delay': `${(-i * 0.45).toFixed(2)}s` }} />
+                </Show>
+              </span>
+              <span class={`tp-state ${l().stateClass}`}>{l().stateLabel}</span>
+            </button>
+            <Show when={openIdx() === i}>
+              <div class="tp-detail">
+                <div class="space-y-1.5 min-w-0 overflow-hidden">
+                  <Show when={l().state.input && Object.keys(l().state.input).length > 0}>
+                    <CodeBlock label="input" maxHeight={200} text={safeStringify(l().state.input)} />
+                  </Show>
+                  <Show when={l().state.output}>
+                    <CodeBlock label="output" maxHeight={280} text={l().state.output || ''} />
+                  </Show>
+                  <Show when={l().state.error}>
+                    <CodeBlock label="error" maxHeight={160} text={l().state.error || ''} />
+                  </Show>
+                </div>
+              </div>
+            </Show>
+          </>
+        )}
+      </Index>
     </div>
   );
 }
@@ -810,6 +1047,31 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
     (p) => p.type === 'text' && (parsePartData<TextPartData>(p.data).text || '').trim().length > 0
   );
 
+  // The segment list re-runs on every fresh message object — once per streamed
+  // token batch, since the transcript's merge replaces the whole message —
+  // while the fold depends only on which parts are teammate calls and in what
+  // runs. Stitch the fresh segments to the previous ones wherever every part
+  // reference inside still matches (samePaneSegment), the same
+  // identity-preserving trick mergeTranscript plays, so Solid's Index
+  // re-renders only the segment whose parts actually changed and TeammatePane
+  // does not re-read every tool part on each tick.
+  const segments = createMemo<PaneSegment[]>((prev) => {
+    const fresh = teammateSegments(props.msg);
+    if (!prev) return fresh;
+    const out: PaneSegment[] = [];
+    let reused = 0;
+    for (let i = 0; i < fresh.length; i++) {
+      const prior = prev[i];
+      if (prior && samePaneSegment(prior, fresh[i])) {
+        out.push(prior);
+        reused++;
+      } else {
+        out.push(fresh[i]);
+      }
+    }
+    return reused === prev.length && reused === out.length ? prev : out;
+  });
+
   const handleCopy = () => {
     const text = props.msg.parts
       .filter((p) => p.type === 'text')
@@ -831,8 +1093,17 @@ function AssistantMessage(props: { msg: MessageWithParts }) {
     <div data-role="assistant" class="animate-msg-in group">
       <div class="min-w-0">
         <div class="space-y-1 min-w-0 overflow-hidden" classList={{ 'msg-streaming': streamingText() }}>
-          <Index each={props.msg.parts}>
-            {(part) => <PartDisplay part={part()} />}
+          <Index each={segments()}>
+            {(seg) => (
+              <>
+                <Show when={seg().kind === 'teammates'}>
+                  <TeammatePane parts={(seg() as { kind: 'teammates'; parts: Part[] }).parts} />
+                </Show>
+                <Show when={seg().kind === 'part'}>
+                  <PartDisplay part={(seg() as { kind: 'part'; part: Part }).part} />
+                </Show>
+              </>
+            )}
           </Index>
 
           <Show when={props.msg.parts.length === 0 && props.msg.info.finish && !props.msg.info.error}>
