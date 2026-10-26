@@ -43,6 +43,7 @@ require (
 )
 
 require (
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

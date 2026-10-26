@@ -82,3 +82,6 @@ demo-recording/
 MEMORY.md
 # Frozen pre-prune snapshots of the same file, kept beside it for reference.
 /MEMORY-ARCHIVE.md
+
+# Chrome Web Store upload builds (make extension-zip)
+/ogweb-*.zip

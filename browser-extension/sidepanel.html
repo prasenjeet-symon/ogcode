@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ogweb</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <h1>ogweb</h1>
+    <div id="status">
+      <span id="dot" class="state-disconnected"></span>
+      <span id="statusText">checking…</span>
+    </div>
+  </header>
+
+  <section class="card">
+    <label for="origin">Server origin</label>
+    <input id="origin" type="text" spellcheck="false" autocomplete="off"
+           placeholder="http://localhost:7801">
+    <label for="token">Pair token</label>
+    <input id="token" type="password" spellcheck="false" autocomplete="off"
+           placeholder="paste the token ogcode printed">
+    <button id="connectBtn" type="button">Connect</button>
+    <p class="hint">Start ogcode and paste the origin + token from the pair URL it
+      prints. Connection is retried automatically if it drops.</p>
+  </section>
+
+  <section class="card" id="tabsCard">
+    <h2>Open tabs</h2>
+    <p class="hint">Tick a tab to allow ogcode to view and drive it. Untick at any
+      time; access is checked on every single operation.</p>
+    <ul id="tabs"></ul>
+    <p class="hint" id="tabsEmpty" hidden>No tabs open.</p>
+  </section>
+
+  <footer>
+    extension v<span id="ver">?</span> &middot; protocol v1
+    &middot; data only goes to your paired local server
+  </footer>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-.PHONY: dev build clean install dev-blog build-blog
+.PHONY: dev build clean install dev-blog build-blog extension-zip
 
 dev:
 	@echo "Starting Go server on :9595..."
@@ -49,3 +49,13 @@ clean:
 
 test:
 	go test ./...
+
+# Zip the extension for a Chrome Web Store upload. The manifest must sit at
+# the ZIP ROOT (never inside a nested folder), so zip the files, not the
+# directory. Bump "version" in browser-extension/manifest.json before every
+# re-upload; the store rejects a version that already exists.
+extension-zip:
+	$(eval EXT_VERSION := $(shell node -p "require('./browser-extension/manifest.json').version"))
+	cd browser-extension && rm -f ../ogweb-$(EXT_VERSION).zip && zip -X ../ogweb-$(EXT_VERSION).zip manifest.json background.js sidepanel.html sidepanel.js sidepanel.css README.md PROTOCOL.md icons/*
+	@unzip -l ogweb-$(EXT_VERSION).zip | head -20
+	@echo "Ready for upload: ogweb-$(EXT_VERSION).zip"

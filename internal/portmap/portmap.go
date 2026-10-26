@@ -82,6 +82,26 @@ func lookupIn(path, dir string) (int, bool) {
 	return p, true
 }
 
+// All returns every entry in the registry — project dir (canonicalized key) →
+// port — for callers that enumerate servers rather than look one up, such as
+// the native-messaging host's pair sweep. The map is a copy: mutating it
+// cannot touch the registry file.
+func All() map[string]int { return allFrom(defaultRegistryPath()) }
+
+// AllIn is All against an explicit registry path; tests use it to avoid
+// depending on the real HOME. A missing or corrupt file reads as empty, the
+// way loadFrom does.
+func AllIn(path string) map[string]int { return allFrom(path) }
+
+func allFrom(path string) map[string]int {
+	m := loadFrom(path)
+	out := make(map[string]int, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 // Save records that dir serves on port, replacing any previous entry.
 func Save(dir string, port int) error { return saveIn(defaultRegistryPath(), dir, port) }
 

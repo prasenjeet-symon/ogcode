@@ -18,6 +18,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
 	"github.com/prasenjeet-symon/ogcode/internal/logging"
 	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
+	"github.com/prasenjeet-symon/ogcode/internal/nativehost"
 	"github.com/prasenjeet-symon/ogcode/internal/portmap"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/server"
@@ -389,6 +390,14 @@ func Execute() error {
 	slog.SetDefault(logging.New(logging.Options{Console: slog.LevelWarn}).Logger)
 	if dir, err := os.Getwd(); err == nil {
 		config.Load(dir).ApplyEnv()
+	}
+	// Chrome launches the native-messaging host by executing the manifest's
+	// path with the calling extension's origin as the first argument — it
+	// never spells the `native-host` subcommand that cobra exposes. Route
+	// that form straight to the host: cobra would otherwise answer "unknown
+	// command" and exit before the extension gets a reply.
+	if IsBrowserLaunched(os.Args[1:]) {
+		return nativehost.Run(os.Stdin, os.Stdout)
 	}
 	err := rootCmd.Execute()
 	if logger != nil {
