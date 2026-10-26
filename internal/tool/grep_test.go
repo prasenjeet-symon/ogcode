@@ -60,6 +60,53 @@ func TestGrepTool_NoMatches(t *testing.T) {
 	}
 }
 
+func TestGrepTool_AlternationSearchesSeveralPatternsInOneCall(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "main.go"), "package main\n// ALPHA one\n// BETA two\n")
+
+	tool := GrepTool{}
+	args, _ := json.Marshal(map[string]string{"pattern": "ALPHA|BETA"})
+	res, err := tool.Execute(context.Background(), args, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, want := range []string{"main.go:2: // ALPHA one", "main.go:3: // BETA two"} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("alternation output missing %q, got %q", want, res.Output)
+		}
+	}
+}
+
+// Exceeding the cap is not a failed search. Returning an error made a call
+// whose first hundred matches answered the question read as broken, and gave
+// the agent no instruction but to repeat the same too-wide search; the result
+// now stays successful and says to narrow the pattern instead.
+func TestGrepTool_CappedResultStillSucceedsAndSaysNarrowIt(t *testing.T) {
+	dir := t.TempDir()
+	var sb strings.Builder
+	for i := 0; i < grepMaxResults*2; i++ {
+		sb.WriteString("HIT\n")
+	}
+	mustWriteFile(t, filepath.Join(dir, "big.txt"), sb.String())
+
+	tool := GrepTool{}
+	args, _ := json.Marshal(map[string]string{"pattern": "HIT"})
+	res, err := tool.Execute(context.Background(), args, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("a capped search must not be an error: %v", err)
+	}
+	lines := strings.Split(res.Output, "\n")
+	if len(lines) != grepMaxResults+1 {
+		t.Fatalf("got %d lines, want %d matches plus the notice", len(lines), grepMaxResults)
+	}
+	if !strings.Contains(lines[len(lines)-1], "narrow the pattern") {
+		t.Errorf("last line = %q, want the narrow-the-pattern notice", lines[len(lines)-1])
+	}
+	if !strings.Contains(res.Title, "100+") {
+		t.Errorf("title = %q, want it to mark the cap", res.Title)
+	}
+}
+
 func TestGrepTool_SearchExplicitHiddenDir(t *testing.T) {
 	// Pointing the tool explicitly at a hidden dir should still search it
 	// (root is never pruned).

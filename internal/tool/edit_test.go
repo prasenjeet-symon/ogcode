@@ -998,6 +998,53 @@ func TestEditTool_TruncationMarkerAnchorExplained(t *testing.T) {
 	}
 }
 
+// A miss that survives the indent-blind pass — the anchor's wording itself
+// has drifted — used to return the bare "not found" with no guidance
+// attached, and the failure data showed callers retrying blind: after a miss
+// the next edit to the file failed again about as often as it landed. The
+// bare line now says the bytes are not the file's, and — when the anchor's
+// first line can still be located in the file — where the re-read should land.
+func TestEditTool_BareMissPointsAtTheReRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+
+	t.Run("the first line locates the region", func(t *testing.T) {
+		mustWriteFile(t, path, "package main\n\nfunc run(p string) error {\n\tif p == \"\" {\n\t\treturn nil\n\t}\n\treturn nil\n}\n")
+		// The first line intact, the later lines retyped — the whitespace
+		// pass cannot rescue this, so the miss used to come back bare.
+		_, err := editWith(t, dir, map[string]any{
+			"path":       path,
+			"old_string": "func run(p string) error {\n\tif p == \"\":\n\t\treturn None",
+			"new_string": "x",
+		})
+		if err == nil {
+			t.Fatal("expected a not-found error")
+		}
+		for _, want := range []string{"matches nowhere", "on 3 — re-read", "copy old_string verbatim"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error should mention %q, got: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("an unfindable anchor still says what to do", func(t *testing.T) {
+		mustWriteFile(t, path, "alpha one\ntwo\nthree\n")
+		_, err := editWith(t, dir, map[string]any{
+			"path":       path,
+			"old_string": "totally absent\nfrom this file",
+			"new_string": "x",
+		})
+		if err == nil {
+			t.Fatal("expected a not-found error")
+		}
+		for _, want := range []string{"matches nowhere", "Re-read the region this block should live in", "verbatim"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error should mention %q, got: %v", want, err)
+			}
+		}
+	})
+}
+
 // The legacy-shape guard has to watch all four per-hunk fields. A top-level
 // replace_all or expected_count used to be dropped without a word — the
 // dropped expected_count being the worse of the two, an assertion the caller

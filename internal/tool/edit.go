@@ -42,7 +42,7 @@ func (EditTool) Parameters() json.RawMessage {
 				"items": {
 					"type": "object",
 					"properties": {
-						"old_string": {"type": "string", "description": "Exact text to find, including indentation. Must match EXACTLY ONE place in the file unless replace_all is true. When a block repeats — the same step in several CI jobs, the same line in several functions — extend it with neighbouring lines until only the intended occurrence matches. Write newlines as plain \\n even in a CRLF file: when every line of the file ends in CRLF, the tool matches and writes the file's own endings."},
+						"old_string": {"type": "string", "description": "Exact text to find, including indentation. Copy it from what a read of this file shows — leading spaces and tabs exactly as printed, no line-number prefix, no truncation marker — and never retype it from memory: an anchor rebuilt from recollection almost never carries the file's bytes. Must match EXACTLY ONE place in the file unless replace_all is true. When a block repeats — the same step in several CI jobs, the same line in several functions — extend it with neighbouring lines until only the intended occurrence matches. Write newlines as plain \\n even in a CRLF file: when every line of the file ends in CRLF, the tool matches and writes the file's own endings."},
 						"new_string": {"type": "string", "description": "Text to replace it with. Always send it, even when replacing with nothing: \"\" means delete old_string, and omitting the field is rejected rather than read as a deletion."},
 						"replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match. Use when the text genuinely should change everywhere, such as removing one repeated step from every job in a workflow. The result reports how many were replaced."},
 						"expected_count": {"type": "integer", "description": "Optional assertion: fail unless old_string matches exactly this many times. Worth setting alongside replace_all, where a miscounted anchor would otherwise rewrite more of the file than intended."}
@@ -480,7 +480,25 @@ func notFoundHint(content, old string) string {
 	starts := indentBlindMatches(fileLines, oldLines)
 	switch len(starts) {
 	case 0:
-		return ""
+		// No line of the file echoes the anchor even ignoring indentation, so
+		// quoting the file back is worse than naming the mistake: these bytes
+		// are not the file's. The usual source is the one the cases below
+		// rescue — the caller retyped from memory instead of copying a read —
+		// only with the wording drifted too far for a whitespace-only match.
+		// Point the re-read at the region the anchor's first line still
+		// locates; when not even that survives, the generic re-read rule is
+		// all that is left to say.
+		if named := firstLineMatches(fileLines, oldLines); len(named) > 0 {
+			return fmt.Sprintf(" — and dropping every difference in spacing it still matches nowhere: the wording has"+
+				" drifted, not just the leading spaces. old_string's first line does appear on %s — re-read the"+
+				" region around one of those lines and copy old_string verbatim from the fresh read: the"+
+				" file's own bytes there, no line numbers, no truncation marker",
+				formatLineNumbers(named))
+		}
+		return " — and dropping every difference in spacing it still matches nowhere: these are not the file's bytes as" +
+			" written. Re-read the region this block should live in and copy old_string verbatim from what" +
+			" that read shows — the file's own exact text, no line numbers, no truncation" +
+			" marker — rather than retyping it from memory"
 	case 1:
 		excerpt, complete := excerptLines(fileLines, starts[0], len(oldLines))
 		instruction := "Send that verbatim as old_string."
@@ -499,6 +517,40 @@ func notFoundHint(content, old string) string {
 			" so the anchor is right and the whitespace is not; re-read one of those regions and copy its"+
 			" exact leading whitespace", len(starts), formatLineNumbers(starts))
 	}
+}
+
+// firstLineMatches finds lines of the file whose trimmed text contains the
+// anchor's first non-blank line — or is contained by it. It is the rescue for
+// a bare miss: an anchor too mangled for indentBlindMatches usually still
+// carries its first line intact. Few matches say where the caller thought
+// this block lives; many say the line is generic, and naming them would be
+// noise, so nil means "be generic" back in notFoundHint. Blank lines and
+// candidates shorter than a phrase are skipped so a lone "}" never matches.
+func firstLineMatches(fileLines, oldLines []string) []int {
+	first := ""
+	for _, line := range oldLines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			first = trimmed
+			break
+		}
+	}
+	if len(first) < 4 {
+		return nil
+	}
+	var named []int
+	for i, line := range fileLines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || len(trimmed) < 4 {
+			continue
+		}
+		if strings.Contains(trimmed, first) || strings.Contains(first, trimmed) {
+			named = append(named, i)
+		}
+	}
+	if len(named) == 0 || len(named) > 5 {
+		return nil
+	}
+	return named
 }
 
 // describeWhitespaceDiff names what actually separates the file's region from
