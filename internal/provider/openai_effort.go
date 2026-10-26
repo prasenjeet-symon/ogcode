@@ -396,15 +396,68 @@ func writeOpenRouterReasoning(spec EffortSpec) effortWriter {
 // for the model. A request that is not the agent loop's (no Thinking) never
 // carries effort, and a level the model does not take is dropped rather than
 // sent: it would fail the request on most hosts.
+//
+// When the session has chosen no effort (req.Effort == ""), a flash-class
+// model gets a light default instead of the endpoint's: those models reason
+// deeply by default and bill the reasoning inside the output budget, and the
+// measured waste is what this default claws back (see defaultEffortFor). A
+// mechanical continuation step is held harder still to EffortNone, and falls
+// back to the light default when its ladder has no "none" — the hold applies
+// only to that defaulted level. An explicit session choice is never
+// rewritten, not even down to a lower level, and non-flash models are
+// untouched.
 func (p *OpenAIProvider) applyEffort(body *oaiRequest, req StreamRequest) {
-	if !req.Thinking || req.Effort == "" {
+	if !req.Thinking {
 		return
 	}
 	spec, write := p.effortPlan(body.Model)
-	if write == nil || !spec.Allows(req.Effort) {
-		return
+	level := req.Effort
+	defaulted := level == ""
+	if defaulted {
+		level = defaultEffortFor(body.Model, spec)
+		if level == "" {
+			// Non-flash model: the endpoint's default applies, as before.
+			return
+		}
+		if req.StepMechanical {
+			level = EffortNone
+		}
 	}
-	write(body, req.Effort)
+	if write == nil || !spec.Allows(level) {
+		// A level the model does not take is dropped rather than sent. A
+		// mechanical step holding a level taken from the default path may keep
+		// the light default when the ladder lacks "none" (glm-5.3-flash grades
+		// low and up); an explicit session choice is never rewritten.
+		if !defaulted || !req.StepMechanical || write == nil || !spec.Allows(EffortLow) {
+			return
+		}
+		level = EffortLow
+	}
+	write(body, level)
+}
+
+// defaultEffortFor is the effort ogcode asks for on a flash-class model the
+// session has not chosen a depth for: "low" — those models reason deeply by
+// default and bill the reasoning inside the output budget, roughly twice what
+// a turn needs on ogx-deepseek-v4.1-flash.
+//
+// The catalogue's own default for the model stands where it is lighter than
+// high: the "none" of gemini-2.5-flash-lite, the "minimal" of the flash-lite
+// siblings and the "medium" of gemini-3.8-flash are what the vendor tuned the
+// model to run at, so there is no deep default there to claw back. A recorded
+// default of high or deeper IS the deep default — ogx-deepseek-v4.1-flash
+// records high — and the low hold applies to it, as it does when nothing is
+// recorded. Non-flash models always return "" (keep the endpoint's default),
+// whether or not a default is recorded. Matched by id substring, as the
+// catalogue's own flash ids all carry the name.
+func defaultEffortFor(modelID string, spec EffortSpec) string {
+	if !strings.Contains(strings.ToLower(modelID), "flash") {
+		return ""
+	}
+	if d := effortDepth(spec.Default); d >= 0 && d < effortDepth(EffortHigh) {
+		return spec.Default
+	}
+	return EffortLow
 }
 
 // listedModel finds a model in the provider's fetched catalogue.

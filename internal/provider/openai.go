@@ -760,6 +760,21 @@ func (p *OpenAIProvider) sendsPromptCacheKey() bool {
 		strings.Contains(u, "ogx.ogcode.in")
 }
 
+// sendsParallelToolCalls reports whether this endpoint documents
+// parallel_tool_calls — the request-side switch that lets one assistant turn
+// carry the several tool calls it wants run at once. A strict server that does
+// not list the field answers 400 on it, so it goes only to the hosts that
+// document it: OpenAI itself, and the OpenAI-compatible hosts known to
+// forward it.
+func (p *OpenAIProvider) sendsParallelToolCalls() bool {
+	if p.id == "openai" {
+		return true
+	}
+	u := strings.ToLower(p.baseURL)
+	return strings.Contains(u, "api.openai.com") ||
+		strings.Contains(u, "openrouter.ai")
+}
+
 // needsExplicitCacheBreakpoints reports whether this request must carry
 // Anthropic-style cache_control markers to be cached at all: an Anthropic model
 // reached through OpenRouter's passthrough.
@@ -969,6 +984,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	}
 	if p.sendsPromptCacheKey() {
 		body.PromptCacheKey = req.CacheKey
+	}
+	if p.sendsParallelToolCalls() && len(tools) > 0 {
+		enabled := true
+		body.ParallelToolCalls = &enabled
 	}
 	// stream_options.include_usage is supported by OpenAI, OpenRouter, and Ollama (v0.5+).
 	// The final chunk will contain a usage object alongside an empty choices array.
@@ -1208,6 +1227,12 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 	var contentBuf strings.Builder
 	sawToolCall := false
 
+	// sawDone records that the server sent its own terminator. It is the one
+	// case the drain at the end of this function may run: a stream that ended at
+	// EOF has nothing left to read, and one that failed has no terminator to
+	// reach.
+	sawDone := false
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -1215,6 +1240,7 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 		}
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
+			sawDone = true
 			break
 		}
 
@@ -1331,6 +1357,14 @@ func (p *OpenAIProvider) streamEvents(body io.ReadCloser, ch chan<- StreamEvent,
 			ch <- StreamEvent{Type: EventToolCallStart, ToolCallID: id, ToolName: name, ToolInput: args}
 			ch <- StreamEvent{Type: EventToolCallEnd, ToolCallID: id, ToolName: name}
 		}
+	}
+
+	// The server has said it is finished but the body is not at EOF yet: read it
+	// out so an HTTP/1.1 connection goes back to the idle pool instead of being
+	// discarded with the handshake it cost. Last, so the events above reach the
+	// loop before the drain can spend its budget on a server that never closes.
+	if sawDone {
+		drainFinishedStream(idle, cancel, postDoneDrainBudget)
 	}
 }
 
@@ -1460,6 +1494,9 @@ type oaiRequest struct {
 	// already holds its prefix. Sent only where it is known to be understood —
 	// see sendsPromptCacheKey.
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
+	// ParallelToolCalls is sent to the endpoints that document it, on every
+	// request that carries tools — see sendsParallelToolCalls.
+	ParallelToolCalls *bool `json:"parallel_tool_calls,omitempty"`
 }
 
 type oaiStreamOptions struct {

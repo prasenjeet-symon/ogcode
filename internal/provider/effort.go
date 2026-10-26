@@ -45,6 +45,13 @@ func IsEffort(level string) bool {
 	return slices.Contains(effortOrder, level)
 }
 
+// effortDepth reports where level sits in effortOrder, or -1 when ogcode does
+// not carry the level (including ""). It ranks one level against another
+// without spelling the ladder out twice.
+func effortDepth(level string) int {
+	return slices.Index(effortOrder, level)
+}
+
 // EffortSpec is what a session may pick for one model on one endpoint.
 type EffortSpec struct {
 	// Levels are the selectable levels, lowest first. Empty means the model

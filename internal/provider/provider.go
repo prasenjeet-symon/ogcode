@@ -436,6 +436,43 @@ func (w *idleWatchdog) Fired() bool { return w.fired.Load() }
 
 func (w *idleWatchdog) Stop() { w.timer.Stop() }
 
+// postDoneDrainBudget bounds how long a stream that has already delivered its
+// terminator may keep reading. A conforming server ends the response promptly
+// after the sentinel, so the drain normally finds EOF at once; this budget is
+// for one that sends the sentinel and then holds the connection open.
+var postDoneDrainBudget = 2 * time.Second
+
+// postDoneDrainBytes caps what the drain will swallow. A server still writing
+// after its own terminator is not ending a stream worth reusing, so the socket
+// is better discarded than read indefinitely.
+const postDoneDrainBytes = 64 << 10
+
+// drainFinishedStream reads a stream out to its end after the reader has
+// already stopped at the protocol's terminator, so the transport can put the
+// connection back in the idle pool.
+//
+// On HTTP/1.1 a response body closed before EOF takes the socket with it:
+// net/http cannot know how much of the chunked body went unread, so it drops the
+// connection rather than hand a half-read stream to the next request. A reader
+// that stops at "data: [DONE]" therefore pays one TCP+TLS handshake per
+// completion on every h1.1 endpoint — local model servers, any proxy without
+// h2, anything behind a MITM tap (measured: 6 requests opened 6 connections,
+// and 1 with this drain). HTTP/2 is unaffected either way, since a finished
+// stream never takes the connection with it.
+//
+// Both ends are bounded, because the terminator is the server's promise and a
+// server that breaks it would otherwise park this goroutine, and the request's
+// slot with it: past postDoneDrainBudget the request is cancelled, which is
+// what unblocks a read waiting on a connection that will never close.
+func drainFinishedStream(r io.Reader, cancel context.CancelFunc, budget time.Duration) {
+	if budget <= 0 {
+		budget = postDoneDrainBudget
+	}
+	timer := time.AfterFunc(budget, cancel)
+	defer timer.Stop()
+	_, _ = io.Copy(io.Discard, io.LimitReader(r, postDoneDrainBytes))
+}
+
 // describeStreamReadError explains why a stream stopped part-way. Without it a
 // failed scan is indistinguishable from a clean end of stream: the reader
 // goroutine returns, the event channel closes, and the agent loop can only say
@@ -592,6 +629,14 @@ type StreamRequest struct {
 	// model takes the level (ResolveEffort). Each provider translates it into
 	// its own field and drops a level the model would reject.
 	Effort string `json:"effort,omitempty"`
+	// StepMechanical marks this request as a mechanical continuation — the
+	// previous step of the turn produced tool calls and no final text, so the
+	// model already spent its plan and this step only carries the results
+	// forward. Only the agent loop sets it. Where a model with no session
+	// effort would otherwise run at its endpoint default (flash-class models
+	// reason deeply by default), applyEffort holds a mechanical step to the
+	// lightest level the model takes.
+	StepMechanical bool `json:"stepMechanical,omitempty"`
 	// CacheKey identifies the conversation this request belongs to, for
 	// providers whose prompt cache is shared across machines and needs a routing
 	// hint to land a session's requests on the node holding its prefix. Only the
