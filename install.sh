@@ -114,7 +114,7 @@ echo "  export ANTHROPIC_API_KEY=sk-...      # Claude"
 echo "  export OPENAI_API_KEY=sk-...         # GPT"
 echo "  export OPENROUTER_API_KEY=sk-...      # OpenRouter"
 echo "  # Ollama Cloud:"
-echo "  export OLLAMA_BASE_URL=https://api.ollama.com/v1"
+echo "  export OLLAMA_BASE_URL=https://ollama.com/v1"
 echo "  export OLLAMA_API_KEY=your-key"
 
 # ── Web search ──────────────────────────────────────────────────────────────

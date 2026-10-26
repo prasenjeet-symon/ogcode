@@ -97,6 +97,13 @@ Write-Host "  ogcode plan         # Start in Plan Mode" -ForegroundColor White
 Write-Host "  ogcode version      # Check version" -ForegroundColor White
 Write-Host ""
 Write-Host "Next step: set your AI provider API key (see README for options)." -ForegroundColor Yellow
+Write-Host "Quick start examples:"
+Write-Host "  `$env:ANTHROPIC_API_KEY='sk-...'      # Claude" -ForegroundColor White
+Write-Host "  `$env:OPENAI_API_KEY='sk-...'         # GPT" -ForegroundColor White
+Write-Host "  `$env:OPENROUTER_API_KEY='sk-...'     # OpenRouter" -ForegroundColor White
+Write-Host "  # Ollama Cloud:" -ForegroundColor White
+Write-Host "  `$env:OLLAMA_BASE_URL='https://ollama.com/v1'" -ForegroundColor White
+Write-Host "  `$env:OLLAMA_API_KEY='your-key'" -ForegroundColor White
 
 # ── Web search ──────────────────────────────────────────────────────────────
 # Search is built into the binary: it queries JS-free search endpoints over

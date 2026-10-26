@@ -49,7 +49,7 @@ var runCmd = &cobra.Command{
 }
 
 func init() {
-	runCmd.Flags().StringVarP(&runAgentName, "agent", "a", "build", "Agent type: build or plan")
+	runCmd.Flags().StringVarP(&runAgentName, "agent", "a", "build", "Agent type: build, plan, task, breakdown, note, index, search, subagent or memory-recall (unknown names default to build)")
 	runCmd.Flags().StringVarP(&runOutputFormat, "output-format", "o", "text", "Output format: text or json")
 	runCmd.Flags().IntVar(&runMaxTurns, "max-turns", 0, "Maximum agent loop iterations; 0 means no limit")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Model ID override (e.g. claude-sonnet-4-5)")

@@ -68,6 +68,11 @@ const nav: DocGroup[] = [
         description: 'Break a feature into tasks, each in its own worktree, and open pull requests.',
       },
       {
+        title: 'Agents & teammates',
+        slug: '/agents-and-teammates',
+        description: 'Teammates, task sub-agents and the Agents page, plus the file change gate and custom OpenAI-compatible providers.',
+      },
+      {
         title: 'Permissions',
         slug: '/permissions',
         description: 'Ask, Auto and Yolo: what is gated, and how approvals are remembered.',
