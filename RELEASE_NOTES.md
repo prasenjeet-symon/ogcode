@@ -1,3 +1,83 @@
+# Release Notes — v0.52.0
+
+## Minor: One-shot agent reminders — the schedule tool
+
+An agent working a long turn keeps a clock only in its own head, and the one
+thing that should not wait on its attention — "ping me in ten minutes to
+double-check the retry", "come back to this after the build finishes" — had
+nowhere to live. The `schedule` tool fixes that: `create` takes a note and
+exactly one of `delaySeconds` or a strictly-future `fireAt`, `list` shows what
+is still pending, `cancel` removes one by id. The store is a new table
+(migration 068) with an atomic `ClaimDue`, a 10-second poll rides the board's
+ticker, and idle rows wait for the session's next turn to start — a reminder
+never starts a turn on its own. Restarts keep the rows: delivery is
+at-least-once.
+
+## Minor: Drive the user's real Chrome — browser takeover
+
+A page that only a logged-in browser can render — SPA dashboards, sites that
+block robots, anything JavaScript-shaped at runtime — is now reachable
+directly. A companion MV3 extension (`browser-extension/`) opens a WebSocket
+bridge to the server and drives the user's real Chrome through tabs it has
+granted, exposed to the agent as the `browser_*` tool family. The pair can be
+set up with zero pasting: `ogcode native-host install` registers a
+native-messaging host (`com.ogcode`) that launches the current binary and
+pairs on first handshake; Chrome reads that registration at browser startup.
+
+The tools are lazy on the wire — only `browser_status` rides every turn, and
+the rest load only when the turn's plan names them — so an idle session pays
+nothing for the family. Snapshots are compact one-line-per-element lists that
+filter inside the extension without renumbering refs; screenshots are 1024 px
+JPEG. The bridge is security-gated the way a local device service has to be:
+pair and handshake requests are checked against an actual loopback peer
+(fail-closed), the pair token persists `0600` under the data dir, and the
+advertised pair URL honors `X-Forwarded-Proto` so a TLS edge answers `wss`.
+
+## Minor: The agents page
+
+The board drawer is gone; `/agents` replaces it with a force-directed graph
+of the whole agent tree — every session a disc, children indented under their
+spawner, a colour per status. Header chips count `running = live − idle` as
+disjoint sums, and the physics runs warm-up ticks so a background tab never
+freezes the layout mid-flight.
+
+## Minor: Uncapped reads, capped grep
+
+`read` and `file_map` drop their output limits entirely: a bare read returns
+the whole file, a missing `end_line` runs to EOF, and any `limit` is a window
+rather than a default — long files return their structural map instead of a
+truncation marker. A `files=[...]` call serves several paths in one round
+trip and stamps the change gate for every file it actually served, so a
+multi-file read certifies edits on all of them.
+
+Two searches got politer instead. grep caps one call at 100 results but stays
+a successful result, saying in its own body that it narrowed nothing and the
+pattern should be narrowed; and a bare edit miss now says what a bare miss
+means — the anchor's bytes are not in the file — names whether the anchor's
+first line still appears somewhere, and points the re-read at that region.
+
+## Minor: Provider belt
+
+OpenAI-family endpoints that document `parallel_tool_calls` receive it on
+every request that carries tools, so one assistant turn can carry its several
+calls at once instead of replaying them serially; strict hosts that would 400
+on the field never see it. A stream the server has properly terminated now
+gets drained back into the connection pool — the HTTP/1.1 handshake it cost
+is reused instead of discarded. `ogx-deepseek-v4.1-flash` holds its default
+thinking effort when the session has not picked one, and a tool-only step
+with real work drops derived effort down a notch.
+
+## Other changes
+
+- The privacy page and landing FAQ state the telemetry reality exactly:
+  analytics ship by default with no env opt-out for the core events, and
+  `OGCODE_POSTHOG_LOGS` is the logs-only opt-in.
+- Install quickstarts point Ollama at `https://ollama.com/v1`, and
+  `install.ps1` gained quick-start examples of its own.
+- `ogcode run --agent` lists every agent type instead of "build or plan".
+- Version and provider references across README, installers and the landing
+  page match what the code actually holds.
+
 # Release Notes — v0.51.0
 
 ## Minor: The agent board — teammates that do the work
