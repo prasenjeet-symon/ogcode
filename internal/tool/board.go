@@ -39,7 +39,7 @@ type BoardTool struct {
 func (BoardTool) ID() string { return "board" }
 
 func (BoardTool) Description() string {
-	return "See the tree of agents working in this project directory: every build session and the teammates it spawned, each with its status and session. " +
+	return "See the tree of agents working in this project directory: every build session and the teammates it spawned, plus background task children, each with its status and session. " +
 		"`roster` draws the tree — an indented child is a teammate its parent spawned, running and finished ones both. " +
 		"It is how you see who is still working, how many are running, and where to look when one of them stops. " +
 		"A child reports back by finishing: its last message is its result, and you are told when it is done. " +

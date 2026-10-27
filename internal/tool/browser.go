@@ -352,11 +352,11 @@ type BrowserClickTool struct{ Disp BrowserDispatcher }
 func (BrowserClickTool) ID() string { return "browser_click" }
 
 func (BrowserClickTool) Description() string {
-	return "Click an element in a granted browser tab by its ref from the latest browser_snapshot (or a CSS selector). The click is delivered as real input events, so hover menus and focus work. Before a submit, checkout, delete, or anything that sends data — ask the user first."
+	return "Click an element in a granted browser tab by its ref from the latest browser_snapshot (or a CSS selector). The click is delivered as real mouse input (mousePressed + mouseReleased), so focus and click handlers work; hover-only menus may not open — click the menu, then re-snapshot. Before a submit, checkout, delete, or anything that sends data — ask the user first."
 }
 
 func (BrowserClickTool) Parameters() json.RawMessage {
-	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"selector":{"type":"string","description":"Fallback CSS selector to click when no ref fits."},` + tabSchema)
+	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"selector":{"type":"string","description":"CSS selector to click; takes precedence over ref when both are given."},` + tabSchema)
 }
 
 func (t BrowserClickTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -387,11 +387,11 @@ type BrowserTypeTool struct{ Disp BrowserDispatcher }
 func (BrowserTypeTool) ID() string { return "browser_type" }
 
 func (BrowserTypeTool) Description() string {
-	return "Type text into an input, select or contenteditable in a granted browser tab, by ref from the latest browser_snapshot. Clears the field first unless clear is false; with submit true it presses Enter after the text, which submits most forms."
+	return "Type text into an input, textarea or contenteditable in a granted browser tab, by ref from the latest browser_snapshot. Typing replaces the field's current value; the clear parameter is currently ignored. With submit true it presses Enter after the text, which submits most forms. A <select> has no type path — snapshot and click it instead."
 }
 
 func (BrowserTypeTool) Parameters() json.RawMessage {
-	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"text":{"type":"string","description":"The text to type."},"submit":{"type":"boolean","description":"Press Enter after typing (submits most forms)."},"clear":{"type":"boolean","description":"Set false to append instead of replacing the value. Defaults to clearing."},` + tabSchema)
+	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"text":{"type":"string","description":"The text to type."},"submit":{"type":"boolean","description":"Press Enter after typing (submits most forms)."},"clear":{"type":"boolean","description":"Currently ignored by the browser: typing always replaces the field's value."},` + tabSchema)
 }
 
 func (t BrowserTypeTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -421,7 +421,7 @@ type BrowserKeyTool struct{ Disp BrowserDispatcher }
 func (BrowserKeyTool) ID() string { return "browser_key" }
 
 func (BrowserKeyTool) Description() string {
-	return "Press a named key (Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace, …) into a granted browser tab. For typing text into a field use browser_type instead; keys are for navigation, dismissal and submission."
+	return "Press a named key (Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace) into a granted browser tab. For typing text into a field use browser_type instead; keys are for navigation, dismissal and submission."
 }
 
 func (BrowserKeyTool) Parameters() json.RawMessage {
@@ -448,11 +448,11 @@ type BrowserScrollTool struct{ Disp BrowserDispatcher }
 func (BrowserScrollTool) ID() string { return "browser_scroll" }
 
 func (BrowserScrollTool) Description() string {
-	return "Scroll a granted browser tab up or down with a real wheel event, so lazy-loaded content loads. amount is pixels; default is most of a viewport."
+	return "Scroll a granted browser tab up or down with a real wheel event, so lazy-loaded content loads. amount is pixels; defaults to 600 px."
 }
 
 func (BrowserScrollTool) Parameters() json.RawMessage {
-	return browserParams(`"direction":{"type":"string","description":"up or down."},"amount":{"type":"integer","description":"Pixels to scroll; defaults to a viewport's worth."},` + tabSchema)
+	return browserParams(`"direction":{"type":"string","description":"up or down."},"amount":{"type":"integer","description":"Pixels to scroll; defaults to 600 px."},` + tabSchema)
 }
 
 func (t BrowserScrollTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {

@@ -22,7 +22,7 @@ type ReadPdfPageTool struct{}
 func (ReadPdfPageTool) ID() string { return "read_pdf_page" }
 
 func (ReadPdfPageTool) Description() string {
-	return "Extract the plain text of a single page from a PDF file. Use pdf_index first to identify which pages are relevant, then call this tool to read their content. Pages dominated by graphs, diagrams, or scanned images return a rendered image instead of text when the model supports vision."
+	return "Extract the plain text of a single page from a PDF file. Use pdf_index first to identify which pages are relevant, then call this tool to read their content. Pages with fewer than ~20 extractable words (likely graphs, scans or diagrams) return a rendered image of the page (any extracted text rides along) when the model supports vision."
 }
 
 func (ReadPdfPageTool) Parameters() json.RawMessage {

@@ -35,7 +35,7 @@ func (LatexToPdfTool) Parameters() json.RawMessage {
 			},
 			"filename": {
 				"type": "string",
-				"description": "Output filename for the PDF (default: output.pdf). Must end with .pdf"
+				"description": "Filename for the output PDF (.pdf appended if missing; default: output.pdf)"
 			}
 		}
 	}`)

@@ -29,7 +29,7 @@ func (WebSearchTool) Parameters() json.RawMessage {
 			},
 			"limit": {
 				"type": "integer",
-				"description": "Maximum number of results to return (default 8, max 15)"
+				"description": "Maximum number of results to return (1–15, default 8; values above 15 fall back to the default 8)"
 			}
 		},
 		"required": ["query"]

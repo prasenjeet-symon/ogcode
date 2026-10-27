@@ -339,7 +339,7 @@ var IndexAgent = Agent{
 var SearchAgent = Agent{
 	ID:               "search",
 	Name:             "Search",
-	Description:      "Deep research agent — decomposes queries, runs parallel web searches, reads top pages, and returns synthesised findings",
+	Description:      "Deep research agent — runs one web search of the query, ranks results, fetches the top pages in parallel, and returns synthesised findings with sources",
 	Tools:            []string{"web_search", "fetch_page", "read", "grep"},
 	FinalInstruction: "Reminder: output only the synthesised markdown answer, including the mandatory Sources section at the bottom. No preamble. Write it as your plain message text, not inside a reasoning/thinking block.",
 	System: `You are a deep research agent. Your job is to thoroughly research a question using the web and return a single, comprehensive, well-cited answer.

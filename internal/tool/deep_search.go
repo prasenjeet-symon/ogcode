@@ -30,7 +30,7 @@ type DeepSearchTool struct {
 
 func (DeepSearchTool) ID() string { return "deep_search" }
 func (DeepSearchTool) Description() string {
-	return "Delegate a research query to the deep search agent. The agent runs parallel web searches, reads top pages, and returns a synthesised answer. Use for any question that requires current web information."
+	return "Delegate a research query to the deep-search pipeline. A single web search of the query verbatim is run, results pooled and ranked, the top pages fetched in parallel, and a synthesised answer with a sources list returned. Use for any question requiring current web information."
 }
 func (DeepSearchTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{

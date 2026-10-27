@@ -49,7 +49,7 @@ func (AskUserTool) Description() string {
 		"Reserve it for what only a person can tell you — a preference, a constraint, a choice between approaches with real trade-offs. " +
 		"Anything you can find out yourself (in the source code, in a file, on the web, by running a command) you look up instead; " +
 		"do not ask it here, and do not use it to confirm an obvious next step. " +
-		"Ask everything you need in ONE call: each question has a short header, the question text, and 2-4 concrete options you propose " +
+		"Ask everything you need in ONE call: each question has a short header, the question text, and 2-6 concrete options you propose " +
 		"(the user can always type their own answer instead), marked multi-select only when several options may apply at once. " +
 		"When one screen should depend on an earlier answer, give the earlier question an id and set showWhen on the later one, " +
 		"so the user only sees the branch that applies to them; the result tells you which screens were shown and which were skipped for not matching. " +
@@ -106,7 +106,7 @@ func (AskUserTool) Parameters() json.RawMessage {
 						},
 						"options": {
 							"type": "array",
-							"description": "2-4 concrete answers you propose, in preference order. The user can always type an answer of their own, so this need not be exhaustive.",
+							"description": "2-6 concrete answers you propose, in preference order. The user can always type an answer of their own, so this need not be exhaustive.",
 							"minItems": 2,
 							"maxItems": 6,
 							"items": {

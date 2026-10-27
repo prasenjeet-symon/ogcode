@@ -67,7 +67,7 @@ func NewMemoryMapTool(store *memfile.Store) MemoryMapTool {
 func (t MemoryMapTool) ID() string { return "memory_map" }
 
 func (t MemoryMapTool) Description() string {
-	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. Every conversation (session) is shown as a SINGLE line: its tag ending in \"/\", the number of turns inside it, and a sample of topic labels drawn from across all its turns. Labels are separated by semicolons. Each tag names exactly one conversation. To look inside a conversation, call again with subdir set to its tag (e.g. \"ses01M269J\") — the call then lists that conversation's summaries as one line each: file name and topic labels. Use this to find which conversation holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) pulls just that section."
+	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. In project scope, every conversation (session) is shown as a SINGLE line: its tag ending in \"/\", the number of turns inside it, and a sample of topic labels drawn from across all its turns; call again with subdir set to a tag (e.g. \"ses01M269J\") to list that conversation's summaries one line each, with file name and topic labels. In session scope (this conversation's own recall), the map renders this conversation's turns flat, one line each, with no tags, and a subdir naming any other conversation is refused. Use this to find which conversation (project scope) or turn (session scope) holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) pulls just that section."
 }
 
 func (t MemoryMapTool) Parameters() json.RawMessage {
@@ -76,7 +76,7 @@ func (t MemoryMapTool) Parameters() json.RawMessage {
 		"properties": {
 			"subdir": {
 				"type": "string",
-				"description": "Optional conversation tag (e.g. \"ses01M269J\"), exactly as the map shows it, to descend into. Any longer prefix of the conversation's session id works too. The map then lists that conversation's turns individually instead of collapsing it to one line. Omit to start at the project level."
+				"description": "Optional conversation tag (e.g. \"ses01M269J\"), exactly as the map shows it, to descend into. Any longer prefix of the conversation's session id works too. In project scope the map then lists that conversation's turns individually; in session scope the recall is pinned to this conversation, so only a prefix of this conversation's own id is accepted and anything else is refused. Omit it in project scope to start at the top."
 			}
 		}
 	}`)
