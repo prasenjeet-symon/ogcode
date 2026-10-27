@@ -210,16 +210,15 @@ Touches: `/tmp/<rig>/` (its copied `config.db` holds API keys), nothing in the r
    message carrying the call and a `user` message whose part echoes the same tool+input beside the result — so
    count calls, not messages.
 6. Take ground truth from the DB, not the transcript:
-   `sqlite3 /tmp/<rig>/proj/.ogcode/ogcode.db "select handle,kind,status,last_seq from board_agent; select
-   seq,from_handle,to_handle,kind,text,path from board_post;"`.
-7. Watch `$HOME/.ogcode/logs/<proj>-*/ogcode.log` for `board: turn started` (the turn really began),
-   `board: delivered to turn` (a queued post reached the next turn) and `could not advance cursor` (a wait
-   replaying the same post).
+   `sqlite3 /tmp/<rig>/proj/.ogcode/ogcode.db "select handle,kind,status,notified_at from board_agent;"`
+   (067_agent_tree.sql dropped `board_post` and `board_agent.last_seq`; the tree is the log now).
+7. Watch `$HOME/.ogcode/logs/<proj>-*/ogcode.log` for `board: turn started` — the turn really began.
 8. Teardown: `pkill -f '/tmp/<rig>/ogcode serve'`, `rm -rf /tmp/<rig>`. A HOME-isolated `go test` leaves a
    read-only module cache — `chmod -R u+w <home>` before deleting it.
 
-Done when: the transcript's tool calls are the ones you meant, the DB rows agree with them (`last_seq` equals
-newest post, no `leaseUntil` left behind), and the log carries no `could not advance cursor`.
+Done when: the transcript's tool calls are the ones you meant, the board rows agree with them — each agent's
+row moves to `status=done` and `notified_at` is stamped when the child reports — and the log carries
+`board: turn started`.
 
 ## Inspect a session's plan-intent routing
 

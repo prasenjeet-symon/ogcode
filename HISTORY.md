@@ -3761,3 +3761,46 @@ Findings came from a v0.51.0 accuracy review of the three public surfaces. Fixes
 - `git mv docs/ARCHITECTURE_AUDIT.md plans/ARCHITECTURE_AUDIT.md` (repo-wide grep found no readers of the old path).
 - Gotchas recorded in MEMORY.md: `docs/install.sh` is a hand-synced copy; docs-site rebuild regenerates `docs/docs/`.
 - Not done (deliberate/deferred): no code-level analytics opt-out (feature request for a future turn); landing announce text "Now with live service preview" left (feature exists).
+
+## 2026-10-26 — v0.52.0 released
+
+- Logical feature commits (tools uncap/grep caps, schedule, browser takeover, provider belt, agents page, docs refresh) + `chore(release): v0.52.0` (2bfc25b); browser-extension/ + cws-listing/ committed into the repo per user decision.
+- Tag push triggered 4 workflows, all green in 3–8 min: Release (7 platform assets), Publish Docker Image, CI, Deploy GitHub Pages.
+- Remote is `prasenjeet-symon/ogcode` (SSH), not the mstorsjo fork guess.
+- Leftovers flagged: legacy unused `web/src/agent-graph.tsx/.css` + `board-graph.ts` rode the wholesale web/src staging in e54e31a — remove in a follow-up if desired.
+
+## 2026-10-26 — Session-level memory (per-conversation .md the agent curates)
+
+- Added `<projectDir>/.ogcode/memory/sessions/<SessionKey>.md` — one file per conversation, keyed by the ROOT session (`sessionMemoryKey` resolves teammates to the parent via `ParentSessionOf`), so the whole agent tree shares it. Rendered into the system prompt as `<session-memory-md>` via `loadSessionMemory` (internal/agent/memorymd.go), read once at RunLoop turn start.
+- `sessionMemoryPrompt` (internal/agent/prompt_builder.go) teaches the split: project MEMORY.md = what every future session profits from before it acts; session memory = only-this-conversation state; unsure → start session-level, promote on evidence, delete from the source file (a fact lives in exactly one place).
+- Prompt builders' signatures grew by one `sessionMemory{relPath,block}` param (all four: buildSystemPrompt, buildSystemPromptForFamily, buildSystemPromptEntries, staticSystemPrompt); every test call site updated with `sessionMemory{}`. `mdWrapperTag` regex now also neutralizes `session-memory-md`.
+- Root-session file deleted in `handleDeleteSession` after `store.Delete` (`memfile.DeleteSessionMemory`, ENOENT-tolerant). Env cap `OGCODE_SESSION_MEMORY_MAX_BYTES` (0 = uncapped).
+- Pinning tests: internal/agent/session_memory_test.go (root key share, roundtrip/missing, block-forgery defense, prompt branches, projectScoped gating — utility agents get nothing).
+
+## 2026-10-26 — Tool/guide accuracy audit (4 auditor + 2 fixer teammates)
+
+- Audited every model-facing tool description (`internal/tool/*`), the prompt builders
+  (`internal/agent/prompt_builder.go`, `agent.go`), and MEMORY.md / HOWTO.md / AGENT.md against current code.
+- Core file/verification tool descriptions (read/edit/write/bash/grep/glob/file_map/check_syntax): all
+  claims held, including read's bare-read map interception (no range AND no offset AND no limit).
+- Fixed stale descriptions: deep_search (single-query pipeline, not parallel per-angle searches),
+  web_search limit (>15 resets to 8, not clamped), browser_type `clear` param documented as ignored by
+  the extension, ask_user options 2-6 (was 2-4), browser_click selector precedence + hover caveat,
+  browser_scroll 600 px default, board roster includes background task children, memory_map scoped
+  project-vs-session wording, read_pdf_page image-fallback trigger (<20 extractable words, text rides
+  along), latex_pdf `.pdf` appended when missing, prompt_builder map escape-hatch clause, agent.go
+  deep-research profile wording.
+- MEMORY.md: 16 line-level corrections (mcp_<server>_<name>, POST /api/search/config, teammate Ask-gated,
+  board migration split 065/067, browser-extension tracked since cbdf224, acquireIndex symbols,
+  internal/docindex/excludes.go path, compactionKeepRecent clamp formula, planless-stint cadence, etc.).
+  HOWTO.md: OGX-gateway entry rewritten for the migration-067 board tree (board_post/last_seq gone).
+- Verified: `go test ./internal/tool/ ./internal/agent/ -count=1` pass after edits; gofmt clean on touched files.
+- Pre-existing, unrelated: `agent/skills/golang-cli/assets/examples/*.go` don't compile under `go build ./...`.
+
+## 2026-10-27 — ogweb published on the Chrome Web Store; store id allowlisted in the native host
+
+- User confirmed the listing is live (publisher prasenjeetsymon); store-assigned id **`kacnfgnhmmnhdpokflkiemdehhjhkidp`** (read from the dashboard; deep_search cannot see CWS listings — the store is barely indexed and the ID lives only in the dashboard / detail URL).
+- `internal/nativehost/nativehost.go:46` `WebStoreExtensionID` filled in (was `""`, reserved for exactly this). `CandidatesFor` now allowlists the store id on every boot-time `EnsureRegistered` manifest, so store installs auto-pair via the native host instead of falling back to manual token/origin paste.
+- Symptom chain that motivated the fix: a store extension id appears in no manifest → `chrome.runtime.connectNative("com.ogcode")` refused → the extension's single native auto-pair attempt fails → manual pair UI.
+- **No extension re-release needed** — extension code unchanged; the fix rides the next ogcode (server) release. Users must update ogcode and restart Chrome (manifests are read at browser startup); a failed `autoPairThenConnect` is memoized for the worker life, so a reload would also clear it.
+- Pins updated: `TestEnsureRegisteredDoesNothingWithoutCandidates` replaced by `TestEnsureRegisteredWritesTheStoreIDForABareProject` (a bare end-user project entitles exactly the store id); the unpacked-id and env-id tests now expect the store id appended. `internal/nativehost` + `internal/cli` green, gofmt + vet clean.
