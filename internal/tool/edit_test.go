@@ -51,6 +51,32 @@ func asEditsForm(params map[string]any) map[string]any {
 	return out
 }
 
+func TestEditTool_MissingPathNamesTheFieldNotTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	// A dropped or empty path used to resolve to the session directory itself
+	// and fail with "read <project dir>: is a directory" — an error naming no
+	// parameter, which left the model guessing and drove it to shell
+	// workarounds. Each shape now refuses on the missing field.
+	for _, tc := range []struct {
+		params map[string]any
+		want   string
+	}{
+		{map[string]any{"old_string": "world", "new_string": "there"}, "path is required"},
+		{map[string]any{"path": "", "old_string": "world", "new_string": "there"}, "path is required"},
+		// A bare "." joins back to the session directory, so it is named by the
+		// session-directory gate instead of the missing-field one.
+		{map[string]any{"path": ".", "old_string": "world", "new_string": "there"}, "session directory"},
+	} {
+		res, err := editWith(t, dir, tc.params)
+		if err != nil {
+			t.Fatalf("path %v: expected a Result refusal, got error %v", tc.params["path"], err)
+		}
+		if !strings.Contains(res.Output, tc.want) {
+			t.Errorf("path %v: output = %q, want it to contain %q", tc.params["path"], res.Output, tc.want)
+		}
+	}
+}
+
 func TestEditTool_UniqueMatchReplaces(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")

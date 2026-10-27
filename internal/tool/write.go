@@ -52,9 +52,19 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 		}, nil
 	}
 
+	// Same trap as edit: schema "required" is advice, and a missing path would
+	// resolve to the session directory itself and fail with an unreadable
+	// "is a directory" on the folder. Land the refusal on the missing field.
+	if strings.TrimSpace(input.Path) == "" {
+		return Result{Title: "Path required", Output: "path is required — the write has no target. Resend the call with the file's path beside \"content\" and \"description\"."}, nil
+	}
+
 	path := input.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(tctx.SessionDir, path)
+	}
+	if tctx.SessionDir != "" && path == tctx.SessionDir {
+		return Result{Title: "Path required", Output: "path points at the session directory itself — name the file inside it instead. Resend the call with the file's path beside \"content\" and \"description\"."}, nil
 	}
 
 	// Serialize with any concurrent write/edit to the same file. The agent loop

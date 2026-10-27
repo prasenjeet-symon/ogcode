@@ -131,6 +131,14 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		}, nil
 	}
 
+	// The schema's "required" is advice (DecodeArgs is a plain unmarshal), so a
+	// model that drops the path still reaches here: the join below resolves an
+	// empty path to the session directory itself, and the read that follows
+	// fails with "read <project dir>: is a directory" — an error naming no
+	// parameter, which leaves the model guessing. Land the refusal on the field.
+	if strings.TrimSpace(input.Path) == "" {
+		return Result{Title: "Path required", Output: "path is required — the edit has no target. Resend the call with the file's path beside \"edits\" and \"description\"."}, nil
+	}
 	sawLegacy := input.LegacyOld != nil || input.LegacyNew != nil ||
 		input.LegacyReplaceAll != nil || input.LegacyExpected != nil
 	hunks, err := collectHunks(input.Edits, sawLegacy)
@@ -141,6 +149,9 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	path := input.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(tctx.SessionDir, path)
+	}
+	if tctx.SessionDir != "" && path == tctx.SessionDir {
+		return Result{Title: "Path required", Output: "path points at the session directory itself — name the file inside it instead. Resend the call with the file's path beside \"edits\" and \"description\"."}, nil
 	}
 
 	// Serialize the read-modify-write with any concurrent write/edit to the same

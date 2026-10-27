@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +23,33 @@ func writeWith(t *testing.T, dir string, params map[string]any) Result {
 		t.Fatalf("execute: %v", err)
 	}
 	return res
+}
+
+func TestWriteTool_MissingPathNamesTheFieldNotTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	// A dropped or empty path resolves to the session directory itself and used
+	// to fail on the folder; it must refuse on the missing field instead.
+	for _, p := range []string{""} {
+		res := writeWith(t, dir, map[string]any{"path": p, "content": "hello\n"})
+		if !strings.Contains(res.Output, "path is required") {
+			t.Errorf("path %q: output = %q, want it to name the missing path", p, res.Output)
+		}
+	}
+	// A path of "." reaches the session-dir gate — it must still refuse, not
+	// attempt a write on the folder.
+	if res := writeWith(t, dir, map[string]any{"path": ".", "content": "hello\n"}); !strings.Contains(res.Output, "session directory") {
+		t.Errorf("path \".\": output = %q, want the session-directory refusal", res.Output)
+	}
+	// A write that omits the param entirely — the shape the schema's required
+	// is advice against.
+	args, _ := json.Marshal(map[string]any{"content": "hello\n", "description": "test change"})
+	res, err := WriteTool{}.Execute(context.Background(), args, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(res.Output, "path is required") {
+		t.Errorf("omitted path: output = %q, want it to name the missing path", res.Output)
+	}
 }
 
 func TestWriteTool_NewFileReportsCreated(t *testing.T) {
