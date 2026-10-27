@@ -3804,3 +3804,10 @@ Findings came from a v0.51.0 accuracy review of the three public surfaces. Fixes
 - Symptom chain that motivated the fix: a store extension id appears in no manifest → `chrome.runtime.connectNative("com.ogcode")` refused → the extension's single native auto-pair attempt fails → manual pair UI.
 - **No extension re-release needed** — extension code unchanged; the fix rides the next ogcode (server) release. Users must update ogcode and restart Chrome (manifests are read at browser startup); a failed `autoPairThenConnect` is memoized for the worker life, so a reload would also clear it.
 - Pins updated: `TestEnsureRegisteredDoesNothingWithoutCandidates` replaced by `TestEnsureRegisteredWritesTheStoreIDForABareProject` (a bare end-user project entitles exactly the store id); the unpacked-id and env-id tests now expect the store id appended. `internal/nativehost` + `internal/cli` green, gofmt + vet clean.
+
+## 2026-10-27 — v0.53.0 released
+
+- The dirty working tree (session memory, tool-description audit, write/edit path refusals, ogweb store-id allowlist, sidebar roster cache, vite verify config) was split into 6 logical commits + `chore(release): v0.53.0` (3a4d60f). The working files' gofmt was clean; the three files gofmt flagged (loop_browser_steer_test.go, tool/task.go, tool/task_test.go) are pre-existing and untouched.
+- Verified before tagging: `CGO_ENABLED=1 go build . ./internal/...`, `go vet` on touched pkgs, `go test ./internal/agent ./internal/tool ./internal/nativehost ./internal/memfile ./internal/server -count=1` all pass, `npm run build` succeeds.
+- prompt_builder.go held one audit line inside the memory-feature file; split via `git apply --cached -R` of the single hunk so the memory commit doesn't claim it.
+- Tag push triggered 4 workflows, all green in ~8 min: Release (7 platform assets), Publish Docker Image, CI, Deploy GitHub Pages. goreleaser's changelog body lists the conventional-commit messages verbatim (docs:/test:/chore:-prefixed subject filters apply, though the release and chore(web) commits still appear in v0.53.0's note — filters matched loosely there; harmless).
