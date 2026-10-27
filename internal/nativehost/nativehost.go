@@ -40,10 +40,10 @@ import (
 const NativeHostName = "com.ogcode"
 
 // WebStoreExtensionID is the companion extension's published Chrome Web Store
-// id. It is reserved and stays empty until the extension ships from the
-// store; after publication set it here so installs allowlist the store copy
-// without a flag.
-const WebStoreExtensionID = ""
+// id. Store installs run under this id, so every native-messaging manifest
+// written at boot allowlists it and a store install pairs itself without a
+// flag. (Unpacked repo installs keep their path-derived id alongside it.)
+const WebStoreExtensionID = "kacnfgnhmmnhdpokflkiemdehhjhkidp"
 
 // maxMessageBytes bounds one framed message. Real requests are a few dozen
 // bytes and the pair reply a few hundred; the cap exists so a broken frame

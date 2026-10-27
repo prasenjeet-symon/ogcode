@@ -135,17 +135,30 @@ func TestUninstallRemovesOnlyTheManifestAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestEnsureRegisteredDoesNothingWithoutCandidates(t *testing.T) {
+func TestEnsureRegisteredWritesTheStoreIDForABareProject(t *testing.T) {
 	root, _ := browserTree(t)
 	setManifestDirs(t, filepath.Join(root, nativeHostDirName))
 	t.Setenv(ExtensionIDsEnv, "")
-	// A project without browser-extension/ and without env ids entitles nothing.
+	// A project without browser-extension/ and without env ids still entitles
+	// the published store copy: every end-user install must allowlist it.
+	if WebStoreExtensionID == "" {
+		t.Fatal("WebStoreExtensionID is empty; the store copy no longer ships unpacked")
+	}
 
 	if err := EnsureRegistered(t.TempDir()); err != nil {
 		t.Fatalf("EnsureRegistered: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, nativeHostDirName, manifestName)); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("a manifest was written without candidates (err %v)", err)
+	data, err := os.ReadFile(filepath.Join(root, nativeHostDirName, manifestName))
+	if err != nil {
+		t.Fatalf("reading the manifest: %v", err)
+	}
+	var m nativeManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"chrome-extension://" + WebStoreExtensionID + "/"}
+	if !reflect.DeepEqual(m.AllowedOrigins, want) {
+		t.Fatalf("allowed_origins = %v, want %v", m.AllowedOrigins, want)
 	}
 }
 
@@ -182,7 +195,10 @@ func TestEnsureRegisteredWritesTheUnpackedProjectsID(t *testing.T) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"chrome-extension://" + id + "/"}
+	want := []string{
+		"chrome-extension://" + id + "/",
+		"chrome-extension://" + WebStoreExtensionID + "/",
+	}
 	if !reflect.DeepEqual(m.AllowedOrigins, want) {
 		t.Fatalf("allowed_origins = %v, want %v", m.AllowedOrigins, want)
 	}
@@ -208,10 +224,12 @@ func TestEnsureRegisteredPicksUpEnvIDs(t *testing.T) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatal(err)
 	}
-	// Deduplicated in order, surrounding whitespace and empties dropped.
+	// Deduplicated in order, surrounding whitespace and empties dropped; the
+	// published store copy rides every manifest behind the env ids.
 	want := []string{
 		"chrome-extension://first_extension_id/",
 		"chrome-extension://second_extension_id/",
+		"chrome-extension://" + WebStoreExtensionID + "/",
 	}
 	if !reflect.DeepEqual(m.AllowedOrigins, want) {
 		t.Fatalf("allowed_origins = %v, want %v", m.AllowedOrigins, want)
