@@ -113,6 +113,38 @@ func SessionTag(sessionID string) string {
 	return sessionTag(sessionID)
 }
 
+// sessionSubDir is the folder under .ogcode/memory/ holding the per-session
+// memory files the agent curates: one file per conversation, named by
+// SessionKey, so a teammate resolves to its root conversation's shared file.
+const sessionSubDir = "sessions"
+
+// SessionMemoryPath returns the absolute path of the per-session memory file
+// for sessionID under projectDir. It does not create anything — the file
+// exists only once the agent writes it.
+func SessionMemoryPath(projectDir, sessionID string) string {
+	return filepath.Join(projectDir, ".ogcode", subDir, sessionSubDir, SessionKey(sessionID)+".md")
+}
+
+// SessionMemoryRelPath returns the session memory file's path relative to
+// projectDir, slash-joined, so the prompt shows one path on every OS.
+func SessionMemoryRelPath(projectDir, sessionID string) string {
+	rel, err := filepath.Rel(projectDir, SessionMemoryPath(projectDir, sessionID))
+	if err != nil {
+		rel = SessionMemoryPath(projectDir, sessionID)
+	}
+	return filepath.ToSlash(rel)
+}
+
+// DeleteSessionMemory removes the per-session memory file for sessionID. A
+// missing file is not an error; any other failure is returned.
+func DeleteSessionMemory(projectDir, sessionID string) error {
+	err := os.Remove(SessionMemoryPath(projectDir, sessionID))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 // slugify turns a human title into a lowercase, dash-separated slug capped at a
 // length that keeps the whole filename comfortably within filesystem limits.
 func slugify(title string) string {

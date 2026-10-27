@@ -278,7 +278,7 @@ func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
 	// cache_control — must NOT contain the current date. It is injected as a
 	// separate system-reminder entry so the cached prefix stays byte-for-byte
 	// identical across turns.
-	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", 1920, 1080, "", -1, true, true)[0]
+	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)[0]
 	if strings.Contains(prompt, "Current date:") {
 		t.Error("did not expect 'Current date:' in the base system prompt (it should be in a separate system-reminder entry)")
 	}
@@ -307,9 +307,9 @@ func TestBuildSystemPrompt_OSEnvStaticAcrossAgents(t *testing.T) {
 	// gets the same cacheable prefix lines, so the prompt stays cache-stable
 	// regardless of which agent runs.
 	detectedOSEnv = nil // force re-detection
-	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", 0, 0, true)
-	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", 0, 0, true)
-	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", 0, 0, true)
+	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
+	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
+	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
 
 	for name, p := range map[string]string{"build": buildPrompt, "plan": planPrompt, "note": notePrompt} {
 		if !strings.Contains(p, "OS:") {
@@ -721,7 +721,7 @@ func TestCodingAgents_ReviewAndEndToEndVerification(t *testing.T) {
 // TestBuildAgent_SystemPrompt_ContainsPublicServing verifies writing agents are
 // told about the workspace public/ folder served over HTTP at /public.
 func TestBuildAgent_SystemPrompt_ContainsPublicServing(t *testing.T) {
-	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", "anthropic", true, true)
+	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", sessionMemory{}, "anthropic", true, true)
 	if !strings.Contains(p, "Public file hosting") {
 		t.Error("BuildAgent prompt should include the public file hosting section")
 	}
@@ -741,7 +741,7 @@ func TestBuildAgent_SystemPrompt_ContainsPublicServing(t *testing.T) {
 // gated on writing ability: a read-only agent (no write/edit) must never be
 // told about a /public hosting capability it cannot use.
 func TestReadOnlyAgent_SystemPrompt_OmitsPublicServing(t *testing.T) {
-	p := staticSystemPrompt(NoteAgent, "/tmp/testproj", false, "", "", "", true, true)
+	p := staticSystemPrompt(NoteAgent, "/tmp/testproj", false, "", "", sessionMemory{}, "", true, true)
 	if strings.Contains(p, "Public file hosting") {
 		t.Error("read-only agent must not be offered the public file hosting section")
 	}
@@ -751,7 +751,7 @@ func TestReadOnlyAgent_SystemPrompt_OmitsPublicServing(t *testing.T) {
 // Build session is told how to hand the user a URL for a service it started on
 // a loopback port.
 func TestBuildAgent_SystemPrompt_ContainsPreviewServing(t *testing.T) {
-	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", "anthropic", true, true)
+	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", sessionMemory{}, "anthropic", true, true)
 	if !strings.Contains(p, "Live service preview") {
 		t.Error("BuildAgent prompt should include the live service preview section")
 	}
@@ -805,7 +805,7 @@ func TestPreviewServingPrompt_BrowserNoteOnlyForLocalhost(t *testing.T) {
 func TestBreakdownAgent_SystemPrompt_ContainsNotesWhenEnabled(t *testing.T) {
 	// The project-notes guidance reaches BreakdownAgent only through the assembled
 	// prompt, and only when the notes feature is enabled.
-	assembled := strings.Join(buildSystemPromptEntries(BreakdownAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true, true), "\n\n")
+	assembled := strings.Join(buildSystemPromptEntries(BreakdownAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
 	if !strings.Contains(assembled, "Project notes") {
 		t.Error("BreakdownAgent assembled prompt should mention project notes when enabled")
 	}
@@ -821,11 +821,11 @@ func TestBreakdownAgent_SystemPrompt_ContainsNotesWhenEnabled(t *testing.T) {
 // The project-notes section is withheld unless the notes feature is enabled for
 // the session, and it appears only in a project-scoped agent's prompt.
 func TestBuildSystemPrompt_NotesGate(t *testing.T) {
-	off := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", -1, true, false), "\n\n")
+	off := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, false), "\n\n")
 	if strings.Contains(off, "Project notes") {
 		t.Error("assembled prompt must omit project notes when the feature is disabled")
 	}
-	on := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 1920, 1080, "", -1, true, true), "\n\n")
+	on := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true), "\n\n")
 	if !strings.Contains(on, "Project notes") {
 		t.Error("assembled prompt must carry project notes when the feature is enabled")
 	}
@@ -838,7 +838,7 @@ func TestBuildSystemPrompt_NotesGate(t *testing.T) {
 // (index, search, memory-recall) are not project-scoped and never see it either.
 func TestBuildSystemPrompt_NotesScope(t *testing.T) {
 	entries := func(a Agent, notes bool) string {
-		return strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", 0, 0, "", -1, true, notes), "\n\n")
+		return strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, notes), "\n\n")
 	}
 
 	for _, a := range []Agent{BuildAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent} {
@@ -895,7 +895,7 @@ func TestBuildSystemPrompt_NotesFlagIsRaceFree(t *testing.T) {
 			defer wg.Done()
 			child := *lr
 			for j := 0; j < 50; j++ {
-				_ = buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", 0, 0, "", -1, true, child.notesOn())
+				_ = buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, child.notesOn())
 			}
 		}()
 	}
@@ -936,14 +936,14 @@ func TestBuildSystemPrompt_FinalInstructionLast(t *testing.T) {
 	}
 	// Viewport dims are provided so a dynamic section is appended before the
 	// final instruction — proving it really is last.
-	p := buildSystemPrompt(NoteAgent, "/tmp/proj", false, "", "", 1920, 1080, true)
+	p := buildSystemPrompt(NoteAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, true)
 	if !strings.HasSuffix(p, NoteAgent.FinalInstruction) {
 		t.Error("NoteAgent FinalInstruction should be the final content of the assembled prompt")
 	}
 	if BuildAgent.FinalInstruction != "" {
 		t.Error("BuildAgent should not define a FinalInstruction")
 	}
-	bp := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", 0, 0, true)
+	bp := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, true)
 	if strings.HasSuffix(bp, "Reminder:") {
 		t.Error("BuildAgent prompt should not gain a stray final reminder")
 	}
@@ -1160,14 +1160,14 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 
 	// BuildAgent has latex_to_pdf tool — should get LaTeX info injected
 	if _, err := exec.LookPath("pdflatex"); err == nil {
-		prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", 1920, 1080, true)
+		prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, true)
 		if !strings.Contains(prompt, "LaTeX environment") {
 			t.Error("expected LaTeX environment section in BuildAgent prompt when pdflatex is available")
 		}
 	}
 
 	// PlanAgent does NOT have latex_to_pdf tool — should NOT get LaTeX info
-	prompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", 1920, 1080, true)
+	prompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, true)
 	if strings.Contains(prompt, "LaTeX environment") {
 		t.Error("did NOT expect LaTeX environment section in PlanAgent prompt (no latex_to_pdf tool)")
 	}
@@ -1181,9 +1181,9 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 // entry [0] is the only block providers mark cacheable, and the browser resends
 // its window size with every prompt, so a resize must not change [0] by one byte.
 func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.T) {
-	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1, true, true)
-	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1280, 720, "", -1, true, true)
-	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 0, 0, "", -1, true, true)
+	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)
+	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1280, 720, "", -1, true, true)
+	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 0, 0, "", -1, true, true)
 
 	if desktop[0] != laptop[0] {
 		t.Error("resizing the window changed the cacheable prefix — the tools+system cache is invalidated on every resize")
@@ -1212,12 +1212,12 @@ func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.
 // that moving the viewport could have broken: an output-only agent's format
 // constraint must stay the last thing the model reads.
 func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
-	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1, true, true)
+	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)
 	if got := entries[len(entries)-1]; got != NoteAgent.FinalInstruction {
 		t.Errorf("last entry = %q, want the agent's FinalInstruction", got)
 	}
 	// An agent without one must not gain an empty trailing entry.
-	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", 1920, 1080, "", -1, true, true) {
+	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true) {
 		if strings.TrimSpace(e) == "" {
 			t.Error("assembled entries contain an empty block")
 		}
@@ -1302,7 +1302,7 @@ func TestMarkdownCapabilities_DoesNotPointAtAnAbsentViewport(t *testing.T) {
 	}
 
 	// End to end: a client that reports no viewport gets neither.
-	bare := strings.Join(buildSystemPromptEntries(BuildAgent, "/proj", false, "", "", 0, 0, "", -1, true, true), "\n\n")
+	bare := strings.Join(buildSystemPromptEntries(BuildAgent, "/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
 	if strings.Contains(bare, "viewport dimensions provided below") {
 		t.Error("assembled prompt references viewport dimensions that were never supplied")
 	}
@@ -1354,7 +1354,7 @@ func TestMemoryMDPrompt_DoesNotNameRecallTools(t *testing.T) {
 	}
 
 	// End to end: Note is project-scoped and holds neither tool.
-	note := strings.Join(buildSystemPromptEntries(NoteAgent, "/proj", true, "", "", 0, 0, "", -1, true, true), "\n\n")
+	note := strings.Join(buildSystemPromptEntries(NoteAgent, "/proj", true, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
 	if strings.Contains(note, "memory_recall") {
 		t.Error("assembled Note prompt names a recall tool it does not have")
 	}
@@ -1378,7 +1378,7 @@ func TestParallelToolCallsPrompt_ExamplesMatchTheAgentsTools(t *testing.T) {
 	}
 
 	// End to end, against the agent that actually takes this branch.
-	assembled := strings.Join(buildSystemPromptEntries(SearchAgent, "/proj", true, "", "", 0, 0, "", -1, true, true), "\n\n")
+	assembled := strings.Join(buildSystemPromptEntries(SearchAgent, "/proj", true, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
 	for _, unwanted := range []string{"file_map", `"glob"`} {
 		if strings.Contains(assembled, unwanted) {
 			t.Errorf("assembled Search prompt names %q, which it cannot call", unwanted)

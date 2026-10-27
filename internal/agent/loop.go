@@ -561,6 +561,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	}
 	agentMDContent := LoadAgentMD(workDir)
 	memoryMDContent := LoadMemoryMD(workDir)
+	// Session memory is a per-conversation file, so it is keyed by the ROOT
+	// session: a teammate shares, reads and writes its parent conversation's
+	// memory rather than a private copy. Loaded once per turn alongside the
+	// project files — it rides the same cached base and the same staleness.
+	sessionMem := loadSessionMemory(workDir, sessionMemoryKey(sessionID, lr.ParentSessionOf))
 
 	// Hand this turn the completions its own teammates reported while it was not
 	// running, as pending notices. Build only, like the board tool itself: the
@@ -1139,7 +1144,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// only, so anything that changes mid-session must stay out of it.
 		// Recall guidance appears when turn-memory is active and the agent holds
 		// the recall tools.
-		systemPrompts := buildSystemPromptEntries(agent, workDir, turnMemoryActive, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles, hasDeepSearch, lr.notesOn())
+		systemPrompts := buildSystemPromptEntries(agent, workDir, turnMemoryActive, agentMDContent, memoryMDContent, sessionMem, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles, hasDeepSearch, lr.notesOn())
 		var modelMessages []provider.ModelMessage
 
 		// Only the current user turn goes on the wire — from the last text-user
@@ -4512,18 +4517,18 @@ func appendSystemEntry(entries []string, a Agent, entry string) []string {
 
 // buildSystemPrompt builds the full system prompt with no model-family tuning
 // (family = generic). Retained for callers/tests that have no model in hand.
-func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, notes bool) string {
-	return buildSystemPromptForFamily(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, "", notes)
+func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, viewportWidth int, viewportHeight int, notes bool) string {
+	return buildSystemPromptForFamily(a, dir, memoryEnabled, agentMDContent, memoryMDContent, sessionMem, viewportWidth, viewportHeight, "", notes)
 }
 
 // buildSystemPromptForFamily returns the assembled entries joined into one
 // string. The provider is given the entries separately (see
 // buildSystemPromptEntries) so the cacheable prefix can be isolated; this
 // convenience form is for callers and tests that just want the whole text.
-func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string, notes bool) string {
+func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, viewportWidth int, viewportHeight int, family string, notes bool) string {
 	// hasDeepSearch=true: these callers have no registry in hand, and the prompt
 	// they want is the full one.
-	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, viewportWidth, viewportHeight, family, -1, true, notes), "\n\n")
+	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, sessionMem, viewportWidth, viewportHeight, family, -1, true, notes), "\n\n")
 }
 
 // buildSystemPromptEntries returns the system-prompt entries in wire order:
@@ -4553,8 +4558,8 @@ func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMD
 // while the session is open.
 //
 // indexedFiles < 0 means no count was reported and the status line is omitted.
-func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, viewportWidth int, viewportHeight int, family string, indexedFiles int, hasDeepSearch bool, notes bool) []string {
-	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, agentMDContent, memoryMDContent, family, hasDeepSearch, notes)}
+func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, viewportWidth int, viewportHeight int, family string, indexedFiles int, hasDeepSearch bool, notes bool) []string {
+	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, agentMDContent, memoryMDContent, sessionMem, family, hasDeepSearch, notes)}
 
 	// Ordered stable -> volatile, which is a caching decision and not a cosmetic
 	// one. OpenAI, Ollama and OpenRouter join EVERY system entry into a single
@@ -4595,7 +4600,7 @@ func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDCo
 // plus everything that is fixed for the whole session. The model-family
 // working-style block belongs here — the model is fixed per session, so it stays
 // byte-identical across turns.
-func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, family string, hasDeepSearch bool, notes bool) string {
+func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, family string, hasDeepSearch bool, notes bool) string {
 	// Project context (working dir, host env, AGENT.md, MEMORY.md) is only
 	// relevant to agents that operate on the user's codebase. Utility agents —
 	// the keyword indexer and web-research agent — skip it to keep their prompt
@@ -4615,6 +4620,13 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 			prompt += memoryMDContent
 		}
 
+		// Session memory block: next to the project one, so both files sit above
+		// the two sections that explain them. Same cadence as MEMORY.md — read
+		// once per turn, so an edit costs one cache write, not one per step.
+		if sessionMem.block != "" {
+			prompt += sessionMem.block
+		}
+
 		// MEMORY.md section: role-aware instructions based on whether the agent
 		// can write files, and on whether a <memory-md> block was actually
 		// prepended above. BuildAgent gets full read/write maintenance
@@ -4624,6 +4636,13 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
 		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
+
+		// Session memory section: what the per-session file is and — the part
+		// this section exists for — the rule deciding which fact goes in the
+		// project file and which stays with the conversation. relPath is passed
+		// even when there is no block: the absent-file wording is what tells a
+		// writable agent where the file goes.
+		prompt += "\n\n" + sessionMemoryPrompt(canWriteFiles, sessionMem.block != "", sessionMem.relPath)
 
 		// HISTORY.md pointer: the log MEMORY.md is not. Nothing is loaded and
 		// no existence check is made, so the section stays constant and the

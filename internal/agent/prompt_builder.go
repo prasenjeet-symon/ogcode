@@ -305,6 +305,7 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 - Use the edit tool for targeted updates; use write only to restructure or first create the file.
 - Write down only what you have seen hold, and name the command or file that showed it when that is not obvious. An unchecked inference is marked "(unverified)" or left out — later sessions read this file as ground truth.
 - Before adding, check it isn't already recorded and update in place. Do this on your own initiative, before your final answer; that answer reports on the task, and mentions the memory update in one line at most.
+- A fact only this conversation needs belongs in the session memory file instead — see the session memory section below. MEMORY.md is for what every future session profits from.
 - When a line is a story about what happened rather than a fact to act on, move it to HISTORY.md. If the file passes about 20 KB, that move is the first thing to do — do not delete facts to hit a size.`
 		if !hasContent {
 			base += "\n- There is no MEMORY.md yet — create one in the project root with the write tool once there is knowledge worth recording."
@@ -318,6 +319,49 @@ func memoryMDPrompt(canWriteFiles, hasContent bool) string {
 - Do not modify MEMORY.md — you have no write or edit tools.`
 	}
 
+	return base
+}
+
+// sessionMemoryPrompt returns the session memory instructions section — the
+// per-session counterpart of memoryMDPrompt. relPath is the memory file's
+// path relative to the working directory, emitted even when the file does not
+// exist yet, because that missing-file case is exactly where the path is
+// needed: it is what the writable agent is told to create.
+//
+// The section spends its words on the split, not just the file. The agent
+// maintains two memory stores and must decide which one each fact lands in;
+// without a stated rule every fact defaults to whichever file was written
+// last. The rule is the project's answer to the promotion question: what
+// every session of this project profits from goes to MEMORY.md, what only
+// this conversation profits from stays in the session file, and an unsure
+// call starts small and promotes when the fact proves durable.
+func sessionMemoryPrompt(canWriteFiles, hasContent bool, relPath string) string {
+	base := "## Session memory — this conversation\n\n"
+	switch {
+	case hasContent && canWriteFiles:
+		base += "The content above in the <session-memory-md> tag is your session memory — a memory file scoped to THIS conversation, held at `" + relPath + "`.\n\n"
+	case hasContent:
+		base += "The content above in the <session-memory-md> tag is the session's memory — a memory file scoped to this conversation, held at `" + relPath + "`. Treat it as read-only reference.\n\n"
+	case canWriteFiles:
+		base += "This session has no session memory file yet. One is created at `" + relPath + "` the first time you write to it with the write tool.\n\n"
+	default:
+		base += "This session has no session memory file yet (it would live at `" + relPath + "`).\n\n"
+	}
+
+	base += "Session memory is re-read at the start of every turn of this conversation — later turns and the teammates this session spawns — and it dies with the conversation. Project `MEMORY.md` is re-read at the start of every turn of every session in this project, indefinitely. The two files are yours to keep apart.\n\n"
+	base += "### The split: what goes where\nA memory fact lands in exactly one of the two files:\n"
+	base += "- **Project level** — a fresh session of this project, knowing nothing of this conversation, benefits from it before it acts: a gotcha with its fix, an invariant and the test that pins it, a canonical value (path, env var, version, exact command), a decision and why. If EVERY session or the whole project benefits from it, it belongs in `MEMORY.md`.\n"
+	base += "- **Session level** — only this conversation benefits from it: what the current task is and where it stands across turns, decisions taken this session that later turns must not relitigate, the files being modified and how far, environment facts discovered mid-task, the user's task-specific preferences, state a teammate must pick up. If only THIS session benefits from it, it belongs in session memory.\n"
+	base += "- **Keep `MEMORY.md` minimal.** It is not a log and it must not explode: promote only what would change a fresh session's FIRST action, keep each line short, and admit nothing the code or build already answers. A fact that only matters once someone is already investigating that area goes to `HISTORY.md` instead — never into `MEMORY.md`.\n"
+	base += "- **Make session lines recall-friendly.** Before acting, later turns of THIS conversation dig past work back out of this file through a recall question — write lines a question can match: name the file, feature or area the fact concerns, so a future lookup has something concrete to hook onto.\n"
+	base += "- **When unsure, start at the session level and promote on evidence.** After a turn that established something, ask: would a fresh session of this project need this before its first act? If yes, move the line into `MEMORY.md` and delete it from session memory — a fact lives in exactly one place; promotion that forgets to delete is duplication.\n\n"
+
+	if !canWriteFiles {
+		base += "### How to use session memory\n- Reference it when deciding what to do next in this conversation — it holds this session's working state.\n- Note any facts worth recording; a future turn with write access can add them.\n- Do not modify the session memory file — you have no write or edit tools."
+		return base
+	}
+
+	base += "### How to maintain session memory\n- The same authoring rules as MEMORY.md apply: write only what you have seen hold, mark an unchecked inference \"(unverified)\" or leave it out, and update in place rather than append a growing log.\n- Keep it small — it reloads every turn of this session too. If it grows past a few KB, promote the durable lines to MEMORY.md (deleting them here) and drop what the conversation has settled.\n- Edits take effect from the next turn: the file is read once at turn start, not re-read mid-turn."
 	return base
 }
 

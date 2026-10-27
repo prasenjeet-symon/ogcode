@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/prasenjeet-symon/ogcode/internal/memfile"
+	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
 const (
@@ -13,6 +16,10 @@ const (
 	// interpolated into the system prompt across all discovered files. Unset —
 	// the default — means no cap at all: every file is loaded whole.
 	memoryMDBudgetEnv = "OGCODE_MEMORY_MD_MAX_BYTES"
+	// sessionMemoryBudgetEnv optionally caps the bytes of the session memory
+	// file's content, the same way memoryMDBudgetEnv caps MEMORY.md. Unset —
+	// the default — means no cap.
+	sessionMemoryBudgetEnv = "OGCODE_SESSION_MEMORY_MAX_BYTES"
 )
 
 // LoadMemoryMD discovers and loads MEMORY.md files by walking from dir up to
@@ -87,6 +94,59 @@ func LoadMemoryMD(dir string) string {
 	}
 
 	return b.String()
+}
+
+// sessionMemory is the session-scoped memory as loaded at turn start: the
+// file's path relative to the working directory — also the path the agent
+// writes the file back to — and its rendered <session-memory-md> block. The
+// zero value means the session has no memory file yet.
+type sessionMemory struct {
+	relPath string
+	block   string
+}
+
+// sessionMemoryKey returns the id a session's memory file is keyed by. When
+// the resolver says this session is a teammate, that is the root session —
+// the user-facing conversation the tree serves — so the whole conversation,
+// the parent session and the teammates it spawned, share one file. Otherwise
+// it is the session's own id.
+func sessionMemoryKey(sessionID session.SessionID, resolver func(session.SessionID) (session.SessionID, string)) string {
+	if resolver != nil {
+		if root, _ := resolver(sessionID); root != "" {
+			return string(root)
+		}
+	}
+	return string(sessionID)
+}
+
+// loadSessionMemory reads one session's memory file from under the project's
+// .ogcode/ — the per-session counterpart of LoadMemoryMD. It discovers no
+// hierarchy: a session memory file is project-anchored by construction,
+// keyed by memfile.SessionKey, and there is exactly one per conversation.
+//
+// The relPath is returned even when the file does not exist — it is the path
+// the missing-file guidance tells the writable agent to create. The block is
+// rendered through renderMDBlock, so content nobody vetted (the agent wrote
+// this file turn after turn) cannot close its own tag or forge another.
+func loadSessionMemory(projectDir, key string) sessionMemory {
+	path := memfile.SessionMemoryPath(projectDir, key)
+	rel := memfile.SessionMemoryRelPath(projectDir, key)
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("failed to read session memory", "path", path, "err", err)
+		}
+		return sessionMemory{relPath: rel}
+	}
+
+	trimmed := strings.TrimSpace(string(content))
+	if trimmed == "" {
+		return sessionMemory{relPath: rel}
+	}
+
+	block, _, _ := renderMDBlock("session-memory-md", rel, trimmed, mdSizeLimit(sessionMemoryBudgetEnv))
+	return sessionMemory{relPath: rel, block: block}
 }
 
 // discoverMemoryMDPaths walks from dir up to the filesystem root,

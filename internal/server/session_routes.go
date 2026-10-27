@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prasenjeet-symon/ogcode/internal/memfile"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
@@ -230,6 +231,20 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// The session memory file is keyed to the ROOT conversation and shared with
+	// every teammate it spawned, so only a root delete drops it — a child's
+	// deletion must not take the conversation's memory with it.
+	// parentSessionOf returns ("", "") for a session that is not a teammate,
+	// which is exactly the root-key case.
+	if parent, _ := s.parentSessionOf(id); parent == "" {
+		if sess, err := s.store.Get(id); err == nil && sess != nil && sess.Directory != "" {
+			if rmErr := memfile.DeleteSessionMemory(sess.Directory, string(id)); rmErr != nil {
+				slog.Warn("failed to delete session memory", "session", id, "err", rmErr)
+			}
+		}
+	}
+
 	s.bus.Publish("session.deleted", map[string]string{"id": string(id)})
 	w.WriteHeader(http.StatusNoContent)
 }

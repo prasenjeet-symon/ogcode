@@ -29,9 +29,12 @@ import (
 // interpolates (see collapseSpace in skill.go). This is that rule applied to
 // whole documents.
 
-// mdWrapperTag matches an opening or closing wrapper tag for either block, in
-// any case, with or without attributes.
-var mdWrapperTag = regexp.MustCompile(`(?i)<(/?)(agent-md|memory-md)`)
+// mdWrapperTag matches an opening or closing wrapper tag for any of the memory
+// blocks, in any case, with or without attributes. The session-memory block is
+// in the list with the other two for the same reason MEMORY.md is: an agent
+// wrote the file turn after turn, so a single poisoned turn could plant a tag
+// that outlives it.
+var mdWrapperTag = regexp.MustCompile(`(?i)<(/?)(agent-md|memory-md|session-memory-md)`)
 
 // mdTruncationMarker ends a block whose file did not fit the byte budget. The
 // budget without it is a document that simply stops mid-sentence, which reads to
@@ -79,12 +82,13 @@ func renderMDBlock(tag, relPath, content string, limit int) (block string, used 
 // neutralizeMDTags defuses any wrapper tag inside a document's own text, so no
 // file can close its block early or open one it was not given.
 //
-// It rewrites only the "<" of those specific tags, rather than escaping the
+// it rewrites only the "<" of those specific tags, rather than escaping the
 // whole document. A
 // project's AGENT.md is prose and code — generics, shell redirection, HTML in a
 // fenced block — and escaping every "<" in it would hand the model a document
-// full of &lt; where the author wrote code. The four sequences that can actually
-// break the frame are the only ones that need to change.
+// full of &lt; where the author wrote code. The sequences that can actually
+// break the frame — the wrapper tags of AGENT.md, MEMORY.md and session
+// memory — are the only ones that need to change.
 func neutralizeMDTags(s string) string {
 	return mdWrapperTag.ReplaceAllString(s, "&lt;$1$2")
 }
