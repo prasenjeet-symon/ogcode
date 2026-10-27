@@ -35,6 +35,11 @@ function shortenPath(path: string): string {
 // Pinned sessions are a local preference (there is no server field for them).
 // Stored as a plain list of ids; they keep the newest-first order they arrive in.
 const PIN_STORAGE_KEY = 'ogcode-pinned-sessions';
+// The last board roster the sidebar fetched, and whether any ever did. Kept
+// module-level because the sidebar is mounted per page — navigating remounts
+// it — and a remount must not start cold. See SessionSidebarInner.
+let ROSTER_CACHE: BoardHandle[] = [];
+let ROSTER_LOADED = false;
 
 function loadPinned(): Set<string> {
   try {
@@ -172,13 +177,22 @@ function SessionSidebarInner() {
 
   // Cluster chips (design of the same name in the sidebar-grouping mockups):
   // the session list joins the agent roster — the one the Agents page shows —
-  // without any API change. Every agent on the roster climbs its
-  // spawned_by edge to the root row the build session joined the board as, and
-  // the chip on that session's row counts the descendants; clicking the chip
-  // folds them in beneath the row. Sessions with no agents render exactly as
+  // without any API change. Every agent on the roster climbs its spawned_by
+  // edge to the root row the build session joined the board as, and the chip
+  // on that session's row counts the descendants; clicking the chip folds
+  // them in beneath the row. Sessions with no agents render exactly as
   // before. The session's own root row is not a chip member: the chip counts
   // only who the session spawned, not the session itself.
-  const [roster, setRoster] = createSignal<BoardHandle[]>([]);
+  //
+  // ROSTER_CACHE above is module-level on purpose: every page renders its own
+  // <SessionSidebar />, so navigating between pages remounts this component
+  // and would reset the signal to empty — child session rows (teammates,
+  // sub-agents) then flash back into the main list until the next roster
+  // fetch resolves. Starting from the last roster (and only hiding children
+  // once a roster has ever loaded) keeps a remount indistinguishable from
+  // the render before it.
+  const [roster, setRoster] = createSignal<BoardHandle[]>(ROSTER_CACHE);
+  const [rosterReady, setRosterReady] = createSignal(ROSTER_LOADED);
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
 
   const teamsById = createMemo(() => {
@@ -214,6 +228,10 @@ function SessionSidebarInner() {
   // dead-root team therefore floats as a main session row again, exactly like
   // a session no one ever grouped.
   const childSessionIds = createMemo(() => {
+    // Before the first roster lands, nothing may be hidden: the fetch would
+    // otherwise take rows away mid-list — appear then vanish. An empty roster
+    // after a real load means just that: no agents, nothing to group.
+    if (!rosterReady()) return new Set<string>();
     const ids = new Set<string>();
     const exists = new Set(session.sessions().map((s) => s.id));
     for (const [rootSessionId, team] of teamsById()) {
@@ -278,7 +296,10 @@ function SessionSidebarInner() {
   const refreshRoster = async () => {
     try {
       const r = await getBoardRoster();
-      setRoster(r.agents ?? []);
+      ROSTER_CACHE = r.agents ?? [];
+      ROSTER_LOADED = true;
+      setRoster(ROSTER_CACHE);
+      setRosterReady(true);
     } catch (err) {
       // The board may be unavailable (503 when it is nil); the last roster
       // keeps rendering — a chip is a summary, not ground truth.
@@ -684,9 +705,12 @@ function SessionSidebarInner() {
         </Show>
       </div>
 
-      {/* Workspace nav — above footer */}
-      <div class="shrink-0 px-2 pb-1">
-        <div class="px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
+      {/* Workspace nav — above footer. Sits in an inset panel so the static
+          workspace region reads as its own surface, apart from the session
+          list scrolling above it. */}
+      <div class="shrink-0 px-2 pt-1 pb-1.5">
+      <div class="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] px-1 pt-0.5 pb-1">
+        <div class="px-2 pt-1.5 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
           Workspace
         </div>
         <Show when={notesOn()}>
@@ -763,6 +787,7 @@ function SessionSidebarInner() {
           </svg>
           <span>Preview</span>
         </button>
+      </div>
       </div>
 
       {/* Footer */}
