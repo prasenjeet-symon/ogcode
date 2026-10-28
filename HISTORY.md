@@ -3852,3 +3852,63 @@ status text ("Fetching models…", "Applied — models updated.", error) + ONE S
 untouched. Verified live via the vite-verify procedure with screenshots of all three key states (Anthropic db-key,
 OpenRouter env+db, Gemini no-key) plus the fetching state; `vite build` + `tsc --noEmit` clean.
 Same chip+2-CTA pattern still present in `web/src/pages/settings/search.tsx` (~line 479) — deliberate follow-up candidate.
+
+## 2026-10-28 — Release v0.54.0
+
+- Minor bump after `remove-plan-mode` landed. HEAD at cut = `8e6dab1` ("chore(release): v0.54.0").
+- Workflows: CI run 40719929883 green; Release (GoReleaser) 40720454587 success; Publish Docker 40720454517 success — `v0.54.0-amd64`/`-arm64` pushed to GHCR + Docker Hub, multi-arch manifest tag published.
+- Assets: 7 (checksums.txt + darwin arm64/x86_64 + linux arm64 etc.). Downloaded darwin arm64 asset, `ogcode version` → v0.54.0 ✓ (note: runs from a non-git cwd print "failed to run git" — the dirty-suffix shell-out; run with cwd inside a git repo).
+- Notes-body gotcha: prepending the new section to RELEASE_NOTES.md clobbered the v0.52.0 header first time (old_string did not re-include it); restored in `b0df05f`. Body cut with `head -n 21` (20 truncated the final sentence).
+- Migration 069 (plan/task drop) is in the release; next free = 070 (MEMORY.md updated).
+
+## 2026-10-28 — OGX "Couldn't reach OGLAB" was an unsigned install, not an outage
+
+- Symptoms from 17:11 IST: OGX tab plan check errored; `~/.ogcode/logs/ogcode-0210a20b/ogcode.log`
+  showed `ogx: gateway refused this client: {"error":"a valid client signature is required"}` —
+  and one `ogx: gateway answered 523` (Cloudflare/origin down briefly) earlier in the day.
+- Root cause: `~/.local/bin/ogcode` (installed 21:08 by a plain `make install`) had
+  `OGXAppSecret` empty — no assertion headers, gateway 401s every plan check.
+  `grep -c -F <secret> <binary>` returns 0 on both the installed and repo binaries.
+- Fix: `make -s install OGX_APP_SECRET=$(tr -d '\n' < ~/.ogcode/ogx-app-secret)` → embed count ≥1.
+- Protocol verified independently of the server: python HMAC probe (same shape as
+  appassertion) — unsigned = 401 "signature required"; signed, no token = 401 "a valid install
+  token is required"; signed + real token from `ogx_account` in `~/.ogcode/config.db` =
+  **200, 2 models granted** (ogx-deepseek-v4.1-flash, glm-5.3-flash class).
+- Probe gotchas: Cloudflare **1010 browser_signature_banned** blocks `Python-urllib` UAs
+  (send `Go-http-client/2.0` or curl); anonymous `curl …/v1/models` = 401 by design (reachable).
+- Lurking (unfixed): a 401 with body containing "install token" maps to `ErrOGXTokenRevoked` —
+  an unsigned client WITH a valid token gets 401 "a valid **install token** is required" and
+  would show the FALSE "revoked" banner instead of unreachable (ogx.go:126-130).
+
+## 2026-10-28 — Blog comments land on giscus (GitHub Discussions)
+
+- Static GitHub Pages blog (`blog/`, Astro 5) has no backend, so comments go through giscus:
+  one lazy-loaded client script from `giscus.app`, threads live in this repo's Discussions.
+- Constants (verified with `gh api graphql`): repo `prasenjeet-symon/ogcode`, repoId
+  `R_kgDOSRkf9g`, category `General`, categoryId `DIC_kwDOSRkf9s4DAniu`, mapping `pathname`,
+  strict 0, reactions 1, emitMetadata 0, inputPosition top, custom dark theme
+  `https://ogcode.in/blog/giscus-theme.css`.
+- Theme file copies the 82 `--color-*` vars from `https://giscus.app/themes/dark.css` and
+  overrides them with the blog tokens (`#151414` canvas, `#ff5e1f` accent, `#d1440c` emphasis).
+- Load is gated on an IntersectionObserver (`rootMargin: 400px`), so first paint stays
+  JS-free; `loading=lazy` is set on the iframe as a second guard.
+- State at hand-off: without the giscus GitHub App installed on the repo the widget renders
+  "An error occurred: giscus is not installed on this repository" — verified in a headless
+  Chrome screenshot of the dev server, so app installation is the one remaining manual step.
+  `gh api repos/prasenjeet-symon/ogcode/installation` answers 401 (JWT required), so the
+  installation state cannot be probed from the CLI.
+- **Install state is browser-only, never `gh`**: `/user/installations` = 403 (needs an
+  app-authorized token), `/repos/{o}/{r}/installation` = 401 (needs a JWT). The repo owner's
+  Chrome landing on `https://github.com/settings/installations/176276531` = installed,
+  "Only select repositories" → ogcode granted. Installation id **176276531**.
+- With the app installed the embed renders the real thread UI (0 reactions / 0 comments /
+  Write-Preview / "Sign in with GitHub") and logs `[giscus] Discussion not found. A new
+  discussion will be created if a comment/reaction is submitted.` — that warning is the
+  HEALTHY state: giscus creates the per-pathname discussion lazily on the first comment.
+- The custom theme needs the CSS deployed: `https://ogcode.in/blog/giscus-theme.css` is 404
+  until the next Pages build (blog changes uncommitted), so the widget wears giscus's
+  built-in theme meanwhile. Pages serves blog assets with `access-control-allow-origin: *`
+  (checked on `/blog/_astro/*.css`), so the external-theme fetch resolves once deployed.
+- Local end-to-end harness: `python3 -m http.server 8899 --bind 127.0.0.1` rooted at `docs/`,
+  open `http://127.0.0.1:8899/blog/<slug>/` — giscus needs real network, headless Chrome
+  works but cannot scroll to a fragment reliably (use the extension tab to eyeball it).
