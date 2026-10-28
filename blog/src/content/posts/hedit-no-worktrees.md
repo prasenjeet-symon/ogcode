@@ -84,7 +84,7 @@ every tool that touches files. We call it hedit.
 **Nobody writes over a change they haven't seen.**
 
 That's it. Simple to say, and it has to work perfectly or the whole idea
-falls apart. So let's look at how the gate makes it true.
+falls apart. Here's how the gate makes it true.
 
 ## The gate remembers three things
 
@@ -103,12 +103,12 @@ changed, without rereading every page. The gate uses this to spot that
 something moved, and then the next read does the real checking.
 
 **A bookmark.** For every agent, the revision number that file had the
-last time that agent truly read it. And "truly read" matters: an agent
+last time that agent truly read it. That qualifier matters: an agent
 that only asked for a quick summary or a file listing doesn't get a
 bookmark, because it never saw the actual words. You can't promise you
 read a page you never saw.
 
-Notice what's missing: no locks, no copies, no merge machinery. The gate
+Nothing in it is a lock, a copy, or a piece of merge machinery. The gate
 is just a very careful diary.
 
 ## What happens when two agents meet
@@ -148,11 +148,11 @@ Re-read the file and re-apply your change against the current content.
 That message is the whole feature. Look at what it gives the losing
 agent: the names of everyone who touched the file, every change it
 missed, with the old and new lines right there, and a clear next step.
-It is not an error the agent will blindly retry. It is a full catch-up
-report.
+It doesn't invite the blind retry a bare error does. It's a full
+catch-up report.
 
 The agent then rereads the fresh file and reapplies its edit on top of
-what exists now. No guessing, no overwriting, no lost work.
+what exists now. Nothing gets overwritten, and nothing gets lost.
 
 We call this refuse-and-catch-up. Compare it to the copy-and-merge
 world: there, the collision is discovered after both agents are
@@ -239,17 +239,17 @@ just the fact that a change happened.
 And the reason is not luck. In Ogcode, an agent cannot edit a file
 without writing one line on why. It is a required part of the edit, the
 same way the file itself is. So the first thing every record answers is
-exactly the question you will have later: not just "what changed" but
-"why", and nobody had to remember to document anything after the fact.
+exactly the question you will have later: what changed, and why. Nobody
+had to remember to document anything after the fact.
 
 Line the records up across a whole feature and the story falls out for
 free: which files iterated and how many times, which agent owned each
-change, what it actually did to the file, why it did it, and where two
-agents met and settled it, because when the collide-and-refuse moment
-from earlier happens, the diffs the refused agent gets are the very same
-diary rows. The catch-up report and the audit trail are one system, not
-two. You could read a whole feature's records top to bottom like a
-story, in a way the copies-and-merge world genuinely cannot give you.
+change, what it actually did to the file, and where two agents met and
+settled it. The settling comes from the collide-and-refuse moment
+earlier: the diffs a refused agent gets are the very same diary rows,
+so the catch-up report and the audit trail are one system. You could
+read a whole feature's records top to bottom like a story, which the
+copies-and-merge world can't give you.
 
 We are honest about what's missing there: the diary has an interface for
 programs but not a real page in the web UI yet. That's coming.
