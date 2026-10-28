@@ -1,6 +1,6 @@
 ---
 title: Sessions & modes
-description: The three modes, how a session runs, and steering it mid-turn.
+description: How a session runs, and steering it mid-turn.
 ---
 
 Everything in Ogcode happens inside a **session**: one conversation with a title, a chosen model, and a transcript. This guide covers what a session is, the modes you can run it in, and how to steer it while it works.

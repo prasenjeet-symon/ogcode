@@ -140,10 +140,10 @@ func TestSessionMemoryPrompt_BranchesAndSplitRules(t *testing.T) {
 				t.Errorf("sessionMemoryPrompt must teach the split rule %q; got:\n%s", want, p)
 			}
 		}
-		// Note and Breakdown are project-scoped but hold no recall tool: the
+		// The note agent is project-scoped but holds no recall tool: the
 		// tool name stays in its own HasTool-gated block, never in this section.
 		if strings.Contains(p, "memory_recall") {
-			t.Errorf("sessionMemoryPrompt names memory_recall, which Note/Breakdown do not hold:\n%s", p)
+			t.Errorf("sessionMemoryPrompt names memory_recall, which the note agent does not hold:\n%s", p)
 		}
 	}
 }

@@ -272,7 +272,7 @@ type LoopRunner struct {
 	// Permissions gates mutating tool calls (bash/write/edit) behind user
 	// approval. nil disables gating entirely (CLI, tests). Even when set, a loop
 	// only prompts when its context carries WithPermissionGating — so headless
-	// runs (task, breakdown, note, search) never block on an approval UI.
+	// runs (task, note, search) never block on an approval UI.
 	Permissions *permission.Manager
 	// Questions carries the ask_user round trip: a batch of questions the agent
 	// cannot answer itself, put to the user through the UI, blocking until they
@@ -2681,7 +2681,7 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 	meta.ProjectID = project.Resolve(dir)
 
 	// Utility/ephemeral sessions (the recall agent itself, subagents, notes,
-	// indexing, search, breakdown) are not units of work worth remembering — and
+	// indexing, search) are not units of work worth remembering — and
 	// summarizing a memory-recall turn would recurse — so skip them.
 	if !turnMemorableSession(meta.SessionType) {
 		return
@@ -2930,7 +2930,7 @@ func truncateForDigest(s string) string {
 // worth summarizing into per-turn memory. Utility/ephemeral agents are excluded.
 func turnMemorableSession(sessionType string) bool {
 	switch sessionType {
-	case "subagent", "memory-recall", "note", "index", "search", "breakdown":
+	case "subagent", "memory-recall", "note", "index", "search":
 		return false
 	}
 	return true
@@ -3060,7 +3060,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 
 	// Permission gate: for interactive, gated sessions, mutating tools
 	// (bash/write/edit) require user approval. Non-gated runs (headless task,
-	// breakdown, note, search, CLI) and a nil manager skip this entirely.
+	// note, search, CLI) and a nil manager skip this entirely.
 	if lr.Permissions != nil && PermissionGatingEnabled(ctx) {
 		action, err := lr.requestPermission(ctx, sessionID, tc, model, providerID)
 		if err != nil {

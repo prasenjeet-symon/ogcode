@@ -180,7 +180,7 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 	ctx = agent.WithLoopControl(ctx, lc)
 	// This is an interactive session with a UI that can answer permission
 	// prompts, so mark it gated: mutating tools (bash/write/edit) will pause for
-	// approval. Headless loops (task/breakdown/note/search) never set this flag.
+	// approval. Headless loops (task/note/search) never set this flag.
 	// The one headless agent that runs through this path is the background task
 	// child: a read-only sub-agent with nobody to answer it, so it is ungated —
 	// the sync sub-agent's runner strips Questions directly for the same reason.

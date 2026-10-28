@@ -17,7 +17,6 @@ import (
 var resumableSessionTypes = map[string]bool{
 	"":      true,
 	"build": true,
-	"plan":  true,
 }
 
 // recoverInterruptedSessions reconciles every interactive session in a

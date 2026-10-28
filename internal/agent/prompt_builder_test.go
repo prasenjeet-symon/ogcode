@@ -1195,8 +1195,8 @@ func TestProjectIndexPrompt_ShellRuleMatchesWhetherTheAgentMayWrite(t *testing.T
 // After the slim, the MEMORY.md section no longer carries the recall-tool
 // comparison — that guidance lives in its own block, gated on the agent actually
 // holding the recall tools. So the MEMORY.md section must never name a recall
-// tool: Note and Breakdown are project-scoped (they receive the MEMORY.md
-// section) but hold neither tool, and naming one would send the model after a
+// tool: the note agent is project-scoped (it receives the MEMORY.md
+// section) but holds neither tool, and naming one would send the model after a
 // call it will never be offered.
 func TestMemoryMDPrompt_DoesNotNameRecallTools(t *testing.T) {
 	for _, canWrite := range []bool{true, false} {

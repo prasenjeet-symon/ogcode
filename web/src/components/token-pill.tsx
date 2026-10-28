@@ -52,9 +52,8 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
   const [pinned, setPinned] = createSignal(false);
   const showBreakdown = () => pinned() || (!isCoarse() && hovered());
 
-  // The local sum of the messages this view holds. It is what the plan view
-  // always uses, and the session view's stand-in — until the server total
-  // arrives, or when it cannot be read.
+  // The local sum of the messages this view holds. It is the session view's
+  // stand-in — until the server total arrives, or when it cannot be read.
   const localTotals = createMemo<Totals>(() => {
     const out: Totals = {
       input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, utility: 0, teammates: 0, effective: 0, total: 0,
@@ -73,8 +72,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
     // than on a message. Fold them into the components so the totals below
     // include them, and keep the utility subtotal — counted like the pill, so
     // it is a part of it — to show how much of the session was utility work.
-    // Only when the caller did not supply its own message list (the plan view
-    // does).
+    // Only when the caller did not supply its own message list.
     if (!props.messages) {
       const u = session.activeSession()?.utilityTokens;
       if (u) {
@@ -102,7 +100,7 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
   // on a session longer than one page its own sum is short; the server reads
   // every step without loading the transcript. Keyed on the session id and
   // refetched on every token total move, so it tracks the session as it runs.
-  // The plan view passes its own message list and has no session row to read.
+  // Skipped when the caller passes its own message list to sum instead.
   const [server] = createResource(
     () => {
       const id = session.activeSession()?.id;
@@ -151,8 +149,9 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
 
   // What the session cost, priced on the server at the model each step ran on.
   // Refetched whenever the token total moves — once per finished step or
-  // utility call — so it never lags the counts beside it. Not for the plan
-  // view, which passes its own message list and has no session row to price.
+  // utility call — so it never lags the counts beside it. Not priced when the
+  // caller passes its own message list, since there is no session row to
+  // price.
   const [usage] = createResource(
     () => {
       const id = session.activeSession()?.id;
@@ -161,7 +160,8 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
     (key: string) => getSessionUsage(key.slice(0, key.indexOf('|'))).catch(() => undefined),
   );
   // Only per-token billing goes in the pill; a plan's list-price value is a
-  // comparison, not a charge, so it stays in the breakdown. A teammate's spend
+  // comparison, not a charge, so it stays in the breakdown of what was bought.
+  // A teammate's spend
   // counts as the session's: it ran because this session spawned it.
   const teammateUsage = () => usage()?.teammates ?? [];
   const billed = () =>

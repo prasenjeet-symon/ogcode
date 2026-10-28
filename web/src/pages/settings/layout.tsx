@@ -18,8 +18,8 @@ import { SettingsShell, type ShellReport } from './ui';
 // navigation and search stay put no matter how long a page runs.
 //
 // Tone follows the rest of the app rather than inventing its own: the chrome —
-// bar and drawer — takes the lighter surface, exactly as SessionSidebar and
-// PlanSidebar do, and the content sits on the darker base beneath it. Settings
+// bar and drawer — takes the lighter surface, exactly as SessionSidebar does,
+// and the content sits on the darker base beneath it. Settings
 // used to invert that, which made crossing between a session and its settings
 // feel like crossing between two apps.
 // ---------------------------------------------------------------------------

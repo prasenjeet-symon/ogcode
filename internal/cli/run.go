@@ -216,8 +216,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	// Tool registry. The core set is shared with the server (see
 	// tool.RegisterCoreTools) — a headless run offers the build agent the same
 	// prompt as an interactive one, so it has to offer the same tools. What
-	// follows is only what this entry point wires itself; BreakdownTool is
-	// omitted because it is a no-op for standalone runs.
+	// follows is only what this entry point wires itself.
 	docindexStore := docindex.NewStore(database)
 	toolRegistry := tool.NewRegistry()
 	tool.RegisterCoreTools(toolRegistry, docindexStore)

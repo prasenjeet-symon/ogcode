@@ -60,7 +60,7 @@ const nav: DocGroup[] = [
       {
         title: 'Sessions & modes',
         slug: '/sessions-and-modes',
-        description: 'The three modes, how a session runs, and steering it mid-turn.',
+        description: 'How a session runs, and steering it mid-turn.',
       },
       {
         title: 'Agents & teammates',

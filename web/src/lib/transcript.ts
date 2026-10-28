@@ -1,7 +1,7 @@
 import type { MessageWithParts, MessagesPage } from '../api/client';
 
 // Merging transcript pages from the server into what a view already holds.
-// Shared by the session and plan contexts, which page the same way.
+// Used by the session context, which pages this way.
 
 // Reference-preserving comparisons for mergeTranscript, so a poll tick that
 // changed nothing keeps the existing objects and the list rebuilds nothing.

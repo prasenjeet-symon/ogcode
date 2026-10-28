@@ -12,9 +12,8 @@ import { getSession } from '../api/client';
 // Triggers:
 //   loop.done            → a session's agent loop exited (finished or failed)
 //   permission.requested → a tool call is waiting for approval
-// Plan tasks already surface through the bell (NotificationProvider); their
-// loops also publish loop.done, so listening only to loop.done here avoids
-// double notifications for the same event.
+// Sub-agent loops ride the same session and publish loop.done the same way, so
+// listening only to loop.done here avoids double notifications for one event.
 //
 // Two gates before any notification fires:
 //   - permission: 'granted' — the user opted in via the banner

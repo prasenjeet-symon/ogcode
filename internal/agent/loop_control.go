@@ -486,7 +486,7 @@ type permissionGatingKey struct{}
 // WithPermissionGating marks a context as belonging to an interactive session
 // that has a UI able to answer permission prompts. Only loops started with this
 // flag will pause on an "Ask" permission decision; headless loops (task,
-// breakdown, note, search, CLI) never carry it, so they never block waiting for
+// note, search, CLI) never carry it, so they never block waiting for
 // an approval that no one is there to give.
 func WithPermissionGating(ctx context.Context) context.Context {
 	return context.WithValue(ctx, permissionGatingKey{}, true)

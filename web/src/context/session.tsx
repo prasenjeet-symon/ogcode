@@ -134,7 +134,7 @@ interface SessionContextValue {
   /** Pick the effort for the selected model and store it on the active session. */
   selectEffort: (level: string) => Promise<void>;
   /** Remember an effort for a model without touching the active session — for
-   *  composers that run another session (a plan's). */
+   *  composers that run another session. */
   setEffortPick: (modelId: string, providerId: string, level: string) => void;
   permissionMode: () => 'auto' | 'ask' | 'yolo';
   setPermissionMode: (mode: 'auto' | 'ask' | 'yolo') => Promise<void>;
