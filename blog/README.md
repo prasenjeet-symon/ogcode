@@ -1,7 +1,7 @@
 # Ogcode blog
 
 The blog at [ogcode.in/blog](https://ogcode.in/blog/). Fully static: every
-page is pre-rendered HTML with zero client-side JavaScript, built with
+page is pre-rendered HTML, built with
 [Astro](https://astro.build) and styled to match the homepage design system
 (`docs/index.html`).
 
@@ -52,3 +52,18 @@ blog is never committed, and every push to `main` touching `docs/**` or
 Feeds and metadata come for free: `/blog/rss.xml`, `/blog/sitemap-index.xml`
 (referenced from `docs/robots.txt`), canonical URLs, OpenGraph/Twitter cards,
 and JSON-LD `BlogPosting` on every post.
+
+## Comments
+
+Comments on each post are powered by [giscus](https://giscus.app) on GitHub
+Discussions in `prasenjeet-symon/ogcode`, category `General`, mapped by page
+pathname. The widget is configured in `src/lib/comments.ts` and rendered by
+`src/components/Comments.astro`.
+
+It is the blog's only client-side JavaScript, and it stays lazy: the script is
+added only once a reader scrolls near the end of a post. The giscus GitHub App
+(<https://github.com/apps/giscus>) has to be installed on the repository, and
+Discussions enabled in its settings, or the box renders empty.
+
+The iframe's appearance comes from `public/giscus-theme.css`, which giscus
+loads by URL from its `data-theme`.

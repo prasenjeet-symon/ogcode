@@ -1,0 +1,70 @@
+---
+// The post's comment thread: giscus paints GitHub Discussions into a
+// blueprint box at the foot of the article. This is the blog's one
+// deliberate exception to "zero client-side JavaScript", so it must never
+// cost the first paint — the giscus client.js is injected only once the
+// mount comes within ~400px of the viewport (IntersectionObserver), and
+// the section plus its GitHub fallback link work with no JS at all.
+// Styles live in post.css; importing it here keeps the section
+// self-contained (Astro dedupes the stylesheet when the page imports it too).
+import { GISCUS } from '../lib/comments';
+import '../styles/post.css';
+
+// giscus reads plain data-* strings, so the pinned config is mapped once,
+// at build time, and handed to the inline loader via define:vars.
+const giscusAttrs: Record<string, string> = {
+  'data-repo': GISCUS.repo,
+  'data-repo-id': GISCUS.repoId,
+  'data-category': GISCUS.category,
+  'data-category-id': GISCUS.categoryId,
+  'data-mapping': GISCUS.mapping,
+  'data-strict': GISCUS.strict,
+  'data-reactions-enabled': GISCUS.reactionsEnabled,
+  'data-emit-metadata': GISCUS.emitMetadata,
+  'data-input-position': GISCUS.inputPosition,
+  'data-lang': GISCUS.lang,
+  'data-loading': GISCUS.loading,
+  'data-theme': GISCUS.theme,
+};
+---
+<section class="bp-comments" aria-labelledby="bp-comments-title">
+  <div class="bp-comments-head">
+    <p class="bp-comments-kicker">Comments</p>
+    <h2 class="bp-comments-title" id="bp-comments-title">Join the discussion</h2>
+    <p class="bp-comments-sub">Comments run on GitHub Discussions — sign in with GitHub, and the thread lives alongside the repo.</p>
+  </div>
+  <div class="box bp-comments-box">
+    <span class="cn tl" aria-hidden="true"></span>
+    <span class="cn tr" aria-hidden="true"></span>
+    <span class="cn bl" aria-hidden="true"></span>
+    <span class="cn br" aria-hidden="true"></span>
+    <div class="bp-comments-mount" data-giscus></div>
+    <p class="bp-comments-fallback"><a class="link" href="https://github.com/prasenjeet-symon/ogcode/discussions" target="_blank" rel="noopener">Open the discussion on GitHub</a></p>
+  </div>
+</section>
+<script is:inline define:vars={{ giscusAttrs }}>
+  (() => {
+    const mount = document.querySelector('[data-giscus]');
+    // No mount, or a previous run already injected the client: nothing to do.
+    if (!mount || mount.childElementCount > 0) return;
+    let loaded = false;
+    const load = () => {
+      if (loaded) return;
+      loaded = true;
+      const el = document.createElement('script');
+      el.src = 'https://giscus.app/client.js';
+      el.async = true;
+      el.crossOrigin = 'anonymous';
+      for (const key in giscusAttrs) el.setAttribute(key, giscusAttrs[key]);
+      mount.appendChild(el);
+    };
+    // No observer (very old browsers, some in-app webviews): load at once.
+    if (!('IntersectionObserver' in window)) return load();
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      io.disconnect();
+      load();
+    }, { rootMargin: '400px' });
+    io.observe(mount);
+  })();
+</script>

@@ -443,3 +443,44 @@
   .bp-back svg, .bp-prose a, .bp-rss { transition: none; }
   .bp-back:hover svg { transform: none; }
 }
+
+/* ══ Comments ════════════════════════════════════════════════════
+   The giscus thread (GitHub Discussions) below the author card: a
+   blueprint box whose corner marks frame the iframe, which lands only
+   once the mount nears the viewport (Comments.astro). */
+.bp-comments {
+  max-width: 720px;
+  margin-inline: auto;
+  margin-top: clamp(56px, 6vw, 84px);
+}
+.bp-comments-kicker {
+  font: 500 10.5px/1.2 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--brand-ink);
+}
+.bp-comments-title {
+  margin-top: 7px;
+  font-size: 22px; font-weight: 500; line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--bright);
+}
+.bp-comments-sub {
+  margin-top: 8px;
+  max-width: 54ch;
+  font-size: 15px; line-height: 1.55;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.bp-comments-box {
+  margin: 22px 0 0;
+  padding: clamp(16px, 2.4vw, 22px);
+}
+/* No reserved height: an empty mount must not jump the page when the
+   iframe arrives, only keep the box from collapsing to zero. */
+.bp-comments-mount { min-height: 1px; }
+.bp-comments-fallback {
+  margin-top: 16px;
+  font-size: 13px; line-height: 1.5;
+  color: var(--dim);
+}

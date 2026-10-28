@@ -1,0 +1,147 @@
+/* ═══════════════════════════════════════════════════════════════
+   Ogcode blog: giscus comment theme.
+
+   giscus takes a full URL in `data-theme`, so the Comments widget
+   points here and the iframe uses this file instead of a stock
+   giscus theme. Dark only, matching the blog: an iframe cannot see
+   the blog's CSS variables, so the palette in src/styles/blog.css
+   is written out as literal values below.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Canvas: --bg, --bg-2, --bg-3 (inset sits one step under --bg) */
+  --color-canvas-default: #151414;
+  --color-canvas-subtle: #191817;
+  --color-canvas-inset: #111010;
+  --color-canvas-overlay: #211f1e;
+
+  /* Text: --text, --muted, --dim */
+  --color-fg-default: #f0e3de;
+  --color-fg-muted: #9a9390;
+  --color-fg-subtle: #8a827e;
+
+  /* Accent: --brand for ink; --brand-btn where white on orange needs 4.5:1 */
+  --color-accent-fg: #ff5e1f;
+  --color-accent-emphasis: #d1440c;
+  --color-accent-muted: rgba(255, 94, 31, .45);
+  --color-accent-subtle: rgba(255, 94, 31, .16);
+
+  /* Hairlines: --line-2, --line, --line-3 */
+  --color-border-default: rgba(240, 227, 222, .16);
+  --color-border-muted: rgba(240, 227, 222, .09);
+  --color-neutral-muted: rgba(240, 227, 222, .09);
+  --color-primer-shadow-inset: 0 0 transparent;
+
+  /* Secondary buttons: --bg-3 fill, --bg-4 hover */
+  --color-btn-text: #f0e3de;
+  --color-btn-bg: #211f1e;
+  --color-btn-border: rgba(240, 227, 222, .16);
+  --color-btn-shadow: 0 0 transparent;
+  --color-btn-inset-shadow: 0 0 transparent;
+  --color-btn-hover-bg: #2a2927;
+  --color-btn-hover-border: rgba(240, 227, 222, .28);
+  --color-btn-active-bg: #2a2927;
+  --color-btn-active-border: rgba(240, 227, 222, .28);
+  --color-btn-selected-bg: #191817;
+
+  /* Primary button: solid #ff5e1f with near-black text (6.4:1) */
+  --color-btn-primary-text: #151414;
+  --color-btn-primary-bg: #ff5e1f;
+  --color-btn-primary-border: #ff5e1f;
+  --color-btn-primary-hover-bg: #ff7038;
+  --color-btn-primary-hover-border: #ff7038;
+  --color-btn-primary-selected-bg: #ff5e1f;
+  --color-btn-primary-shadow: 0 0 transparent;
+  --color-btn-primary-inset-shadow: 0 0 transparent;
+  --color-btn-primary-selected-shadow: 0 0 transparent;
+  --color-btn-primary-disabled-text: rgba(21, 20, 20, .6);
+  --color-btn-primary-disabled-bg: rgba(255, 94, 31, .45);
+  --color-btn-primary-disabled-border: transparent;
+
+  /* Segmented control + hover rows */
+  --color-segmented-control-bg: rgba(240, 227, 222, .08);
+  --color-segmented-control-button-bg: #151414;
+  --color-segmented-control-button-selected-border: rgba(240, 227, 222, .28);
+  --color-action-list-item-default-hover-bg: rgba(240, 227, 222, .08);
+
+  /* Status and reaction tints: --ok, --bad, --warn */
+  --color-success-fg: #3ecf8e;
+  --color-danger-fg: #ef5b5b;
+  --color-danger-muted: rgba(239, 91, 91, .45);
+  --color-danger-subtle: rgba(239, 91, 91, .12);
+  --color-attention-fg: #f2a53a;
+  --color-attention-muted: rgba(242, 165, 58, .45);
+  --color-attention-subtle: rgba(242, 165, 58, .12);
+  --color-scale-gray-7: #2a2927;
+  --color-scale-blue-8: #3a1e12;
+  --color-social-reaction-bg-hover: #2a2927;
+  --color-social-reaction-bg-reacted-hover: #3a1e12;
+
+  /* Code blocks: a warm palette instead of GitHub's blues and greens.
+     Every --color-prettylights-syntax-* name the stock theme sets. */
+  --color-prettylights-syntax-comment: #8a827e;   --color-prettylights-syntax-constant: #f2a53a;
+  --color-prettylights-syntax-entity: #ff7038;    --color-prettylights-syntax-entity-tag: #3ecf8e;
+  --color-prettylights-syntax-keyword: #ff8a5c;   --color-prettylights-syntax-string: #f5b547;
+  --color-prettylights-syntax-string-regexp: #3ecf8e;
+  --color-prettylights-syntax-variable: #ff7038;
+  --color-prettylights-syntax-storage-modifier-import: #f0e3de;
+  --color-prettylights-syntax-constant-other-reference-link: #f2a53a;
+  --color-prettylights-syntax-markup-list: #f5b547; --color-prettylights-syntax-markup-heading: #ff5e1f;
+  --color-prettylights-syntax-markup-italic: #f0e3de; --color-prettylights-syntax-markup-bold: #fffbf5;
+  --color-prettylights-syntax-markup-deleted-text: #ffd9d9;
+  --color-prettylights-syntax-markup-deleted-bg: #4a1515;
+  --color-prettylights-syntax-markup-inserted-text: #c9f5df;
+  --color-prettylights-syntax-markup-inserted-bg: #103026;
+  --color-prettylights-syntax-markup-changed-text: #ffe4c4;
+  --color-prettylights-syntax-markup-changed-bg: #43240c;
+  --color-prettylights-syntax-markup-ignored-text: #f0e3de;
+  --color-prettylights-syntax-markup-ignored-bg: #2a2927;
+  --color-prettylights-syntax-meta-diff-range: #ff7038;
+  --color-prettylights-syntax-brackethighlighter-angle: #9a9390;
+  --color-prettylights-syntax-brackethighlighter-unmatched: #ef5b5b;
+  --color-prettylights-syntax-invalid-illegal-text: #fffbf5;
+  --color-prettylights-syntax-invalid-illegal-bg: #7a1f1f;
+  --color-prettylights-syntax-carriage-return-text: #fffbf5;
+  --color-prettylights-syntax-carriage-return-bg: #a02a2a;
+  --color-prettylights-syntax-sublimelinter-gutter-mark: #2a2927;
+}
+
+html, body {
+  background: var(--color-canvas-default);
+  color: var(--color-fg-default);
+}
+
+main a { color: var(--color-accent-fg); }
+
+/* Text fields, including the new-comment and reply boxes. */
+.gsc-comment-box, .gsc-reply-box, .gsc-input {
+  background: var(--color-canvas-inset);
+  border-color: var(--color-border-default);
+  border-radius: 8px;
+}
+
+textarea, input, .gsc-comment-box-textarea { color: var(--color-fg-default); }
+
+textarea:focus, input:focus, .gsc-comment-box-textarea:focus {
+  border-color: var(--color-accent-emphasis);
+  outline: 2px solid var(--color-accent-fg);
+  outline-offset: 1px;
+}
+
+/* Buttons: giscus sets its own sizes, so only colour and radius change. */
+.gsc-btn, .gsc-direct-reaction-button, button { border-radius: 6px; }
+.gsc-btn-primary, button[type="submit"] { color: var(--color-btn-primary-text); }
+
+/* Comment cards and their chrome: the blog's warm hairlines, not GitHub grey. */
+.gsc-comment { border-color: var(--color-border-muted); border-radius: 12px; }
+.gsc-comment-header, .gsc-comment-box-tabs, .gsc-toolbar-item {
+  border-color: var(--color-border-muted);
+}
+
+/* Markdown inside comments follows the site's tones. */
+pre, code { border-radius: 6px; }
+pre { background: var(--color-canvas-inset); border: 1px solid var(--color-border-muted); }
+blockquote { border-left: 3px solid var(--color-accent-muted); color: var(--color-fg-muted); }
+hr { border-color: var(--color-border-muted); }
+
+::selection { background: rgba(255, 94, 31, .45); color: #fffbf5; }

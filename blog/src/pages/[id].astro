@@ -2,6 +2,7 @@
 import { render } from 'astro:content';
 import Base from '../layouts/Base.astro';
 import AuthorCard from '../components/AuthorCard.astro';
+import Comments from '../components/Comments.astro';
 import CtaSlab from '../components/CtaSlab.astro';
 import { publishedPosts, formatDate, type Post } from '../lib/posts';
 import { AUTHOR } from '../lib/author';
@@ -122,6 +123,8 @@ const jsonLd = JSON.stringify({
       </div>
 
       {byDefaultAuthor && <AuthorCard />}
+
+      <Comments />
 
       <nav class="bp-foot" aria-label="More from the blog">
         <a class="btn btn-line btn-sm bp-back" href="/blog/">
