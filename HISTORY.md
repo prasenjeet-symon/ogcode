@@ -3805,6 +3805,12 @@ Findings came from a v0.51.0 accuracy review of the three public surfaces. Fixes
 - **No extension re-release needed** — extension code unchanged; the fix rides the next ogcode (server) release. Users must update ogcode and restart Chrome (manifests are read at browser startup); a failed `autoPairThenConnect` is memoized for the worker life, so a reload would also clear it.
 - Pins updated: `TestEnsureRegisteredDoesNothingWithoutCandidates` replaced by `TestEnsureRegisteredWritesTheStoreIDForABareProject` (a bare end-user project entitles exactly the store id); the unpacked-id and env-id tests now expect the store id appended. `internal/nativehost` + `internal/cli` green, gofmt + vet clean.
 
+## 2026-10-28 — v0.53.1 released
+
+- Tagged v0.53.1 off the vendor-slot work: feat(provider) 739d58f, fix(agent) 8ef3d59, chore(release) 0d47645. Release/CI/Docker workflows all green (~7 min); assets = 7 (darwin/linux/windows, x86_64+arm64 + checksums.txt).
+- `CGO_ENABLED=1 go test ./...` fails ONLY in agent/skills/golang-cli/assets/examples (missing module deps in tracked asset samples, pre-existing) — that package has no module and is expected red locally; CI stays green.
+- Uncommitted strays in the tree at release time: docs-site/docs edits from another session (untouched) + mock2.log/ogcode.log/pids.txt (never commit).
+
 ## 2026-10-28 — intent router: echo step indexes verbatim, raise the match bar
 
 - The route model was answering with the step's list position instead of its own `index` (the input is filtered, so they differ) — intentRouteSystem now demands the verbatim echo, and "genuinely help" gets an explicit high bar (most steps correctly match nothing). Also marshals the payload as a content-parts block ({"type":"text"}) instead of a bare JSON string (internal/agent/intent_tools.go + test).
