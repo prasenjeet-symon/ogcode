@@ -1,4 +1,24 @@
-# Release Notes — v0.52.0
+# Release Notes — v0.54.0
+
+## Major: Plan mode is gone
+
+A task no longer starts with a planning step that broke the work into tasks
+and sub-tasks before anything ran. The plan-mode feature has been removed
+whole: the planning, breakdown and task agents, their packages and database
+tables, the plan UI and its routes. A request now runs as one agent loop that
+starts working immediately, states its plan with the `update_intent` tool and
+keeps the plan's step status live in the composer as it goes.
+
+Upgrading runs migration 069, which drops the plan and task tables. Nothing
+else reads or writes them after this version. Users who rely on plan mode
+will find its function absorbed into the `update_intent` plan shown for
+every turn, and the board's agent tree now covers all agents, not just the
+ones a plan spawned.
+
+## Minor: Cleaner credentials row in Models settings
+
+The provider credentials block on the Models page is now one row with one
+Save button, instead of a stacked form with two.
 
 ## Minor: One-shot agent reminders — the schedule tool
 
