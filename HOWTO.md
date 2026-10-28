@@ -163,6 +163,23 @@ Done when: the PNG shows the intended page; for an injected overlay, verify it r
 can silently drop it) — a `bg-black/60` backdrop reads ~0.4× the undimmed capture and
 `getComputedStyle(backdrop).backgroundColor` is `oklab(0 0 0 / 0.6)`.
 
+### A static page (`docs/index.html`) needs no CDP
+The CLI `--screenshot` works here because nothing holds the page open. From `docs/`:
+
+1. Build a throwaway `_shot.html`: rewrite `loading="lazy"` → `eager` (lazy images NEVER paint
+   headless, so a missing photo is usually the harness, not the CSS), and inject
+   `<style>.reveal,.rise{opacity:1!important;transform:none!important}</style>` so the scroll-in
+   animation is not caught mid-fade.
+2. `--headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1
+   --window-size=W,H --virtual-time-budget=15000 --screenshot=/tmp/x.png _shot.html`. To shoot one
+   section, add a script that removes the other `<section>`s and scrolls to the target after ~900 ms.
+3. `docs/index.html` is a single file: check a grid change at 1400, 1024 and 760 wide, then
+   `rm -f _shot.html` (never leave it in the tree).
+
+Flake: with `--disable-gpu` a decoded image sometimes never repaints (same file, same flags, one run
+paints and the next does not). Re-run once before touching the CSS — a forced style recalc in the
+injected script always made it paint, which is how the artifact is told from a real bug.
+
 ## Drive the web UI end to end with ego-browser
 
 Verified: 2026-10-22 @ v0.50.2
