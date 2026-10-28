@@ -212,6 +212,45 @@ and the actual difference between old and new text. The diary never
 shrinks, so even long after an agent is gone you can still look up
 exactly what it did.
 
+That diary is where the one-folder rule pays off a second time: it makes
+the whole job auditable.
+
+Think about auditing when agents work on copies. Three branches, three
+streams of commits, one merge commit at the end that mashes everything
+together. Ask later "why does this function look like this?" and the
+honest answer is archaeology: dig through chat logs and terminal
+scrollback, hoping someone wrote the reason down somewhere.
+
+In Ogcode, asking "what happened to this file?" gets a straight answer.
+Here is the shape of it, for the file from the refusal message above,
+covering one job:
+
+```
+rev 8   09:14:07  docs-team     edit   fix the wrong port number
+rev 9   09:14:52  nav-fix       edit   rename the navigation section
+rev 10  09:15:31  docs-team     edit   rewrite the failing test
+rev 11  09:16:03  orchestrator  edit   update the config example
+```
+
+Every line is one landing, and every landing carries the old and new
+lines beside it, so you open the record and see the actual change, not
+just the fact that a change happened.
+
+And the reason is not luck. In Ogcode, an agent cannot edit a file
+without writing one line on why. It is a required part of the edit, the
+same way the file itself is. So the first thing every record answers is
+exactly the question you will have later: not just "what changed" but
+"why", and nobody had to remember to document anything after the fact.
+
+Line the records up across a whole feature and the story falls out for
+free: which files iterated and how many times, which agent owned each
+change, what it actually did to the file, why it did it, and where two
+agents met and settled it, because when the collide-and-refuse moment
+from earlier happens, the diffs the refused agent gets are the very same
+diary rows. The catch-up report and the audit trail are one system, not
+two. You could read a whole feature's records top to bottom like a
+story, in a way the copies-and-merge world genuinely cannot give you.
+
 We are honest about what's missing there: the diary has an interface for
 programs but not a real page in the web UI yet. That's coming.
 
