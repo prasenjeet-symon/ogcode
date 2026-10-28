@@ -290,12 +290,20 @@ func TestSuggestIntentToolsAppendsAHint(t *testing.T) {
 	if reqs[0].MaxTokens != 0 {
 		t.Errorf("MaxTokens = %d, want it unset: matches are uncapped", reqs[0].MaxTokens)
 	}
-	// ModelMessage.Content must be a JSON string (not a raw JSON object):
-	// OpenAIProvider unmarshals Content into `any` and serializes it verbatim as
-	// `messages[].content`, so a raw object is rejected with 400 by providers.
-	var contentText string
-	if err := json.Unmarshal([]byte(reqs[0].Messages[0].Content), &contentText); err != nil {
-		t.Fatalf("message Content is not a JSON string (%s): %v", reqs[0].Messages[0].Content, err)
+	// ModelMessage.Content must arrive as a text-parts array whose single text
+	// part IS the payload object — never a raw JSON object (OpenAIProvider
+	// unmarshals Content into `any` and serializes it verbatim as
+	// `messages[].content`, so a raw object is rejected with 400 by providers)
+	// and never a JSON string inside a JSON string.
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(reqs[0].Messages[0].Content), &parts); err != nil {
+		t.Fatalf("message Content is not a text-parts array (%s): %v", reqs[0].Messages[0].Content, err)
+	}
+	if len(parts) != 1 || parts[0].Type != "text" {
+		t.Fatalf("content parts = %+v, want exactly one text part", parts)
 	}
 	var payload struct {
 		Steps []struct {
@@ -304,7 +312,7 @@ func TestSuggestIntentToolsAppendsAHint(t *testing.T) {
 			Description string `json:"description"`
 		} `json:"steps"`
 	}
-	if err := json.Unmarshal([]byte(contentText), &payload); err != nil {
+	if err := json.Unmarshal([]byte(parts[0].Text), &payload); err != nil {
 		t.Fatalf("payload is not JSON: %v", err)
 	}
 	if len(payload.Steps) != 1 || payload.Steps[0].Index != 0 || payload.Steps[0].Description == "" {

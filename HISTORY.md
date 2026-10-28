@@ -3805,6 +3805,18 @@ Findings came from a v0.51.0 accuracy review of the three public surfaces. Fixes
 - **No extension re-release needed** — extension code unchanged; the fix rides the next ogcode (server) release. Users must update ogcode and restart Chrome (manifests are read at browser startup); a failed `autoPairThenConnect` is memoized for the worker life, so a reload would also clear it.
 - Pins updated: `TestEnsureRegisteredDoesNothingWithoutCandidates` replaced by `TestEnsureRegisteredWritesTheStoreIDForABareProject` (a bare end-user project entitles exactly the store id); the unpacked-id and env-id tests now expect the store id appended. `internal/nativehost` + `internal/cli` green, gofmt + vet clean.
 
+## 2026-10-28 — intent router: echo step indexes verbatim, raise the match bar
+
+- The route model was answering with the step's list position instead of its own `index` (the input is filtered, so they differ) — intentRouteSystem now demands the verbatim echo, and "genuinely help" gets an explicit high bar (most steps correctly match nothing). Also marshals the payload as a content-parts block ({"type":"text"}) instead of a bare JSON string (internal/agent/intent_tools.go + test).
+- Rewrote the browser-takeover Skill front-matter description so browsing jobs load it by default, phrased around open/navigate/click/screenshot verbs (internal/skill/embedded.go).
+
+## 2026-10-28 — "Point at" vendors + custom endpoints become first-class Models-settings tabs
+
+- Tab strip in `/settings/models` now renders one tab per pointed vendor (own API key, base URL, model enable/disable, global in config.db) instead of a single OpenAI tab with a vendor-aim dropdown. Tabs appear only when created — "Add a vendor" chip lane (presets: Google Gemini, Groq, DeepSeek, Cerebras, Together, Mistral, SambaNova, NVidia, …) and "Add a vendor → custom URL" for arbitrary OpenAI-compatible endpoints; chips label bare-IP endpoints as `host:port` (vendorLabelFor, web/src/lib/providers.ts). Removed via "Remove this vendor" / `DELETE /api/providers/config/{id}` (missing row = clean no-op `{"removed":true}`).
+- Vendor slots no longer masquerade OpenAI's catalogue (internal/provider/openai.go): RefreshCatalog's default branch fetches any slot whose id ≠ "openai" (or a re-aimed cloud URL, previously only a re-aimed URL fetched); staticFallback for unknown ids returns nil, except a config-declared model (`modelExplicit` from NewOpenAICompatibleProvider) serves one synthetic row pre-refresh. Pins: TestVendorSlotRefreshesItsLocalEndpoint, TestVendorSlotNeverBorrowsOpenAIFallback, TestVendorSlotDeclaredModelServesPreRefresh (catalog_test.go); fixes TestLoadProviderMapRegistersCustomProviders which had only passed via the masquerade.
+- Native confirm() in models.tsx removeThisVendor blocks browser takeover sessions (page-level dialog) — verified removal via the API instead; confirm() kept, it matches the file's existing pattern.
+- Rig: throwaway server :7911 + mock python vendor :59601 + vite verify :5199 via web/vite.verify.config.ts; all cleaned up after.
+
 ## 2026-10-27 — v0.53.0 released
 
 - The dirty working tree (session memory, tool-description audit, write/edit path refusals, ogweb store-id allowlist, sidebar roster cache, vite verify config) was split into 6 logical commits + `chore(release): v0.53.0` (3a4d60f). The working files' gofmt was clean; the three files gofmt flagged (loop_browser_steer_test.go, tool/task.go, tool/task_test.go) are pre-existing and untouched.

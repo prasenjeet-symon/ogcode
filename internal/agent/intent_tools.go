@@ -37,7 +37,9 @@ const intentRouteSystem = `You route a coding agent's plan steps to the tools th
 
 Rules:
 - Answer with JSON only: {"matches":[{"step":<index>,"names":["<exact name>", ...]}]}
+- "step" must be the step's own "index" field from the input, echoed verbatim — not the step's position in the list. The list is filtered, so the two differ.
 - Use names exactly as they appear in the catalogue. Never invent one.
+- "genuinely help" is a high bar: prefer one or two entries for a step, and only when an entry plainly does what the step describes. Most coding steps match nothing in the catalogue at all — an empty answer is a correct, expected answer, not a failure.
 - Include a step only when at least one entry clearly fits it. A wrong suggestion costs the agent real work, so leave a step out when nothing fits.
 - Do not explain, and add no prose outside the JSON.`
 
@@ -335,7 +337,7 @@ func (lr *LoopRunner) suggestIntentTools(ctx context.Context, sessionID session.
 		"steps":     described,
 		"catalogue": catalogue,
 	})
-	userContent, _ := json.Marshal(string(payload))
+	userContent, _ := json.Marshal([]map[string]any{{"type": "text", "text": string(payload)}})
 
 	reqCtx, cancel := context.WithTimeout(ctx, intentMatchLLMTimeout)
 	defer cancel()
