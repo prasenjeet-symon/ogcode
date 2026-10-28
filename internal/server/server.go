@@ -1126,6 +1126,50 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 		slog.Info("registered custom provider", "id", id, "baseUrl", pc.BaseURL)
 	}
 
+	// Vendor slots saved in the DB — OpenAI-compatible endpoints the settings
+	// page stored under their own id, beyond the first-party slots and ogx.
+	// Unlike the ogcode.json customs above they may carry no API key (a local
+	// vLLM or LM Studio answers without one), but like everything else here
+	// they need a base URL: without one there is nothing to point at. A
+	// first-party id is never re-claimed from this table — its builtin
+	// registration above owns the id — and an ogcode.json custom of the same
+	// id keeps its earlier registration, the file entry outranking a stale DB
+	// row. Sorted for a deterministic log order; an entry that refuses to
+	// build is skipped with a warning, not fatal, like the customs loop.
+	firstParty := make(map[string]bool, len(knownProviders)+1)
+	for _, id := range knownProviders {
+		firstParty[id] = true
+	}
+	vendorIDs := make([]string, 0, len(dbProviderMap))
+	for id, c := range dbProviderMap {
+		if firstParty[id] || id == provider.OGXProviderID || c.BaseURL == "" {
+			continue
+		}
+		if _, already := providers[id]; already {
+			continue
+		}
+		vendorIDs = append(vendorIDs, id)
+	}
+	sort.Strings(vendorIDs)
+	for _, id := range vendorIDs {
+		c := dbProviderMap[id]
+		// The collection groups this slot's models in the picker: the preset
+		// name the endpoint implies (CollectionForBaseURL) when the host is
+		// one, else the slot's own id — an arbitrary endpoint still gets a
+		// grouping, and all its models under one.
+		label := provider.CollectionForBaseURL(c.BaseURL)
+		if label == "" {
+			label = id
+		}
+		p, err := provider.NewOpenAICompatibleProvider(id, c.APIKey, c.BaseURL, "", label)
+		if err != nil {
+			slog.Warn("skipped vendor provider", "id", id, "err", err)
+			continue
+		}
+		providers[id] = p
+		slog.Info("registered vendor provider", "id", id, "baseUrl", c.BaseURL)
+	}
+
 	return providers
 }
 

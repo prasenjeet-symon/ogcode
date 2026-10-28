@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -72,6 +73,23 @@ type ollamaStatusResponse struct {
 	BaseURL   string `json:"baseUrl"`
 }
 
+// isBuiltinProviderID reports whether an id belongs to a slot whose credentials
+// are managed through its own flow — the first-party four, or the OGX
+// gateway whose key is the connected subscription. The vendor-slot endpoints
+// never store, list or remove these ids: a row they wrote would collide with
+// the registration those flows build.
+func isBuiltinProviderID(id string) bool {
+	if id == provider.OGXProviderID {
+		return true
+	}
+	for _, known := range knownProviders {
+		if id == known {
+			return true
+		}
+	}
+	return false
+}
+
 // handleGetProviderConfigs returns masked credentials for all known providers,
 // including whether each is configured via environment variable.
 func (s *Server) handleGetProviderConfigs(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +113,41 @@ func (s *Server) handleGetProviderConfigs(w http.ResponseWriter, r *http.Request
 			EnvBaseURLSet:    envVars.baseURL != "" && os.Getenv(envVars.baseURL) != "",
 		}
 		out = append(out, resp)
+	}
+	// Vendor slots come after the builtins, sorted by id: every
+	// OpenAI-compatible endpoint the settings page saved under its own id,
+	// with the same masking as the first-party slots but no env story — a
+	// vendor key never comes from a PROVIDER_API_KEY-style variable, which is
+	// exactly what the missing providerEnvVars entry (its zero value) reports.
+	rows, err := session.GetAllProviderConfigs(s.globalDB)
+	if err != nil {
+		http.Error(w, "failed to read provider config", http.StatusInternalServerError)
+		return
+	}
+	vendorIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if !isBuiltinProviderID(row.ProviderID) {
+			vendorIDs = append(vendorIDs, row.ProviderID)
+		}
+	}
+	sort.Strings(vendorIDs)
+	for _, id := range vendorIDs {
+		cfg, err := session.GetProviderConfig(s.globalDB, id)
+		if err != nil {
+			http.Error(w, "failed to read provider config", http.StatusInternalServerError)
+			return
+		}
+		masked := session.MaskedProviderConfig(cfg)
+		envVars := providerEnvVars[id]
+		out = append(out, providerConfigResponse{
+			ProviderID:       masked.ProviderID,
+			APIKey:           masked.APIKey,
+			BaseURL:          masked.BaseURL,
+			EffectiveBaseURL: s.effectiveBaseURL(id),
+			UpdatedAt:        masked.UpdatedAt,
+			EnvKeySet:        os.Getenv(envVars.key) != "",
+			EnvBaseURLSet:    envVars.baseURL != "" && os.Getenv(envVars.baseURL) != "",
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -128,6 +181,28 @@ func (s *Server) handleSetProviderConfig(w http.ResponseWriter, r *http.Request)
 	// without requiring a restart.
 	s.reloadProviders()
 	writeJSON(w, http.StatusOK, session.MaskedProviderConfig(&incoming))
+}
+
+// handleDeleteProviderConfig removes a vendor slot entirely — the DB row and,
+// after the reload, the live provider it registered. Only vendor ids are
+// removable: the first-party four and ogx answer 400 rather than being
+// silently unstored, since their credentials belong to their own flows and
+// dropping the row would leave those half-configured. A missing row deletes
+// as a no-op — the state the caller wants already holds.
+func (s *Server) handleDeleteProviderConfig(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if isBuiltinProviderID(id) {
+		http.Error(w, "builtin providers cannot be removed", http.StatusBadRequest)
+		return
+	}
+	if err := session.DeleteProviderConfig(s.globalDB, id); err != nil {
+		http.Error(w, "failed to delete provider config", http.StatusInternalServerError)
+		return
+	}
+	// Same reload as the save path: the slot disappears from the registry
+	// without a restart.
+	s.reloadProviders()
+	writeJSON(w, http.StatusOK, map[string]any{"removed": true})
 }
 
 // handleValidateProviderConfig tests whether the supplied credentials work by

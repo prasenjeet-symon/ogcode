@@ -525,6 +525,13 @@ export function setProviderConfig(id: string, cfg: Omit<ProviderConfig, 'provide
   });
 }
 
+// Removing a vendor slot deletes its saved config outright — posting an empty
+// key would only leave an empty row behind. The four builtins and the OGX
+// plan slot refuse (400).
+export function deleteProviderConfig(id: string): Promise<{ removed: boolean }> {
+  return fetchAPI(`/providers/config/${id}`, { method: 'DELETE' });
+}
+
 // OGX — the OGLAB plan. Sign-up, payment and plan state live on the web
 // side; these calls only start the browser hand-off, report whether the
 // resulting token is stored locally, and re-read the plan from the gateway.

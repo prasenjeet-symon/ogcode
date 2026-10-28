@@ -135,6 +135,70 @@ func TestRefreshCatalogFailureKeepsLastKnown(t *testing.T) {
 	}
 }
 
+// TestVendorSlotRefreshesItsLocalEndpoint pins that a named slot's refresh
+// fetches its endpoint's own list even when it is local: a local vLLM or LM
+// Studio tab must show what that endpoint serves, not an empty or borrowed
+// list. (The builtin openai slot keeps its compiled-in catalogue and fetches
+// only a re-aimed cloud URL — see the RefreshCatalog default branch.)
+func TestVendorSlotRefreshesItsLocalEndpoint(t *testing.T) {
+	var hits atomic.Int64
+	srv := countingGateway(t, &hits)
+
+	p, err := NewOpenAICompatibleProvider("custom-local", "", srv.URL, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := p.(*OpenAIProvider).RefreshCatalog(context.Background())
+	if len(got) != 2 || hits.Load() != 1 {
+		t.Fatalf("local slot refresh: %d models, %d hits, want 2 fetched with 1 hit: %+v", len(got), hits.Load(), got)
+	}
+	for _, m := range got {
+		if m.ProviderID != "custom-local" {
+			t.Errorf("fetched model %q providerId = %q, want the slot's own id", m.ID, m.ProviderID)
+		}
+	}
+}
+
+// TestVendorSlotNeverBorrowsOpenAIFallback pins that a named slot with no
+// fetched catalogue answers with nothing rather than OpenAI's compiled-in
+// list: OpenAI models under another slot's id are a guess at what that
+// endpoint serves, and an empty list until its own refresh lands is honest.
+func TestVendorSlotNeverBorrowsOpenAIFallback(t *testing.T) {
+	p := &OpenAIProvider{id: "gemini", model: "m"}
+	if list := p.Models(); len(list) != 0 {
+		t.Fatalf("an unrefreshed named slot showed %d models, want none: %+v", len(list), list)
+	}
+}
+
+// TestVendorSlotDeclaredModelServesPreRefresh pins that a custom provider
+// entry declaring a model in its config serves that one model from the first
+// read, before any refresh has run: the config promised it, and hiding it
+// until the endpoint answers would leave the entry dead on a cold start.
+func TestVendorSlotDeclaredModelServesPreRefresh(t *testing.T) {
+	p, err := NewOpenAICompatibleProvider("deepseek-local", "", "https://api.deepseek.com/v1", "deepseek-chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := p.Models()
+	if len(list) != 1 || list[0].ID != "deepseek-chat" || list[0].ProviderID != "deepseek-local" {
+		t.Fatalf("an unrefreshed slot with a declared model = %+v, want the one declared row", list)
+	}
+	if !list[0].Default {
+		t.Fatalf("the declared model %q is not the default: %+v", list[0].ID, list[0].Default)
+	}
+
+	// A placeholder model (the ogcode.json entry left `model` empty) must
+	// NOT invent a row: modelExplicit is false, and the endpoint is
+	// authoritative.
+	p, err = NewOpenAICompatibleProvider("placeholder-slot", "", "https://api.deepseek.com/v1", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list := p.Models(); len(list) != 0 {
+		t.Fatalf("an undeclared model invented rows: %+v", list)
+	}
+}
+
 // TestModelsDefaultFlagIsNotSharedAcrossCalls pins that stamping the default
 // does not mutate the cached catalogue or a package-level fallback: two reads
 // must return independent slices, or a concurrent reader could observe one

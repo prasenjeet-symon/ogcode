@@ -75,6 +75,7 @@ func (s *Server) routes() http.Handler {
 		r.Get("/providers/config", s.handleGetProviderConfigs)
 		r.Post("/providers/config/{id}", s.handleSetProviderConfig)
 		r.Post("/providers/config/{id}/validate", s.handleValidateProviderConfig)
+		r.Delete("/providers/config/{id}", s.handleDeleteProviderConfig)
 		r.Get("/providers/ollama/status", s.handleOllamaStatus)
 
 		// OGX: the OG Lab plan. Connect hands off to the browser; callback is

@@ -224,13 +224,16 @@ func (p *OpenAIProvider) RefreshCatalog(ctx context.Context) []ModelInfo {
 		p.storeCatalog(fetched)
 		return fetched
 
-	default: // openai
-		// When the base URL points to a non-OpenAI endpoint (e.g. DeepSeek,
-		// Gemini, Groq — OpenAI-compatible providers configured via a custom
-		// OPENAI_BASE_URL), fetch the model list so the user sees the actual
-		// models that endpoint serves. The canonical api.openai.com endpoint
-		// has a compiled-in catalogue and fetches nothing.
-		if isCloudURL(p.baseURL) && p.baseURL != "https://api.openai.com/v1" {
+	default: // openai and every named slot built on it
+		// A named slot (a vendor tab, a custom endpoint) has no compiled-in
+		// list of its own: its endpoint is authoritative, local or cloud, and
+		// the fetch is the only way its real models ever appear. The builtin
+		// openai provider fetches only when the base URL points elsewhere
+		// (e.g. DeepSeek, Gemini, Groq — OpenAI-compatible providers
+		// configured via a custom OPENAI_BASE_URL): the canonical
+		// api.openai.com endpoint has a compiled-in catalogue and fetches
+		// nothing.
+		if p.id != "openai" || (isCloudURL(p.baseURL) && p.baseURL != "https://api.openai.com/v1") {
 			fetched := p.fetchDynamicModels(ctx)
 			if len(fetched) > 0 {
 				p.storeCatalog(fetched)
@@ -589,12 +592,24 @@ func (p *OpenAIProvider) staticFallback() []ModelInfo {
 		return nil
 	case OGXProviderID:
 		return nil
+	case "openai":
+		return openAICatalog()
 	}
-	// openai: the canonical endpoint and a custom OpenAI-compatible one alike
-	// fall back to the compiled-in catalogue until a fetch lands (a custom
-	// endpoint's real list replaces it via RefreshCatalog). This mirrors the
-	// pre-existing behavior of showing the OpenAI list rather than nothing.
-	return openAICatalog()
+	// A config-declared model (a custom provider entry with `model`) is a
+	// promise the configuration made: serve it from the first read, before
+	// any refresh has run, in place of the endpoint list the fetch will
+	// replace it with. resolveDefaultModel already keeps such a declared
+	// model as the default afterwards, so the row stays the default.
+	if p.modelExplicit && p.model != "" {
+		return []ModelInfo{{
+			ID:              p.model,
+			Name:            p.model,
+			ProviderID:      p.id,
+			Collection:      p.collection,
+			ActiveByDefault: true,
+		}}
+	}
+	return nil
 }
 
 // openAICatalog renders the compiled-in OpenAI model list, minus the models
@@ -706,6 +721,14 @@ func collectionFromBaseURL(baseURL string) string {
 		return "Ollama Cloud"
 	}
 	return ""
+}
+
+// CollectionForBaseURL exposes collectionFromBaseURL to callers outside the
+// package — the DB-driven vendor slots want the same grouping label this
+// package would derive for an endpoint, so the models they register carry the
+// name the URL implies rather than a second spelling of it.
+func CollectionForBaseURL(baseURL string) string {
+	return collectionFromBaseURL(baseURL)
 }
 
 // Prompt caching on this code path is two unrelated problems, because one

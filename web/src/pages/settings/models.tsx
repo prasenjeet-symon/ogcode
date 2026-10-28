@@ -2,6 +2,7 @@ import { For, Index, Show, createSignal, createMemo, createEffect, untrack, onMo
 import { useSession } from '../../context/session';
 import type { ModelInfo, ProviderConfig, OGXStatus } from '../../api/client';
 import {
+  deleteProviderConfig,
   getProviderConfigs,
   setProviderConfig,
   getOGXStatus,
@@ -29,10 +30,17 @@ import {
 } from './ui';
 import {
   PROVIDER_DEFS,
-  PROVIDER_GUIDE,
   COMPATIBLE_PRESETS,
   collectionForBaseURL,
+  isVendorSlotId,
+  providerGuideFor,
+  vendorDefFor,
+  vendorHostOf,
+  vendorIdForBaseURL,
+  vendorIdForPreset,
+  vendorLabelFor,
   type ProviderDef,
+  type CompatiblePreset,
 } from '../../lib/providers';
 import { useFeatureFlag } from '../../lib/feature-flags';
 
@@ -40,9 +48,12 @@ import { useFeatureFlag } from '../../lib/feature-flags';
 // Models — one tab per provider.
 //
 // ogcode speaks four protocols and only four: anthropic, openai, openrouter,
-// ollama (see NewProviderWithConfig, which rejects everything else). Every
-// other vendor — Gemini, DeepSeek, Groq, Together — arrives through the OpenAI
-// slot with a different base URL.
+// ollama (see NewProviderWithConfig, which rejects everything else). Other
+// OpenAI-compatible vendors — Gemini, DeepSeek, Groq, a company gateway — are
+// each saved as their OWN tab once the user points at one: their own key,
+// base URL and catalogue, stored as extra provider config rows server-side.
+// "Add a vendor" in the strip is how one is created; a vendor tab exists only
+// while such a row does.
 //
 // Each protocol gets a tab holding its credentials and its slice of the
 // catalogue: one provider on screen at a time, the strip under the page title
@@ -100,6 +111,22 @@ export default function ModelsSettings() {
     }
   });
 
+  // Vendor slots: rows the frontend has saved outside the four builtin
+  // protocols. The memo reads configs alone, never session.models() — a tab
+  // must not appear or disappear because a model was toggled, so the strip
+  // stays still through ordinary editing. Sorting keeps it stable however the
+  // configs row arrives.
+  const vendorSlots = createMemo<Slot[]>(() => {
+    const out: Slot[] = [];
+    for (const id of Object.keys(configs())) {
+      if (!isVendorSlotId(id)) continue;
+      const cfg = configs()[id];
+      const baseURL = cfg.effectiveBaseUrl || cfg.baseUrl;
+      out.push({ id, label: vendorLabelFor(id, baseURL), def: vendorDefFor(id, baseURL) });
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label));
+  });
+
   // The page always shows the four real slots, plus any unexpected provider id
   // that turns up in the catalogue — a model the user can see in the picker must
   // be reachable here, whatever its provider.
@@ -117,14 +144,18 @@ export default function ModelsSettings() {
       // that already has plan models must not surface them as a generic
       // provider tab once the flag is off.
       if (ogxTab()) base.unshift({ id: OGX_SLOT, label: 'OGX', readOnly: true });
-      const known = new Set([...base.map((s) => s.id), OGX_SLOT]);
+      // Vendor tabs ride after the protocols, ahead of the catalogue
+      // catch-all: they are first-class editors, not the read-only extras
+      // below. Each id counts as known here so the extras loop does not
+      // add a second, read-only copy of the same vendor.
+      const known = new Set([...base.map((s) => s.id), OGX_SLOT, ...vendorSlots().map((s) => s.id)]);
       const extra = new Set<string>();
       for (const m of session.models()) {
         const slot = m.providerId;
         if (!known.has(slot)) extra.add(slot);
       }
       for (const id of [...extra].sort()) base.push({ id, label: id, readOnly: true });
-      return base;
+      return [...base, ...vendorSlots()];
     },
     [] as Slot[],
     // Toggling a model rebuilds this list, but the set of provider slots almost
@@ -161,10 +192,14 @@ export default function ModelsSettings() {
     modelsFor(slot.id).some((m) => modelMatches(m, q)) ||
     (!slot.readOnly && CREDENTIAL_TERMS.some((t) => matches(q, t)));
 
-  /** True when a query is live and nothing anywhere on the page matched it. */
+  /** True when a query is live and nothing anywhere on the page matched it.
+   *  Searching "vendor" or the old "point at" is a search for the
+   *  affordance, not for a slot — the add-a-vendor lane answers it, and the
+   *  empty state below would hide the very row that resolves the query. */
   const nothingMatched = createMemo(() => {
     const q = shell.query().trim();
     if (!q) return false;
+    if (ADD_VENDOR_TERMS.some((t) => matches(q, t))) return false;
     return !slots().some((slot) => slotSearchMatches(slot, q));
   });
 
@@ -181,6 +216,73 @@ export default function ModelsSettings() {
     const hit = untrack(() => slots().find((slot) => slotSearchMatches(slot, q)));
     if (hit) untrack(() => setActive(hit.id));
   });
+
+  const addVendorMatches = () => {
+    const q = shell.query().trim();
+    return !!q && ADD_VENDOR_TERMS.some((t) => matches(q, t));
+  };
+  const showAddRow = () => showAddVendor() || addVendorMatches();
+
+  const [showAddVendor, setShowAddVendor] = createSignal(false);
+  const [addVendorBusy, setAddVendorBusy] = createSignal(false);
+  const [addError, setAddError] = createSignal('');
+  const [customOpen, setCustomOpen] = createSignal(false);
+  const [customURL, setCustomURL] = createSignal('');
+  const [customURLError, setCustomURLError] = createSignal('');
+
+  // A vendor joins by SAVING, not by filling a form first: the POST writes a
+  // row with an empty key under the vendor's id, and the tab that then opens
+  // carries the standard credential form — its key is filled in there. The
+  // server reloads its providers in place, so the same refresh the Save path
+  // uses is all it takes for the vendor's models to arrive.
+  const addVendor = async (id: string, baseURL: string) => {
+    // Already pointing at it: that is simply the open-tab click.
+    if (configs()[id]) {
+      setShowAddVendor(false);
+      setActive(id);
+      return;
+    }
+    setAddVendorBusy(true);
+    setAddError('');
+    try {
+      const cfg = await setProviderConfig(id, { apiKey: '', baseUrl: baseURL });
+      setConfigs({ ...configs(), [id]: cfg });
+      setShowAddVendor(false);
+      setCustomOpen(false);
+      setCustomURL('');
+      setActive(id);
+      await session.reloadModels();
+    } catch {
+      setAddError('Could not add this vendor. Is the ogcode server still running?');
+    } finally {
+      setAddVendorBusy(false);
+    }
+  };
+
+  const addCustomVendor = async () => {
+    const url = customURL().trim();
+    // No scheme means no hostname, which means no slug and no label — the
+    // form has to demand the full URL rather than guess at a port.
+    if (!vendorHostOf(url)) {
+      setCustomURLError('Enter a full URL, including http:// or https://.');
+      return;
+    }
+    setCustomURLError('');
+    await addVendor(vendorIdForBaseURL(url), url);
+  };
+
+  // Removing a vendor is one DELETE: the config row goes, the slot memo loses
+  // it, and the fallback effect above lands on the first remaining tab when
+  // the removed one was open.
+  const removeVendorById = async (id: string) => {
+    await deleteProviderConfig(id);
+    const next = { ...configs() };
+    delete next[id];
+    setConfigs(next);
+    // The reload drops the vendor's models from the picker the same way the
+    // save path drops a cleared key's.
+    await session.reloadModels();
+  };
 
   const current = () => slots().find((s) => s.id === active()) ?? slots()[0];
 
@@ -246,8 +348,95 @@ export default function ModelsSettings() {
               );
             }}
           </For>
+          {/* The plus is how the strip grows. The tabs before it are data; this
+              one is an affordance, so it carries no dot and no count. */}
+          <button
+            type="button"
+            title="Add a vendor"
+            aria-label="Add a vendor"
+            onClick={() => {
+              setShowAddVendor(!showAddVendor());
+              setCustomOpen(false);
+              setCustomURLError('');
+            }}
+            class={`relative flex items-center h-8 px-2.5 rounded-md text-ui whitespace-nowrap shrink-0
+                    transition-colors duration-150
+              ${
+                showAddVendor()
+                  ? 'text-[color:var(--text-primary)] font-medium'
+                  : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]'
+              }`}
+          >
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
         </div>
       </div>
+
+      {/* The way a vendor joins. One scrolling chip row — the lane the old
+          "Point at" row used — kept under the strip, and shown only on the
+          plus click or when a search names "vendor" or "point at". A preset
+          that already has a tab just opens it; nothing duplicates. */}
+      <Show when={showAddRow()}>
+        <div class="mt-2">
+          <div class="flex flex-nowrap gap-2 overflow-x-auto hide-scrollbar">
+            <For each={COMPATIBLE_PRESETS}>
+              {(preset) => (
+                <Chip
+                  title={`${preset.baseURL} — its own tab, with its own key (${preset.keyHint})`}
+                  onClick={() => addVendor(vendorIdForPreset(preset), preset.baseURL)}
+                >
+                  {preset.label}
+                </Chip>
+              )}
+            </For>
+            <Chip
+              active={customOpen()}
+              title="Any OpenAI-compatible endpoint — vLLM, LM Studio, LiteLLM, a company gateway"
+              onClick={() => setCustomOpen(!customOpen())}
+            >
+              Custom…
+            </Chip>
+          </div>
+          <Show when={customOpen()}>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <div class="flex-1 min-w-[16rem]">
+                <TextField
+                  mono
+                  value={customURL()}
+                  onInput={(v) => {
+                    setCustomURL(v);
+                    setCustomURLError('');
+                  }}
+                  onEnter={addCustomVendor}
+                  disabled={addVendorBusy()}
+                  ariaLabel="Custom vendor base URL"
+                  placeholder="Full URL, e.g. http://localhost:8000/v1 or https://vllm.mycompany.com/v1"
+                />
+              </div>
+              <Button onClick={addCustomVendor} disabled={addVendorBusy()}>
+                {addVendorBusy() ? 'Adding…' : 'Add'}
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => {
+                  setCustomOpen(false);
+                  setCustomURL('');
+                  setCustomURLError('');
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </Show>
+          <Show when={customURLError() || addError()}>
+            <p class="mt-1.5 text-micro" style={{ color: 'var(--danger)' }}>
+              {customURLError() || addError()}
+            </p>
+          </Show>
+        </div>
+      </Show>
 
       <Show when={current()}>
         {(slot) => (
@@ -268,6 +457,7 @@ export default function ModelsSettings() {
             loadingConfig={loadingConfigs()}
             onSaved={(c) => setConfigs({ ...configs(), [slot().id]: c })}
             onApplied={() => session.reloadModels()}
+            onRemoveVendor={isVendorSlotId(slot().id) ? () => removeVendorById(slot().id) : undefined}
             onToggle={(m) => session.toggleModel(m, !m.enabled)}
             onRemove={async (m) => {
               if (!confirm(`Remove "${m.name}"? This deletes the custom model.`)) return;
@@ -704,6 +894,10 @@ function OGXMark(props: { class?: string }) {
  *  "endpoint" finds them under every provider. */
 const CREDENTIAL_TERMS = ['API key', 'Base URL', 'endpoint', 'credentials', 'models'];
 
+// Searching "vendor" or the old "point at" names the affordance rather than
+// any slot: the add-a-vendor lane (and only it) answers that query.
+const ADD_VENDOR_TERMS = ['vendor', 'point at'];
+
 // Names and IDs match anywhere, because people type fragments of them ("4o",
 // "coder"). Collections match only at a word boundary: a plain substring test
 // makes "llama" hit every model in *O-llama Cloud*, which drowns the models
@@ -734,9 +928,15 @@ function ProviderSection(props: {
   onToggle: (m: ModelInfo) => void | Promise<void>;
   onRemove: (m: ModelInfo) => void;
   onAdd: (id: string, name: string, collection: string) => Promise<void>;
+  /** Present only for a vendor slot: removes the vendor entirely — config
+   *  row, stored key and models. The builtin protocols have no way out. */
+  onRemoveVendor?: () => Promise<void>;
 }) {
   const shell = useShell();
-  const guide = () => PROVIDER_GUIDE[props.slot.id];
+  // Vendor ids resolve through the guide fallback — PROVIDER_GUIDE has no
+  // entry for a slug minted at save time.
+  const guide = () => providerGuideFor(props.slot.id);
+  const isVendor = () => isVendorSlotId(props.slot.id);
 
   const pointedAt = () => {
     if (props.slot.id !== 'openai') return '';
@@ -750,6 +950,17 @@ function ProviderSection(props: {
 
   const enabledCount = () => props.models.filter((m) => m.enabled).length;
   const configured = () => isConfigured(props.slot, props.config);
+
+  const [removeErr, setRemoveErr] = createSignal('');
+  const removeThisVendor = async () => {
+    if (!confirm(`Remove the ${props.slot.label} vendor and its stored key from ogcode? Its models drop out of the picker.`)) return;
+    setRemoveErr('');
+    try {
+      await props.onRemoveVendor!();
+    } catch {
+      setRemoveErr('Could not remove this vendor. Is the ogcode server still running?');
+    }
+  };
 
   return (
     <div class="page-enter">
@@ -801,12 +1012,27 @@ function ProviderSection(props: {
           onRemove={props.onRemove}
           onAdd={props.onAdd}
           suggestedCollection={
-            props.slot.id === 'openai'
+            // OpenAI and vendor tabs alike: collectionForBaseURL reads the
+            // saved host — a preset's collection for a known one, empty for a
+            // custom gateway the user names rows for by hand.
+            props.slot.id === 'openai' || isVendor()
               ? collectionForBaseURL(props.config?.effectiveBaseUrl || props.config?.baseUrl || '')
               : ''
           }
         />
       </Row>
+
+      {/* The way a vendor leaves: one DELETE takes the config row and its
+          stored key, and removing it is confirmed for the key's sake just as
+          clearing a key is. */}
+      <Show when={props.onRemoveVendor}>
+        <div class="flex items-center gap-3 flex-wrap">
+          <LinkAction onClick={removeThisVendor}>Remove this vendor</LinkAction>
+          <Show when={removeErr()}>
+            <span class="text-micro" style={{ color: 'var(--danger)' }}>{removeErr()}</span>
+          </Show>
+        </div>
+      </Show>
     </Group>
     </div>
   );
@@ -834,9 +1060,8 @@ function Credentials(props: {
   const [error, setError] = createSignal('');
   // The form is locked through both the save and the follow-up catalogue fetch.
   const busy = () => saving() || refreshing();
-  let baseRef: HTMLInputElement | undefined;
 
-  const guide = () => PROVIDER_GUIDE[props.def.id];
+  const guide = () => providerGuideFor(props.def.id);
 
   // Re-seed the form when the card switches providers — otherwise one
   // provider's endpoint would carry into another's form.
@@ -967,7 +1192,13 @@ function Credentials(props: {
         helper={
           <Show
             when={dbKeySet()}
-            fallback={<>Read from <Mono>{guide()?.envKey}</Mono> if that variable is set. Applies as soon as you save.</>}
+            fallback={
+              // A vendor has no env var of its own; the helper must not read
+              // "Read from  if that variable is set" around an empty name.
+              <Show when={guide()?.envKey} fallback="Applies as soon as you save.">
+                <>Read from <Mono>{guide()!.envKey}</Mono> if that variable is set. Applies as soon as you save.</>
+              </Show>
+            }
           >
             <>
               Leave blank to keep the stored key.
@@ -1040,7 +1271,6 @@ function Credentials(props: {
             <div class="flex-1 min-w-[14rem]">
               <TextField
                 mono
-                ref={(el) => (baseRef = el)}
                 value={baseURL()}
                 onInput={setBaseURL}
                 onEnter={commit}
@@ -1061,45 +1291,6 @@ function Credentials(props: {
               </Banner>
             </div>
           </Show>
-        </Row>
-      </Show>
-
-      {/* One-click endpoints — the whole point of the OpenAI slot. Choosing a
-          vendor fills the field; the user still supplies that vendor's key and
-          saves, so nothing changes behind their back. */}
-      <Show when={props.def.id === 'openai'}>
-        <Row
-          label="Point at"
-          helper="Aim this slot at another OpenAI-compatible vendor. One at a time — the key above must belong to whichever you pick."
-          stacked
-          hidden={props.hide('Point at', 'gemini deepseek groq together vendor preset compatible')}
-        >
-          {/* One scrolling row rather than wrapping to two: the vendor list keeps
-              growing, and a single lane reads as a picker. hide-scrollbar +
-              shrink-0 chips match the settings tab rail. */}
-          <div class="flex flex-nowrap gap-2 overflow-x-auto hide-scrollbar">
-            <Chip active={!collectionForBaseURL(baseURL())} onClick={() => setBaseURL('')}>
-              OpenAI
-            </Chip>
-            <For each={COMPATIBLE_PRESETS}>
-              {(preset) => (
-                <Chip
-                  active={collectionForBaseURL(baseURL()) === preset.collection}
-                  title={`${preset.baseURL} — key looks like ${preset.keyHint}`}
-                  onClick={() => setBaseURL(preset.baseURL)}
-                >
-                  {preset.label}
-                </Chip>
-              )}
-            </For>
-            <Chip
-              active={false}
-              title="Any OpenAI-compatible endpoint — vLLM, LM Studio, LiteLLM, a company gateway"
-              onClick={() => baseRef?.focus()}
-            >
-              Custom…
-            </Chip>
-          </div>
         </Row>
       </Show>
     </>
@@ -1305,7 +1496,10 @@ function ModelList(props: {
         <AddModelRow
           providerLabel={props.slot.label}
           suggestedCollection={props.suggestedCollection}
-          showCollection={props.slot.id === 'openai'}
+          // The Group field earns its row when a known host names it — OpenAI
+          // pointed at a preset, or a vendor tab — and stays hidden where a
+          // collection would be invented rather than derived.
+          showCollection={props.slot.id === 'openai' || isVendorSlotId(props.slot.id)}
           onAdd={props.onAdd}
         />
       </Show>

@@ -30,9 +30,11 @@ export const PROVIDER_DEFS: ProviderDef[] = [
 // internal/provider/provider.go, which rejects anything that is not
 // anthropic / openai / openrouter / ollama. Every other vendor a user might
 // name (Gemini, DeepSeek, Groq, Together, …) reaches ogcode *through* one of
-// those four, almost always the OpenAI one. The settings screen therefore
-// lists four slots and explains which to reach for, rather than pretending to
-// offer a dozen integrations.
+// those four, almost always the OpenAI one — or, since vendors grew their own
+// tabs, as a saved vendor slot of its own (see the vendor-slot helpers below
+// them). The guide covers the four slots plus that fallback for vendor ids,
+// and the settings screen explains which to reach for, rather than pretending
+// to offer a dozen integrations.
 // ---------------------------------------------------------------------------
 export interface ProviderGuide {
   /** One line under the provider name: what this slot actually is. */
@@ -67,9 +69,9 @@ export const PROVIDER_GUIDE: Record<string, ProviderGuide> = {
     defaultBaseURL: 'https://api.anthropic.com/v1',
   },
   openai: {
-    tagline: 'GPT models — and every service that speaks the OpenAI API.',
-    useWhen: 'Use for OpenAI itself, or point Base URL at Gemini, DeepSeek, Groq, Together, Mistral, or your own vLLM / LM Studio server.',
-    tradeoff: 'This slot holds one endpoint at a time: aiming it at DeepSeek means GPT models stop answering until you aim it back.',
+    tagline: 'GPT models, direct from OpenAI.',
+    useWhen: 'Anything the OpenAI API serves — the protocol virtually every SDK and tool defaults to. OpenAI-compatible vendors get a tab of their own via "Add a vendor" in the strip.',
+    tradeoff: 'Pay-as-you-go per token; needs an account with billing enabled. A Base URL here is an endpoint override for OpenAI itself, not a way to reach another vendor.',
     envKey: 'OPENAI_API_KEY',
     envBaseURL: 'OPENAI_BASE_URL',
     keysURL: 'https://platform.openai.com/api-keys',
@@ -99,11 +101,11 @@ export const PROVIDER_GUIDE: Record<string, ProviderGuide> = {
   },
 };
 
-// Known OpenAI-compatible endpoints that can be used through the OpenAI
-// provider by setting a custom base URL. Each entry suggests a collection name
-// (used to group custom models in the picker) and the API base URL.
-// The OpenAI provider already supports an optional base URL, so these are just
-// convenience presets surfaced in the "Add custom model" and onboarding flows.
+// Known OpenAI-compatible endpoints. Connected through Settings → Models'
+// "Add a vendor", each becomes its own tab keyed by the slug of its
+// collection name (vendorIdForPreset below). The entry's collection name and
+// key hints also serve the onboarding flow, where a preset still suggests the
+// collection custom models are grouped under.
 export interface CompatiblePreset {
   collection: string;
   label: string;
@@ -158,6 +160,132 @@ export function collectionForBaseURL(baseURL: string): string {
   // here, as it does on the server, instead of passing for plain OpenAI.
   if (u.includes('models.inference.ai.azure.com')) return 'GitHub Models';
   return '';
+}
+
+// ---------------------------------------------------------------------------
+// Vendor slots
+//
+// The OpenAI slot once pointed at these presets one at a time; now each preset
+// — and any custom OpenAI-compatible endpoint — can be saved as its OWN tab
+// (Settings → Models → "Add a vendor"), with its own key and base URL. A
+// vendor tab exists only once the settings page has saved a config for its
+// id, so the strip carries no always-on empty tabs.
+// ---------------------------------------------------------------------------
+
+// The ids the four builtin protocols plus the OGX plan slot own. A vendor id
+// must never pass for one of these.
+const RESERVED_PROVIDER_IDS = ['anthropic', 'openai', 'openrouter', 'ollama', 'ogx'];
+
+// Lowercase ascii, single dashes, nothing else. Capped, so a pathological
+// hostname cannot grow the tab strip forever.
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/g, '');
+}
+
+/** True for an id the settings page may treat as a vendor slot — anything
+ *  saved outside the five reserved ids, kept to the slug charset. */
+export function isVendorSlotId(id: string): boolean {
+  return !!id && !RESERVED_PROVIDER_IDS.includes(id) && /^[a-z0-9][a-z0-9-]*$/.test(id);
+}
+
+/** The vendor id a preset connects as: its collection name lowercased with
+ *  spaces to dashes. Gemini → "gemini", Together AI → "together",
+ *  Ollama Cloud → "ollama-cloud". */
+export function vendorIdForPreset(preset: CompatiblePreset): string {
+  return slugify(preset.collection);
+}
+
+/** The hostname of a base URL, or '' when the URL carries none — the caller
+ *  uses that to reject half-typed endpoints like "localhost:8000/v1". */
+export function vendorHostOf(baseURL: string): string {
+  try { return new URL(baseURL).hostname.toLowerCase(); } catch { return ''; }
+}
+
+/** The vendor id a custom endpoint connects as: "custom-" plus the slugified
+ *  hostname. https://vllm.mycompany.com/v1 → "custom-vllm-mycompany-com".
+ *  The prefix is what distinguishes customs from preset slugs and keeps them
+ *  clear of the reserved ids even for a bare-IP endpoint. */
+export function vendorIdForBaseURL(baseURL: string): string {
+  return `custom-${slugify(vendorHostOf(baseURL)) || 'endpoint'}`;
+}
+
+const presetForVendorId = (id: string): CompatiblePreset | undefined =>
+  COMPATIBLE_PRESETS.find((p) => vendorIdForPreset(p) === id);
+
+/** The tab label a vendor slot reads as: the preset's own label, or — for a
+ *  custom endpoint — a capitalized slice of the host with the domain kept for
+ *  context ("Vllm (mycompany.com)"). This is what search matches on, so it
+ *  must stay a human word, never the raw slug. */
+export function vendorLabelFor(id: string, baseURL: string): string {
+  const preset = presetForVendorId(id);
+  if (preset) return preset.label;
+  let host = '';
+  let port = '';
+  try { host = new URL(baseURL).hostname.toLowerCase(); port = new URL(baseURL).port; } catch { /* malformed */ }
+  const parts = host.split('.').filter(Boolean);
+  const name = parts[0]?.replace(/[^a-z0-9]/g, '');
+  // A bare-IP (or otherwise all-numeric) host has no word in it — slice off the
+  // first octet and you get an ambiguous "127 (0.0.1)". Label it host:port so
+  // two IP endpoints side by side stay distinct.
+  if (!name || /^\d+$/.test(name)) return port ? `${host}:${port}` : (host || id);
+  const capitalized = name[0].toUpperCase() + name.slice(1);
+  const rest = parts.slice(1).join('.');
+  return rest ? `${capitalized} (${rest})` : capitalized;
+}
+
+/** The ProviderDef a vendor tab presents — the preset's color where one
+ *  applies, neutral otherwise, and always an endpoint the tab's Base URL row
+ *  can retarget. Not first-party: vendors authenticate with a key. */
+export function vendorDefFor(id: string, baseURL: string): ProviderDef {
+  const preset = presetForVendorId(id);
+  return {
+    id,
+    label: vendorLabelFor(id, baseURL),
+    dot: preset?.dot ?? 'bg-[color:var(--border-strong)]',
+    bg: 'bg-[color:var(--bg-elevated)]',
+    ring: 'ring-[color:var(--border-subtle)]',
+    hasBaseURL: true,
+    keyOptional: false,
+    firstParty: false,
+  };
+}
+
+// Guidance for a vendor tab. PROVIDER_GUIDE is keyed by id, and vendor ids
+// are whatever slug the page minted at save time — they resolve through
+// providerGuideFor instead.
+export const VENDOR_GUIDE: ProviderGuide = {
+  tagline: 'An OpenAI-compatible vendor connected as its own slot — its key, endpoint and catalogue are independent of every other tab.',
+  useWhen: 'You want this vendor\'s models alongside the others without repointing any existing provider. Its Base URL holds the endpoint it was added from; edit it there if the vendor moves.',
+  tradeoff: 'The vendor must be reachable from the ogcode server, and its catalogue is only as fresh as the last save — a wrong key or URL shows up as an empty model list here rather than an error.',
+  envKey: '',
+  keyHint: 'sk-…',
+};
+
+/** Guide for any settings slot id: the builtin entry when one exists, the
+ *  vendor fallback for a saved vendor id, nothing otherwise. */
+export function providerGuideFor(id: string): ProviderGuide | undefined {
+  const built = PROVIDER_GUIDE[id];
+  if (built) return built;
+  if (!isVendorSlotId(id)) return undefined;
+  // A preset vendor carries the preset's key hint and, when one is known,
+  // its key URL — the tab then reads exactly like any credential row.
+  const preset = presetForVendorId(id);
+  if (!preset) return VENDOR_GUIDE;
+  const keysURL = preset.keysURL;
+  return {
+    ...VENDOR_GUIDE,
+    keyHint: preset.keyHint,
+    ...(keysURL
+      ? { keysURL, keysLabel: (() => {
+          try { return new URL(keysURL).hostname; } catch { return keysURL; }
+        })() }
+      : {}),
+  };
 }
 
 export const CHAT_PROVIDERS = [

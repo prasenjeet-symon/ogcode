@@ -68,6 +68,19 @@ func SetProviderConfig(database *db.DB, c *ProviderConfig) error {
 	return nil
 }
 
+// DeleteProviderConfig removes a provider's stored credentials entirely — the
+// only call that un-registers a vendor slot: upserting an empty row would
+// leave the id in GetAllProviderConfigs and keep it surfaced in the settings
+// list. Deleting an id with no row is a no-op, not an error — the outcome the
+// caller wants already holds.
+func DeleteProviderConfig(database *db.DB, providerID string) error {
+	_, err := database.Exec(`DELETE FROM provider_config WHERE provider_id = ?`, providerID)
+	if err != nil {
+		return fmt.Errorf("delete provider config: %w", err)
+	}
+	return nil
+}
+
 // MaskedProviderConfig returns a copy with the API key replaced by a sentinel
 // so it can be sent to the UI without leaking the real value.
 func MaskedProviderConfig(c *ProviderConfig) *ProviderConfig {
