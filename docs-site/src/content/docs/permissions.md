@@ -17,7 +17,7 @@ When the agent asks, it shows you exactly what it wants to do. You can approve i
 
 ## What "consequential" means
 
-Read-only work never raises a prompt: listing files, reading source, searching the codebase, or mapping a project all run freely in every mode. The gate is about things that could change your machine or your repository: writing or editing files, and running shell commands.
+Read-only work never raises a prompt: listing files, reading source, searching the codebase, or mapping a project all run freely in every mode. The gate is about things that could change your machine or your repository: writing or editing files, and running shell commands. Spawning a teammate agent raises a prompt too: it is a second writer in your tree.
 
 In **Auto** mode the agent still errs toward asking. A command it recognises as routine (a build, a test run, a `git` status) goes through; something destructive or ambiguous is put to you rather than guessed at.
 
@@ -41,4 +41,4 @@ Reach for the modes in this order:
 
 ## Where to change it
 
-The mode toggle sits in the composer, next to the model selector, and changes apply immediately to the current session and become the default for new ones.
+The mode toggle sits at the left of the composer toolbar, and changes apply immediately to the current session and become the default for new ones.

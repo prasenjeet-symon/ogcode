@@ -7,7 +7,7 @@ A handful of ideas explain almost everything Ogcode does. None of them need conf
 
 ## The workspace
 
-Ogcode works inside one directory at a time: the **workspace**. It is the root the agent may read and write, and the boundary its file tools refuse to cross. Start `ogcode` from a project and that becomes the workspace; switch it from the UI to work elsewhere.
+Ogcode works inside one directory at a time: the **workspace**. It is the directory the agent reads, edits and runs commands in, and the root relative file paths resolve against. Start `ogcode` from a project and that becomes the workspace; start it in another directory to work elsewhere.
 
 A **project** is a workspace Ogcode has seen before. Everything project-scoped (sessions, the index, task worktrees) lives under `.ogcode/` inside it, so the state travels with the checkout and nothing leaks between projects.
 

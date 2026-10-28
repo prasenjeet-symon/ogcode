@@ -14,7 +14,7 @@ cd ~/code/my-project
 ogcode
 ```
 
-The server binds all interfaces on port `9595` and opens the web UI at [http://localhost:9595](http://localhost:9595). The directory you started it from is the workspace the agent can read and write; you can point it elsewhere from the workspace switcher.
+The server binds all interfaces on port `9595` and opens the web UI at [http://localhost:9595](http://localhost:9595). The directory you started it from is the workspace the agent can read and write. To work on a different project, just start ogcode from that directory instead.
 
 If the port is already taken, ogcode remembers the next free one **per project** and prints the address it settled on.
 
@@ -60,7 +60,7 @@ ogcode run "add a --json flag to the CLI and document it"
 
 | Flag | Meaning |
 | --- | --- |
-| `-a, --agent` | Agent to run: `build` (default), `plan`, `task`, `breakdown` |
+| `-a, --agent` | Agent to run: `build` (default), `plan`, `task`, `breakdown`, plus a few internal agent types |
 | `-o, --output-format` | `text` (default) or `json` |
 | `--max-turns` | Stop after this many steps; `0` (the default) means no limit |
 | `--model` | Override the model for this run |

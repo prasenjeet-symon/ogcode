@@ -4577,7 +4577,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       <div class="hero slab">
         <div class="hero-in">
           <a class="announce rise r1" href="https://github.com/prasenjeet-symon/ogcode/releases/latest" target="_blank" rel="noopener">
-            <span id="versionPill" data-release="v0.51.">v0.51.0</span>
+            <span id="versionPill" data-release="v0.53.">v0.53.1</span>
             <span class="dot" aria-hidden="true">·</span>
             <span class="announce-text">Now with live service preview</span>
             <span class="announce-go" aria-hidden="true">
@@ -6286,7 +6286,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       fetch('https://api.github.com/repos/' + REPO + '/releases/latest')
         .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
         .then(function (d) {
-          // The pill announces the v0.51 release: only a v0.51.x patch tag may replace it.
+          // The pill announces the v0.53 release: only a v0.53.x patch tag may replace it.
           var el = document.getElementById('versionPill');
           var rel = el && el.getAttribute('data-release');
           if (el && d && d.tag_name && (!rel || d.tag_name.indexOf(rel) === 0)) el.textContent = d.tag_name;

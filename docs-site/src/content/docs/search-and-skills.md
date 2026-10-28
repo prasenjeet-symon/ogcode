@@ -28,7 +28,7 @@ Two knobs tune deeper research (how many pages it reads and how much of each), b
 
 A **skill** is a folder with a `SKILL.md` file that teaches the agent a repeatable procedure: a release checklist, a migration, how your team writes docs. When a task matches, the agent loads the skill's instructions and follows them, instead of you explaining the process every time.
 
-Skills are discovered from standard locations automatically: an `.agents/skills/` folder in the project, and `~/.ogcode/skills/` (plus a couple of other common homes) on your machine. Drop a `SKILL.md` in one of those and it is available.
+Skills are discovered from standard locations automatically: an `.agents/skills/` (or `.claude/skills/`) folder in the project, and `~/.ogcode/skills/`, `~/.config/ogcode/skills/`, `~/.agents/skills/`, or `~/.claude/skills/` on your machine. Drop a `SKILL.md` in one of those and it is available.
 
 A skill can also declare the environment variables it needs (an API token, an endpoint), and you can decide per skill whether it is allowed, denied, or gated behind an approval, so a skill you do not fully trust never runs without you saying so.
 

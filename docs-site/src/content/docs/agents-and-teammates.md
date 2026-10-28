@@ -87,7 +87,7 @@ Any provider that speaks the OpenAI chat-completions API can be added without co
 | Field | Meaning |
 | --- | --- |
 | `baseUrl` | Required. The endpoint the provider talks to. On a built-in slot (such as `openai`) it overrides the default endpoint instead. |
-| `apiKey` | Sent as a bearer token. |
+| `apiKey` | Sent as a bearer token (custom providers); on a built-in slot it is exported as that provider's environment variable instead. |
 | `type` | Optional. Only `openai` (or empty, which means the same) is supported today; any other value is skipped. |
 | `model` | Optional default model, used when you have not picked one. |
 | `label` | Optional human-readable label, shown as the provider's grouping in the model picker. |
@@ -112,7 +112,7 @@ The built-in ids (`anthropic`, `openai`, `openrouter`, `ollama` and `ogx`) are n
 ## Two smaller additions
 
 - **`schedule`**: one-shot reminders the agent sets for itself. `create` needs a `note` and exactly one of `delaySeconds` (up to about a year) or `fireAt` (an absolute RFC3339 timestamp); `list` shows what is pending and `cancel` removes one by id. A reminder is delivered into the session as a notice, and it never starts a turn: if the session is idle, the note is waiting at the start of the next one.
-- **`update_intent`**: the plan pill you may see at the top of a session. The agent states what it intends to do as a short list of steps (at most seven), each marked pending, active, done or dropped, and updates the statuses as it works, replacing the whole plan on each call. It is a window on the turn, not a script: the plan is cleared when the turn ends.
+- **`update_intent`**: the plan pill you may see at the top of a session. The agent states what it intends to do as a short list of steps (at most seven), each marked pending, active, done or dropped, and updates the statuses as it works, replacing the whole plan on each call. It is a window on the turn, not a script: the plan is cleared when the next turn starts.
 
 ## Next
 

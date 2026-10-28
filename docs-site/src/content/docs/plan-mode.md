@@ -15,7 +15,7 @@ A single Build turn is right for a change you can describe in a paragraph. For s
 
 2. Describe the outcome you want. The planning agent inspects the repository and works out an approach with you.
 3. **Review the plan** before anything runs. It becomes a board of tasks with descriptions and dependencies, and you approve it; nothing is executed until you do.
-4. The tasks run, independent ones in parallel, each in its **own git worktree** off the base branch, so changes never collide with each other or with your working tree.
+4. Start the tasks from the board. Independent ones run in parallel, each in its **own git worktree** off the base branch, so changes never collide with each other or with your working tree; a dependent task starts as soon as the one it waits on finishes.
 5. When a task finishes it can commit, push, and **open a pull request**, and a failed task can be retried from a clean state.
 
 ## Why worktrees

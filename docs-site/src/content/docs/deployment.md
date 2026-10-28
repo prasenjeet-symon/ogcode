@@ -239,7 +239,7 @@ Directories are `0700`, files `0600`, and secrets are redacted. Useful environme
 
 To watch what the server is doing, run with `OGCODE_LOG_CONSOLE=info`.
 
-Log shipping is **opt in and off by default**. When `OGCODE_POSTHOG_LOGS=1`, records at or above `OGCODE_POSTHOG_LOGS_LEVEL` are sent (redacted) to PostHog Logs, so the ogcode maintainers can see crashes and errors across installs; setting `DO_NOT_TRACK` to any value but `0` disables it regardless of the flag.
+Log shipping is **opt in and off by default**. When `OGCODE_POSTHOG_LOGS=1`, records at or above `OGCODE_POSTHOG_LOGS_LEVEL` are sent (redacted) to PostHog Logs, so the ogcode maintainers can see crashes and errors across installs; setting `DO_NOT_TRACK` to anything other than `0`, `false`, `no`, or `off` disables it regardless of the flag.
 
 
 ## Checklist
