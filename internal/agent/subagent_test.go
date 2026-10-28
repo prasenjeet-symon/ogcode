@@ -27,7 +27,7 @@ func TestSubagentAgent_ReadOnlyDepth1(t *testing.T) {
 			t.Errorf("SubagentAgent should have investigation tool %q", want)
 		}
 	}
-	for _, parent := range []Agent{BuildAgent, PlanAgent, TaskAgent} {
+	for _, parent := range []Agent{BuildAgent} {
 		if !parent.HasTool("task") {
 			t.Errorf("%s agent should be able to delegate via the task tool", parent.ID)
 		}

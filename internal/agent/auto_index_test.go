@@ -154,7 +154,7 @@ func TestRunLoop_AutoIndexesAfterACompletedTurn(t *testing.T) {
 // own turns through this loop under the "index" agent, so indexing on those
 // would recurse into an index of the index, without bound.
 func TestRunLoop_AutoIndexSkipsNonBuildAgents(t *testing.T) {
-	for _, agentName := range []string{"index", "plan", "note", "breakdown", "task", "search"} {
+	for _, agentName := range []string{"index", "note", "search"} {
 		t.Run(agentName, func(t *testing.T) {
 			called := make(chan string, 4)
 			lr, sessionID, _ := autoIndexFixture(t, autoIndexCase{sessionType: agentName}, func(d, _, _ string) { called <- d })
@@ -178,8 +178,8 @@ func TestRunLoop_AutoIndexSkipsWorktreeSessions(t *testing.T) {
 	called := make(chan string, 4)
 	worktree := t.TempDir()
 
-	// A task session: stored as "build", but run as the "task" agent and
-	// pointing at its own worktree rather than the project.
+	// The session is stored as "build", but it points at its own worktree
+	// rather than the project — the directory decides, not the session type.
 	lr, sessionID, _ := autoIndexFixture(t, autoIndexCase{
 		sessionType: "build",
 		directory:   worktree,

@@ -1,6 +1,5 @@
 import { createSignal, Show, For, onMount } from 'solid-js';
 import { useNotifications } from '../context/notification';
-import { useNavigate } from '@solidjs/router';
 import { getVersion, checkForUpdate } from '../api/client';
 import type { VersionResponse } from '../api/client';
 
@@ -25,7 +24,6 @@ function statusIcon(type: string) {
 
 export default function NotificationBell() {
   const notifs = useNotifications();
-  const navigate = useNavigate();
   const [open, setOpen] = createSignal(false);
   const [versionInfo, setVersionInfo] = createSignal<VersionResponse | null>(null);
   const [showUpdatePopover, setShowUpdatePopover] = createSignal(false);
@@ -42,7 +40,6 @@ export default function NotificationBell() {
   const handleClick = (notif: any) => {
     notifs.markRead(notif.id);
     setOpen(false);
-    navigate(`/plan/${notif.planId}`);
   };
 
   const handleUpdateClick = () => {

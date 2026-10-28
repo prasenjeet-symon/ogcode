@@ -118,7 +118,7 @@ export default function SettingsLayout(props: RouteSectionProps) {
   // Replace rather than push: leaving settings should pop the user back out,
   // not stack another entry so the browser's own Back button re-enters settings.
   const goBack = () =>
-    navigate(storedPreviousRoute ?? (server.mode() === 'plan' ? '/plan' : '/'), { replace: true });
+    navigate(storedPreviousRoute ?? '/', { replace: true });
 
   const currentPage = createMemo(() => PAGES.find((p) => p.match(location.pathname)) ?? PAGES[0]);
 

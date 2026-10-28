@@ -1,6 +1,5 @@
 import { createSignal, Show } from 'solid-js';
 import { useLocation } from '@solidjs/router';
-import { useServer } from '../context/server';
 import { useDesktopNotifications } from '../context/desktop-notification';
 
 // DesktopNotificationBanner offers the browser notification permission from a
@@ -9,7 +8,6 @@ import { useDesktopNotifications } from '../context/desktop-notification';
 // permission is still 'default' (undecided); once granted or denied it goes
 // away, and a dismissal is remembered so we never nag across reloads.
 export default function DesktopNotificationBanner() {
-  const server = useServer();
   const desktop = useDesktopNotifications();
   const location = useLocation();
   let storedDismissed = false;
@@ -32,14 +30,10 @@ export default function DesktopNotificationBanner() {
     desktop.permission() === 'default' &&
     location.pathname !== '/onboarding';
 
-  // Plan mode stacks two banners above this one — the plan-mode notice at
-  // top-4 and the git-sync banner at top-16 — so drop below both there.
-  const top = () => (server.mode() === 'plan' ? 'top-28' : 'top-4');
-
   return (
     <Show when={visible()}>
       <div
-        class={`fixed left-1/2 z-[150] -translate-x-1/2 flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-[10px] border max-w-[92vw] transition-[top] duration-200 ${top()}`}
+        class="fixed left-1/2 z-[150] top-4 -translate-x-1/2 flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-[10px] border max-w-[92vw]"
         style={{ background: 'var(--bg-overlay)', 'border-color': 'color-mix(in srgb, var(--accent) 30%, transparent)', 'box-shadow': 'var(--shadow-lg)' }}
       >
         <span class="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)' }}>

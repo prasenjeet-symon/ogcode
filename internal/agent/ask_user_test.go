@@ -322,7 +322,7 @@ func TestWithoutLoopControlKeepsPermissionGating(t *testing.T) {
 // list by the loop, never baked into an agent's static toolset. So it must be in
 // no agent's Tools list, and the loop's offer must come from canAskUser.
 func TestNoAgentBakesInAskUser(t *testing.T) {
-	for _, name := range []string{"build", "task", "subagent", "memory-recall", "plan", "breakdown", "note", "index", "search"} {
+	for _, name := range []string{"build", "subagent", "memory-recall", "note", "index", "search"} {
 		a := GetAgent(name)
 		if a.HasTool("ask_user") {
 			t.Errorf("agent %q lists ask_user statically; it must be added per turn by the loop", name)
@@ -334,9 +334,9 @@ func TestCanAskUserIsOnlyTheBuildAgent(t *testing.T) {
 	if !BuildAgent.canAskUser() {
 		t.Error("the build agent must be able to ask the user")
 	}
-	// TaskAgent shares the build agent's toolset but is headless — the case this
+	// The headless agents run with no user attached — the case this
 	// check exists for.
-	for _, name := range []string{"task", "subagent", "memory-recall", "plan", "breakdown", "note", "index", "search"} {
+	for _, name := range []string{"subagent", "memory-recall", "note", "index", "search"} {
 		a := GetAgent(name)
 		if a.canAskUser() {
 			t.Errorf("agent %q may ask the user; only the interactive build agent has a user to ask", name)

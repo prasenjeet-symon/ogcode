@@ -104,7 +104,6 @@ fi
 echo ""
 echo "Usage:"
 echo "  ogcode              # Start in Build Mode"
-echo "  ogcode plan         # Start in Plan Mode"
 echo "  ogcode version      # Check version"
 echo ""
 echo "Next step: set your AI provider API key (see README for options)."

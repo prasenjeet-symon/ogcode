@@ -4,7 +4,7 @@ import { createSignal } from 'solid-js';
 // the point: the hamburger buttons live in page headers, the drawer itself is
 // the sidebar component wrapped in SidebarShell, and the two halves never
 // share a parent — they meet here.
-export type DrawerId = 'sessions' | 'plans';
+export type DrawerId = 'sessions';
 
 const [open, setOpen] = createSignal<DrawerId | null>(null);
 

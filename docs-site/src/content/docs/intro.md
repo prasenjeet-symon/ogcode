@@ -14,7 +14,7 @@ If you have used an editor plugin with a chat panel, the difference is the shape
 - **Browser-native.** You work in a web UI, not inside a particular editor.
 - **Model-agnostic.** Anthropic, OpenAI, OpenRouter, a local Ollama endpoint, or the OG Lab subscription (OGX).
 - **Built for long-running work.** Sessions survive restarts, context is compacted rather than lost, and memory carries from one turn to the next.
-- **Git-native.** Plan Mode breaks a feature into tasks, runs each in its own worktree, and opens pull requests.
+- **Git-native.** The agent works in your real checkout, and every change shows as a reviewable git diff.
 - **Permission-aware.** Every consequential action is gated: ask, auto-approve, or refuse by an explicit rule.
 - **Growing into a general computer agent.** Code is the current focus; the same tool-and-permission model reaches documents, rich output, and local services.
 
@@ -22,7 +22,6 @@ If you have used an editor plugin with a chat panel, the difference is the shape
 
 - **Understand a codebase.** Ask how a feature works and get an answer grounded in the real files, pointed straight at the parts that matter.
 - **Build and fix.** Describe a change and the agent edits the files, runs the build and tests, and reports what it changed and how it verified it.
-- **Plan larger work.** Give it a whole feature and let Plan Mode split it into tasks it can run in parallel and turn into pull requests.
 - **Research.** Let it search the web and read pages alongside your local code and documents.
 - **Repeat your process.** Teach it reusable skills, and connect the tools you already use.
 - **Work headlessly.** Run any of it from a script or CI with a single command.

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
-	"github.com/prasenjeet-symon/ogcode/internal/git"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
@@ -28,26 +27,7 @@ func (s *Server) handlePath(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []map[string]string{
 		{"id": "build", "name": "Build", "description": "Full-access coding agent"},
-		{"id": "plan", "name": "Plan", "description": "Planning agent — reads and understands code, plans changes but never writes"},
 	})
-}
-
-func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"mode": string(s.mode),
-	})
-}
-
-// handleGitSync reports whether the working directory's current branch is in
-// sync with its upstream (best-effort fetch first). Used by plan mode to warn
-// when the active branch is behind the remote before tasks branch from it.
-func (s *Server) handleGitSync(w http.ResponseWriter, r *http.Request) {
-	st, err := git.BranchSyncStatus(r.Context(), s.dir)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +197,6 @@ func (s *Server) configPayload() map[string]any {
 		"installId":          s.installID,
 		"notesEnabled":       s.notesEnabled.Load(),
 		"devicePanelEnabled": s.devicePanelEnabled.Load(),
-		"planModeEnabled":    s.planModeEnabled.Load(),
 	}
 }
 

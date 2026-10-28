@@ -308,10 +308,9 @@ func TestBuildSystemPrompt_OSEnvStaticAcrossAgents(t *testing.T) {
 	// regardless of which agent runs.
 	detectedOSEnv = nil // force re-detection
 	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
-	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
 	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
 
-	for name, p := range map[string]string{"build": buildPrompt, "plan": planPrompt, "note": notePrompt} {
+	for name, p := range map[string]string{"build": buildPrompt, "note": notePrompt} {
 		if !strings.Contains(p, "OS:") {
 			t.Errorf("%s prompt: expected 'OS:' line", name)
 		}
@@ -322,11 +321,10 @@ func TestBuildSystemPrompt_OSEnvStaticAcrossAgents(t *testing.T) {
 			t.Errorf("%s prompt: expected 'sh -c' mention", name)
 		}
 	}
-	// All three should share the identical OS/Shell block since it's host-derived.
+	// Both should share the identical OS/Shell block since it's host-derived.
 	buildOS := substringAfter(buildPrompt, "\nOS:")
-	planOS := substringAfter(planPrompt, "\nOS:")
 	noteOS := substringAfter(notePrompt, "\nOS:")
-	if buildOS != planOS || planOS != noteOS {
+	if buildOS != noteOS {
 		t.Error("expected identical OS/Shell block across all agents (host-derived, not agent-derived)")
 	}
 }
@@ -621,24 +619,6 @@ func TestBuildAgent_HasExpectedTools(t *testing.T) {
 	}
 }
 
-func TestPlanAgent_HasExpectedTools(t *testing.T) {
-	if PlanAgent.HasTool("write") {
-		t.Error("PlanAgent should not have write tool")
-	}
-	if PlanAgent.HasTool("edit") {
-		t.Error("PlanAgent should not have edit tool")
-	}
-	if !PlanAgent.HasTool("memory_recall") {
-		t.Error("PlanAgent should have memory_recall tool")
-	}
-	if !PlanAgent.HasTool("project_memory_recall") {
-		t.Error("PlanAgent should have project_memory_recall tool")
-	}
-	if !PlanAgent.HasTool("read") {
-		t.Error("PlanAgent should have read tool")
-	}
-}
-
 func TestNoteAgent_HasExpectedTools(t *testing.T) {
 	if NoteAgent.HasTool("write") {
 		t.Error("NoteAgent should not have write tool")
@@ -663,21 +643,6 @@ func TestNoteAgent_HasExpectedTools(t *testing.T) {
 	}
 }
 
-func TestBreakdownAgent_HasExpectedTools(t *testing.T) {
-	if BreakdownAgent.HasTool("write") {
-		t.Error("BreakdownAgent should not have write tool")
-	}
-	if BreakdownAgent.HasTool("edit") {
-		t.Error("BreakdownAgent should not have edit tool")
-	}
-	if BreakdownAgent.HasTool("memory_recall") {
-		t.Error("BreakdownAgent should not have memory_recall tool (single-iteration agent)")
-	}
-	if !BreakdownAgent.HasTool("submit_task_breakdown") {
-		t.Error("BreakdownAgent should have submit_task_breakdown tool")
-	}
-}
-
 func TestBuildAgent_SystemPrompt_ContainsSharedSections(t *testing.T) {
 	// Verify that BuildAgent's system prompt includes the shared prompt sections
 	if !strings.Contains(BuildAgent.System, "Parallel tool calls") {
@@ -691,14 +656,14 @@ func TestBuildAgent_SystemPrompt_ContainsSharedSections(t *testing.T) {
 	// is pinned by the pure projectNotesPrompt tests instead.
 }
 
-// Both coding agents verify a change by running it the way it is used, not only
+// The coding agent verifies a change by running it the way it is used, not only
 // through its tests, and review work — their own included — to one standard of
 // evidence: a clean result needs support as much as a finding does, the review
 // reaches past the changed lines to what depends on them, and what could not be
 // checked is reported as such. The read-only agents cannot run anything, so
 // neither rule reaches them.
 func TestCodingAgents_ReviewAndEndToEndVerification(t *testing.T) {
-	for _, a := range []Agent{BuildAgent, TaskAgent} {
+	for _, a := range []Agent{BuildAgent} {
 		for _, want := range []string{
 			"## Reviewing work",
 			"hold every conclusion to the same standard of evidence",
@@ -711,7 +676,7 @@ func TestCodingAgents_ReviewAndEndToEndVerification(t *testing.T) {
 			}
 		}
 	}
-	for _, a := range []Agent{PlanAgent, NoteAgent, BreakdownAgent, SubagentAgent} {
+	for _, a := range []Agent{NoteAgent, SubagentAgent} {
 		if strings.Contains(a.System, "## Reviewing work") {
 			t.Errorf("%s system prompt tells a read-only agent how to run a review", a.ID)
 		}
@@ -802,22 +767,6 @@ func TestPreviewServingPrompt_BrowserNoteOnlyForLocalhost(t *testing.T) {
 	}
 }
 
-func TestBreakdownAgent_SystemPrompt_ContainsNotesWhenEnabled(t *testing.T) {
-	// The project-notes guidance reaches BreakdownAgent only through the assembled
-	// prompt, and only when the notes feature is enabled.
-	assembled := strings.Join(buildSystemPromptEntries(BreakdownAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
-	if !strings.Contains(assembled, "Project notes") {
-		t.Error("BreakdownAgent assembled prompt should mention project notes when enabled")
-	}
-	if !strings.Contains(BreakdownAgent.System, "verification step") {
-		t.Error("BreakdownAgent should require a per-task verification step")
-	}
-	// The worked example must not reference a fictional internal API.
-	if strings.Contains(BreakdownAgent.System, "PromptBuilder") {
-		t.Error("BreakdownAgent example should not reference the non-existent PromptBuilder type")
-	}
-}
-
 // The project-notes section is withheld unless the notes feature is enabled for
 // the session, and it appears only in a project-scoped agent's prompt.
 func TestBuildSystemPrompt_NotesGate(t *testing.T) {
@@ -841,7 +790,7 @@ func TestBuildSystemPrompt_NotesScope(t *testing.T) {
 		return strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, notes), "\n\n")
 	}
 
-	for _, a := range []Agent{BuildAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent} {
+	for _, a := range []Agent{BuildAgent, NoteAgent} {
 		on := entries(a, true)
 		if !strings.Contains(on, "Project notes") {
 			t.Errorf("%s should carry project notes when the feature is enabled", a.ID)
@@ -954,11 +903,8 @@ func TestGetAgent(t *testing.T) {
 		name     string
 		expected string
 	}{
-		{"plan", "plan"},
-		{"breakdown", "breakdown"},
 		{"note", "note"},
 		{"build", "build"},
-		{"task", "task"},
 		{"unknown", "build"}, // default
 		{"", "build"},        // default
 	}
@@ -966,67 +912,6 @@ func TestGetAgent(t *testing.T) {
 		agent := GetAgent(tc.name)
 		if agent.ID != tc.expected {
 			t.Errorf("GetAgent(%q) = %q, want %q", tc.name, agent.ID, tc.expected)
-		}
-	}
-}
-
-// TestBuildVsTaskAgent_Framing locks in that BuildAgent (interactive
-// Build Mode) and TaskAgent (headless worktree execution) share the toolset
-// except `schedule` (canSchedule — its reminders only reach a build session,
-// never a worktree) while framing commits and the source-of-truth differently.
-// The interactive agent must NOT tell the developer their uncommitted work will
-// be lost or that it must commit.
-func TestBuildVsTaskAgent_Framing(t *testing.T) {
-	// Near-identical capabilities: the shared list for the task agent, and the
-	// build agent one tool ahead — schedule alone. TestScheduleIsOnlyTheBuildAgent
-	// pins every other agent's view of the split.
-	if TaskAgent.HasTool("schedule") || !BuildAgent.HasTool("schedule") || len(BuildAgent.Tools) != len(TaskAgent.Tools)+1 {
-		t.Fatalf("BuildAgent and TaskAgent should share the toolset except schedule (canSchedule): build holds %d tools, task %d", len(BuildAgent.Tools), len(TaskAgent.Tools))
-	}
-
-	// Task-only framing must appear in TaskAgent and NOT in BuildAgent.
-	taskOnly := []string{
-		"executing a single implementation task in a dedicated git worktree",
-		"You MUST commit",
-		"uncommitted changes will be lost after the task completes",
-		"Read the task description carefully",
-	}
-	for _, s := range taskOnly {
-		if !strings.Contains(TaskAgent.System, s) {
-			t.Errorf("TaskAgent.System should contain %q", s)
-		}
-		if strings.Contains(BuildAgent.System, s) {
-			t.Errorf("BuildAgent.System (interactive) must NOT contain task-only framing %q", s)
-		}
-	}
-
-	// Interactive-only framing must appear in BuildAgent and NOT in TaskAgent.
-	// The decision-summary directive is interactive-only too: the per-turn memory
-	// note is written from the interactive reply, so the headless TaskAgent (no
-	// memory summary) must not carry it.
-	interactiveOnly := []string{
-		"Do not commit unless asked",
-		"nothing is lost by staying uncommitted",
-		"## Decision summary",
-		"## Decisions & why",
-	}
-	for _, s := range interactiveOnly {
-		if !strings.Contains(BuildAgent.System, s) {
-			t.Errorf("BuildAgent.System (interactive) should contain %q", s)
-		}
-		if strings.Contains(TaskAgent.System, s) {
-			t.Errorf("TaskAgent.System must NOT contain interactive-only framing %q", s)
-		}
-	}
-
-	// Shared sections must be present in both. (Project notes is excluded: it is
-	// appended at assembly when the feature is on, not baked into System.)
-	for _, s := range []string{"Parallel tool calls", "Error recovery"} {
-		if !strings.Contains(BuildAgent.System, s) {
-			t.Errorf("BuildAgent.System should contain shared section %q", s)
-		}
-		if !strings.Contains(TaskAgent.System, s) {
-			t.Errorf("TaskAgent.System should contain shared section %q", s)
 		}
 	}
 }
@@ -1049,15 +934,6 @@ func TestProjectIndexPrompt(t *testing.T) {
 		}
 	}
 
-	// Plan role — read-only, ends with "produce your plan" instead of "make changes"
-	planPrompt := projectIndexPrompt("plan", true, true)
-	if !strings.Contains(planPrompt, "Then produce your plan") {
-		t.Error("expected plan role workflow to end with 'Then produce your plan'")
-	}
-	if strings.Contains(planPrompt, "Then make changes") {
-		t.Error("did not expect 'make changes' in plan role workflow (read-only agent)")
-	}
-
 	// Note role — read-only, ends with "produce your note"
 	notePrompt := projectIndexPrompt("note", true, true)
 	if !strings.Contains(notePrompt, "Then produce your note") {
@@ -1075,27 +951,6 @@ func TestBuildAgent_SystemPrompt_ContainsProjectIndex(t *testing.T) {
 	}
 	if !strings.Contains(BuildAgent.System, "codebase_map") {
 		t.Error("BuildAgent system prompt should reference codebase_map tool")
-	}
-}
-
-func TestPlanAgent_SystemPrompt_ContainsProjectIndex(t *testing.T) {
-	// PlanAgent should contain the project index prompt since it has the codebase_map tool
-	if !strings.Contains(PlanAgent.System, "Mandatory: Explore Before You Read") {
-		t.Error("PlanAgent system prompt should include project index section")
-	}
-	if !strings.Contains(PlanAgent.System, "codebase_map") {
-		t.Error("PlanAgent system prompt should reference codebase_map tool")
-	}
-	// The plan agent is read-only — its workflow must not instruct it to make changes
-	if strings.Contains(PlanAgent.System, "Then make changes") {
-		t.Error("PlanAgent system prompt should not include 'make changes' workflow step (read-only agent)")
-	}
-	if !strings.Contains(PlanAgent.System, "Then produce your plan") {
-		t.Error("PlanAgent system prompt should include 'Then produce your plan' workflow step")
-	}
-	// The plan agent's own start-of-session steps must reinforce codebase_map (not just read/glob/grep)
-	if !strings.Contains(PlanAgent.System, "Start with **codebase_map**") {
-		t.Error("PlanAgent step 2 should explicitly start with codebase_map")
 	}
 }
 
@@ -1166,10 +1021,10 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 		}
 	}
 
-	// PlanAgent does NOT have latex_to_pdf tool — should NOT get LaTeX info
-	prompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, true)
+	// NoteAgent does NOT have latex_to_pdf tool — should NOT get LaTeX info
+	prompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, true)
 	if strings.Contains(prompt, "LaTeX environment") {
-		t.Error("did NOT expect LaTeX environment section in PlanAgent prompt (no latex_to_pdf tool)")
+		t.Error("did NOT expect LaTeX environment section in NoteAgent prompt (no latex_to_pdf tool)")
 	}
 
 	// Reset for other tests
@@ -1228,7 +1083,7 @@ func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
 // full contract, where it is stated once. Only the write-capable agents carry
 // the pointer, because only they can commit the mistake.
 func TestCodingAgentHardRules_PointAtTheEditContract(t *testing.T) {
-	for _, a := range []Agent{BuildAgent, TaskAgent} {
+	for _, a := range []Agent{BuildAgent} {
 		hard := a.System[strings.Index(a.System, "## Hard rules"):]
 		for _, want := range []string{
 			`"edits" array`,
@@ -1239,7 +1094,7 @@ func TestCodingAgentHardRules_PointAtTheEditContract(t *testing.T) {
 			}
 		}
 	}
-	for _, a := range []Agent{PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent} {
+	for _, a := range []Agent{NoteAgent, SubagentAgent} {
 		if strings.Contains(a.System, "The full contract, including the one forbidden pair") {
 			t.Errorf("%s: cannot edit, so the rule is noise in its prompt", a.Name)
 		}
@@ -1308,17 +1163,17 @@ func TestMarkdownCapabilities_DoesNotPointAtAnAbsentViewport(t *testing.T) {
 	}
 }
 
-// Plan, Note and Breakdown hold bash while being read-only by policy, and
+// Note holds bash while being read-only by policy, and
 // nothing below the prompt enforces that — permission.go has no mode handling
 // and bash_safety.go only blocks catastrophic commands. So the shell paragraph
-// must not hand them the mutating uses.
+// must not hand it the mutating uses.
 func TestProjectIndexPrompt_ShellRuleMatchesWhetherTheAgentMayWrite(t *testing.T) {
 	build := projectIndexPrompt("build", true, true)
 	if !strings.Contains(build, "builds, tests, linters, formatters, git") {
 		t.Error("write-capable agent lost the full shell guidance")
 	}
 
-	for _, role := range []string{"plan", "note", "breakdown"} {
+	for _, role := range []string{"note"} {
 		readOnly := projectIndexPrompt(role, true, true)
 		if !strings.Contains(readOnly, "inspect, never to change") {
 			t.Errorf("%s: shell paragraph does not restrict the shell to inspection", role)
@@ -1391,7 +1246,7 @@ func TestParallelToolCallsPrompt_ExamplesMatchTheAgentsTools(t *testing.T) {
 // is unhelpful and falls back to grep — having paid for the call and discarded
 // the labels that were the answer. The prompt has to teach the descent.
 func TestProjectIndexPromptTeachesTheDescent(t *testing.T) {
-	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+	for _, role := range []string{"build", "note", "subagent"} {
 		prompt := projectIndexPrompt(role, true, true)
 
 		for _, want := range []string{
@@ -1426,7 +1281,7 @@ func TestProjectIndexPromptTeachesTheDescent(t *testing.T) {
 // diagram's arrow order reads as one pass — descend, map, read, done — and the
 // agent answers from the wrong package.
 func TestProjectIndexPromptLoopsBackWhenAReadPointsElsewhere(t *testing.T) {
-	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+	for _, role := range []string{"build", "note", "subagent"} {
 		prompt := projectIndexPrompt(role, true, true)
 
 		for _, want := range []string{
@@ -1465,7 +1320,7 @@ func TestIndexStatusPromptPointsAtTheDescent(t *testing.T) {
 // index decides only how the files are FOUND — the batching that follows is
 // unconditional, and a file read one-per-round-trip is paid for on every step.
 func TestExplorationIsMapThenBatchedReadsInEveryProject(t *testing.T) {
-	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+	for _, role := range []string{"build", "note", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
 		for _, want := range []string{
 			"## Mandatory: Explore Before You Read",
@@ -1505,7 +1360,7 @@ func TestExplorationIsMapThenBatchedReadsInEveryProject(t *testing.T) {
 // cheap, so "map every file and read the parts" still ran one file per round
 // trip. The step has to name the batched calls it is asking for.
 func TestProcessStepTwoNamesTheBatchedCalls(t *testing.T) {
-	p := codingAgentSystem("build")
+	p := codingAgentSystem()
 	start := strings.Index(p, "2. **Explore before you write.**")
 	end := strings.Index(p, "3. **Implement focused, minimal changes.**")
 	if start < 0 || end <= start {

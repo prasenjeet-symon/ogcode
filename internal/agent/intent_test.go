@@ -16,7 +16,7 @@ func TestCanUpdateIntentIsOnlyTheBuildAgent(t *testing.T) {
 			t.Errorf("agent %q should state a plan for the turn", a.ID)
 		}
 	}
-	for _, a := range []Agent{SubagentAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, IndexAgent, SearchAgent, MemoryRecallAgent} {
+	for _, a := range []Agent{SubagentAgent, NoteAgent, IndexAgent, SearchAgent, MemoryRecallAgent} {
 		if a.canUpdateIntent() {
 			t.Errorf("agent %q should not state a plan", a.ID)
 		}

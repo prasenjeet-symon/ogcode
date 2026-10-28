@@ -447,8 +447,8 @@ func (w *Worker) RemoveUserWorktree(repoDir, userName string) error {
 // MergeUserBranch merges the user/<slug> branch back into the repo's base
 // branch and returns what happened ("merged", "already merged", or
 // "merged+pushed"). The merge runs in a temporary worktree on the base branch
-// (a mirror of internal/git's MergeTaskBranch, never disturbing the checked-
-// out user worktrees), and a pushable origin receives the updated base
+// (in a temporary worktree, never disturbing the checked-out user
+// worktrees), and a pushable origin receives the updated base
 // best-effort — a failed push does not fail the merge.
 func (w *Worker) MergeUserBranch(repoDir, userName, baseBranch string, push bool) (string, error) {
 	if !gitAvailable() {

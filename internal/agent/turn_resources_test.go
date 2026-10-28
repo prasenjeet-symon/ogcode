@@ -37,7 +37,7 @@ func TestRunLoop_ReportsTurnResourcesForAUserTurn(t *testing.T) {
 // turn the user already asked for, so reporting it too would charge one user
 // turn several times over.
 func TestRunLoop_DoesNotReportNestedAgents(t *testing.T) {
-	for _, agentName := range []string{"index", "subagent", "memory-recall", "breakdown", "search"} {
+	for _, agentName := range []string{"index", "subagent", "memory-recall", "search"} {
 		t.Run(agentName, func(t *testing.T) {
 			called := false
 			lr, sessionID, _ := autoIndexFixture(t, autoIndexCase{sessionType: "build"}, nil)

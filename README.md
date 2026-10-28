@@ -77,8 +77,7 @@ Two more commands are handy from a terminal:
 
 - **Understand unfamiliar code**: Ogcode maps a project before reading it, outlines files with exact line ranges, and reads only what matters. [Core concepts →](https://ogcode.in/docs/core-concepts/)
 - **Build and fix software**: implement features and fixes across files, run your builds and tests, and investigate failures instead of retrying blindly.
-- **Deliver a whole feature**: turn an objective into tasks, run independent ones in parallel, and open pull requests for review. [Plan mode & tasks →](https://ogcode.in/docs/plan-mode/)
-- **Stay in control**: choose Ask, Auto, or Yolo per session, and approve or remember each decision. [Permissions →](https://ogcode.in/docs/permissions/)
+- **Permission-aware.**- **Stay in control**: choose Ask, Auto, or Yolo per session, and approve or remember each decision. [Permissions →](https://ogcode.in/docs/permissions/)
 - **Keep context that fits**: recall past decisions instead of replaying the whole transcript, so long sessions stay focused and affordable. [Memory & context →](https://ogcode.in/docs/memory-and-context/)
 - **Research as you go**: built-in web search and page reading, reusable `SKILL.md` workflows, and external MCP servers. [Search, skills & MCP →](https://ogcode.in/docs/search-and-skills/)
 - **See more than text**: Mermaid diagrams, LaTeX and rendered PDFs, Plotly charts, sandboxed HTML, and downloadable artifacts. [Rich results & preview →](https://ogcode.in/docs/rich-results/)

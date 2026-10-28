@@ -59,7 +59,7 @@ func (m *serverManager) ensure(dir string) (*serverHost, error) {
 		return h, nil
 	}
 
-	srv := server.NewWithOptions(0, dir, server.ModeBuild, server.Options{NoBrowser: true, Loopback: true})
+	srv := server.NewWithOptions(0, dir, server.Options{NoBrowser: true, Loopback: true})
 
 	hostCtx, cancel := context.WithCancel(m.ctx)
 	serveDone := make(chan struct{})

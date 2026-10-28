@@ -16,7 +16,7 @@ import (
 // through after Ctrl+C. Shutdown now releases the stream first, so Serve returns
 // as soon as the real work is done, well inside the grace period.
 func TestServe_ShutdownReleasesTheEventStream(t *testing.T) {
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(context.Background()) }()
 	waitUp(t, srv)

@@ -9,7 +9,7 @@ A handful of ideas explain almost everything Ogcode does. None of them need conf
 
 Ogcode works inside one directory at a time: the **workspace**. It is the directory the agent reads, edits and runs commands in, and the root relative file paths resolve against. Start `ogcode` from a project and that becomes the workspace; start it in another directory to work elsewhere.
 
-A **project** is a workspace Ogcode has seen before. Everything project-scoped (sessions, the index, task worktrees) lives under `.ogcode/` inside it, so the state travels with the checkout and nothing leaks between projects.
+A **project** is a workspace Ogcode has seen before. Everything project-scoped (sessions, the index) lives under `.ogcode/` inside it, so the state travels with the checkout and nothing leaks between projects.
 
 ## Sessions and turns
 
@@ -17,7 +17,7 @@ A **session** is one conversation: a title, a chosen model, and a transcript of 
 
 ## Modes
 
-The mode you launch decides the shape of the work: **Build** for everyday conversation and edits, **Plan** to split a large feature into tasks each running in its own worktree, **Task** to run one of those tasks, and **Breakdown** to produce a task list without executing it. See [Plan mode & tasks](/docs/plan-mode/).
+The mode you launch decides the shape of the work: **Build** for everyday conversation and edits.
 
 ## Tools
 

@@ -93,7 +93,6 @@ Write-Host "ogcode $version installed successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Usage:" -ForegroundColor Cyan
 Write-Host "  ogcode              # Start in Build Mode" -ForegroundColor White
-Write-Host "  ogcode plan         # Start in Plan Mode" -ForegroundColor White
 Write-Host "  ogcode version      # Check version" -ForegroundColor White
 Write-Host ""
 Write-Host "Next step: set your AI provider API key (see README for options)." -ForegroundColor Yellow

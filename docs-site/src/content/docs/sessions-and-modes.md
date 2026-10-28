@@ -20,11 +20,8 @@ The mode you launch decides the shape of the work:
 | Mode | Start it with | What it does |
 | --- | --- | --- |
 | **Build** | `ogcode` | The default. Chat, inspect, edit, run commands, verify: one session, many turns. |
-| **Plan** | `ogcode plan` | Turns a larger feature into a board of tasks and executes them. See [Plan mode & tasks](/docs/plan-mode/). |
-| **Task** | (from a plan) | Runs a single plan task inside its own git worktree. |
-| **Breakdown** | `ogcode run -a breakdown` | Splits a goal into a task list without executing it. |
 
-For everyday work you stay in **Build** mode. You switch into the others when a change is too large for a single conversation.
+For everyday work you stay in **Build** mode.
 
 ## Watch it work
 
@@ -52,7 +49,7 @@ ogcode run "add a --json flag to the CLI and document it"
 
 | Flag | Meaning |
 | --- | --- |
-| `-a, --agent` | Agent to run: `build` (default), `plan`, `task`, `breakdown` |
+| `-a, --agent` | Agent to run: `build` (default), plus a few internal agent types |
 | `-o, --output-format` | `text` (default) or `json` |
 | `--max-turns` | Stop after this many steps; `0` (the default) means no limit |
 | `--model` | Override the model for this run |
@@ -62,4 +59,3 @@ A non-zero exit status means the run did not complete, so `run` fits into a pipe
 ## Next
 
 - [Permissions](/docs/permissions/): how the agent decides when to ask before acting.
-- [Plan mode & tasks](/docs/plan-mode/): for work that is too big for one turn.

@@ -1,16 +1,8 @@
 import { useNavigate } from '@solidjs/router';
-import { Show } from 'solid-js';
-import { useServer } from '../context/server';
 import SessionSidebar from '../components/session-sidebar';
-import PlanSidebar from '../components/plan-sidebar';
 
 function Sidebar() {
-  const server = useServer();
-  return (
-    <Show when={server.mode() === 'plan'} fallback={<SessionSidebar />}>
-      <PlanSidebar />
-    </Show>
-  );
+  return <SessionSidebar />;
 }
 
 interface NotFoundPanelProps {
@@ -18,9 +10,9 @@ interface NotFoundPanelProps {
   title?: string;
   // One-line explanation shown under the headline.
   message?: string;
-  // Label for the primary action. Defaults to the mode-aware home label.
+  // Label for the primary action. Defaults to the home label.
   actionLabel?: string;
-  // Where the primary action goes. Defaults to the mode-aware home route.
+  // Where the primary action goes. Defaults to the home route.
   actionHref?: string;
 }
 
@@ -28,11 +20,10 @@ interface NotFoundPanelProps {
 // embedded next to a sidebar by pages whose :id turned out not to exist, so a
 // dead URL always leaves the user with a way out instead of a blank screen.
 export function NotFoundPanel(props: NotFoundPanelProps) {
-  const server = useServer();
   const navigate = useNavigate();
 
-  const homeHref = () => (server.mode() === 'plan' ? '/plan' : '/');
-  const homeLabel = () => (server.mode() === 'plan' ? 'Back to plans' : 'Back to home');
+  const homeHref = () => '/';
+  const homeLabel = () => 'Back to home';
   const href = () => props.actionHref ?? homeHref();
   const label = () => props.actionLabel ?? homeLabel();
 

@@ -56,15 +56,6 @@ func TestBuildSystemPrompt_HistoryMDSectionIsAPointer(t *testing.T) {
 			t.Errorf("system prompt missing %q", want)
 		}
 	}
-
-	// PlanAgent is read-only: it is told what the file is, not how to write one.
-	planPrompt := buildSystemPrompt(PlanAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
-	if !strings.Contains(planPrompt, "## HISTORY.md — Project History") {
-		t.Error("PlanAgent prompt lost the HISTORY.md pointer")
-	}
-	if strings.Contains(planPrompt, "### Adding an entry") {
-		t.Error("read-only agent is given HISTORY.md authoring rules")
-	}
 }
 
 func TestBuildSystemPrompt_MemoryMDSection_ContainsPurposeSection(t *testing.T) {
@@ -103,18 +94,6 @@ func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
 		t.Error("expected creation prompt when memoryMDContent is empty and agent can write")
 	}
 
-	// PlanAgent has no write/edit tools — should get read-only instructions
-	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", "", sessionMemory{}, 0, 0, true)
-	if !strings.Contains(planPrompt, "### How to use MEMORY.md") {
-		t.Error("expected 'How to use' heading for PlanAgent (read-only)")
-	}
-	if strings.Contains(planPrompt, "Use the edit tool") {
-		t.Error("did not expect 'Use the edit tool' for read-only PlanAgent")
-	}
-	if strings.Contains(planPrompt, "create one in the project root with the write tool") {
-		t.Error("did not expect creation prompt for read-only PlanAgent")
-	}
-
 	// NoteAgent has no write/edit tools — should get read-only instructions
 	notePrompt := buildSystemPrompt(NoteAgent, dir, false, "", "", sessionMemory{}, 0, 0, true)
 	if !strings.Contains(notePrompt, "### How to use MEMORY.md") {
@@ -139,15 +118,6 @@ func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
 	}
 	if strings.Contains(buildPrompt, "create one in the project root with the write tool") {
 		t.Error("did not expect creation prompt when memoryMDContent is present for BuildAgent")
-	}
-
-	// PlanAgent with MEMORY.md content — should show read-only version, no creation prompt
-	planPrompt := buildSystemPrompt(PlanAgent, dir, false, "", memContent, sessionMemory{}, 0, 0, true)
-	if !strings.Contains(planPrompt, "The content above in the <memory-md> tag") {
-		t.Error("expected content indicator when memoryMDContent is present for PlanAgent")
-	}
-	if strings.Contains(planPrompt, "create one in the project root with the write tool") {
-		t.Error("did not expect creation prompt for read-only PlanAgent even with content")
 	}
 }
 
@@ -848,14 +818,14 @@ func TestEstimateRequestTokensReasoningParts(t *testing.T) {
 // agent granted project_memory_recall *without* memory_recall would silently
 // get the tool and no instructions on when to use it.
 func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
-	all := []Agent{BuildAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, IndexAgent, SearchAgent, SubagentAgent}
+	all := []Agent{BuildAgent, NoteAgent, IndexAgent, SearchAgent, SubagentAgent}
 	withTool := []Agent{}
 	for _, a := range all {
 		if a.HasTool("project_memory_recall") {
 			withTool = append(withTool, a)
 		}
 	}
-	withoutTool := []Agent{NoteAgent, BreakdownAgent, IndexAgent, SearchAgent}
+	withoutTool := []Agent{NoteAgent, IndexAgent, SearchAgent}
 
 	// Recall is the per-turn markdown route only. Every agent holding
 	// project_memory_recall must be told it searches all sessions and takes

@@ -25,7 +25,7 @@ func TestLogTargetIsGlobalNeverInTheProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for cmd, wantFile := range map[string]string{"serve": "ogcode.log", "plan": "ogcode.log", "run": "run.log", "index": "index.log"} {
+	for cmd, wantFile := range map[string]string{"serve": "ogcode.log", "run": "run.log", "index": "index.log"} {
 		c, _, err := rootCmd.Find([]string{cmd})
 		if err != nil {
 			t.Fatal(err)

@@ -7,7 +7,6 @@ export interface Notification {
   type: 'task.started' | 'task.completed' | 'task.failed';
   taskTitle: string;
   taskId: string;
-  planId: string;
   timestamp: number;
   read: boolean;
 }
@@ -44,14 +43,13 @@ export const NotificationProvider: ParentComponent = (props) => {
     if (last.type !== 'task.started' && last.type !== 'task.completed' && last.type !== 'task.failed') return;
 
     const props = last.properties as Record<string, any> | undefined;
-    if (!props?.id || !props?.planId) return;
+    if (!props?.id) return;
 
     const notif: Notification = {
       id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       type: last.type as Notification['type'],
       taskTitle: props.title || props.id,
       taskId: props.id,
-      planId: props.planId,
       timestamp: Date.now(),
       read: false,
     };

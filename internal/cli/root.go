@@ -60,14 +60,6 @@ var serveCmd = &cobra.Command{
 	RunE:  serve,
 }
 
-var planCmd = &cobra.Command{
-	Use:   "plan",
-	Short: "Start ogcode in Plan Mode",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return serveWithMode(cmd, args, server.ModePlan)
-	},
-}
-
 var indexCmd = &cobra.Command{
 	Use:   "index",
 	Short: "Scan workspace for PDF files and index them with semantic labels",
@@ -77,12 +69,10 @@ var indexCmd = &cobra.Command{
 func init() {
 	rootCmd.Flags().IntVarP(&port, "port", "p", 9595, "Port to listen on")
 	serveCmd.Flags().IntVarP(&port, "port", "p", 9595, "Port to listen on")
-	planCmd.Flags().IntVarP(&port, "port", "p", 9595, "Port to listen on")
 	indexCmd.Flags().StringVar(&indexModel, "model", "", "Model to use for the IndexAgent (default: provider default)")
 	rootCmd.PersistentFlags().StringVar(&ollamaURLFlag, "ollama-url", "", "Ollama server address, e.g. http://100.x.x.x:11434 (overrides OLLAMA_BASE_URL and the config file)")
 	rootCmd.PersistentFlags().StringVar(&ollamaKeyFlag, "ollama-key", "", "API key for a hosted/authenticated Ollama-compatible endpoint (overrides OLLAMA_API_KEY)")
 	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(indexCmd)
 }
 
@@ -264,7 +254,7 @@ var logger *logging.Logger
 func logTarget(cmd *cobra.Command) (dir, name string) {
 	var file string
 	switch cmd.CommandPath() {
-	case "ogcode", "ogcode serve", "ogcode plan":
+	case "ogcode", "ogcode serve":
 		file = "ogcode.log"
 	case "ogcode run":
 		file = "run.log"
@@ -320,10 +310,6 @@ func logPath() string {
 }
 
 func serve(cmd *cobra.Command, args []string) error {
-	return serveWithMode(cmd, args, server.ModeBuild)
-}
-
-func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
@@ -379,7 +365,7 @@ func serveWithMode(cmd *cobra.Command, args []string, mode server.ServerMode) er
 		fmt.Println("\nStopping ogcode… (press Ctrl+C again to quit immediately)")
 	}
 
-	srv := server.NewWithOptions(startPort, dir, mode, server.Options{OnListen: onListen, OnInterrupt: onInterrupt})
+	srv := server.NewWithOptions(startPort, dir, server.Options{OnListen: onListen, OnInterrupt: onInterrupt})
 	return srv.Serve(context.Background())
 }
 

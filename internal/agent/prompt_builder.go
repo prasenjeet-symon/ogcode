@@ -41,15 +41,11 @@ import (
 // cannot read them, which is the part that changes what they do next.
 func projectIndexPrompt(role string, hasBash, hasDocTools bool) string {
 	// The final workflow step differs by role: write-capable agents make changes,
-	// read-only agents produce their plan/note instead.
+	// read-only agents produce their note instead.
 	finalStep := "Then make changes"
 	switch role {
-	case "plan":
-		finalStep = "Then produce your plan"
 	case "note":
 		finalStep = "Then produce your note"
-	case "breakdown":
-		finalStep = "Then define your tasks"
 	case "subagent":
 		finalStep = "Then report your findings"
 	}
@@ -61,12 +57,12 @@ func projectIndexPrompt(role string, hasBash, hasDocTools bool) string {
 		docRule = `Documents are indexed too, so PDF and DOCX files appear in the tree with labels aggregated across the whole file. You have no tool to open one. If the work depends on what is inside a document, say so explicitly rather than guessing at its contents.`
 	}
 
-	// Both write-capable roles arrive as "build" (BuildAgent and TaskAgent share
-	// codingAgentSystem); everything else is read-only by policy. Several of
-	// those read-only agents still hold bash, so the shell paragraph has to say
-	// what the shell is *for* differently: telling a planning agent to reach for
-	// formatters and builds invites exactly the file rewrites its own hard rules
-	// forbid, and nothing below the prompt enforces that boundary.
+	// Only the build role arrives with write access; every other agent is
+	// read-only by policy. Several of those read-only agents still hold bash,
+	// so the shell paragraph has to say what the shell is *for* differently:
+	// telling a read-only agent to reach for formatters and builds invites
+	// exactly the file rewrites its own hard rules forbid, and nothing below
+	// the prompt enforces that boundary.
 	canWrite := role == "build"
 
 	shellRule := ""
@@ -173,16 +169,6 @@ The "start_line" and "end_line" keys of a range are inclusive and use exactly th
 // library choice before committing a plan to it.
 func deepSearchPrompt(role string) string {
 	switch role {
-	case "plan":
-		return `## External knowledge
-
-Use "deep_search" whenever you need external knowledge to write a credible plan — library docs, API capabilities, version compatibility, library comparisons, or community best practices. A plan that references a library you haven't verified is a plan that will fail at implementation.`
-
-	case "breakdown":
-		return `## External knowledge
-
-Use "deep_search" to look up library docs, API signatures, or version-specific behaviour whenever a task description must reference them precisely — a vague task description produces bad implementation.`
-
 	case "note":
 		return `## External knowledge
 
@@ -499,7 +485,7 @@ The chat interface natively renders the following — use them when they add gen
 // the only durable path for a decision's rationale is for the agent to write it
 // down in the reply the digest captures.
 //
-// It is interactive-only (see codingAgentSystem): the headless TaskAgent has no
+// It is interactive-only: the headless agents have no
 // memory summary to feed. The conditional framing is what keeps a scripted
 // heading off trivial turns, where it would be noise in the user's reply.
 func decisionSummaryPrompt() string {

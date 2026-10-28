@@ -104,8 +104,6 @@ func TestIDPrefixesAndShape(t *testing.T) {
 		{"msg_", string(NewMessageID())},
 		{"prt_", string(NewPartID())},
 		{"prm_", string(NewPermissionID())},
-		{"pln_", string(NewPlanID())},
-		{"tsk_", string(NewTaskID())},
 		{"nte_", NewNoteID()},
 		{"ntv_", NewNoteVersionID()},
 	} {

@@ -229,53 +229,6 @@ func TestDevicePanelEnabled(t *testing.T) {
 	}
 }
 
-// TestPlanModeEnabled pins the plan-mode read the same way as the notes and
-// device ones: only a boolean true under the flag's key turns it on; an absent
-// flag, or one carried for another feature, reads as off. The flag withholds no
-// feature — it only lets the plan-mode warning banner be hidden from PostHog.
-func TestPlanModeEnabled(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-		want bool
-	}{
-		{"flag on", `{"featureFlags":{"plan-mode":true}}`, true},
-		{"flag off", `{"featureFlags":{"plan-mode":false}}`, false},
-		{"flag absent", `{"featureFlags":{}}`, false},
-		{"only another flag", `{"featureFlags":{"notes-feature":true}}`, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			resetNotesFlagCache(t)
-			stubDecide(t, http.StatusOK, tc.body)
-			if got := PlanModeEnabled("install-abc", featureFlagHTTPTimeout); got != tc.want {
-				t.Errorf("PlanModeEnabled = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestPlanModeConfigReportsFlag pins the delivery surface: /api/config carries
-// the plan-mode flag, which is what lets the web banner react to a flip without
-// a reload.
-func TestPlanModeConfigReportsFlag(t *testing.T) {
-	srv := newTestServer(t)
-	h := srv.routes()
-
-	for _, want := range []bool{false, true} {
-		srv.planModeEnabled.Store(want)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/config", nil))
-		var cfg map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
-			t.Fatalf("decode /api/config: %v (body %s)", err, rec.Body.String())
-		}
-		if cfg["planModeEnabled"] != want {
-			t.Errorf("/api/config planModeEnabled = %v, want %v", cfg["planModeEnabled"], want)
-		}
-	}
-}
-
 // TestDevicePanelRoutesGatedByFlag pins the HTTP gate: with the flag off the
 // device endpoints answer as unknown endpoints and the /scrcpy proxy answers a
 // plain 404, so no stream can be opened; with the flag on the endpoints serve

@@ -339,7 +339,6 @@
     .og-still #recall .rc-flow, .og-still #recall .rc-node::after,
     .og-still #why .wy-fl, .og-still #why .wy-eq i, .og-still #why .wy-glitch,
     .og-still #cost .co-dot-og::after,
-    .og-still #product .pr-pulse, .og-still #product .pr-spin,
     .og-still #product .pr-mg-wires path, .og-still #product .pr-mg-node .halo,
     .og-still #product .pr-band::after, .og-still #product .pr-caret,
     .og-still #cluster .hc-a, .og-still #cluster .hc-lane i, .og-still #cluster .hc-racks::after,
@@ -2832,164 +2831,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 }
 #product .pr-copy { position: relative; margin-top: 28px; max-width: 560px; }
 
-/* ── A · Plan Mode board ─────────────────────────────────────────── */
-#product .pr-plan {
-  container: pr-plan / inline-size;
-  width: 100%;
-  display: flex;
-  align-items: stretch;
-  gap: 14px;
-}
-#product .pr-lock {
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  flex: 0 0 132px;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 16px 15px;
-  border-radius: var(--r-lg);
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), 0 18px 40px rgba(110, 28, 0, .32);
-}
-#product .pr-lock-ic { width: 26px; height: 26px; }
-#product .pr-lock-steps { display: grid; gap: 10px; margin: auto 0 18px; }
-#product .pr-lock-steps i { display: flex; align-items: center; gap: 8px; height: 6px; }
-#product .pr-lock-steps i::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #fff;
-}
-#product .pr-lock-steps i::after {
-  content: "";
-  height: 4px;
-  width: 72%;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, .42);
-}
-#product .pr-lock-steps i:nth-child(2)::after { width: 50%; }
-#product .pr-lock-steps i:nth-child(3)::after { width: 84%; }
-#product .pr-lock-steps i:nth-child(4)::after { width: 38%; }
-#product .pr-lock-t {
-  font: 500 13px/1.3 var(--mono);
-  letter-spacing: -.01em;
-  color: #fff;
-}
-
-#product .pr-board {
-  --pr-row: 44px;
-  container: pr-board / inline-size;
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-}
-#product .pr-board-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  height: 40px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--line);
-  font: 12px/1 var(--mono);
-  color: var(--dim);
-}
-#product .pr-bh-l {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#product .pr-bh-l svg { flex: none; width: 14px; height: 14px; color: var(--dim); }
-#product .pr-bh-r { flex: none; display: inline-flex; align-items: center; gap: 7px; }
-#product .pr-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ok);
-  animation: pr-pulse 2.4s ease-out infinite;
-}
-#product .pr-clip {
-  position: relative;
-  height: calc(var(--pr-row) * 5);
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(180deg, #000 40%, rgba(0, 0, 0, .08) 100%);
-          mask-image: linear-gradient(180deg, #000 40%, rgba(0, 0, 0, .08) 100%);
-}
-#product .pr-tasks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  transition: transform .75s var(--ease);
-}
-#product .pr-task {
-  display: grid;
-  grid-template-columns: 5ch minmax(0, 1fr) 17ch 12ch;
-  align-items: center;
-  column-gap: 16px;
-  height: var(--pr-row);
-  padding: 0 16px;
-  border-bottom: 1px solid var(--line);
-  font: 13px/1 var(--mono);
-  color: var(--text);
-  white-space: nowrap;
-}
-#product .pr-id { color: var(--brand-ink); }
-#product .pr-nm,
-#product .pr-br { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-#product .pr-br { color: var(--dim); }
-#product .pr-st {
-  justify-self: end;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-#product .pr-si {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-#product .pr-si .pr-fill { fill: currentColor; stroke: none; }
-#product .pr-si .pr-ck { stroke: var(--bg-2); stroke-width: 1.7; }
-#product .pr-task[data-s="queued"] .pr-st { color: var(--dim); }
-#product .pr-task[data-s="running"] .pr-st { color: var(--brand-ink); }
-#product .pr-task[data-s="pr"] .pr-si { color: var(--ok); }
-#product .pr-task[data-s="merged"] .pr-si { color: var(--brand-ink); }
-#product .pr-task[data-s="merged"] .pr-sl,
-#product .pr-task[data-s="merged"] .pr-nm { color: var(--muted); }
-#product .pr-spin { animation: pr-spin 1s linear infinite; }
-#product .pr-st.pr-flip { animation: pr-flip .55s var(--ease) forwards; }
-#product .pr-task.pr-new { animation: pr-rowin .7s var(--ease) forwards; }
-
-@container pr-plan (max-width: 560px) {
-  #product .pr-lock { display: none; }
-}
-@container pr-board (max-width: 540px) {
-  #product .pr-task { grid-template-columns: 5ch minmax(0, 1fr) 12ch; column-gap: 12px; padding: 0 14px; }
-  #product .pr-br { display: none; }
-}
-@container pr-board (max-width: 340px) {
-  #product .pr-task { font-size: 12px; column-gap: 10px; padding: 0 12px; }
-  #product .pr-board-head { padding: 0 12px; }
-}
-
 /* ── B · OGmap (on-brand) ────────────────────────────────────────── */
 #product .pr-b .p { color: #fff; }
 #product .pr-map-svg {
@@ -3232,8 +3073,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
    Pausing is not enough: a held transform on an SVG child still lays out every frame. */
 #product .pr-idle .pr-mg-wires path,
 #product .pr-idle .pr-mg-node .halo,
-#product .pr-idle .pr-pulse,
-#product .pr-idle .pr-spin,
 #product .pr-idle .pr-band::after,
 #product .pr-idle .pr-caret { animation-name: none; }
 
@@ -3381,19 +3220,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 #product .pr-f:hover .pr-speed img { transform: scale(1.06) translateX(-6px); }
 
 /* ── Keyframes ───────────────────────────────────────────────────── */
-@keyframes pr-spin { to { transform: rotate(360deg); } }
-@keyframes pr-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(62, 207, 142, .5); }
-  70%, 100% { box-shadow: 0 0 0 6px rgba(62, 207, 142, 0); }
-}
-@keyframes pr-flip {
-  from { opacity: .15; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes pr-rowin {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 @keyframes pr-flow { to { stroke-dashoffset: -18; } }
 @keyframes pr-halo {
   0%, 100% { transform: scale(.78); opacity: .55; }
@@ -3425,17 +3251,12 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 
 /* ── Reduced motion: everything rests in its final state ─────────── */
 @media (prefers-reduced-motion: reduce) {
-  #product .pr-spin,
-  #product .pr-pulse,
   #product .pr-mg-wires path,
   #product .pr-mg-node .halo,
   #product .pr-caret,
-  #product .pr-st.pr-flip,
-  #product .pr-task.pr-new,
   #product .pr-term .pr-tl.pr-show { animation: none; }
   #product .pr-band::after { display: none; }
   #product .pr-mg-node .halo { transform: none; opacity: .8; }
-  #product .pr-tasks,
   #product .pr-sheet,
   #product .pr-speed img { transition: none; }
   #product .pr-e:hover .pr-pdf { transform: translateY(12px) rotate(-3deg); }
@@ -4587,7 +4408,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 
           <h1 class="hero-title rise r2" id="heroTitle">Get the job done without burning through your wallet.</h1>
 
-          <p class="hero-sub rise r3">From plan to pull request, Ogcode does the work <strong>end to end</strong>. OGmap steers it straight to the right files in even a huge codebase, it reads only the lines that matter, and it recalls instead of re-sending your whole conversation every turn, so you pay <strong>about a third of the usual bill</strong>.</p>
+          <p class="hero-sub rise r3">Ogcode does the work <strong>end to end</strong>. OGmap steers it straight to the right files in even a huge codebase, it reads only the lines that matter, and it recalls instead of re-sending your whole conversation every turn, so you pay <strong>about a third of the usual bill</strong>.</p>
 
           <div class="hero-actions rise r4" id="install">
             <button class="btn btn-light btn-lg" type="button" id="dlToggle" aria-expanded="false" aria-controls="dlPanel">
@@ -4687,7 +4508,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           <div class="rc-feat reveal">
             <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/></svg></span>
             <h3 class="h3">Built for developers</h3>
-            <p class="p">Ship with an agent that already knows the repo. It plans features, opens PRs, and never asks you to re-explain the codebase.</p>
+            <p class="p">Ship with an agent that already knows the repo. It plans features, runs the tests, and never asks you to re-explain the codebase.</p>
           </div>
         </div>
         <div class="cell">
@@ -5280,41 +5101,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       <i class="cn tl"></i><i class="cn tr"></i><i class="cn bl"></i><i class="cn br"></i>
       <div class="pr-bento">
 
-        <!-- A · Plan Mode (span 2) -->
-        <div class="pr-card pr-a pr-wide">
-          <div class="pr-in reveal">
-            <div class="pr-vis">
-              <div class="pr-plan" role="img" aria-label="A locked plan running as a live task board. Each task moves from queued to running in its own git worktree, gets a pull request opened, and is merged. For example, Write OAuth tests running while Add OAuth callback route has its pull request open.">
-                <div class="pr-lock on-brand">
-                  <svg class="pr-lock-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10.5" rx="2.2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.6v2.4"/></svg>
-                  <span class="pr-lock-steps"><i></i><i></i><i></i><i></i></span>
-                  <span class="pr-lock-t">plan<br>locked</span>
-                </div>
-                <div class="pr-board">
-                  <div class="pr-board-head">
-                    <span class="pr-bh-l"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.6"/><path d="M6 2.5v11M10 2.5v11"/></svg>oauth-sign-in</span>
-                    <span class="pr-bh-r"><i class="pr-pulse"></i>live</span>
-                  </div>
-                  <div class="pr-clip">
-                    <ul class="pr-tasks">
-                      <li class="pr-task" data-s="queued"><span class="pr-id">T-106</span><span class="pr-nm">Update auth docs</span><span class="pr-br">wt/oauth-docs</span><span class="pr-st"><svg class="pr-si" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" stroke-dasharray="2.3 2.1"/></svg><span class="pr-sl">Queued</span></span></li>
-                      <li class="pr-task" data-s="running"><span class="pr-id">T-105</span><span class="pr-nm">Write OAuth tests</span><span class="pr-br">wt/oauth-tests</span><span class="pr-st"><svg class="pr-si pr-spin" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" opacity=".28"/><path d="M13.6 8A5.6 5.6 0 0 0 8 2.4"/></svg><span class="pr-sl">Running</span></span></li>
-                      <li class="pr-task" data-s="pr"><span class="pr-id">T-104</span><span class="pr-nm">Add OAuth callback route</span><span class="pr-br">wt/oauth-callback</span><span class="pr-st"><svg class="pr-si" viewBox="0 0 16 16"><circle class="pr-fill" cx="8" cy="8" r="6.4"/><path class="pr-ck" d="m5.3 8.2 1.8 1.8 3.6-3.8"/></svg><span class="pr-sl">PR opened</span></span></li>
-                      <li class="pr-task" data-s="merged"><span class="pr-id">T-103</span><span class="pr-nm">Session table migration</span><span class="pr-br">wt/session-table</span><span class="pr-st"><svg class="pr-si" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.9"/><path d="m5.5 8.2 1.7 1.7 3.4-3.6"/></svg><span class="pr-sl">Merged</span></span></li>
-                      <li class="pr-task" data-s="merged"><span class="pr-id">T-102</span><span class="pr-nm">Add users.provider column</span><span class="pr-br">wt/users-provider</span><span class="pr-st"><svg class="pr-si" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.9"/><path d="m5.5 8.2 1.7 1.7 3.4-3.6"/></svg><span class="pr-sl">Merged</span></span></li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="pr-copy">
-              <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M6 8.6V21"/><path d="M13 6h3a2 2 0 0 1 2 2v7.4"/><path d="m15.5 3.5-2.5 2.5 2.5 2.5"/></svg></span>
-              <h3 class="h3">Plan Mode ships pull requests</h3>
-              <p class="p">Describe the outcome and lock the plan. Ogcode breaks it into a board of tasks, runs independent ones in parallel in isolated git worktrees, and opens a pull request for each.</p>
-            </div>
-          </div>
-        </div>
-
         <!-- B · OGmap (brand) -->
         <div class="pr-card pr-b on-brand">
           <div class="pr-in reveal d1">
@@ -5739,7 +5525,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">I already use Claude Code / Cursor. Why switch?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
-            <div class="ans">You may not need to. Ogcode is strongest when sessions run long, when you want a feature planned and shipped as PRs rather than a file edited, or when you want to stay off a subscription and off the cloud. If you mostly want inline completions in your editor, keep what you have.</div>
+            <div class="ans">You may not need to. Ogcode is strongest when sessions run long, when you want a feature handled end to end rather than a file edited, or when you want to stay off a subscription and off the cloud. If you mostly want inline completions in your editor, keep what you have.</div>
           </details>
           <details>
             <summary><span class="fq-sum"><span class="fq-q">How is this different from just a bigger context window?</span><span class="fq-plus" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></span></summary>
@@ -5809,7 +5595,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Recalls instead of re-sending</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Reads PDF, DOCX and CSV</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Every change is a reviewable git diff</li>
-              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Plan Mode opens pull requests</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Open source, AGPL-3.0</li>
               </ul>
               <ul class="marquee-set" role="list" aria-hidden="true">
@@ -5820,7 +5605,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Recalls instead of re-sending</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Reads PDF, DOCX and CSV</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Every change is a reviewable git diff</li>
-              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Plan Mode opens pull requests</li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>Open source, AGPL-3.0</li>
               </ul>
             </div>
@@ -6694,106 +6478,6 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
       es.forEach(function (e) { box.classList.toggle('pr-idle', !e.isIntersecting); });
     }, { rootMargin: '120px 0px' }).observe(box);
   }
-
-  /* ── A · Plan Mode board: a new task joins at the top every 3s and every
-     row below advances one stage (Queued → Running → PR opened → Merged). ── */
-  (function board() {
-    var list = root.querySelector('.pr-tasks');
-    var clip = root.querySelector('.pr-clip');
-    if (!list || !clip) return;
-
-    var ROWS = 5;
-    var LABEL = { queued: 'Queued', running: 'Running', pr: 'PR opened', merged: 'Merged' };
-    var ICON = {
-      queued: '<svg class="pr-si" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" stroke-dasharray="2.3 2.1"/></svg>',
-      running: '<svg class="pr-si pr-spin" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" opacity=".28"/><path d="M13.6 8A5.6 5.6 0 0 0 8 2.4"/></svg>',
-      pr: '<svg class="pr-si" viewBox="0 0 16 16"><circle class="pr-fill" cx="8" cy="8" r="6.4"/><path class="pr-ck" d="m5.3 8.2 1.8 1.8 3.6-3.8"/></svg>',
-      merged: '<svg class="pr-si" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.9"/><path d="m5.5 8.2 1.7 1.7 3.4-3.6"/></svg>'
-    };
-    var QUEUE = [
-      ['Add logout endpoint', 'wt/oauth-logout'],
-      ['Rotate refresh tokens', 'wt/token-refresh'],
-      ['Sign-in audit log', 'wt/signin-audit'],
-      ['Link existing accounts', 'wt/account-link'],
-      ['Revoke stale sessions', 'wt/session-revoke'],
-      ['Login error states', 'wt/login-errors'],
-      ['Provider settings page', 'wt/provider-ui'],
-      ['Rate-limit callbacks', 'wt/callback-limit']
-    ];
-    var nextId = 107;
-    var qi = 0;
-    var timer = null;
-    var busy = false;
-
-    function stageAt(i) {
-      return i === 0 ? 'queued' : i === 1 ? 'running' : i === 2 ? 'pr' : 'merged';
-    }
-    function statusHTML(s) {
-      return ICON[s] + '<span class="pr-sl">' + LABEL[s] + '</span>';
-    }
-    function setStage(li, s) {
-      if (li.getAttribute('data-s') === s) return;
-      li.setAttribute('data-s', s);
-      var st = li.querySelector('.pr-st');
-      if (!st) return;
-      st.innerHTML = statusHTML(s);
-      st.classList.remove('pr-flip');
-      void st.offsetWidth; // restart the flip animation
-      st.classList.add('pr-flip');
-    }
-    function cell(cls, text) {
-      var el = document.createElement('span');
-      el.className = cls;
-      el.textContent = text;
-      return el;
-    }
-    function makeRow(task, id) {
-      var li = document.createElement('li');
-      li.className = 'pr-task pr-new';
-      li.setAttribute('data-s', 'queued');
-      li.appendChild(cell('pr-id', 'T-' + id));
-      li.appendChild(cell('pr-nm', task[0]));
-      li.appendChild(cell('pr-br', task[1]));
-      var st = document.createElement('span');
-      st.className = 'pr-st';
-      st.innerHTML = statusHTML('queued');
-      li.appendChild(st);
-      return li;
-    }
-    var plan = root.querySelector('.pr-plan');
-    function tick() {
-      if (busy || document.hidden || document.documentElement.classList.contains('og-still')) return;
-      if (plan && plan.matches && plan.matches(':hover')) return; // hold while being read
-      busy = true;
-      var li = makeRow(QUEUE[qi % QUEUE.length], nextId);
-      qi += 1;
-      nextId += 1;
-      list.insertBefore(li, list.firstChild);
-      var rows = list.children;
-      for (var i = 1; i < rows.length; i++) setStage(rows[i], stageAt(i));
-
-      // FLIP: start shifted up by one row, then glide down into place.
-      var h = li.getBoundingClientRect().height || 44;
-      list.style.transition = 'none';
-      list.style.transform = 'translateY(' + (-h) + 'px)';
-      void list.offsetHeight;
-      list.style.transition = '';
-      list.style.transform = 'translateY(0)';
-
-      setTimeout(function () {
-        while (list.children.length > ROWS) list.removeChild(list.lastElementChild);
-        li.classList.remove('pr-new');
-        busy = false;
-      }, 820);
-    }
-    function start() { if (!timer) timer = setInterval(tick, 3000); }
-    function stop() { if (timer) { clearInterval(timer); timer = null; } }
-
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) { if (e.isIntersecting) start(); else stop(); });
-    }, { threshold: 0.2 });
-    io.observe(clip);
-  })();
 
   /* ── D · Terminal: the query types into the input, Enter is pressed, and
      the recall lines print one by one, but only once, the first time it is seen. ── */

@@ -9,8 +9,7 @@ import (
 // every tab by a tick in its side panel that only the user can flip. The gate
 // is therefore about accountability, not reachability: only the interactive
 // build agent (and a teammate running as "build") can be held to a grant it
-// used. TaskAgent shares BuildAgent's toolset, so the list split alone cannot
-// carry this — the pin is the gate (canControlBrowser) plus the shared list
+// used. The pin is the gate (canControlBrowser) plus the shared list
 // staying clean. The loop's per-turn append is what turns the gate into the
 // actual offer; the board/teammate appends it mirrors are covered by the
 // server's session-loop tests, and this pins the agent-id seam the same way
@@ -20,7 +19,7 @@ func TestBrowserOpsAreOnlyTheBuildAgent(t *testing.T) {
 	if !build.canControlBrowser() {
 		t.Error("BuildAgent.canControlBrowser() = false; the gate must pass for the build agent")
 	}
-	for _, name := range []string{"task", "subagent", "memory-recall", "plan", "breakdown", "note", "index", "search"} {
+	for _, name := range []string{"subagent", "memory-recall", "note", "index", "search"} {
 		a := GetAgent(name)
 		if a.canControlBrowser() {
 			t.Errorf("agent %q passes canControlBrowser; only the interactive build agent can be held to the tab grants it uses", name)
@@ -28,7 +27,7 @@ func TestBrowserOpsAreOnlyTheBuildAgent(t *testing.T) {
 	}
 	for _, id := range codingAgentTools {
 		if strings.HasPrefix(id, "browser_") {
-			t.Errorf("codingAgentTools carries %q; a task session runs headless in a disposable worktree and must never reach the user's Chrome", id)
+			t.Errorf("codingAgentTools carries %q; a headless session must never reach the user's Chrome", id)
 		}
 	}
 }

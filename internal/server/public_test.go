@@ -26,7 +26,7 @@ func TestServe_PublicDir(t *testing.T) {
 		t.Fatalf("seed public file: %v", err)
 	}
 
-	srv := NewWithOptions(0, dir, ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, dir, Options{Loopback: true, NoBrowser: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ctx) }()
@@ -75,7 +75,7 @@ func TestServe_PublicDir(t *testing.T) {
 		// A fresh project dir with no public/: ensurePublicDir should create it.
 		// It needs its own dir because one server per project is now enforced.
 		dir2 := t.TempDir()
-		srv2 := NewWithOptions(0, dir2, ModeBuild, Options{Loopback: true, NoBrowser: true})
+		srv2 := NewWithOptions(0, dir2, Options{Loopback: true, NoBrowser: true})
 		ctx2, cancel2 := context.WithCancel(context.Background())
 		done2 := make(chan error, 1)
 		go func() { done2 <- srv2.Serve(ctx2) }()

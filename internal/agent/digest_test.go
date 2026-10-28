@@ -85,13 +85,13 @@ func TestTruncateForDigest(t *testing.T) {
 }
 
 func TestTurnMemorableSession(t *testing.T) {
-	memorable := []string{"", "build", "plan", "task"}
+	memorable := []string{"", "build"}
 	for _, s := range memorable {
 		if !turnMemorableSession(s) {
 			t.Errorf("session type %q should be memorable", s)
 		}
 	}
-	skip := []string{"memory-recall", "subagent", "note", "index", "search", "breakdown"}
+	skip := []string{"memory-recall", "subagent", "note", "index", "search"}
 	for _, s := range skip {
 		if turnMemorableSession(s) {
 			t.Errorf("session type %q should be skipped", s)

@@ -3,7 +3,6 @@ import { useServer } from '../context/server';
 import { useDocIndex } from '../context/docindex';
 import { type IndexFile } from '../api/client';
 import SessionSidebar from '../components/session-sidebar';
-import PlanSidebar from '../components/plan-sidebar';
 import IndexScopeDialog from '../components/index-scope-dialog';
 import IndexRunDialog from '../components/index-run-dialog';
 import FileViewer from '../components/index-file-viewer';
@@ -17,12 +16,7 @@ import {
 } from '../components/file-tree';
 
 function Sidebar() {
-  const server = useServer();
-  return (
-    <Show when={server.mode() === 'plan'} fallback={<SessionSidebar />}>
-      <PlanSidebar />
-    </Show>
-  );
+  return <SessionSidebar />;
 }
 
 const WIDTH_KEY = 'ogcode.docindex.treeWidth';
@@ -376,7 +370,7 @@ export default function DocIndexPage() {
           class="relative shrink-0 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] pl-2 pr-2 sm:pl-3 sm:pr-2.5 h-12 flex items-center gap-2 sm:gap-3"
           style={{ 'padding-top': 'env(safe-area-inset-top)' }}
         >
-          <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
+          <DrawerToggle drawer="sessions" label="Open navigation" />
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="w-7 h-7 rounded-lg bg-[color:var(--accent-soft)] shadow-[inset_0_0_0_1px_var(--accent-ring)] flex items-center justify-center shrink-0">
               <svg class="w-3.5 h-3.5 text-[color:var(--accent-ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">

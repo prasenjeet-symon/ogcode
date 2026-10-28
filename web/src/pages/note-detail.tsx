@@ -7,16 +7,10 @@ import MarkdownContent from '../components/markdown-content';
 import NoteEditor from '../components/note-editor';
 import ModelSelector from '../components/model-selector';
 import SessionSidebar from '../components/session-sidebar';
-import PlanSidebar from '../components/plan-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
 
 function Sidebar() {
-  const server = useServer();
-  return (
-    <Show when={server.mode() === 'plan'} fallback={<SessionSidebar />}>
-      <PlanSidebar />
-    </Show>
-  );
+  return <SessionSidebar />;
 }
 
 function formatDate(ts: number): string {
@@ -203,7 +197,7 @@ export default function NoteDetailPage() {
                 the breadcrumb rather than crowding it. */}
             <div class="flex flex-wrap items-center gap-2 px-3 sm:px-4 pt-3 pb-2"
                  style={{ 'padding-top': 'max(0.75rem, env(safe-area-inset-top))' }}>
-              <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
+              <DrawerToggle drawer="sessions" label="Open navigation" />
               <button
                 onClick={() => navigate('/notes')}
                 class="flex items-center gap-1.5 text-[12px] text-zinc-500 hover:text-zinc-200 transition shrink-0"

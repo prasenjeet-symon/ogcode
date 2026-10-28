@@ -68,7 +68,7 @@ func noRedirectClient() *http.Client {
 // it when the test ends.
 func startPreviewServer(t *testing.T) *Server {
 	t.Helper()
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ctx) }()

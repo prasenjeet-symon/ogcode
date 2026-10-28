@@ -23,71 +23,43 @@ type Agent struct {
 	FinalInstruction string
 }
 
-// codingAgentTools is the shared full-access toolset used by both the
-// interactive BuildAgent and the headless TaskAgent. They differ in exactly one
-// tool beyond their system-prompt framing: `schedule` (buildAgentTools) rides
-// with the build agent alone, because a reminder is deliverable only to a build
-// session running in the project directory.
+// codingAgentTools is the full-access toolset behind the interactive BuildAgent.
+// Only it holds this list directly: buildAgentTools adds `schedule`, which is
+// deliverable only to a build session running in the project directory, and the
+// other agents carry their own narrower read-only lists.
 var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task", "skill", "mcp_*"}
 
 // buildAgentTools is the BuildAgent's toolset: codingAgentTools plus `schedule`.
 // A reminder reaches its session two ways — the per-session catch-up hook at the
 // next turn start, which requires agentID == "build" (loop.go), and the server's
-// reminder poller, which scans only the server's own directory. A task session
-// runs in a disposable worktree under <project>/.ogcode/worktrees, so neither
-// path can ever reach it: its timer is claimed due and then delivered never, and
-// nothing prunes the abandoned rows. TaskAgent therefore keeps codingAgentTools,
-// which carries no schedule. The pinned gate behind the split is
-// (Agent).canSchedule, and the tests are TestScheduleIsOnlyTheBuildAgent and
-// TestScheduleLeftCodingAgentToolsShared. Cloning before the append keeps the
-// two lists from sharing a backing array, so this can never drift back into
-// TaskAgent's list.
+// reminder poller, which scans only the server's own directory. A session
+// running outside that directory could arm a timer that is claimed due and then
+// delivered never — nothing prunes one — so only the build agent holds the tool.
+// The pinned gate behind the split is (Agent).canSchedule, and the test is
+// TestScheduleIsOnlyTheBuildAgent. Cloning before the append keeps
+// buildAgentTools from sharing codingAgentTools' backing array, so a later
+// append to one list can never drift into the other.
 var buildAgentTools = append(append([]string{}, codingAgentTools...), "schedule")
 
-// codingAgentSystem builds the full-access coding-agent system prompt. The two
-// modes share the same body but differ in framing:
-//   - "interactive": the default Build Mode agent chatting with a developer in
-//     their working directory. There is no task spec, nothing is discarded when
-//     the turn ends, and it must NOT auto-commit — the developer reviews first.
-//   - "task": a headless agent executing one breakdown task in a disposable git
-//     worktree. The task description is authoritative and it MUST commit,
-//     because the worktree is torn down after the task completes.
-func codingAgentSystem(mode string) string {
-	task := mode == "task"
-
+// codingAgentSystem builds the full-access coding-agent system prompt: the
+// default Build Mode agent chatting with a developer in their working
+// directory. There is no task spec, nothing is discarded when the turn ends,
+// and it must NOT auto-commit — the developer reviews first.
+func codingAgentSystem() string {
 	opening := `You are an interactive coding assistant collaborating with a developer in their project, in a live conversation. You have full read/write access to the codebase: you can read and edit files, run shell commands, and search the project. The developer can see your work and will steer you as you go.`
 	step1 := `1. **Understand the request.** The developer's latest message is your source of truth. If it is ambiguous or underspecified, ask one focused clarifying question — with ` + "`ask_user`" + ` when it is offered — before changing code rather than guessing. For anything worth building, the plan comes before the code: outline the approach as parallel tracks, then decide how many teammates it takes and which stream each one gets before you start reading — the fan-out is the single biggest lever on how fast the work finishes and how many tokens it burns (see **Working alongside other agents**).`
 	step6 := `6. **Do not commit unless asked.** Leave your changes in the working tree so the developer can review them — nothing is lost by staying uncommitted, and this is the developer's own working directory. Commit or push only when the developer explicitly asks. When you do, stage only the files you intentionally changed (git status → git add <specific files> → git commit -m 'verb: what and why'), never git add -A blindly.`
 	scopeRule := `- Stay focused on what the developer asked. Do not refactor unrelated code, rename things that aren't broken, or expand scope — if a correct change requires touching more than was asked, check in with the developer first.`
 
-	// decisionSummary is interactive-only. The per-turn memory summary is
-	// built from the agent's final reply (buildTurnDigest → SummarySystemPrompt),
-	// so asking the interactive agent to state its rationale in that reply is
-	// what carries the "why" into memory. The TaskAgent runs headless in a
-	// disposable worktree with no memory summary, so it gets none of this.
-	decisionSummary := ""
-	if !task {
-		decisionSummary = "\n\n" + decisionSummaryPrompt()
-	}
+	// decisionSummary: the per-turn memory summary is built from the agent's
+	// final reply (buildTurnDigest → SummarySystemPrompt), so asking the agent
+	// to state its rationale in that reply is what carries the "why" into
+	// memory. The headless agents build their own prompts and get none of this.
+	decisionSummary := "\n\n" + decisionSummaryPrompt()
 
-	// boardSection is interactive-only, like decisionSummary. TaskAgent shares
-	// this prompt body but runs headless in a disposable worktree: it is handed
-	// neither board nor teammate (see canUseBoard), and there are no peers.
-	boardSection := ""
-	if !task {
-		boardSection = "\n\n" + boardPrompt()
-	}
-
-	if task {
-		opening = `You are a coding agent executing a single implementation task in a dedicated git worktree. You have full read/write access to the codebase.`
-		step1 = `1. **Read the task description carefully.** It is your primary source of truth — it contains the exact files to touch, functions to add or change, patterns to follow, and edge cases to handle. Follow it precisely.`
-		step6 = `6. **Commit all changes.** Stage only the files you intentionally modified — do not use git add -A blindly:
-   - List changed files first: git status
-   - Stage specific files: git add <file1> <file2> ...
-   - Commit with a clear message: git commit -m 'verb: what and why'
-   You MUST commit — uncommitted changes will be lost after the task completes.`
-		scopeRule = `- Never exceed the task scope — if implementing the task correctly requires changes the task didn't mention, make only the minimum necessary and note it in the commit message.`
-	}
+	// boardSection rides along, like decisionSummary: this is the only prompt
+	// handed to a session with board and teammate peers (see canUseBoard).
+	boardSection := "\n\n" + boardPrompt()
 
 	return opening + `
 
@@ -144,126 +116,7 @@ var BuildAgent = Agent{
 	Name:        "Build",
 	Description: "Full-access coding agent",
 	Tools:       buildAgentTools,
-	System:      codingAgentSystem("interactive"),
-}
-
-// TaskAgent is the headless variant of BuildAgent used to execute a single
-// breakdown task inside a disposable git worktree. Same tools as BuildAgent
-// except `schedule` (buildAgentTools — its reminders only ever reach a build
-// session in the project directory, never this worktree); the prompt treats the
-// task description as authoritative and requires a commit, because the worktree
-// is discarded once the task finishes.
-var TaskAgent = Agent{
-	ID:          "task",
-	Name:        "Task",
-	Description: "Task-execution coding agent — runs one task in an isolated git worktree",
-	Tools:       codingAgentTools,
-	System:      codingAgentSystem("task"),
-}
-
-// PlanAgent is the read-only planning agent — it can understand and plan but never writes code.
-var PlanAgent = Agent{
-	ID:          "plan",
-	Name:        "Plan",
-	Description: "Planning agent — reads and understands code, plans changes but never writes",
-	Tools:       []string{"bash", "read", "file_map", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image", "task", "skill"},
-	System: `You are a planning agent. Your role is to understand the user's goal, ground it in the actual codebase, and produce a clear, structured implementation plan that can be directly broken into executable git tasks.
-
-` + projectIndexPrompt("plan", true, true) + `
-
-## What you MUST do at the start of every session
-
-1. **Check past plans.** Look for markdown files in .ogcode/archives/ and read the ones relevant to the request to understand what was already built and documented. If the directory does not exist, skip this step.
-   - From archives: what was built, file paths, decisions made, patterns established.
-
-2. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, then call it again with subdir to descend into the folders whose labels match the request until it lists files. Then use read, glob, and grep to verify assumptions before forming any opinion. Focus your exploration on the areas the request touches — do not explore the entire codebase. Confirm: which files exist, how they are structured, what patterns are already established.
-
-3. **Resolve ambiguities.** If the request is unclear or has gaps, ask the user one focused question at a time. Wait for the answer before asking the next. Do not dump a list of questions.
-
-## How to produce the plan
-
-Once you have enough information, produce a plan with this structure:
-
-**Goal** — one or two sentences describing what will be built and why.
-
-**Context** — what already exists that is relevant (file paths, modules, patterns). Call out any overlap with past plans explicitly.
-
-**Approach** — how the work will be done, step by step. Think in terms of natural implementation order: schema/data layer first, then backend logic, then API, then frontend. Each step should be something that could be implemented independently in its own git branch.
-
-**Affected files** — list every file that will be created or modified, with a one-line note on what changes.
-
-**Key decisions** — any non-obvious choices made and why (e.g. why one approach over another).
-
-**Constraints and edge cases** — things the implementation must handle correctly.
-
-When your plan is complete, tell the user explicitly: "This plan is ready to lock." Do not say this until you are confident the plan is specific enough for a developer to implement without re-reading this conversation.
-
-` + parallelToolCallsPrompt(false, true) + `
-
-## Hard rules
-
-- You MUST NOT change the project. You have no write or edit tools, and the shell is not a way around that: no redirecting output into a file, no "sed -i", no formatter, generator, or build step that rewrites sources. Read, run read-only commands, and plan.
-- Do not invent file paths or function names — only reference things you have actually read.
-- Do not propose re-implementing anything that already exists and works, unless the user explicitly asks to replace it.
-- Stay tightly scoped. Do not expand scope, suggest unrelated improvements, or plan work the user did not request.
-- The plan you produce will be broken into git tasks by a downstream agent — write it with that in mind. Each step in your approach should be implementable as a focused, self-contained unit of work.
-` + "\n" + noPackageManagerDirsPrompt() + `
-
-` + markdownCapabilitiesPrompt(false, false),
-}
-
-// BreakdownAgent produces structured task definitions from a locked plan conversation.
-var BreakdownAgent = Agent{
-	ID:          "breakdown",
-	Name:        "Breakdown",
-	Description: "Task breakdown agent — reads a locked plan and produces structured task definitions",
-	Tools:       []string{"bash", "read", "file_map", "glob", "grep", "codebase_map", "deep_search", "submit_task_breakdown"},
-	System: `You are a task breakdown agent. You receive a finalized, user-approved plan and translate it into a structured set of implementation tasks for a build agent to execute — one task per git branch.
-
-` + projectIndexPrompt("breakdown", true, false) + `
-
-## Your process
-
-1. **Read the plan carefully.** The plan will be provided as the final agreed-upon summary. Treat it as the sole source of truth for what needs to be built. Do not second-guess the plan's decisions — your job is to decompose it into implementable tasks, not to redesign it.
-
-2. **Explore the codebase.** Start with **codebase_map** at the project root for a labeled overview of the top-level areas, descending with subdir into the ones the plan touches, then use read, glob, and grep to verify the files, functions, types, and patterns mentioned in the plan actually exist and understand how they are structured. Do not assume — confirm.
-
-3. **Identify the natural execution order.** Think about what must be built first before other things can build on top of it. Common ordering: schema/migrations → backend logic → API routes → frontend → tests. Let the work's natural dependencies drive the order, not arbitrary sequencing.
-
-4. **Define the tasks.** Each task must be scoped to what one developer can complete in one focused sitting. Merge trivially small steps into their natural parent. Aim for 3–10 tasks total — do not over-split.
-
-5. **Write implementation-ready descriptions.** A build agent will implement each task from its description alone — it will not re-read the plan. Every description must include:
-   - Exact file paths to create or modify (verified against the actual codebase)
-   - Function, type, or interface names to add or change
-   - Patterns and conventions to follow, referencing existing code
-   - Error handling and edge cases to consider
-   - A verification step at the end: run the project's existing tests if any exist, otherwise build/compile the project, to be extra sure there are no compile-time or syntax issues before the task is considered done
-   Vague descriptions like "implement the feature" are not acceptable.
-
-   Example of a good task description (adapt the file paths, symbol names, and the
-   verification command to the project's actual language and stack — the example
-   below is Go, but the same level of specificity applies to any language):
-
-   Add a RateLimiter type in internal/middleware/ratelimit.go implementing a
-   token-bucket keyed by client IP (bucket size and refill rate read from
-   config.RateLimit, following the existing config pattern in internal/config).
-   Wire it into the HTTP middleware chain in internal/server/router.go before the
-   auth middleware; when a request is over the limit, respond 429 with a
-   Retry-After header. Verify with:
-   go test ./internal/middleware/... ./internal/server/...
-
-6. **Call submit_task_breakdown** with the complete task array. Do not output raw JSON.
-
-` + parallelToolCallsPrompt(false, true) + `
-
-## Hard rules
-
-- Dependencies use 0-based indices into the task array. Each task may depend on AT MOST ONE other task — strictly linear chains (A→B→C). Fan-in (A,B→C) is not allowed; consolidate predecessors into one task if needed.
-- Parallel tasks (no dependency between them) MUST NOT touch the same files — assign file ownership to one workstream to prevent merge conflicts.
-- Do NOT create tasks for project setup, dependency installation, or codebase familiarisation — the developer is already familiar.
-- Only reference file paths and symbols you have actually read. Never invent paths or function names.
-- Every task description MUST end with an explicit verification step: run the project's tests if any exist (e.g. ` + "`go test ./...`, `npm test`, `pytest`" + `), otherwise build/compile the project (e.g. ` + "`go build ./...`, `npm run build`, `cargo build`" + `), so the build agent confirms there are no compile-time or syntax errors before completing the task.
-` + "\n" + noPackageManagerDirsPrompt(),
+	System:      codingAgentSystem(),
 }
 
 // NoteAgent researches a query and produces a comprehensive markdown note.
@@ -469,27 +322,19 @@ func (a *Agent) HasTool(toolID string) bool {
 // The natural gate is "can it write files", which is what this used to be, and
 // it is wrong: the served folder belongs to the SERVER's directory, while the
 // section names the AGENT's. Those are the same folder only for a session
-// running in the project itself.
-//
-// TaskAgent is the case that broke. It runs in a disposable worktree under
-// <project>/.ogcode/worktrees/<branch>, so it was told to publish into
-// <worktree>/public/ — a path the server does not serve, inside the .ogcode
-// directory AGENT.md puts off-limits, and deleted with the worktree when the
-// task ends. It would write the file, hand back a /public/<name> URL, and the
-// user would get a 404 with nothing logged anywhere.
-//
-// PlanAgent is deliberately absent too: it holds no write or edit tools and its
-// own hard rules forbid creating files through the shell, so a section telling
-// it to drop a file somewhere is one it could never act on.
+// running in the project itself — the interactive build agent's case, and its
+// teammate's, who runs as "build" in the same directory. No other agent
+// qualifies: the headless agents have no live conversation to hand a
+// /public/<name> URL back into, and the read-only agents' own hard rules
+// forbid creating files through the shell.
 func (a *Agent) canHostPublicFiles() bool { return a.ID == "build" }
 
 // canAskUser reports whether this agent may put a question to the user through
 // the ask_user tool.
 //
 // Like canHostPublicFiles, this is an agent id rather than a capability check,
-// and for the same reason: TaskAgent shares BuildAgent's toolset (codingAgentTools)
-// but runs headless, executing one breakdown task in a disposable worktree with
-// nobody to answer. A capability check would hand it a dialog no one can see.
+// and for the same reason: the headless agents run with no live conversation
+// attached, so a capability check would hand them a dialog nobody can see.
 // The loop still gates the tool on permission gating and a live question
 // manager — this is the outer of the conditions, not a substitute for them. A
 // teammate of the build agent passes here too (teammatehood is a property of
@@ -503,18 +348,16 @@ func (a *Agent) canAskUser() bool { return a.ID == "build" }
 // Like canAskUser, this is an agent id rather than a capability check, and for
 // the same reason: the plan is read by the intent matcher to suggest skills and
 // MCP tools, and only the interactive build session both shows a plan (the
-// header pill) and runs that matcher. TaskAgent shares BuildAgent's toolset but
-// runs headless in a disposable worktree, and the sub-agent is headless too, so
-// a plan there would reach nobody and drive no suggestions.
+// header pill) and runs that matcher. Every headless agent would write a plan
+// that reaches nobody and drives no suggestions.
 func (a *Agent) canUpdateIntent() bool { return a.ID == "build" }
 
 // canUseBoard reports whether this agent may read the tree of agents working
 // in the project, which is what the board tool needs.
 //
-// Like canAskUser, this is an agent id rather than a capability check. TaskAgent
-// shares BuildAgent's toolset but runs in a disposable worktree that is deleted
-// when the task ends — a tree of agents there outlives nothing and reaches
-// nobody, and PlanAgent is read-only, so it spawns nobody to track.
+// Like canAskUser, this is an agent id rather than a capability check: a tree
+// of agents only makes sense for the live interactive session — one written by
+// a headless run outlives nothing and reaches nobody.
 func (a *Agent) canUseBoard() bool { return a.ID == "build" }
 
 // canSpawnTeammate reports whether this agent may spawn a teammate: another
@@ -533,19 +376,18 @@ func (a *Agent) canSpawnTeammate() bool { return a.ID == "build" }
 // reachability: delivery itself is build-only in both paths. A reminder reaches
 // its session either through the per-session catch-up hook at the next turn
 // start — which requires agentID == "build" (loop.go) — or through the server's
-// reminder poller, which scans only the server's own directory. TaskAgent shares
-// BuildAgent's toolset shape but runs in a disposable worktree under
-// <project>/.ogcode/worktrees, so its timer would be claimed due and delivered
-// never, sticking there forever (nothing prunes one). A teammate passes here too:
-// teammatehood is a property of the session, not the agent, and a teammate runs
-// as "build" in the project directory.
+// reminder poller, which scans only the server's own directory. A timer armed
+// from a session outside that directory would be claimed due and delivered
+// never, sticking there forever (nothing prunes one). A teammate passes here
+// too: teammatehood is a property of the session, not the agent, and a
+// teammate runs as "build" in the project directory.
 //
 // The loop gates schedule at the same seam as canControlBrowser: scheduleOffered
 // (loop.go) strips the id from the turn's allowlist when this gate or the live
 // registry disagrees, and the reminder catch-up hook at turn start rides this
 // gate too, so the boolean cannot drift away from the actual enforcement — the
-// static split it stands on (schedule rides buildAgentTools, TaskAgent keeps
-// codingAgentTools with none) is the list side it still pins.
+// static split it stands on (schedule rides buildAgentTools, codingAgentTools
+// carries none) is the list side it still pins.
 func (a *Agent) canSchedule() bool { return a.ID == "build" }
 
 // canControlBrowser reports whether this agent may drive the user's real
@@ -557,9 +399,8 @@ func (a *Agent) canSchedule() bool { return a.ID == "build" }
 // own browser, and the extension grants every tab by a tick in the side panel
 // that only the user can flip, so the gate is accountability, not reachability
 // — only the interactive build agent (and a teammate running as "build") can
-// be held to a grant it used. TaskAgent shares BuildAgent's toolset but runs
-// headless in a disposable worktree with nobody watching a real browser, and
-// the read-only agents must not fire input events anywhere.
+// be held to a grant it used. The headless agents have nobody watching a real
+// browser, and the read-only agents must not fire input events anywhere.
 //
 // The loop offers tools from the turn's allowlist, so live enforcement is the
 // per-turn append (the ask_user/board shape): browserOffered rides this gate
@@ -616,12 +457,8 @@ Verify what a teammate returns the cheap way: review the diff it left and run th
 }
 
 // promptRole maps an agent to the role string the shared prompt sections switch
-// on. TaskAgent is the headless variant of BuildAgent and shares its prompt, so
-// it shares its role; every other agent's id is already its role.
+// on. Every agent's id is already its role.
 func (a *Agent) promptRole() string {
-	if a.ID == "task" {
-		return "build"
-	}
 	return a.ID
 }
 
@@ -645,12 +482,6 @@ func (a *Agent) notesScoped() bool {
 // GetAgent returns the agent by name, defaulting to BuildAgent.
 func GetAgent(name string) Agent {
 	switch name {
-	case "plan":
-		return PlanAgent
-	case "task":
-		return TaskAgent
-	case "breakdown":
-		return BreakdownAgent
 	case "note":
 		return NoteAgent
 	case "index":

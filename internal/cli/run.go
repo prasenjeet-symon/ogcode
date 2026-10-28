@@ -44,12 +44,12 @@ var runCmd = &cobra.Command{
 	Short: "Run a one-shot agent prompt non-interactively (prints to stdout)",
 	Example: `  ogcode run "add unit tests for auth.go"
   echo "explain this codebase" | ogcode run
-  git diff | ogcode run --agent plan "review these changes"`,
+  git diff | ogcode run --agent note "summarize these changes"`,
 	RunE: runPrompt,
 }
 
 func init() {
-	runCmd.Flags().StringVarP(&runAgentName, "agent", "a", "build", "Agent type: build, plan, task, breakdown, note, index, search, subagent or memory-recall (unknown names default to build)")
+	runCmd.Flags().StringVarP(&runAgentName, "agent", "a", "build", "Agent type: build, note, index, search, subagent or memory-recall (unknown names default to build)")
 	runCmd.Flags().StringVarP(&runOutputFormat, "output-format", "o", "text", "Output format: text or json")
 	runCmd.Flags().IntVar(&runMaxTurns, "max-turns", 0, "Maximum agent loop iterations; 0 means no limit")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Model ID override (e.g. claude-sonnet-4-5)")

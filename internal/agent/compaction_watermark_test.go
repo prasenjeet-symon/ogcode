@@ -333,8 +333,8 @@ func TestCanCompactContextTracksTheToolThatFillsContext(t *testing.T) {
 	if !canCompactContext(BuildAgent) {
 		t.Error("build agent should be offered compaction")
 	}
-	if !canCompactContext(PlanAgent) {
-		t.Error("plan agent reads files too and should be offered compaction")
+	if !canCompactContext(NoteAgent) {
+		t.Error("note agent reads files too and should be offered compaction")
 	}
 	if canCompactContext(IndexAgent) {
 		t.Error("index agent makes one structured call and has nothing to compact")

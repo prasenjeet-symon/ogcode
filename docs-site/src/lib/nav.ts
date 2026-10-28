@@ -63,11 +63,6 @@ const nav: DocGroup[] = [
         description: 'The three modes, how a session runs, and steering it mid-turn.',
       },
       {
-        title: 'Plan mode & tasks',
-        slug: '/plan-mode',
-        description: 'Break a feature into tasks, each in its own worktree, and open pull requests.',
-      },
-      {
         title: 'Agents & teammates',
         slug: '/agents-and-teammates',
         description: 'Teammates, task sub-agents and the Agents page, plus the file change gate and custom OpenAI-compatible providers.',

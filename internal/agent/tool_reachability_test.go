@@ -17,7 +17,7 @@ import (
 // agent (no read tools) and the Search agent (reads fetched web pages, not the
 // repo) are deliberately excluded.
 func codeFacingAgents() []Agent {
-	return []Agent{BuildAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent}
+	return []Agent{BuildAgent, NoteAgent, SubagentAgent}
 }
 
 // mandatoryPromptTools are tools the shared prompt sections tell an agent it
@@ -173,7 +173,7 @@ func TestLivePreviewReachesOnlyTheBuildAgent(t *testing.T) {
 	const heading = "## Live service preview"
 
 	all := []Agent{
-		BuildAgent, TaskAgent, PlanAgent, BreakdownAgent,
+		BuildAgent,
 		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
 	}
 	for _, a := range all {
@@ -189,16 +189,14 @@ func TestLivePreviewReachesOnlyTheBuildAgent(t *testing.T) {
 // prompt section naming it fills in the AGENT's. Those agree only for a session
 // running in the project itself, so the section belongs to exactly one agent.
 //
-// The gate used to be "can it write files", which let TaskAgent in. A task runs
-// in a disposable worktree under <project>/.ogcode/worktrees/<branch>, so it was
-// told to publish into a folder the server does not serve, inside the directory
-// AGENT.md puts off-limits, and deleted when the task ends — it would report a
-// /public/<name> URL that 404s, with nothing logged anywhere.
+// The gate used to be "can it write files". Only the interactive Build
+// session runs in the directory the server actually serves, so the section
+// belongs to exactly one agent.
 func TestPublicFileHostingReachesOnlyTheBuildAgent(t *testing.T) {
 	const heading = "## Public file hosting"
 
 	all := []Agent{
-		BuildAgent, TaskAgent, PlanAgent, BreakdownAgent,
+		BuildAgent,
 		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
 	}
 	for _, a := range all {
@@ -231,7 +229,7 @@ func TestSearchAgent_ExcludedFromFileMap(t *testing.T) {
 // "not available to the <agent> agent": offered but never callable. This pins the
 // two halves staying in sync.
 func TestHasTool_GlobAuthorizesAtCallTime(t *testing.T) {
-	for _, a := range []Agent{BuildAgent, TaskAgent} {
+	for _, a := range []Agent{BuildAgent} {
 		if !slices.Contains(a.Tools, "mcp_*") {
 			t.Errorf("%s: expected mcp_* in Tools (the glob the test is about)", a.Name)
 			continue
@@ -248,9 +246,9 @@ func TestHasTool_GlobAuthorizesAtCallTime(t *testing.T) {
 	}
 	// Literal ids still match exactly, and unrelated ids still fail — the glob
 	// change must not loosen the guard for non-glob agents.
-	planAgentID := "mcp_penpot_execute_code"
-	if PlanAgent.HasTool(planAgentID) {
-		t.Errorf("PlanAgent.HasTool(%q) = true; PlanAgent has no mcp_* entry", planAgentID)
+	literalID := "mcp_penpot_execute_code"
+	if SubagentAgent.HasTool(literalID) {
+		t.Errorf("SubagentAgent.HasTool(%q) = true; SubagentAgent has no mcp_* entry", literalID)
 	}
 	if !BuildAgent.HasTool("bash") {
 		t.Error("BuildAgent.HasTool(\"bash\") = false; exact match must still work")
@@ -433,8 +431,8 @@ func TestBuildSystemPrompt_BoundaryClosesTheStaticBlock(t *testing.T) {
 }
 
 // Holding the tools is only half of it — the agent has to be told the rule.
-// BreakdownAgent carried file_map and codebase_map for a while without ever
-// receiving the workflow section, so it issued whole-file reads and learned the
+// An agent can hold file_map and codebase_map for a long while without ever
+// receiving the workflow section, so it issues whole-file reads and learns the
 // range discipline only from read's interception, one wasted round trip per
 // file.
 //
@@ -489,8 +487,8 @@ func TestSubagent_OmitsShellReadRule(t *testing.T) {
 // The mirror of TestAgents_PromptMandatedToolsAreReachable for the document
 // tools, which are now gated: that test catches a prompt naming a tool the
 // agent lacks, and this one catches an agent holding the tools while the prompt
-// stays silent — the gate stuck off. Same failure as the breakdown agent's
-// missing workflow section: capability present, instruction absent, nothing to
+// stays silent — the gate stuck off. Same failure as a missing workflow
+// section: capability present, instruction absent, nothing to
 // tell you the model simply never makes the call.
 func TestAgents_WithDocToolsAreToldThePerPageFlow(t *testing.T) {
 	for _, a := range codeFacingAgents() {
@@ -510,7 +508,7 @@ func TestAgents_WithDocToolsAreToldThePerPageFlow(t *testing.T) {
 // more familiar instruction is the one a model tends to follow. Explore-before-
 // you-write has to survive, but stated so it agrees with the rule above it.
 func TestCodingAgents_ExploreStepDoesNotContradictRangedReads(t *testing.T) {
-	for _, a := range []Agent{BuildAgent, TaskAgent} {
+	for _, a := range []Agent{BuildAgent} {
 		if strings.Contains(a.System, "Read every file the request mentions") {
 			t.Errorf("%s: explore step still asks for whole files, contradicting "+
 				"the ranged-read rule in the same prompt", a.Name)
@@ -642,8 +640,8 @@ func TestBuildSystemPromptEntries_LatexInfoIsInCachedPrefix(t *testing.T) {
 // or losing the tool has to be a deliberate edit here rather than a drift in
 // one of the two lists that has to agree.
 func TestAgents_SkillToolReachesTheIntendedAgents(t *testing.T) {
-	want := map[string]bool{"build": true, "task": true, "plan": true}
-	all := []Agent{BuildAgent, TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent, IndexAgent, SearchAgent}
+	want := map[string]bool{"build": true}
+	all := []Agent{BuildAgent, NoteAgent, SubagentAgent, IndexAgent, SearchAgent}
 	for _, a := range all {
 		has := slices.Contains(a.Tools, "skill")
 		if has != want[a.ID] {
@@ -701,7 +699,7 @@ func TestSkillGuidancePrompt_EscapesSkillText(t *testing.T) {
 // the whole session. The guidance is appended by the loop as a later entry, so
 // it must never appear in the entries buildSystemPromptEntries produces.
 func TestBuildSystemPromptEntries_SkillGuidanceStaysOutOfTheCachedPrefix(t *testing.T) {
-	for _, a := range []Agent{BuildAgent, TaskAgent, PlanAgent} {
+	for _, a := range []Agent{BuildAgent} {
 		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)
 		for i, e := range entries {
 			if strings.Contains(e, "<available_skills>") {

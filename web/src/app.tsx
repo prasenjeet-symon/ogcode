@@ -4,24 +4,17 @@ import { closeDrawer } from './lib/mobile-drawer';
 import { useServer } from './context/server';
 import { OnboardingProvider, useOnboarding } from './context/onboarding';
 import { SessionProvider } from './context/session';
-import { PlanProvider } from './context/plan';
 import { NoteProvider } from './context/note';
 import { DocIndexProvider } from './context/docindex';
 import { NotificationProvider } from './context/notification';
 import { DesktopNotificationProvider } from './context/desktop-notification';
 import { ThemeProvider } from './context/theme';
 import UpdateNotification from './components/update-notification';
-import PlanModeBanner from './components/plan-mode-banner';
-import GitSyncBanner from './components/git-sync-banner';
 import DesktopNotificationBanner from './components/desktop-notification-banner';
 import ModelSwitchPopup from './components/model-switch-popup';
 import IndexConsentDialog from './components/index-consent-dialog';
 import Home from './pages/home';
 import Chat from './pages/session';
-import PlanList from './pages/plan-list';
-import PlanDetail from './pages/plan-detail';
-import PlanTasksPage from './pages/plan-tasks';
-import TaskExecution from './pages/task-execution';
 import NotesPage from './pages/notes';
 import NoteDetailPage from './pages/note-detail';
 import DocIndexPage from './pages/docindex';
@@ -47,10 +40,6 @@ export default function App() {
       <Route path="/onboarding" component={Onboarding} />
       <Route path="/" component={Home} />
       <Route path="/session/:id" component={Chat} />
-      <Route path="/plan" component={PlanList} />
-      <Route path="/plan/:id" component={PlanDetail} />
-      <Route path="/plan/:id/tasks" component={PlanTasksPage} />
-      <Route path="/task/:id" component={TaskExecution} />
       {/* Notes routes exist only while the notes flag is on; otherwise the
           wildcard below renders the 404 page for these paths. */}
       <Show when={notesOn()}>
@@ -96,7 +85,6 @@ function AppWrapper(props: { children?: any }) {
     <OnboardingProvider>
         <ThemeProvider>
           <SessionProvider>
-            <PlanProvider>
               <NoteProvider>
                   <DocIndexProvider>
                     <NotificationProvider>
@@ -114,8 +102,6 @@ function AppWrapper(props: { children?: any }) {
                           {props.children}
                         </div>
                         <UpdateNotification />
-                        <PlanModeBanner />
-                        <GitSyncBanner />
                         <DesktopNotificationBanner />
                         <ModelSwitchPopup />
                         <IndexConsentDialog />
@@ -123,7 +109,6 @@ function AppWrapper(props: { children?: any }) {
                     </NotificationProvider>
                   </DocIndexProvider>
               </NoteProvider>
-            </PlanProvider>
           </SessionProvider>
         </ThemeProvider>
       </OnboardingProvider>

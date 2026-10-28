@@ -38,16 +38,6 @@ You do not have to wait for a turn to finish. Type another instruction while the
 
 Press <kbd>Esc</kbd> (or the stop button) to abort the current turn.
 
-## Plan a larger change
-
-When a task is too big for one turn, switch to Plan Mode:
-
-```bash
-ogcode plan
-```
-
-Plan Mode decomposes the feature into a board of tasks, each running in its own git worktree off the base branch, and can open pull requests when they finish. You review the plan before execution starts.
-
 ## Work without the browser
 
 Everything the UI does is available headlessly:
@@ -60,7 +50,7 @@ ogcode run "add a --json flag to the CLI and document it"
 
 | Flag | Meaning |
 | --- | --- |
-| `-a, --agent` | Agent to run: `build` (default), `plan`, `task`, `breakdown`, plus a few internal agent types |
+| `-a, --agent` | Agent to run: `build` (default), plus a few internal agent types |
 | `-o, --output-format` | `text` (default) or `json` |
 | `--max-turns` | Stop after this many steps; `0` (the default) means no limit |
 | `--model` | Override the model for this run |
@@ -88,4 +78,4 @@ This walks the tree (honouring `.gitignore` and your exclude rules) and indexes 
 
 ## Next
 
-Read [Core concepts](/docs/core-concepts/) for the mental model, then browse the guides by capability: [Sessions & modes](/docs/sessions-and-modes/), [Permissions](/docs/permissions/), [Memory & context](/docs/memory-and-context/), [Plan mode & tasks](/docs/plan-mode/), [Search, skills & MCP](/docs/search-and-skills/), [Rich results & preview](/docs/rich-results/), and [Remote deployment](/docs/deployment/).
+Read [Core concepts](/docs/core-concepts/) for the mental model, then browse the guides by capability: [Sessions & modes](/docs/sessions-and-modes/), [Permissions](/docs/permissions/), [Memory & context](/docs/memory-and-context/), [Search, skills & MCP](/docs/search-and-skills/), [Rich results & preview](/docs/rich-results/), and [Remote deployment](/docs/deployment/).

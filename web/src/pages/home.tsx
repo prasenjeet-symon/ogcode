@@ -81,13 +81,6 @@ function HomeContent() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Redirect to plan mode landing page when in plan mode
-  createEffect(() => {
-    if (server.mode() === 'plan') {
-      navigate('/plan', { replace: true });
-    }
-  });
-
   const [text, setText] = createSignal('');
   const [submitting, setSubmitting] = createSignal(false);
   const [version, setVersion] = createSignal('');

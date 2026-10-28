@@ -22,11 +22,6 @@ const (
 	// /device UI, its /api/scrcpy/* endpoints and the /scrcpy/* stream proxy are
 	// all withheld — a live Android screen and input never leave this machine.
 	devicePanelFlagKey = "device-panel"
-	// planModeFlagKey gates the plan-mode instability warning: while it is on,
-	// the UI shows the notice that plan mode is still under rapid development.
-	// Unlike the two above it withholds no feature — plan mode stays reachable
-	// in either case — so it is a remote kill-switch for the warning alone.
-	planModeFlagKey = "plan-mode"
 )
 
 // featureFlagTTL is the interval at which the refresher re-reads the flags, so
@@ -82,7 +77,6 @@ func (s *Server) startFeatureFlagRefresh(ctx context.Context) {
 		flags := featureFlags(s.installID, featureFlagHTTPTimeout)
 		s.applyFeatureFlag(&s.notesEnabled, flags[notesFeatureFlagKey], "notes.changed")
 		s.applyFeatureFlag(&s.devicePanelEnabled, flags[devicePanelFlagKey], "device-panel.changed")
-		s.applyFeatureFlag(&s.planModeEnabled, flags[planModeFlagKey], "plan-mode.changed")
 	}
 	go func() {
 		defer func() {
@@ -132,16 +126,6 @@ func NotesEnabled(distinctID string, timeout time.Duration) bool {
 // devicePanelUnavailable).
 func DevicePanelEnabled(distinctID string, timeout time.Duration) bool {
 	return featureFlags(distinctID, timeout)[devicePanelFlagKey]
-}
-
-// PlanModeEnabled asks PostHog whether the plan-mode instability warning is
-// shown for this install. Only the server's background refresher calls it; the
-// UI reads the atomic flag the refresher maintains (see configPayload). It
-// withholds no feature — plan mode stays reachable whatever it returns — and an
-// unreachable PostHog reads as off, so a failed lookup hides the warning rather
-// than flashing it on.
-func PlanModeEnabled(distinctID string, timeout time.Duration) bool {
-	return featureFlags(distinctID, timeout)[planModeFlagKey]
 }
 
 // featureFlags returns this install's boolean flags, fetching them if the cached

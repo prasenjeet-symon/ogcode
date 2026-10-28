@@ -1,6 +1,6 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
 import { createSignal, createEffect, on } from 'solid-js';
-import { getPath, getConfig, getVCS, getMode, getResources } from '../api/client';
+import { getPath, getConfig, getVCS, getResources } from '../api/client';
 import type { ResourceSample } from '../api/client';
 import { createSSE, type SSEEvent } from '../api/sse';
 import { projectName } from '../lib/paths';
@@ -11,7 +11,6 @@ interface ServerContextValue {
   isGitRepo: () => boolean;
   hasRemote: () => boolean;
   ghInstalled: () => boolean;
-  mode: () => 'build' | 'plan';
   // Whether the event stream is up: true from the server's server.connected
   // until the stream next drops.
   connected: () => boolean;
@@ -22,10 +21,6 @@ interface ServerContextValue {
   // Whether the server resolved the device-panel feature flag as on for this
   // install. Same ownership model as notesEnabled.
   devicePanelEnabled: () => boolean;
-  // Whether the server resolved the plan-mode feature flag as on for this
-  // install. Same ownership model; it gates only the plan-mode instability
-  // warning, never plan mode itself.
-  planModeEnabled: () => boolean;
   // The host OS the server runs on (e.g. "darwin", "linux", "windows").
   // Safari web search drives osascript on that machine, so this decides the
   // search settings' Safari option and guide.
@@ -65,12 +60,10 @@ export const ServerProvider: ParentComponent = (props) => {
   const [isGitRepo, setIsGitRepo] = createSignal(true);
   const [hasRemote, setHasRemote] = createSignal(true);
   const [ghInstalled, setGhInstalled] = createSignal(true);
-  const [mode, setMode] = createSignal<'build' | 'plan'>('build');
   const [connected, setConnected] = createSignal(false);
   const [searchRunning, setSearchRunning] = createSignal(false);
   const [notesEnabled, setNotesEnabled] = createSignal(false);
   const [devicePanelEnabled, setDevicePanelEnabled] = createSignal(false);
-  const [planModeEnabled, setPlanModeEnabled] = createSignal(false);
   const [os, setOS] = createSignal('');
   const [eventTick, setEventTick] = createSignal(0);
   const [lastEvent, setLastEvent] = createSignal<SSEEvent | null>(null);
@@ -107,11 +100,6 @@ export const ServerProvider: ParentComponent = (props) => {
     setGhInstalled(info.ghInstalled ?? true);
   }).catch(() => { /* ignore */ });
 
-  // Load server mode
-  getMode().then((info) => {
-    if (info.mode) setMode(info.mode as 'build' | 'plan');
-  }).catch(() => { /* ignore */ });
-
   // Backfill the resource window in one shot so the graph opens populated
   // instead of drawing itself one sample at a time off the SSE stream.
   getResources().then((snap) => {
@@ -131,7 +119,6 @@ export const ServerProvider: ParentComponent = (props) => {
       setSearchRunning((config as any).searchRunning ?? false);
       setNotesEnabled(config.notesEnabled ?? false);
       setDevicePanelEnabled(config.devicePanelEnabled ?? false);
-      setPlanModeEnabled(config.planModeEnabled ?? false);
       setOS(config.os ?? '');
     }).catch(() => { /* ignore */ });
   }
@@ -177,9 +164,6 @@ export const ServerProvider: ParentComponent = (props) => {
     } else if (event.type === 'device-panel.changed') {
       // Same contract as notes.changed, for the device panel's flag.
       setDevicePanelEnabled((event.properties as any)?.enabled ?? false);
-    } else if (event.type === 'plan-mode.changed') {
-      // Same contract, for the plan-mode flag that gates the instability warning.
-      setPlanModeEnabled((event.properties as any)?.enabled ?? false);
     } else {
       setLastEvent(event);
       setEventTick((n) => n + 1);
@@ -233,12 +217,10 @@ export const ServerProvider: ParentComponent = (props) => {
     isGitRepo,
     hasRemote,
     ghInstalled,
-    mode,
     connected,
     searchRunning,
     notesEnabled,
     devicePanelEnabled,
-    planModeEnabled,
     os,
     resources,
     resourceMeta,

@@ -33,7 +33,7 @@ func waitUp(t *testing.T, srv *Server) {
 // the worker dials the tunnel with it), and Serve returns cleanly when the
 // caller's context is cancelled.
 func TestServe_BindsLoopbackAndReportsPort(t *testing.T) {
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -68,7 +68,7 @@ func TestServe_BindsLoopbackAndReportsPort(t *testing.T) {
 // Serve's wait loop and Serve returns nil, without any signal or ctx cancel —
 // the seam a supervisor uses to stop a hosted worktree server.
 func TestServe_StopFromAnotherGoroutine(t *testing.T) {
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(context.Background()) }()
@@ -89,7 +89,7 @@ func TestServe_StopFromAnotherGoroutine(t *testing.T) {
 // Serve on an already-served Server fails fast instead of double-binding or
 // double-closing the DBs.
 func TestServe_DoubleCallRejected(t *testing.T) {
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(context.Background()) }()
@@ -128,7 +128,7 @@ func TestServe_OnListenReportsActualBoundPort(t *testing.T) {
 	// Port() with the REQUESTED port, and the occupied listener answers on it, so
 	// a port-based readiness probe would race ahead of the real bind.
 	listened := make(chan int, 1)
-	srv := NewWithOptions(busyPort, t.TempDir(), ModeBuild, Options{
+	srv := NewWithOptions(busyPort, t.TempDir(), Options{
 		Loopback:  true,
 		NoBrowser: true,
 		OnListen:  func(p int) { listened <- p },

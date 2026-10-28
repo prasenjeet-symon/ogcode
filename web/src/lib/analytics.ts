@@ -44,12 +44,12 @@ export function trackMessageSent(props: {
   });
 }
 
-/** The user switched the model. `context` says which surface (a chat session,
- *  a plan, or onboarding) so the two flows can be told apart. */
+/** The user switched the model. `context` says which surface (a chat session
+ *  or onboarding) so the two flows can be told apart. */
 export function trackModelSelected(props: {
   model: string;
   provider: string;
-  context: 'session' | 'plan' | 'onboarding';
+  context: 'session' | 'onboarding';
 }): void {
   capture('model_selected', {
     model: props.model || 'default',

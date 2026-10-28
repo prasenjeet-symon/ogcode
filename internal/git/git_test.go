@@ -2,9 +2,30 @@ package git
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+// git shells out to `git` with a fixed identity, failing the test on error.
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@local", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %s: %v", args, string(out), err)
+	}
+}
+
+// writeCommit stages the file and commits it with a fixed identity.
+func writeCommit(t *testing.T, dir, file, content, msg string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", msg)
+}
 
 func TestParsePorcelain(t *testing.T) {
 	// -z output: records NUL-separated. A modified+staged file, an untracked

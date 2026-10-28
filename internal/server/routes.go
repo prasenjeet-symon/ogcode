@@ -47,8 +47,6 @@ func (s *Server) routes() http.Handler {
 		r.Get("/models", s.handleModels)
 		r.Post("/models/refresh", s.handleModelsRefresh)
 		r.Get("/config", s.handleConfig)
-		r.Get("/mode", s.handleMode)
-		r.Get("/git/sync", s.handleGitSync)
 		r.Get("/git/status", s.handleGitStatus)
 		r.Get("/git/diff", s.handleGitDiff)
 		r.Get("/git/commits", s.handleGitCommits)
@@ -130,34 +128,6 @@ func (s *Server) routes() http.Handler {
 				r.Post("/permission/{permissionID}", s.handlePermissionReply)
 				r.Get("/question", s.handleListQuestions)
 				r.Post("/question/{questionID}", s.handleReplyQuestion)
-			})
-		})
-
-		r.Route("/plans", func(r chi.Router) {
-			r.Get("/", s.handleListPlans)
-			r.Post("/", s.handleCreatePlan)
-			r.Route("/{planID}", func(r chi.Router) {
-				r.Get("/", s.handleGetPlan)
-				r.Patch("/", s.handleUpdatePlan)
-				r.Delete("/", s.handleDeletePlan)
-				r.Post("/lock", s.handleLockPlan)
-				r.Post("/abort", s.handleAbortPlan)
-				r.Post("/prompt", s.handlePlanPrompt)
-				r.Get("/message", s.handleGetPlanMessages)
-				r.Get("/export", s.handleExportPlan)
-				r.Get("/tasks", s.handleListTasks)
-				r.Post("/tasks", s.handleCreateTasks)
-			})
-		})
-
-		r.Route("/tasks", func(r chi.Router) {
-			r.Route("/{taskID}", func(r chi.Router) {
-				r.Get("/", s.handleGetTask)
-				r.Patch("/", s.handleUpdateTask)
-				r.Post("/start", s.handleStartTask)
-				r.Post("/complete", s.handleCompleteTask)
-				r.Post("/fail", s.handleFailTask)
-				r.Post("/retry", s.handleRetryTask)
 			})
 		})
 

@@ -41,7 +41,7 @@ func TestServe_ScrcpyProxy(t *testing.T) {
 	// test built so this run rebuilds against OUR stub.
 	resetScrcpyProxyForTest()
 
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 	// The device panel is feature-flagged and fails closed; turn it on so this
 	// test exercises the proxy rather than the gate. TestMain blanks the PostHog
 	// key, so Serve starts no flag refresher and the stored decision holds.
@@ -139,7 +139,7 @@ func TestServe_ScrcpyDown(t *testing.T) {
 	backendURL := backend.URL
 	backend.Close() // free the port so nothing answers on it
 
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 	srv.devicePanelEnabled.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -189,7 +189,7 @@ func TestServe_ScrcpyStatus(t *testing.T) {
 	t.Setenv("OGCODE_SCRCPY_TARGET", backend.URL)
 	resetScrcpyProxyForTest()
 
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 	srv.devicePanelEnabled.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -374,7 +374,7 @@ func TestServe_ScrcpyDevices(t *testing.T) {
 	}
 	t.Setenv("ANDROID_HOME", scratch)
 
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 	srv.devicePanelEnabled.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

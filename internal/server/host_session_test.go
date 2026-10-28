@@ -23,7 +23,7 @@ func hostTestServer(t *testing.T) *Server {
 		t.Setenv(k, "")
 	}
 
-	srv := NewWithOptions(0, t.TempDir(), ModeBuild, Options{Loopback: true, NoBrowser: true})
+	srv := NewWithOptions(0, t.TempDir(), Options{Loopback: true, NoBrowser: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	done := make(chan error, 1)

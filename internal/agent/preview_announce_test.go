@@ -94,7 +94,7 @@ func TestRecordAnnouncedPorts(t *testing.T) {
 
 	t.Run("non-build agents record nothing", func(t *testing.T) {
 		lr, sess := announceLoopRunner(t)
-		lr.recordAnnouncedPorts("task", sess.ID, "serving at http://4321."+PreviewDomain()+":7799/")
+		lr.recordAnnouncedPorts("subagent", sess.ID, "serving at http://4321."+PreviewDomain()+":7799/")
 		if got := announcedIn(t, lr, sess.Directory); len(got) != 0 {
 			t.Fatalf("got %v, want none", got)
 		}
@@ -102,17 +102,17 @@ func TestRecordAnnouncedPorts(t *testing.T) {
 
 	t.Run("a session outside its project records nothing", func(t *testing.T) {
 		lr, proj := announceLoopRunner(t)
-		// A task session: the project in one field, its own worktree in the other.
-		task := &session.Session{
+		// The project in one field, the session's own worktree in the other.
+		outside := &session.Session{
 			ID: session.NewSessionID(), ProjectID: proj.Directory, Directory: t.TempDir(),
 			Title: "t", Model: "mock-model", SessionType: "build",
 			CreatedAt: session.Now(), UpdatedAt: session.Now(),
 		}
-		if err := lr.Store.Create(task); err != nil {
-			t.Fatalf("create task session: %v", err)
+		if err := lr.Store.Create(outside); err != nil {
+			t.Fatalf("create outside-project session: %v", err)
 		}
-		lr.recordAnnouncedPorts("build", task.ID, "serving at http://4321."+PreviewDomain()+":7799/")
-		for _, dir := range []string{task.Directory, task.ProjectID} {
+		lr.recordAnnouncedPorts("build", outside.ID, "serving at http://4321."+PreviewDomain()+":7799/")
+		for _, dir := range []string{outside.Directory, outside.ProjectID} {
 			if got := announcedIn(t, lr, dir); len(got) != 0 {
 				t.Fatalf("%s: got %v, want none", dir, got)
 			}

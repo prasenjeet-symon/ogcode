@@ -3,7 +3,6 @@ import { useNavigate } from '@solidjs/router';
 import { useServer } from '../context/server';
 import { useSession } from '../context/session';
 import SessionSidebar from '../components/session-sidebar';
-import PlanSidebar from '../components/plan-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
 import AgentForceGraph from '../components/agent-force-graph';
 import { getBoardRoster, stopBoardTeammate, type BoardHandle } from '../api/client';
@@ -223,9 +222,7 @@ export default function AgentsPage() {
 
   return (
     <div class="flex h-dvh w-full">
-      <Show when={server.mode() === 'plan'} fallback={<SessionSidebar />}>
-        <PlanSidebar />
-      </Show>
+      <SessionSidebar />
       <main class="page-enter flex-1 flex flex-col min-w-0 min-h-0 bg-[color:var(--bg-base)]">
         {/* Page header — the same h-11 band as the session page, so the chrome
             reads as one app across screens. */}
@@ -233,7 +230,7 @@ export default function AgentsPage() {
           class="h-11 shrink-0 border-b border-[color:var(--border-subtle)] flex items-center px-2 sm:px-3.5 gap-2 backdrop-blur-md"
           style={{ background: 'linear-gradient(var(--tint), var(--tint)) color-mix(in srgb, var(--bg-surface) 82%, transparent)', 'z-index': 100, ['padding-top']: 'env(safe-area-inset-top)' }}
         >
-          <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
+          <DrawerToggle drawer="sessions" label="Open navigation" />
           <div class="flex items-center gap-2 min-w-0 flex-1">
             <span class="w-5 h-5 rounded-[6px] flex items-center justify-center shrink-0 bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)] shadow-[inset_0_0_0_1px_var(--accent-ring)]">
               <BoardIcon class="w-3 h-3" />

@@ -26,46 +26,32 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 	"github.com/prasenjeet-symon/ogcode/internal/filechange"
-	"github.com/prasenjeet-symon/ogcode/internal/git"
 	"github.com/prasenjeet-symon/ogcode/internal/indexer"
 	"github.com/prasenjeet-symon/ogcode/internal/mcp"
 	"github.com/prasenjeet-symon/ogcode/internal/memfile"
 	"github.com/prasenjeet-symon/ogcode/internal/nativehost"
 	"github.com/prasenjeet-symon/ogcode/internal/note"
 	"github.com/prasenjeet-symon/ogcode/internal/permission"
-	"github.com/prasenjeet-symon/ogcode/internal/plan"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/question"
 	"github.com/prasenjeet-symon/ogcode/internal/resource"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
-	"github.com/prasenjeet-symon/ogcode/internal/task"
 	"github.com/prasenjeet-symon/ogcode/internal/timer"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 	"github.com/prasenjeet-symon/ogcode/internal/usage"
 	"github.com/prasenjeet-symon/ogcode/internal/version"
 )
 
-// ServerMode determines the operational mode of the server.
-type ServerMode string
-
-const (
-	ModeBuild ServerMode = "build"
-	ModePlan  ServerMode = "plan"
-)
-
 type Server struct {
 	port          atomic.Int32 // written once by Serve after bind, read cross-goroutine via Port()
 	dir           string
-	mode          ServerMode
 	db            *db.DB
 	globalDB      *db.DB // shared config DB at ~/.ogcode/config.db
 	usage         *usage.Ledger
 	bus           *bus.Bus
 	store         *session.Store
-	planStore     *plan.Store
-	taskStore     *task.Store
 	noteStore     *note.Store
 	docindexStore *docindex.Store
 	board         *board.Store
@@ -142,12 +128,6 @@ type Server struct {
 	// race.
 	devicePanelEnabled atomic.Bool
 
-	// planModeEnabled is the plan-mode feature-flag decision for this install,
-	// refreshed by the same background goroutine. It gates only the UI's
-	// instability warning, never plan mode itself; /api/config reports it.
-	// atomic so readers and the refresh goroutine never race.
-	planModeEnabled atomic.Bool
-
 	// Track running agent loops so they can be cancelled on abort
 	mu           sync.Mutex
 	running      map[session.SessionID]context.CancelFunc
@@ -209,8 +189,8 @@ type Server struct {
 // (see draining), what remains is ordinary requests, which finish in far less.
 const httpShutdownGrace = 3 * time.Second
 
-func New(port int, dir string, mode ServerMode) *Server {
-	return NewWithOptions(port, dir, mode, Options{})
+func New(port int, dir string) *Server {
+	return NewWithOptions(port, dir, Options{})
 }
 
 // Options tunes a server's runtime behavior without changing what it serves.
@@ -234,8 +214,8 @@ type Options struct {
 	OnInterrupt func()
 }
 
-func NewWithOptions(port int, dir string, mode ServerMode, opts Options) *Server {
-	s := &Server{dir: dir, mode: mode, opts: opts, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64), runningDone: make(map[session.SessionID]chan struct{}), loopControls: make(map[session.SessionID]*agent.LoopControl)}
+func NewWithOptions(port int, dir string, opts Options) *Server {
+	s := &Server{dir: dir, opts: opts, running: make(map[session.SessionID]context.CancelFunc), runningToken: make(map[session.SessionID]uint64), runningDone: make(map[session.SessionID]chan struct{}), loopControls: make(map[session.SessionID]*agent.LoopControl)}
 	s.port.Store(int32(port))
 	return s
 }
@@ -304,7 +284,7 @@ func (s *Server) serve(ctx context.Context) error {
 	}
 
 	// The workspace's public/ folder is served over HTTP at /public by every
-	// server instance (interactive, plan-mode, worker-hosted) — see routes().
+	// server instance (interactive, worker-hosted) — see routes().
 	// Create it eagerly so the route is stable even when it is still empty.
 	if err := s.ensurePublicDir(); err != nil {
 		return fmt.Errorf("create public dir: %w", err)
@@ -350,8 +330,6 @@ func (s *Server) serve(ctx context.Context) error {
 	} else if steps+util > 0 {
 		slog.Info("usage ledger backfilled", "steps", steps, "utility", util)
 	}
-	s.planStore = plan.NewStore(database)
-	s.taskStore = task.NewStore(database)
 	s.noteStore = note.NewStore(database)
 	s.docindexStore = docindex.NewStore(database)
 	// The per-project agent board: coordination between the sessions working in
@@ -390,24 +368,6 @@ func (s *Server) serve(ctx context.Context) error {
 		slog.Info("recovered stuck notes", "count", len(stuck))
 	}
 
-	// Recover tasks that were in_progress when the server last stopped.
-	failedTasks, err := s.taskStore.FailStuckTasks()
-	if err != nil {
-		slog.Warn("recover stuck tasks", "err", err)
-	} else if len(failedTasks) > 0 {
-		slog.Info("marked stuck tasks as failed", "count", len(failedTasks))
-		// Clean up orphaned worktrees from crashed tasks
-		for _, t := range failedTasks {
-			if t.BranchName != "" {
-				s.gitMu.Lock()
-				if err := git.RemoveTaskWorktree(s.dir, t.BranchName); err != nil {
-					slog.Warn("cleanup orphaned worktree", "task", t.ID, "branch", t.BranchName, "err", err)
-				}
-				s.gitMu.Unlock()
-			}
-		}
-	}
-
 	// Initialize provider registry from DB-stored credentials + environment
 	// variables (env takes precedence). Built here at startup and rebuilt in
 	// place by reloadProviders() when credentials change at runtime.
@@ -422,12 +382,11 @@ func (s *Server) serve(ctx context.Context) error {
 	// server offers.
 	toolRegistry := tool.NewRegistry()
 	tool.RegisterCoreTools(toolRegistry, s.docindexStore)
-	toolRegistry.Register(tool.BreakdownTool{})
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.NewMemoryMapTool(memfileStore))
 	// board and teammate are registered for every turn that shares this
 	// registry, but the agent loop offers them per agent (build only), so a
-	// headless task or a plan session never sees them.
+	// headless sub-agent never sees them.
 	toolRegistry.Register(tool.BoardTool{Run: s.boardTool})
 	toolRegistry.Register(tool.TeammateTool{Run: s.teammateTool})
 	// The reminder scheduler sits beside them on the same shared registry; the
@@ -779,9 +738,7 @@ func (s *Server) serve(ctx context.Context) error {
 	if PostHogAPIKey != "" {
 		s.posthogClient = NewPostHogClient(PostHogAPIKey, PostHogAPIHost)
 		if s.posthogClient != nil {
-			s.posthogClient.Capture("ogcode_server_started", posthogDistinctID(), map[string]any{
-				"mode": string(s.mode),
-			})
+			s.posthogClient.Capture("ogcode_server_started", posthogDistinctID(), map[string]any{})
 			if installStitched {
 				reportInstallOnce(home, s.installID, s.posthogClient.Capture)
 			}

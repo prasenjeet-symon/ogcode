@@ -3,17 +3,11 @@ import { useNavigate } from '@solidjs/router';
 import { useNote } from '../context/note';
 import { useServer } from '../context/server';
 import SessionSidebar from '../components/session-sidebar';
-import PlanSidebar from '../components/plan-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
 import type { Note } from '../api/client';
 
 function Sidebar() {
-  const server = useServer();
-  return (
-    <Show when={server.mode() === 'plan'} fallback={<SessionSidebar />}>
-      <PlanSidebar />
-    </Show>
-  );
+  return <SessionSidebar />;
 }
 
 function formatTime(ts: number): string {
@@ -216,7 +210,7 @@ export default function NotesPage() {
         <div class="shrink-0 border-b border-[color:var(--border-subtle)] px-3 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-2"
              style={{ 'padding-top': 'max(0.75rem, env(safe-area-inset-top))' }}>
           <div class="flex items-center gap-1 min-w-0">
-            <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
+            <DrawerToggle drawer="sessions" label="Open navigation" />
             <div class="min-w-0">
               <h1 class="text-[15px] font-semibold text-zinc-100">Project Notes</h1>
               <p class="text-[11px] text-zinc-500 mt-0.5">

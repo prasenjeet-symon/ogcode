@@ -21,7 +21,6 @@ import (
 var resumableSessionTypes = map[string]bool{
 	"":      true, // the default interactive build session
 	"build": true,
-	"plan":  true,
 }
 
 // handleResumeSession restarts the agent loop on a session whose last turn was
@@ -197,7 +196,7 @@ func (s *Server) startSessionLoop(sessionID session.SessionID, agentName string,
 	// Put the session on the board as running before the loop starts, so the first
 	// tool call already sees this session on the roster and any post that arrived
 	// while it was idle is folded into its first turn. Only the build agent joins
-	// (the check lives in joinBoard); a plan or task session logs and carries on.
+	// (the check lives in joinBoard); any other agent logs and carries on.
 	joinCtx, joinCancel := context.WithTimeout(context.Background(), boardOpTimeout)
 	if jerr := s.boardTurnStart(joinCtx, sessionID, agentName); jerr != nil {
 		slog.Info("board: session did not join", "session", sessionID, "agent", agentName, "err", jerr)

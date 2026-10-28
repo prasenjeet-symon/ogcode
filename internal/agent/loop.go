@@ -542,16 +542,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		return session.ErrSessionDeleted
 	}
 
-	// Warn if the agent name doesn't match the session type — catches accidental
-	// mismatches at call sites (breakdown intentionally differs, so not a hard error).
 	if sess != nil && sess.SessionType != "" && sess.SessionType != agentName {
-		// The breakdown agent and task-execution agent both run on sessions
-		// created with SessionType "build" — these are expected, not bugs.
-		knownMismatch := (agentName == "breakdown" || agentName == "task") && sess.SessionType == "build"
-		if !knownMismatch {
-			slog.Warn("agent/session type mismatch — possible call-site bug",
-				"sessionType", sess.SessionType, "agentName", agentName, "session", sessionID)
-		}
+		slog.Warn("agent/session type mismatch — possible call-site bug",
+			"sessionType", sess.SessionType, "agentName", agentName, "session", sessionID)
 	}
 
 	// Load AGENT.md and MEMORY.md files from session directory
@@ -789,17 +782,16 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// tool on the wire and the system entry below, so the two stay in step.
 	intentOffered := agent.canUpdateIntent() && lr.Tools.Get("update_intent") != nil
 	// board and teammate are the shared-board tools, offered to the interactive
-	// build agent alone. They are not in codingAgentTools, which TaskAgent also
-	// holds: a task session runs in a worktree deleted when it ends, where a post
-	// reaches nobody and a teammate would write into a tree about to go away.
-	// PlanAgent is read-only and has no board section in its prompt.
+	// build agent alone (see canUseBoard): a session with no live conversation
+	// attached would write posts into a tree nobody reads and spawn teammates
+	// that outlive the run that started them.
 	boardOffered := agent.canUseBoard() && lr.Tools.Get("board") != nil
 	teammateOffered := agent.canSpawnTeammate() && lr.Tools.Get("teammate") != nil
 	// schedule is the one-shot agent-timer tool, offered to the interactive
 	// build agent alone (see canSchedule), the way board and teammate are: both
 	// delivery paths (the poller push and the catch-up hook above) pay off only
-	// a build session, so a task or plan session holding the tool would arm
-	// timers nothing ever delivers.
+	// a build session, so any other agent holding the tool would arm timers
+	// nothing ever delivers.
 	scheduleOffered := agent.canSchedule() && lr.Tools.Get("schedule") != nil
 	// The browser tools are the Chrome-takeover ops, offered to the interactive
 	// build agent alone (see canControlBrowser), the way board and teammate are:
@@ -2753,9 +2745,7 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 // user turn several times over.
 var turnResourceAgents = map[string]bool{
 	"build": true,
-	"plan":  true,
 	"note":  true,
-	"task":  true,
 }
 
 // autoIndexTurn refreshes the project index for a just-finished turn, on a
@@ -2769,13 +2759,13 @@ var turnResourceAgents = map[string]bool{
 // for memory, every changed file in the tree for the index — so the set of
 // sessions that may trigger it is deliberately the narrow one:
 //
-//   - agentID must be "build". Every other agent is a utility turn (plan, note,
-//     breakdown, search, subagent, recall) whose work does not belong in the
-//     project index, and the index agent in particular would recurse: the
-//     indexer drives its own turns through this loop, so indexing on them would
-//     spawn an index of the index, without bound. The session TYPE is not the
-//     discriminator — a task session is stored as "build" — so the resolved
-//     agent is what is checked.
+//   - agentID must be "build". Every other agent is a utility turn (note,
+//     search, subagent, recall) whose work does not belong in the project
+//     index, and the index agent in particular would recurse: the indexer
+//     drives its own turns through this loop, so indexing on them would spawn
+//     an index of the index, without bound. The session TYPE is not the sole
+//     discriminator — delegated build-agent work is stored under the parent —
+//     so the resolved agent is what is checked.
 //   - the session's directory must be its project directory. A task session
 //     works in a git worktree under .ogcode/, which is a second full checkout:
 //     every file in it is new to the index, so one task turn would index a

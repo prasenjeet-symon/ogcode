@@ -33,7 +33,7 @@ func TestWorkflowEndsOnVerificationForAgentsThatWrite(t *testing.T) {
 
 	// The read-only roles end on their own product and are never pointed at a
 	// tool they do not hold.
-	for _, role := range []string{"plan", "note", "breakdown", "subagent"} {
+	for _, role := range []string{"note", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
 		for _, unwanted := range []string{"check_syntax", "run the tests", "Then make changes", "the way it is used"} {
 			if strings.Contains(p, unwanted) {
@@ -46,7 +46,7 @@ func TestWorkflowEndsOnVerificationForAgentsThatWrite(t *testing.T) {
 // The diagram is a pattern, not a script: its example calls must not name one
 // project's folders, which a model working in another project copies as-is.
 func TestWorkflowNamesNoProjectSpecificPaths(t *testing.T) {
-	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+	for _, role := range []string{"build", "note", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
 		workflow := p[strings.Index(p, "### Workflow"):strings.Index(p, "### Map a file before reading it")]
 		if strings.Contains(workflow, `subdir="internal`) {
@@ -69,7 +69,7 @@ func TestRemapAfterEditIsConditionalAndForWritersOnly(t *testing.T) {
 	if strings.Contains(build, `After you edit a file, call "file_map" on it again`) {
 		t.Error("build prompt still asks for a re-map after every edit")
 	}
-	for _, role := range []string{"plan", "note", "breakdown", "subagent"} {
+	for _, role := range []string{"note", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
 		if strings.Contains(p, "you have edited") {
 			t.Errorf("%s prompt tells a read-only agent about re-mapping its edits", role)
@@ -84,7 +84,7 @@ func TestRemapAfterEditIsConditionalAndForWritersOnly(t *testing.T) {
 // The atomic-edit contract is stated once, in Parallel tool calls, and Hard
 // rules points at it instead of restating a second, drifting version.
 func TestHardRulesStateAtomicEditsOnce(t *testing.T) {
-	for _, a := range []Agent{BuildAgent, TaskAgent} {
+	for _, a := range []Agent{BuildAgent} {
 		if n := strings.Count(a.System, "cannot half-apply a refactor"); n != 1 {
 			t.Errorf("%s: states the atomic-edit rule %d times, want once", a.Name, n)
 		}
@@ -121,7 +121,7 @@ func TestParallelCallsPromptStatesTheSameFileOrder(t *testing.T) {
 			t.Errorf("writer prompt still says %q, which the runtime no longer does", stale)
 		}
 	}
-	for _, a := range []Agent{BuildAgent, TaskAgent} {
+	for _, a := range []Agent{BuildAgent} {
 		if strings.Contains(a.System, "order is unspecified") {
 			t.Errorf("%s: prompt still says same-file order is unspecified", a.Name)
 		}
@@ -201,7 +201,7 @@ func TestBoardPromptPrefersTheSplit(t *testing.T) {
 	if !strings.Contains(BuildAgent.System, "how many teammates it takes and which stream each one gets") {
 		t.Error("BuildAgent prompt does not point at the fan-out from the planning step")
 	}
-	for _, a := range []Agent{TaskAgent, PlanAgent, BreakdownAgent, NoteAgent, SubagentAgent} {
+	for _, a := range []Agent{NoteAgent, SubagentAgent} {
 		if strings.Contains(a.System, "teammate") {
 			t.Errorf("%s: cannot spawn a teammate, so the section is noise in its prompt", a.Name)
 		}
@@ -217,7 +217,7 @@ func TestBoardPromptPrefersTheSplit(t *testing.T) {
 // the same reconciliation: a read routinely reveals another file, and mapping
 // that file may share the read block — map-before-read holds file by file.
 func TestProjectIndexPromptBridgesThePlanAndCarriesRevealedMaps(t *testing.T) {
-	for _, role := range []string{"build", "plan", "note", "breakdown", "subagent"} {
+	for _, role := range []string{"build", "note", "subagent"} {
 		p := projectIndexPrompt(role, true, true)
 		workflow := p[strings.Index(p, "### Workflow"):strings.Index(p, "### Map a file before reading it")]
 

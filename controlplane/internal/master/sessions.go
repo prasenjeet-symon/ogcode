@@ -40,7 +40,7 @@ const (
 // names the per-directory server resolves through GetAgent (internal/agent);
 // anything unrecognized falls through to the build agent there anyway, so the
 // form validates against exactly this set and passes the value through.
-var agentChoices = []string{"build", "plan", "task", "breakdown"}
+var agentChoices = []string{"build"}
 
 // workerOption is one entry of the worker select on the start-session form.
 type workerOption struct {

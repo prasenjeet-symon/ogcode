@@ -3,16 +3,10 @@ import { useSearchParams } from '@solidjs/router';
 import { useServer } from '../context/server';
 import { getScrcpyStatus, getScrcpyDevices, type ScrcpyDevice, type ScrcpyStatus } from '../api/client';
 import SessionSidebar from '../components/session-sidebar';
-import PlanSidebar from '../components/plan-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
 
 function Sidebar() {
-  const server = useServer();
-  return (
-    <Show when={server.mode() === 'plan'} fallback={<SessionSidebar />}>
-      <PlanSidebar />
-    </Show>
-  );
+  return <SessionSidebar />;
 }
 
 // How often the panel re-checks ws-scrcpy. The stream itself runs in the
@@ -212,7 +206,7 @@ export default function DevicePage() {
         {/* ---- Header ---- */}
         <header class="shrink-0 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] pl-2 pr-2 sm:pl-3 sm:pr-2.5 h-12 flex items-center gap-2 sm:gap-3"
                 style={{ [ 'padding-top']: 'env(safe-area-inset-top)' }}>
-          <DrawerToggle drawer={server.mode() === 'plan' ? 'plans' : 'sessions'} label="Open navigation" />
+          <DrawerToggle drawer="sessions" label="Open navigation" />
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="w-6 h-6 rounded-md bg-[color:var(--accent-soft)] flex items-center justify-center shrink-0">
               <svg class="w-3.5 h-3.5 text-[color:var(--accent-ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">

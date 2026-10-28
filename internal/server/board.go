@@ -119,10 +119,9 @@ func (s *Server) mintFreeHandle(ctx context.Context, reg board.Handle, attempts 
 	return board.Handle{}, fmt.Errorf("no free handle after %d attempts: %w", attempts, taken)
 }
 
-// joinBoard puts a session on the roster. Only the build agent joins: the plan
-// agent has a transcript of its own and no board tool, and a headless task
-// session works in a worktree that is deleted when it finishes, so neither has
-// a teammate to coordinate with.
+// joinBoard puts a session on the roster. Only the build agent joins: the headless
+// sub-agent works in an ephemeral session that is deleted when it finishes, so it
+// has no teammate roster to coordinate with across turns.
 func (s *Server) joinBoard(ctx context.Context, id session.SessionID, agentName string) (board.Handle, error) {
 	if agentName != "build" {
 		return board.Handle{}, fmt.Errorf("the %s agent does not join the board", agentName)

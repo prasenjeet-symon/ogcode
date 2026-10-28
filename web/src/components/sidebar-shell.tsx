@@ -2,8 +2,8 @@ import { Show, createEffect, onCleanup, type JSX } from 'solid-js';
 import { drawerIsOpen, openDrawer, closeDrawer } from '../lib/mobile-drawer';
 
 interface SidebarShellProps {
-  // Which drawer this sidebar acts as on small screens ('sessions' or 'plans').
-  drawer: 'sessions' | 'plans';
+  // Which drawer this sidebar acts as on small screens.
+  drawer: 'sessions';
   children: JSX.Element;
 }
 
@@ -21,7 +21,7 @@ interface SidebarShellProps {
 // cycles and keeps the closed state free of layout cost.
 export default function SidebarShell(props: SidebarShellProps) {
   const isOpen = () => drawerIsOpen(props.drawer);
-  const label = () => (props.drawer === 'sessions' ? 'Sessions' : 'Plans');
+  const label = () => 'Sessions';
 
   // Close-on-navigation lives in DrawerNavCloser (app.tsx), which mounts once
   // above the router outlet and survives page swaps — a shell here unmounts
@@ -54,7 +54,7 @@ export default function SidebarShell(props: SidebarShellProps) {
           block for position:fixed descendants: a scrim inside it would cover
           only the drawer's own 320px box (dimming the sidebar instead of the
           page behind) and paint above the sidebar content, swallowing every
-          tap on session/plan rows. As a sibling under the root it covers the
+          tap on session rows. As a sibling under the root it covers the
           real viewport, sits under the drawer (z 59 < 60), and its tap
           closes the drawer. */}
       <Show when={isOpen()}>
@@ -89,7 +89,7 @@ export default function SidebarShell(props: SidebarShellProps) {
 
 // Hamburger — the control in each page header that opens the drawer. Hidden
 // at lg+ where the inline sidebar is always visible.
-export function DrawerToggle(props: { drawer: 'sessions' | 'plans'; label?: string }) {
+export function DrawerToggle(props: { drawer: 'sessions'; label?: string }) {
   return (
     <button
       type="button"
