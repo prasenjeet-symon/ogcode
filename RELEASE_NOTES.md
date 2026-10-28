@@ -20,6 +20,8 @@ ones a plan spawned.
 The provider credentials block on the Models page is now one row with one
 Save button, instead of a stacked form with two.
 
+# Release Notes — v0.52.0
+
 ## Minor: One-shot agent reminders — the schedule tool
 
 An agent working a long turn keeps a clock only in its own head, and the one
