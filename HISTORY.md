@@ -3905,10 +3905,27 @@ Same chip+2-CTA pattern still present in `web/src/pages/settings/search.tsx` (~l
   Write-Preview / "Sign in with GitHub") and logs `[giscus] Discussion not found. A new
   discussion will be created if a comment/reaction is submitted.` — that warning is the
   HEALTHY state: giscus creates the per-pathname discussion lazily on the first comment.
-- The custom theme needs the CSS deployed: `https://ogcode.in/blog/giscus-theme.css` is 404
-  until the next Pages build (blog changes uncommitted), so the widget wears giscus's
-  built-in theme meanwhile. Pages serves blog assets with `access-control-allow-origin: *`
-  (checked on `/blog/_astro/*.css`), so the external-theme fetch resolves once deployed.
+- The custom theme needs the CSS deployed: `https://ogcode.in/blog/giscus-theme.css` was 404
+  until the Pages build shipped it (blog changes uncommitted at hand-off), so the widget wore
+  giscus's built-in theme meanwhile. Pages serves blog assets with `access-control-allow-origin: *`
+  (checked on `/blog/_astro/*.css`), so the external-theme fetch resolved once deployed —
+  verified 2026-10-28 after run 40741719910: 200, `text/css`, 6836 b.
 - Local end-to-end harness: `python3 -m http.server 8899 --bind 127.0.0.1` rooted at `docs/`,
   open `http://127.0.0.1:8899/blog/<slug>/` — giscus needs real network, headless Chrome
   works but cannot scroll to a fragment reliably (use the extension tab to eyeball it).
+
+## 2026-10-28 — Homepage bento holes fixed, homepage + blog shipped to Pages
+
+- Root cause of the solid grey/dark blocks in the product grid: `#product .pr-bento` is
+  `repeat(3, minmax(0,1fr))` with `gap:1px; background: var(--line)`, and the 6 cards spanned
+  **7** cells — auto-placement left the spare cells to be painted by the container background.
+- Fix in `docs/index.html`: DOM order B → C → F → D(`pr-wide`) → E, `pr-wide` off E; the speed
+  card dropped its `::after` fade, its base `scale(1.02)` and the mask-image (mask + composited
+  layer both hid the car panorama), hover now 1.04, glow toned. Verified at 1400/1024/760 — no
+  holes, copy bottom-aligned per row, single column below 900px.
+- Shipped as 3 commits (`cecada4` homepage, `f683581` blog, `794b015` history) pushed to `main`;
+  pages.yml run **40741719910** green in 42 s. Deploy is one push — it builds blog/ and
+  docs-site/ then uploads `docs/`.
+- Live after: `/`, `/docs/`, `/blog/`, `/blog/rss.xml`, `/blog/sitemap-index.xml` = 200; homepage
+  cards come out B, C, F, D-wide, E; post HTML carries `data-giscus` + "Join the discussion";
+  `/blog/giscus-theme.css` = 200 `text/css` 6836 b (was 404 before this build).
