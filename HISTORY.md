@@ -3829,3 +3829,26 @@ Findings came from a v0.51.0 accuracy review of the three public surfaces. Fixes
 - Verified before tagging: `CGO_ENABLED=1 go build . ./internal/...`, `go vet` on touched pkgs, `go test ./internal/agent ./internal/tool ./internal/nativehost ./internal/memfile ./internal/server -count=1` all pass, `npm run build` succeeds.
 - prompt_builder.go held one audit line inside the memory-feature file; split via `git apply --cached -R` of the single hunk so the memory commit doesn't claim it.
 - Tag push triggered 4 workflows, all green in ~8 min: Release (7 platform assets), Publish Docker Image, CI, Deploy GitHub Pages. goreleaser's changelog body lists the conventional-commit messages verbatim (docs:/test:/chore:-prefixed subject filters apply, though the release and chore(web) commits still appear in v0.53.0's note — filters matched loosely there; harmless).
+
+## 2026-10-28 — Removed plan mode
+
+- Feature deleted end to end on branch `remove-plan-mode`: planning agent (`internal/agent/breakdown.go`), breakdown tool, `internal/plan/*`, `internal/task/*`, plan/task server routes, `internal/server/plan_chain_*` tests, CLI `ogcode plan` command, `internal/id` PlanID/TaskID, plan-era `internal/git` helpers + `git/sync_test.go`, and PostHog "mode" event.
+- Web: 12 files deleted (plan context, 4 plan pages + task-execution, 7 components incl. git-sync-banner, task-board); 19 edited. Whole mode axis dropped in `context/server.tsx`; `web/dist` rebuilt.
+- Docs: `docs-site` plan-mode.md deleted, nav + intro/quick-start/sessions-and-modes/core-concepts edited (Build-only mode table), homepage hero tagline changed; root install.sh/ps1 + docs/ copies synced.
+- Migration `069_plan_task_drop.sql` drops the `plan` and `task` tables (Down recreates migration-006 shape).
+- Kept adjacent: TaskTool/RunTaskSession/board KindTask subagents, NoteAgent + `internal/note`, OGX plan-model billing (`ogx_store.go HasPlan`), permission modes Ask/Approve/Auto/Yolo. prompt_builder note/subagent finalStep cases stay separate (collapsing broke 2 tests).
+- PostHog feature flag `plan-mode` (id 938783, project 497411, 100% rollout) removed from code; **dashboard retirement is a manual developer action still pending**.
+- Verification: `CGO_ENABLED=1 go build ./internal/... .`, `go vet` root + controlplane, `go test ./internal/... (minus skills) + .` all green; `npx tsc --noEmit` + both web builds green. Committed as 51be164 (98 paths), not pushed.
+
+## 2026-10-28 — Models settings credentials block redesigned (single Save, contextual CTAs)
+
+User complaint on the Models settings page: green "Key stored in ogcode" chip + two link CTAs + two Save
+buttons (API key row and Base URL row each had one) looked cumbersome.
+Redesign in `web/src/pages/settings/models.tsx` (the `Credentials` return block): one "Credentials" row
+holding the API-key sub-block (quiet green dot + `keyState()` text instead of a StatusChip pill, helper via
+`keyHelper()`, CTAs contextual — "Remove stored key" only when a stored key exists, "Get a key at {label}"
+only when neither db nor env key is set), the Base URL sub-block when `def.hasBaseURL`, and a footer row of
+status text ("Fetching models…", "Applied — models updated.", error) + ONE Save button. `commit()`/`clearKey()`
+untouched. Verified live via the vite-verify procedure with screenshots of all three key states (Anthropic db-key,
+OpenRouter env+db, Gemini no-key) plus the fetching state; `vite build` + `tsc --noEmit` clean.
+Same chip+2-CTA pattern still present in `web/src/pages/settings/search.tsx` (~line 479) — deliberate follow-up candidate.

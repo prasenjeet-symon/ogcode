@@ -609,3 +609,27 @@ Touches: writes a throwaway `web/vite.verify.config.ts` (delete after); spawns a
 
 Done when: the changed component renders real live data in the dev server and the interaction works; the
 live ogcode server was never restarted and the throwaway config is gone.
+
+## Generate a blog hero image with the Gemini key
+
+Verified: 2026-10-28
+Touches: `blog/public/media/*-hero.jpg`, the post's frontmatter
+
+1. The key is `GEMINI_API_KEY` in `~/.zshrc`; `source ~/.zshrc` first. Model is
+   `gemini-2.5-flash-image` (nano banana) at
+   `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`.
+2. POST JSON: `contents[0].parts[0].text` = the prompt, `generationConfig` =
+   `{"responseModalities":["IMAGE"],"imageConfig":{"aspectRatio":"16:9"}}`. The response's
+   `candidates[0].content.parts[].inlineData.data` is base64 PNG (~965 KB raw).
+3. Prompt recipes that worked: dark charcoal isometric scene in the sibling hero's style
+   (`blog/public/media/memory-is-table-stakes-hero.jpg`), brand orange `#ff5e1f` as the ONLY vivid
+   color, deeper `#d1440c` for shadowed glow; say "absolutely no text, letters, or numbers".
+4. Decode base64 to a file, convert with
+   `sips -s format jpeg -s formatOptions 88 /tmp/hero_raw.png --out blog/public/media/<slug>-hero.jpg`
+   — lands at 1344x768.
+5. Wire the post: frontmatter `hero: "/blog/media/<slug>-hero.jpg"`, `heroAlt: "..."`,
+   `ogImage: "https://ogcode.in/blog/media/<slug>-hero.jpg"`; `blog/src/pages/[id].astro` renders
+   `post.data.hero`/`heroAlt` and Base.astro takes ogImage.
+
+Done when: `python3` script prints "saved image/png <bytes>" and `cd blog && npm run build` completes
+with the new page built.

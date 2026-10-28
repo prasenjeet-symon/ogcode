@@ -1185,114 +1185,137 @@ function Credentials(props: {
     }
   };
 
+  // One state-dependent sentence under the field label — only what the state
+  // marker next to the label does not already say. A stored key needs no
+  // "leave blank to keep it" prose: the field's own placeholder says that.
+  const keyHelper = () => {
+    if (dbKeySet() && envKeySet())
+      return (
+        <>The environment key <Mono>{guide()?.envKey}</Mono> takes priority over the stored one.</>
+      );
+    if (dbKeySet() || envKeySet()) return null;
+    return (
+      <>
+        <Show when={guide()?.envKey}>
+          Read from <Mono>{guide()!.envKey}</Mono> if that variable is set.{' '}
+        </Show>
+        Applies as soon as you save.
+      </>
+    );
+  };
+
   return (
     <>
       <Row
-        label="API key"
-        helper={
-          <Show
-            when={dbKeySet()}
-            fallback={
-              // A vendor has no env var of its own; the helper must not read
-              // "Read from  if that variable is set" around an empty name.
-              <Show when={guide()?.envKey} fallback="Applies as soon as you save.">
-                <>Read from <Mono>{guide()!.envKey}</Mono> if that variable is set. Applies as soon as you save.</>
-              </Show>
-            }
-          >
-            <>
-              Leave blank to keep the stored key.
-              <Show when={envKeySet()}>
-                {' '}<Mono>{guide()?.envKey}</Mono> is also set and takes priority.
-              </Show>
-            </>
-          </Show>
-        }
+        label="Credentials"
         stacked
-        hidden={props.hide('API key', 'credentials', 'token')}
+        hidden={props.hide('API key', 'credentials', 'token', 'Base URL', 'endpoint', 'host')}
       >
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="flex-1 min-w-[14rem]">
-            <TextField
-              password
-              mono
-              value={apiKey()}
-              onInput={setApiKey}
-              onEnter={commit}
-              disabled={busy()}
-              ariaLabel={`${props.def.label} API key`}
-              placeholder={
-                dbKeySet() ? 'leave blank to keep the saved key'
-                : envKeySet() ? 'leave blank to use the environment key'
-                : guide()?.keyHint ?? 'sk-…'
-              }
-            />
-          </div>
-          <Button onClick={commit} disabled={busy()}>{saving() ? 'Saving…' : refreshing() ? 'Fetching…' : 'Save'}</Button>
-        </div>
-        <div class="mt-2 flex items-center gap-3 flex-wrap">
-          <Show when={keyState()}>
-            <StatusChip tone="ok">{keyState()}</StatusChip>
-          </Show>
-          <Show when={refreshing()}>
-            <span class="inline-flex items-center gap-1.5 text-micro text-[color:var(--text-muted)]">
-              <Spinner class="w-3 h-3" />
-              Fetching models…
-            </span>
-          </Show>
-          <Show when={saved() && !refreshing()}>
-            <span class="text-micro" style={{ color: 'var(--success)' }}>Applied — models updated.</span>
-          </Show>
-          <Show when={error()}>
-            <span class="text-micro" style={{ color: 'var(--danger)' }}>{error()}</span>
-          </Show>
-          <Show when={dbKeySet()}>
-            <LinkAction onClick={clearKey}>Remove stored key</LinkAction>
-          </Show>
-          <Show when={guide()?.keysURL}>
-            <LinkAction href={guide()!.keysURL}>Get a key at {guide()!.keysLabel}</LinkAction>
-          </Show>
-        </div>
-      </Row>
-
-      <Show when={props.def.hasBaseURL}>
-        <Row
-          label="Base URL"
-          helper={
-            <>
-              Where requests are sent. Leave blank for the default
-              <Show when={guide()?.defaultBaseURL}> — <Mono>{guide()!.defaultBaseURL}</Mono></Show>.
-            </>
-          }
-          stacked
-          hidden={props.hide('Base URL', 'endpoint', 'host')}
-        >
-          <div class="flex items-center gap-2 flex-wrap">
-            <div class="flex-1 min-w-[14rem]">
+        <div class="space-y-4">
+          {/* API key. The state rides the label line as quiet inline text —
+              it is a fact, not a control — and only the action the state
+              actually enables is shown: remove a stored key, or fetch one
+              when there is none. */}
+          <div>
+            <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <span class="text-meta font-medium text-[color:var(--text-primary)]">API key</span>
+              <Show when={keyState()}>
+                <span
+                  class="inline-flex items-center gap-1.5 text-micro font-medium"
+                  style={{ color: 'var(--success)' }}
+                >
+                  <span class="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'var(--success)' }} />
+                  {keyState()}
+                </span>
+              </Show>
+            </div>
+            <Show when={keyHelper()} fallback={null}>
+              <p class="mt-1 text-meta leading-[1.5] text-[color:var(--text-tertiary)]">{keyHelper()}</p>
+            </Show>
+            <div class="mt-1.5">
               <TextField
+                password
                 mono
-                value={baseURL()}
-                onInput={setBaseURL}
+                value={apiKey()}
+                onInput={setApiKey}
                 onEnter={commit}
                 disabled={busy()}
-                ariaLabel={`${props.def.label} base URL`}
-                placeholder={guide()?.defaultBaseURL ?? ''}
+                ariaLabel={`${props.def.label} API key`}
+                placeholder={
+                  dbKeySet() ? 'leave blank to keep the saved key'
+                  : envKeySet() ? 'leave blank to use the environment key'
+                  : guide()?.keyHint ?? 'sk-…'
+                }
               />
             </div>
-            <Button onClick={commit} disabled={busy()}>{saving() ? 'Saving…' : refreshing() ? 'Fetching…' : 'Save'}</Button>
+            <div class="mt-1.5 flex items-center gap-3 flex-wrap">
+              <Show when={dbKeySet()}>
+                <LinkAction onClick={clearKey}>Remove stored key</LinkAction>
+              </Show>
+              <Show when={!dbKeySet() && !envKeySet() && guide()?.keysURL}>
+                <LinkAction href={guide()!.keysURL}>Get a key at {guide()!.keysLabel}</LinkAction>
+              </Show>
+            </div>
           </div>
-          <Show when={endpointOverridden()}>
-            <div class="mt-1.5">
-              <Banner tone="warn">
-                Currently calling <Mono>{effectiveURL()}</Mono>
-                {props.config?.envBaseURLSet
-                  ? ` — ${guide()?.envBaseURL ?? 'the environment variable'} wins over the value above.`
-                  : ' — the saved endpoint was unreachable.'}
-              </Banner>
+
+          {/* Base URL — the second half of the same save. One commit covers
+              both, so the single Save below is the only button. */}
+          <Show when={props.def.hasBaseURL}>
+            <div>
+              <span class="block text-meta font-medium text-[color:var(--text-primary)]">Base URL</span>
+              <p class="mt-1 text-meta leading-[1.5] text-[color:var(--text-tertiary)]">
+                Where requests are sent. Leave blank for the default
+                <Show when={guide()?.defaultBaseURL}> — <Mono>{guide()!.defaultBaseURL}</Mono></Show>.
+              </p>
+              <div class="mt-1.5">
+                <TextField
+                  mono
+                  value={baseURL()}
+                  onInput={setBaseURL}
+                  onEnter={commit}
+                  disabled={busy()}
+                  ariaLabel={`${props.def.label} base URL`}
+                  placeholder={guide()?.defaultBaseURL ?? ''}
+                />
+              </div>
+              <Show when={endpointOverridden()}>
+                <div class="mt-1.5">
+                  <Banner tone="warn">
+                    Currently calling <Mono>{effectiveURL()}</Mono>
+                    {props.config?.envBaseURLSet
+                      ? ` — ${guide()?.envBaseURL ?? 'the environment variable'} wins over the value above.`
+                      : ' — the saved endpoint was unreachable.'}
+                  </Banner>
+                </div>
+              </Show>
             </div>
           </Show>
-        </Row>
-      </Show>
+
+          {/* The outcome line: status on the left, the one Save on the right —
+              both fields travel in the same POST. */}
+          <div class="flex items-center justify-between gap-3 flex-wrap pt-1">
+            <div class="min-w-0 flex items-center gap-3 flex-wrap">
+              <Show when={refreshing()}>
+                <span class="inline-flex items-center gap-1.5 text-micro text-[color:var(--text-muted)]">
+                  <Spinner class="w-3 h-3" />
+                  Fetching models…
+                </span>
+              </Show>
+              <Show when={saved() && !refreshing()}>
+                <span class="text-micro" style={{ color: 'var(--success)' }}>Applied — models updated.</span>
+              </Show>
+              <Show when={error()}>
+                <span class="text-micro" style={{ color: 'var(--danger)' }}>{error()}</span>
+              </Show>
+            </div>
+            <span class="shrink-0">
+              <Button onClick={commit} disabled={busy()}>
+                {saving() ? 'Saving…' : refreshing() ? 'Fetching…' : 'Save'}
+              </Button>
+            </span>
+          </div>
+        </div>
+      </Row>
     </>
   );
 }
