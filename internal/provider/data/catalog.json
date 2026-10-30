@@ -1,0 +1,3028 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-30T12:11:31.027901Z",
+  "models": [
+    {
+      "id": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "activeByDefault": true,
+      "inputPricePerM": 10,
+      "outputPricePerM": 50,
+      "cacheReadPricePerM": 0.25,
+      "cacheWritePricePerM": 12.5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "activeByDefault": true,
+      "inputPricePerM": 4,
+      "outputPricePerM": 20,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "medium",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "activeByDefault": true,
+      "inputPricePerM": 2,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 2.5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "aliases": [
+        "claude-haiku-4-5"
+      ],
+      "name": "Claude Haiku 4.5",
+      "activeByDefault": true,
+      "inputPricePerM": 1,
+      "outputPricePerM": 5,
+      "cacheReadPricePerM": 0.1,
+      "cacheWritePricePerM": 1.25,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-mythos-5-1",
+      "name": "Claude Mythos 5.1",
+      "activeByDefault": false,
+      "inputPricePerM": 10,
+      "outputPricePerM": 50,
+      "cacheReadPricePerM": 0.25,
+      "cacheWritePricePerM": 12.5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-fable-5",
+      "name": "Claude Fable 5",
+      "activeByDefault": false,
+      "inputPricePerM": 10,
+      "outputPricePerM": 50,
+      "cacheReadPricePerM": 1,
+      "cacheWritePricePerM": 12.5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-mythos-5",
+      "name": "Claude Mythos 5",
+      "activeByDefault": false,
+      "inputPricePerM": 10,
+      "outputPricePerM": 50,
+      "cacheReadPricePerM": 1,
+      "cacheWritePricePerM": 12.5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-sonnet-5",
+      "name": "Claude Sonnet 5",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 2.5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-opus-5",
+      "name": "Claude Opus 5",
+      "activeByDefault": false,
+      "inputPricePerM": 5,
+      "outputPricePerM": 25,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 6.25,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "activeByDefault": false,
+      "inputPricePerM": 5,
+      "outputPricePerM": 25,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 6.25,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-opus-4-7",
+      "name": "Claude Opus 4.7",
+      "activeByDefault": false,
+      "inputPricePerM": 5,
+      "outputPricePerM": 25,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 6.25,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-opus-4-6",
+      "name": "Claude Opus 4.6",
+      "activeByDefault": false,
+      "inputPricePerM": 5,
+      "outputPricePerM": 25,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 6.25,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "activeByDefault": false,
+      "inputPricePerM": 3,
+      "outputPricePerM": 15,
+      "cacheReadPricePerM": 0.3,
+      "cacheWritePricePerM": 3.75,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-opus-4-5-20251101",
+      "aliases": [
+        "claude-opus-4-5"
+      ],
+      "name": "Claude Opus 4.5",
+      "activeByDefault": false,
+      "inputPricePerM": 5,
+      "outputPricePerM": 25,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 6.25,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-sonnet-4-5-20250929",
+      "aliases": [
+        "claude-sonnet-4-5"
+      ],
+      "name": "Claude Sonnet 4.5",
+      "activeByDefault": false,
+      "inputPricePerM": 3,
+      "outputPricePerM": 15,
+      "cacheReadPricePerM": 0.3,
+      "cacheWritePricePerM": 3.75,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "collection": "anthropic"
+    },
+    {
+      "id": "gpt-6-sol",
+      "aliases": [
+        "gpt-6-sol-pro"
+      ],
+      "name": "GPT-6 Sol",
+      "activeByDefault": true,
+      "inputPricePerM": 2,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 2.5,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-6-luna",
+      "aliases": [
+        "gpt-6-luna-pro"
+      ],
+      "name": "GPT-6 Luna",
+      "activeByDefault": true,
+      "inputPricePerM": 0.1,
+      "outputPricePerM": 0.5,
+      "cacheReadPricePerM": 0.01,
+      "cacheWritePricePerM": 0.125,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-6-astra",
+      "aliases": [
+        "gpt-6-astra-pro"
+      ],
+      "name": "GPT-6 Astra",
+      "activeByDefault": false,
+      "inputPricePerM": 10,
+      "outputPricePerM": 50,
+      "cacheReadPricePerM": 1,
+      "cacheWritePricePerM": 12.5,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "responsesOnly": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "aliases": [
+        "gpt-5.6",
+        "gpt-5.6-sol-pro"
+      ],
+      "name": "GPT-5.6 Sol",
+      "activeByDefault": true,
+      "inputPricePerM": 4,
+      "outputPricePerM": 20,
+      "cacheReadPricePerM": 0.4,
+      "cacheWritePricePerM": 5,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "aliases": [
+        "gpt-5.6-terra-pro"
+      ],
+      "name": "GPT-5.6 Terra",
+      "activeByDefault": true,
+      "inputPricePerM": 2,
+      "outputPricePerM": 12,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 2.5,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "aliases": [
+        "gpt-5.6-luna-pro"
+      ],
+      "name": "GPT-5.6 Luna",
+      "activeByDefault": false,
+      "inputPricePerM": 0.2,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.02,
+      "cacheWritePricePerM": 0.25,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.5",
+      "name": "GPT-5.5",
+      "activeByDefault": false,
+      "inputPricePerM": 5,
+      "outputPricePerM": 30,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 5,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.5-pro",
+      "name": "GPT-5.5 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 30,
+      "outputPricePerM": 180,
+      "cacheReadPricePerM": 30,
+      "cacheWritePricePerM": 30,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "medium",
+      "responsesOnly": true,
+      "efforts": [
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "high",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.4",
+      "name": "GPT-5.4",
+      "activeByDefault": false,
+      "inputPricePerM": 2.5,
+      "outputPricePerM": 15,
+      "cacheReadPricePerM": 0.25,
+      "cacheWritePricePerM": 2.5,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "none",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "name": "GPT-5.4 Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 0.75,
+      "outputPricePerM": 4.5,
+      "cacheReadPricePerM": 0.075,
+      "cacheWritePricePerM": 0.75,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "none",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.4-nano",
+      "name": "GPT-5.4 Nano",
+      "activeByDefault": false,
+      "inputPricePerM": 0.2,
+      "outputPricePerM": 1.25,
+      "cacheReadPricePerM": 0.02,
+      "cacheWritePricePerM": 0.2,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "toolsNeedNoReasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "none",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.4-pro",
+      "name": "GPT-5.4 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 30,
+      "outputPricePerM": 180,
+      "cacheReadPricePerM": 30,
+      "cacheWritePricePerM": 30,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "medium",
+      "responsesOnly": true,
+      "efforts": [
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.3-codex",
+      "name": "GPT-5.3 Codex",
+      "activeByDefault": false,
+      "inputPricePerM": 1.75,
+      "outputPricePerM": 14,
+      "cacheReadPricePerM": 0.175,
+      "cacheWritePricePerM": 1.75,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "responsesOnly": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.2",
+      "name": "GPT-5.2",
+      "activeByDefault": false,
+      "inputPricePerM": 1.75,
+      "outputPricePerM": 14,
+      "cacheReadPricePerM": 0.175,
+      "cacheWritePricePerM": 1.75,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "none",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.2-pro",
+      "name": "GPT-5.2 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 21,
+      "outputPricePerM": 168,
+      "cacheReadPricePerM": 21,
+      "cacheWritePricePerM": 21,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "medium",
+      "responsesOnly": true,
+      "efforts": [
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5.1",
+      "name": "GPT-5.1",
+      "activeByDefault": false,
+      "inputPricePerM": 1.25,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.125,
+      "cacheWritePricePerM": 1.25,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "none",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5",
+      "name": "GPT-5",
+      "activeByDefault": false,
+      "inputPricePerM": 1.25,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.125,
+      "cacheWritePricePerM": 1.25,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "minimal",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5-mini",
+      "name": "GPT-5 Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 0.25,
+      "outputPricePerM": 2,
+      "cacheReadPricePerM": 0.025,
+      "cacheWritePricePerM": 0.25,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "minimal",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5-nano",
+      "name": "GPT-5 Nano",
+      "activeByDefault": false,
+      "inputPricePerM": 0.05,
+      "outputPricePerM": 0.4,
+      "cacheReadPricePerM": 0.005,
+      "cacheWritePricePerM": 0.05,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "minimal",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-5-pro",
+      "name": "GPT-5 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 15,
+      "outputPricePerM": 120,
+      "cacheReadPricePerM": 15,
+      "cacheWritePricePerM": 15,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "effortFloor": "high",
+      "responsesOnly": true,
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-4.1",
+      "name": "GPT-4.1",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 8,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 2,
+      "supportsImages": true,
+      "contextWindow": 1047576,
+      "maxOutputTokens": 0,
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-4.1-mini",
+      "name": "GPT-4.1 Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 0.4,
+      "outputPricePerM": 1.6,
+      "cacheReadPricePerM": 0.1,
+      "cacheWritePricePerM": 0.4,
+      "supportsImages": true,
+      "contextWindow": 1047576,
+      "maxOutputTokens": 0,
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-4.1-nano",
+      "name": "GPT-4.1 Nano",
+      "activeByDefault": false,
+      "inputPricePerM": 0.1,
+      "outputPricePerM": 0.4,
+      "cacheReadPricePerM": 0.025,
+      "cacheWritePricePerM": 0.1,
+      "supportsImages": true,
+      "contextWindow": 1047576,
+      "maxOutputTokens": 0,
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "activeByDefault": false,
+      "inputPricePerM": 2.5,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 1.25,
+      "cacheWritePricePerM": 2.5,
+      "supportsImages": true,
+      "contextWindow": 128000,
+      "maxOutputTokens": 0,
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-4o-mini",
+      "name": "GPT-4o Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 0.15,
+      "outputPricePerM": 0.6,
+      "cacheReadPricePerM": 0.075,
+      "cacheWritePricePerM": 0.15,
+      "supportsImages": true,
+      "contextWindow": 128000,
+      "maxOutputTokens": 0,
+      "collection": "openai"
+    },
+    {
+      "id": "o3",
+      "name": "o3",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 8,
+      "cacheReadPricePerM": 0.5,
+      "cacheWritePricePerM": 2,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "o4-mini",
+      "aliases": [
+        "o4-mini-high"
+      ],
+      "name": "o4 Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 1.1,
+      "outputPricePerM": 4.4,
+      "cacheReadPricePerM": 0.275,
+      "cacheWritePricePerM": 1.1,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "o3-mini",
+      "aliases": [
+        "o3-mini-high"
+      ],
+      "name": "o3 Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 1.1,
+      "outputPricePerM": 4.4,
+      "cacheReadPricePerM": 0.55,
+      "cacheWritePricePerM": 1.1,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "o1",
+      "name": "o1",
+      "activeByDefault": false,
+      "inputPricePerM": 15,
+      "outputPricePerM": 60,
+      "cacheReadPricePerM": 7.5,
+      "cacheWritePricePerM": 15,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "o3-pro",
+      "name": "o3 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 20,
+      "outputPricePerM": 80,
+      "cacheReadPricePerM": 20,
+      "cacheWritePricePerM": 20,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "responsesOnly": true,
+      "collection": "openai"
+    },
+    {
+      "id": "o1-pro",
+      "name": "o1 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 150,
+      "outputPricePerM": 600,
+      "cacheReadPricePerM": 150,
+      "cacheWritePricePerM": 150,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "responsesOnly": true,
+      "collection": "openai"
+    },
+    {
+      "id": "gemini-4-argon",
+      "aliases": [
+        "gemini-pro-latest"
+      ],
+      "name": "Gemini 4 Argon",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.1,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 32768,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "high",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "aliases": [
+        "gemini-flash-latest"
+      ],
+      "name": "Gemini 3.8 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.75,
+      "outputPricePerM": 3.75,
+      "cacheReadPricePerM": 0.075,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3.7-flash",
+      "name": "Gemini 3.7 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.75,
+      "outputPricePerM": 3.75,
+      "cacheReadPricePerM": 0.075,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.75,
+      "outputPricePerM": 3.75,
+      "cacheReadPricePerM": 0.075,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "name": "Gemini 3.5 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 1.5,
+      "outputPricePerM": 9,
+      "cacheReadPricePerM": 0.15,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3.5-flash-lite",
+      "aliases": [
+        "gemini-flash-lite-latest"
+      ],
+      "name": "Gemini 3.5 Flash-Lite",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 2.5,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "minimal",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3.1-flash-lite",
+      "name": "Gemini 3.1 Flash-Lite",
+      "activeByDefault": false,
+      "inputPricePerM": 0.25,
+      "outputPricePerM": 1.5,
+      "cacheReadPricePerM": 0.025,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "minimal",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "aliases": [
+        "gemini-3.1-pro-preview-customtools",
+        "gemini-3-pro-preview"
+      ],
+      "name": "Gemini 3.1 Pro (preview)",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 12,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "high",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-3-flash-preview",
+      "name": "Gemini 3 Flash (preview)",
+      "activeByDefault": false,
+      "inputPricePerM": 0.5,
+      "outputPricePerM": 3,
+      "cacheReadPricePerM": 0.05,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "high",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "name": "Gemini 2.5 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 1.25,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.125,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "collection": "google"
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "name": "Gemini 2.5 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 2.5,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "collection": "google"
+    },
+    {
+      "id": "gemini-2.5-flash-lite",
+      "name": "Gemini 2.5 Flash-Lite",
+      "activeByDefault": false,
+      "inputPricePerM": 0.1,
+      "outputPricePerM": 0.4,
+      "cacheReadPricePerM": 0.01,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "none",
+      "collection": "google"
+    },
+    {
+      "id": "deepseek-flash",
+      "aliases": [
+        "deepseek-v4.1-flash",
+        "ogx-deepseek-v4.1-flash",
+        "deepseek-ai/DeepSeek-V4.1-Flash",
+        "deepseek-v4p1-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp"
+      ],
+      "name": "DeepSeek V4.1 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.006,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 393216,
+      "efforts": [
+        "none",
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "open"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "aliases": [
+        "deepseek-v4-pro-0813",
+        "deepseek-ai/DeepSeek-V4-Pro-0813",
+        "deepseek-ai/DeepSeek-V4-Pro"
+      ],
+      "name": "DeepSeek V4 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 1.32,
+      "outputPricePerM": 3.96,
+      "cacheReadPricePerM": 0.044,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 393216,
+      "efforts": [
+        "none",
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "open"
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "name": "DeepSeek V4 Flash 0731",
+      "activeByDefault": false,
+      "inputPricePerM": 0.021,
+      "outputPricePerM": 0.32,
+      "cacheReadPricePerM": 0.016,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "high",
+        "max"
+      ],
+      "collection": "open"
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.2",
+      "aliases": [
+        "deepseek-v3.2-exp"
+      ],
+      "name": "DeepSeek V3.2",
+      "activeByDefault": false,
+      "inputPricePerM": 0.28,
+      "outputPricePerM": 0.42,
+      "cacheReadPricePerM": 0.028,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 163840,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "collection": "open"
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.1-Terminus",
+      "aliases": [
+        "deepseek-v3.1:671b-terminus"
+      ],
+      "name": "DeepSeek V3.1 Terminus",
+      "activeByDefault": false,
+      "inputPricePerM": 0.27,
+      "outputPricePerM": 1,
+      "cacheReadPricePerM": 0.135,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 163840,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "collection": "open"
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V3.1",
+      "aliases": [
+        "deepseek-chat-v3.1",
+        "deepseek-v3.1:671b"
+      ],
+      "name": "DeepSeek V3.1",
+      "activeByDefault": false,
+      "inputPricePerM": 0.25,
+      "outputPricePerM": 0.95,
+      "cacheReadPricePerM": 0.13,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 163840,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "collection": "open"
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-R1-0528",
+      "aliases": [
+        "deepseek-r1:671b",
+        "deepseek-r1:671b-0528"
+      ],
+      "name": "DeepSeek R1 0528",
+      "activeByDefault": false,
+      "inputPricePerM": 0.5,
+      "outputPricePerM": 2.15,
+      "cacheReadPricePerM": 0.35,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 163840,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.8-2.4t-a95b",
+      "aliases": [
+        "Qwen/Qwen3.8-2.4T-A95B-FP8"
+      ],
+      "name": "Qwen3.8 2.4T-A95B",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 6,
+      "cacheReadPricePerM": 0.25,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 983000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "defaultEffort": "xhigh",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.8-27b",
+      "aliases": [
+        "Qwen/Qwen3.8-27B-FP8",
+        "qwen3.8"
+      ],
+      "name": "Qwen3.8 27B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.5,
+      "outputPricePerM": 3,
+      "cacheReadPricePerM": 0.1,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 983000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "defaultEffort": "xhigh",
+      "collection": "open"
+    },
+    {
+      "id": "Qwen/Qwen3.8-Flash-Next",
+      "aliases": [
+        "qwen3.8-flash",
+        "qwen3.8-flash-next:125b-a6b"
+      ],
+      "name": "Qwen3.8 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.15,
+      "outputPricePerM": 0.47,
+      "cacheReadPricePerM": 0.016,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 983000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "defaultEffort": "xhigh",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.6-35b-a3b",
+      "aliases": [
+        "qwen3.6:35b",
+        "qwen3.6"
+      ],
+      "name": "Qwen3.6 35B-A3B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.375,
+      "outputPricePerM": 2.25,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 258000,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.6-27b",
+      "name": "Qwen3.6 27B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 3.6,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 258000,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.5-397b-a17b",
+      "name": "Qwen3.5 397B-A17B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 3.6,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 258000,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.5-122b-a10b",
+      "aliases": [
+        "qwen3.5:122b"
+      ],
+      "name": "Qwen3.5 122B-A10B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.4,
+      "outputPricePerM": 3.2,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 258000,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.5-35b-a3b",
+      "aliases": [
+        "qwen3.5:35b"
+      ],
+      "name": "Qwen3.5 35B-A3B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.25,
+      "outputPricePerM": 2,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 258000,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3.5-27b",
+      "name": "Qwen3.5 27B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 2.4,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 258000,
+      "maxOutputTokens": 65536,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "qwen3-coder-next",
+      "name": "Qwen3 Coder Next",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.5,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "collection": "open"
+    },
+    {
+      "id": "qwen3-coder-480b-a35b-instruct",
+      "aliases": [
+        "qwen3-coder",
+        "qwen3-coder:480b"
+      ],
+      "name": "Qwen3 Coder 480B-A35B",
+      "activeByDefault": false,
+      "inputPricePerM": 1.5,
+      "outputPricePerM": 7.5,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "collection": "open"
+    },
+    {
+      "id": "qwen3-coder-30b-a3b-instruct",
+      "aliases": [
+        "qwen3-coder:30b",
+        "qwen3-coder:30b-a3b"
+      ],
+      "name": "Qwen3 Coder 30B-A3B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.45,
+      "outputPricePerM": 2.25,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 204800,
+      "maxOutputTokens": 65536,
+      "collection": "open"
+    },
+    {
+      "id": "qwen3-235b-a22b-instruct-2507",
+      "aliases": [
+        "qwen3-235b-a22b-2507",
+        "qwen3:235b-instruct"
+      ],
+      "name": "Qwen3 235B-A22B Instruct 2507",
+      "activeByDefault": false,
+      "inputPricePerM": 0.23,
+      "outputPricePerM": 0.92,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 129000,
+      "maxOutputTokens": 32768,
+      "collection": "open"
+    },
+    {
+      "id": "qwen3-235b-a22b-thinking-2507",
+      "aliases": [
+        "qwen3:235b-thinking"
+      ],
+      "name": "Qwen3 235B-A22B Thinking 2507",
+      "activeByDefault": false,
+      "inputPricePerM": 0.23,
+      "outputPricePerM": 2.3,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 126000,
+      "maxOutputTokens": 32768,
+      "collection": "open"
+    },
+    {
+      "id": "qwen3-vl-235b-a22b-instruct",
+      "aliases": [
+        "qwen3-vl:235b"
+      ],
+      "name": "Qwen3 VL 235B-A22B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.4,
+      "outputPricePerM": 1.6,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 129000,
+      "maxOutputTokens": 32768,
+      "collection": "open"
+    },
+    {
+      "id": "kimi-k3",
+      "name": "Kimi K3",
+      "activeByDefault": false,
+      "inputPricePerM": 3,
+      "outputPricePerM": 15,
+      "cacheReadPricePerM": 0.3,
+      "cacheWritePricePerM": 3,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 131072,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "collection": "open"
+    },
+    {
+      "id": "kimi-k2.7-code",
+      "aliases": [
+        "kimi-k2p7-code"
+      ],
+      "name": "Kimi K2.7 Code",
+      "activeByDefault": false,
+      "inputPricePerM": 0.95,
+      "outputPricePerM": 4,
+      "cacheReadPricePerM": 0.19,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "rejectsSampling": true,
+      "collection": "open"
+    },
+    {
+      "id": "kimi-k2.7-code-highspeed",
+      "name": "Kimi K2.7 Code Highspeed",
+      "activeByDefault": false,
+      "inputPricePerM": 1.9,
+      "outputPricePerM": 8,
+      "cacheReadPricePerM": 0.38,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "rejectsSampling": true,
+      "collection": "open"
+    },
+    {
+      "id": "kimi-k2.6",
+      "aliases": [
+        "kimi-k2p6"
+      ],
+      "name": "Kimi K2.6",
+      "activeByDefault": false,
+      "inputPricePerM": 0.95,
+      "outputPricePerM": 4,
+      "cacheReadPricePerM": 0.16,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "rejectsSampling": true,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "moonshotai/Kimi-K2.5",
+      "name": "Kimi K2.5",
+      "activeByDefault": false,
+      "inputPricePerM": 0.45,
+      "outputPricePerM": 2.25,
+      "cacheReadPricePerM": 0.07,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "moonshotai/Kimi-K2-Thinking",
+      "name": "Kimi K2 Thinking",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 2.5,
+      "cacheReadPricePerM": 0.15,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "moonshotai/Kimi-K2-Instruct-0905",
+      "aliases": [
+        "kimi-k2-0905",
+        "kimi-k2-0905-preview"
+      ],
+      "name": "Kimi K2 0905",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 2.5,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "moonshotai/Kimi-K2-Instruct",
+      "aliases": [
+        "kimi-k2"
+      ],
+      "name": "Kimi K2",
+      "activeByDefault": false,
+      "inputPricePerM": 0.57,
+      "outputPricePerM": 2.3,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "glm-5.3",
+      "aliases": [
+        "glm-5p3"
+      ],
+      "name": "GLM-5.3",
+      "activeByDefault": false,
+      "inputPricePerM": 1.4,
+      "outputPricePerM": 4.4,
+      "cacheReadPricePerM": 0.26,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "collection": "open"
+    },
+    {
+      "id": "glm-5.3-flash",
+      "aliases": [
+        "glm-5p3-flash",
+        "ogx-glm-5.3-flash"
+      ],
+      "name": "GLM-5.3 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.15,
+      "outputPricePerM": 0.5,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "collection": "open"
+    },
+    {
+      "id": "glm-5.3-flashx",
+      "name": "GLM-5.3 FlashX",
+      "activeByDefault": false,
+      "inputPricePerM": 0.37,
+      "outputPricePerM": 1.25,
+      "cacheReadPricePerM": 0.075,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "collection": "open"
+    },
+    {
+      "id": "glm-5.2",
+      "aliases": [
+        "glm-5p2"
+      ],
+      "name": "GLM-5.2",
+      "activeByDefault": false,
+      "inputPricePerM": 1.4,
+      "outputPricePerM": 4.4,
+      "cacheReadPricePerM": 0.26,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "collection": "open"
+    },
+    {
+      "id": "glm-5.1",
+      "name": "GLM-5.1",
+      "activeByDefault": false,
+      "inputPricePerM": 1.4,
+      "outputPricePerM": 4.4,
+      "cacheReadPricePerM": 0.26,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 202752,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "glm-5",
+      "name": "GLM-5",
+      "activeByDefault": false,
+      "inputPricePerM": 1,
+      "outputPricePerM": 3.2,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 202752,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "glm-4.7",
+      "name": "GLM-4.7",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 2.2,
+      "cacheReadPricePerM": 0.11,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 202752,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "glm-4.7-flash",
+      "name": "GLM-4.7 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 200000,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "glm-4.6",
+      "name": "GLM-4.6",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 2.2,
+      "cacheReadPricePerM": 0.11,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 202752,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "glm-4.5",
+      "name": "GLM-4.5",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 2.2,
+      "cacheReadPricePerM": 0.11,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 98304,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "glm-4.5-air",
+      "name": "GLM-4.5 Air",
+      "activeByDefault": false,
+      "inputPricePerM": 0.2,
+      "outputPricePerM": 1.1,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 98304,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "MiniMax-M3",
+      "name": "MiniMax M3",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.06,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 524288,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "MiniMax-M2.7",
+      "name": "MiniMax M2.7",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.06,
+      "cacheWritePricePerM": 0.375,
+      "contextWindow": 196608,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "MiniMax-M2.7-highspeed",
+      "name": "MiniMax M2.7 Highspeed",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 2.4,
+      "cacheReadPricePerM": 0.06,
+      "cacheWritePricePerM": 0.375,
+      "contextWindow": 196608,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "MiniMax-M2.5",
+      "name": "MiniMax M2.5",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0.375,
+      "contextWindow": 196608,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "MiniMax-M2.1",
+      "name": "MiniMax M2.1",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0.375,
+      "contextWindow": 196608,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "MiniMax-M2",
+      "name": "MiniMax M2",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0.375,
+      "contextWindow": 196608,
+      "maxOutputTokens": 131072,
+      "collection": "open"
+    },
+    {
+      "id": "MiniMaxAI/MiniMax-M1-80k",
+      "aliases": [
+        "minimax-m1",
+        "MiniMaxAI/MiniMax-M1-40k"
+      ],
+      "name": "MiniMax M1",
+      "activeByDefault": false,
+      "inputPricePerM": 0.4,
+      "outputPricePerM": 2.2,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-models/Muse-Glimmer-30B",
+      "aliases": [
+        "muse-glimmer"
+      ],
+      "name": "Muse Glimmer 30B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.3,
+      "outputPricePerM": 1.2,
+      "cacheReadPricePerM": 0.04,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+      "aliases": [
+        "llama-4-maverick",
+        "llama4:maverick",
+        "llama4:128x17b",
+        "llama4-maverick-instruct-basic"
+      ],
+      "name": "Llama 4 Maverick",
+      "activeByDefault": false,
+      "inputPricePerM": 0.1875,
+      "outputPricePerM": 0.6525,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+      "aliases": [
+        "llama-4-scout",
+        "llama4:scout",
+        "llama4:16x17b",
+        "llama4",
+        "llama4-scout-instruct-basic"
+      ],
+      "name": "Llama 4 Scout",
+      "activeByDefault": false,
+      "inputPricePerM": 0.1,
+      "outputPricePerM": 0.3,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.3-70B-Instruct",
+      "aliases": [
+        "llama3.3:70b",
+        "llama3.3",
+        "llama-3.3-70b-versatile",
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "llama-v3p3-70b-instruct"
+      ],
+      "name": "Llama 3.3 70B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.1,
+      "outputPricePerM": 0.32,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.1-405B-Instruct",
+      "aliases": [
+        "llama3.1:405b",
+        "llama-v3p1-405b-instruct"
+      ],
+      "name": "Llama 3.1 405B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.1-70B-Instruct",
+      "aliases": [
+        "Meta-Llama-3.1-70B-Instruct",
+        "llama3.1:70b",
+        "llama-v3p1-70b-instruct"
+      ],
+      "name": "Llama 3.1 70B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.4,
+      "outputPricePerM": 0.4,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.1-8B-Instruct",
+      "aliases": [
+        "Meta-Llama-3.1-8B-Instruct",
+        "llama3.1:8b",
+        "llama3.1",
+        "llama-3.1-8b-instant",
+        "llama-v3p1-8b-instruct"
+      ],
+      "name": "Llama 3.1 8B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.05,
+      "outputPricePerM": 0.08,
+      "cacheReadPricePerM": 0.025,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.2-3B-Instruct",
+      "aliases": [
+        "llama3.2:3b",
+        "llama3.2"
+      ],
+      "name": "Llama 3.2 3B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.05,
+      "outputPricePerM": 0.33,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.2-1B-Instruct",
+      "aliases": [
+        "llama3.2:1b"
+      ],
+      "name": "Llama 3.2 1B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.027,
+      "outputPricePerM": 0.201,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.2-11B-Vision-Instruct",
+      "aliases": [
+        "llama3.2-vision:11b",
+        "llama3.2-vision"
+      ],
+      "name": "Llama 3.2 11B Vision",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "meta-llama/Llama-3.2-90B-Vision-Instruct",
+      "aliases": [
+        "llama3.2-vision:90b"
+      ],
+      "name": "Llama 3.2 90B Vision",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "mistral-medium-3-5",
+      "aliases": [
+        "mistralai/Mistral-Medium-3.5-128B",
+        "mistral-medium-3.5:128b"
+      ],
+      "name": "Mistral Medium 3.5",
+      "activeByDefault": false,
+      "inputPricePerM": 1.5,
+      "outputPricePerM": 7.5,
+      "cacheReadPricePerM": 0.15,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "collection": "open"
+    },
+    {
+      "id": "mistral-small-2603",
+      "aliases": [
+        "mistralai/Mistral-Small-4-119B-2603"
+      ],
+      "name": "Mistral Small 4",
+      "activeByDefault": false,
+      "inputPricePerM": 0.15,
+      "outputPricePerM": 0.6,
+      "cacheReadPricePerM": 0.015,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "collection": "open"
+    },
+    {
+      "id": "mistral-large-2512",
+      "aliases": [
+        "mistralai/Mistral-Large-3-675B-Instruct-2512",
+        "mistral-large-3:675b"
+      ],
+      "name": "Mistral Large 3",
+      "activeByDefault": false,
+      "inputPricePerM": 0.5,
+      "outputPricePerM": 1.5,
+      "cacheReadPricePerM": 0.05,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "ministral-14b-2512",
+      "aliases": [
+        "mistralai/Ministral-3-14B-Instruct-2512",
+        "ministral-3:14b"
+      ],
+      "name": "Ministral 3 14B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.2,
+      "outputPricePerM": 0.2,
+      "cacheReadPricePerM": 0.02,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "ministral-8b-2512",
+      "aliases": [
+        "mistralai/Ministral-3-8B-Instruct-2512",
+        "ministral-3:8b",
+        "ministral-3"
+      ],
+      "name": "Ministral 3 8B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.15,
+      "outputPricePerM": 0.15,
+      "cacheReadPricePerM": 0.015,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "ministral-3b-2512",
+      "aliases": [
+        "mistralai/Ministral-3-3B-Instruct-2512",
+        "ministral-3:3b"
+      ],
+      "name": "Ministral 3 3B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.1,
+      "outputPricePerM": 0.1,
+      "cacheReadPricePerM": 0.01,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "devstral-2512",
+      "aliases": [
+        "mistralai/Devstral-2-123B-Instruct-2512",
+        "devstral-2:123b",
+        "devstral-2"
+      ],
+      "name": "Devstral 2",
+      "activeByDefault": false,
+      "inputPricePerM": 0.4,
+      "outputPricePerM": 2,
+      "cacheReadPricePerM": 0.04,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "mistralai/Devstral-Small-2-24B-Instruct-2512",
+      "aliases": [
+        "labs-devstral-small-2512",
+        "devstral-small-2:24b",
+        "devstral-small-2"
+      ],
+      "name": "Devstral Small 2",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "mistralai/Devstral-Small-2507",
+      "aliases": [
+        "devstral:24b",
+        "devstral"
+      ],
+      "name": "Devstral Small 1.1",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "mistralai/Magistral-Small-2509",
+      "name": "Magistral Small 1.2",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+      "aliases": [
+        "mistral-small-2506",
+        "mistral-small-3.2-24b-instruct",
+        "mistral-small3.2:24b",
+        "mistral-small3.2"
+      ],
+      "name": "Mistral Small 3.2",
+      "activeByDefault": false,
+      "inputPricePerM": 0.09375,
+      "outputPricePerM": 0.25,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "gemma-4-31b-it",
+      "aliases": [
+        "gemma4:31b"
+      ],
+      "name": "Gemma 4 31B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.09,
+      "outputPricePerM": 0.34,
+      "cacheReadPricePerM": 0.05,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "none",
+      "collection": "open"
+    },
+    {
+      "id": "gemma-4-26b-a4b-it",
+      "aliases": [
+        "gemma4:26b"
+      ],
+      "name": "Gemma 4 26B-A4B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.09,
+      "outputPricePerM": 0.3,
+      "cacheReadPricePerM": 0.05,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "none",
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-4-12B-it",
+      "aliases": [
+        "gemma4:12b"
+      ],
+      "name": "Gemma 4 12B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "none",
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-4-E4B-it",
+      "aliases": [
+        "gemma4:e4b",
+        "gemma4"
+      ],
+      "name": "Gemma 4 E4B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "none",
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-4-E2B-it",
+      "aliases": [
+        "gemma4:e2b"
+      ],
+      "name": "Gemma 4 E2B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "none",
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-3-27b-it",
+      "aliases": [
+        "gemma3:27b"
+      ],
+      "name": "Gemma 3 27B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.08,
+      "outputPricePerM": 0.45,
+      "cacheReadPricePerM": 0.04,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-3-12b-it",
+      "aliases": [
+        "gemma3:12b"
+      ],
+      "name": "Gemma 3 12B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.05,
+      "outputPricePerM": 0.15,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-3-4b-it",
+      "aliases": [
+        "gemma3:4b",
+        "gemma3"
+      ],
+      "name": "Gemma 3 4B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.05,
+      "outputPricePerM": 0.1,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-3-1b-it",
+      "aliases": [
+        "gemma3:1b"
+      ],
+      "name": "Gemma 3 1B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 32768,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-3n-E4B-it",
+      "aliases": [
+        "gemma3n:e4b",
+        "gemma3n"
+      ],
+      "name": "Gemma 3n E4B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 32768,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "google/gemma-3n-E2B-it",
+      "aliases": [
+        "gemma3n:e2b"
+      ],
+      "name": "Gemma 3n E2B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 32768,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "gpt-oss-120b",
+      "aliases": [
+        "gpt-oss:120b"
+      ],
+      "name": "gpt-oss-120b",
+      "activeByDefault": false,
+      "inputPricePerM": 0.15,
+      "outputPricePerM": 0.6,
+      "cacheReadPricePerM": 0.075,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "open"
+    },
+    {
+      "id": "gpt-oss-20b",
+      "aliases": [
+        "gpt-oss:20b",
+        "gpt-oss"
+      ],
+      "name": "gpt-oss-20b",
+      "activeByDefault": false,
+      "inputPricePerM": 0.018,
+      "outputPricePerM": 0.09,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 131072,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "open"
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "aliases": [
+        "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16",
+        "nemotron-3-ultra"
+      ],
+      "name": "Nemotron 3 Ultra",
+      "activeByDefault": false,
+      "inputPricePerM": 0.6,
+      "outputPricePerM": 2.4,
+      "cacheReadPricePerM": 0.12,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "aliases": [
+        "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+        "nemotron-3-super:120b",
+        "nemotron-3-super"
+      ],
+      "name": "Nemotron 3 Super",
+      "activeByDefault": false,
+      "inputPricePerM": 0.08,
+      "outputPricePerM": 0.45,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-30b-a3b",
+      "aliases": [
+        "nvidia/nemotron-nano-3-30b-a3b",
+        "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+        "nemotron-3-nano:30b",
+        "nemotron-3-nano"
+      ],
+      "name": "Nemotron 3 Nano 30B",
+      "activeByDefault": false,
+      "inputPricePerM": 0.05,
+      "outputPricePerM": 0.2,
+      "cacheReadPricePerM": 0.03,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "none",
+        "on"
+      ],
+      "defaultEffort": "on",
+      "collection": "open"
+    },
+    {
+      "id": "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16",
+      "aliases": [
+        "nemotron-3-nano:4b"
+      ],
+      "name": "Nemotron 3 Nano 4B",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "aliases": [
+        "nemotron-3.5-lightning",
+        "nemotron-3.5-lightning:30b"
+      ],
+      "name": "Nemotron 3.5 Lightning",
+      "activeByDefault": false,
+      "inputPricePerM": 0.08,
+      "outputPricePerM": 0.2,
+      "cacheReadPricePerM": 0.04,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 262144,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "aliases": [
+        "nemotron3:33b"
+      ],
+      "name": "Nemotron 3 Nano Omni",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "microsoft/phi-4",
+      "aliases": [
+        "phi4:14b",
+        "phi4"
+      ],
+      "name": "Phi-4",
+      "activeByDefault": false,
+      "inputPricePerM": 0.125,
+      "outputPricePerM": 0.5,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 16384,
+      "maxOutputTokens": 16384,
+      "collection": "open"
+    },
+    {
+      "id": "microsoft/Phi-4-reasoning",
+      "aliases": [
+        "phi4-reasoning:14b",
+        "phi4-reasoning"
+      ],
+      "name": "Phi-4 Reasoning",
+      "activeByDefault": false,
+      "inputPricePerM": 0.125,
+      "outputPricePerM": 0.5,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 32768,
+      "maxOutputTokens": 32768,
+      "collection": "open"
+    },
+    {
+      "id": "microsoft/Phi-4-reasoning-plus",
+      "aliases": [
+        "phi4-reasoning:plus"
+      ],
+      "name": "Phi-4 Reasoning Plus",
+      "activeByDefault": false,
+      "inputPricePerM": 0.125,
+      "outputPricePerM": 0.5,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 32768,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "microsoft/Phi-4-mini-instruct",
+      "aliases": [
+        "phi4-mini:3.8b",
+        "phi4-mini"
+      ],
+      "name": "Phi-4 Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 0.075,
+      "outputPricePerM": 0.3,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "microsoft/Phi-4-multimodal-instruct",
+      "name": "Phi-4 Multimodal",
+      "activeByDefault": false,
+      "inputPricePerM": 0.08,
+      "outputPricePerM": 0.32,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 131072,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "microsoft/Phi-4-mini-reasoning",
+      "aliases": [
+        "phi4-mini-reasoning:3.8b",
+        "phi4-mini-reasoning"
+      ],
+      "name": "Phi-4 Mini Reasoning",
+      "activeByDefault": false,
+      "inputPricePerM": 0.075,
+      "outputPricePerM": 0.3,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "contextWindow": 128000,
+      "maxOutputTokens": 128000,
+      "collection": "open"
+    },
+    {
+      "id": "microsoft/Phi-4-reasoning-vision-15B",
+      "name": "Phi-4 Reasoning Vision",
+      "activeByDefault": false,
+      "inputPricePerM": 0,
+      "outputPricePerM": 0,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 16384,
+      "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "claude-opus-4-1-20250805",
+      "aliases": [
+        "claude-opus-4-1"
+      ],
+      "name": "Claude Opus 4.1",
+      "activeByDefault": false,
+      "inputPricePerM": 15,
+      "outputPricePerM": 75,
+      "cacheReadPricePerM": 1.5,
+      "cacheWritePricePerM": 18.75,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    },
+    {
+      "id": "claude-opus-4-20250514",
+      "aliases": [
+        "claude-opus-4"
+      ],
+      "name": "Claude Opus 4",
+      "activeByDefault": false,
+      "inputPricePerM": 15,
+      "outputPricePerM": 75,
+      "cacheReadPricePerM": 1.5,
+      "cacheWritePricePerM": 18.75,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    },
+    {
+      "id": "claude-sonnet-4-20250514",
+      "aliases": [
+        "claude-sonnet-4"
+      ],
+      "name": "Claude Sonnet 4",
+      "activeByDefault": false,
+      "inputPricePerM": 3,
+      "outputPricePerM": 15,
+      "cacheReadPricePerM": 0.3,
+      "cacheWritePricePerM": 3.75,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    },
+    {
+      "id": "claude-3-5-haiku-20241022",
+      "aliases": [
+        "claude-3-5-haiku"
+      ],
+      "name": "Claude Haiku 3.5",
+      "activeByDefault": false,
+      "inputPricePerM": 0.8,
+      "outputPricePerM": 4,
+      "cacheReadPricePerM": 0.08,
+      "cacheWritePricePerM": 1,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    },
+    {
+      "id": "gpt-5.2-codex",
+      "name": "GPT-5.2 Codex",
+      "activeByDefault": false,
+      "inputPricePerM": 1.75,
+      "outputPricePerM": 14,
+      "cacheReadPricePerM": 0.175,
+      "cacheWritePricePerM": 1.75,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    },
+    {
+      "id": "gpt-5.1-codex",
+      "name": "GPT-5.1 Codex",
+      "activeByDefault": false,
+      "inputPricePerM": 1.25,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.125,
+      "cacheWritePricePerM": 1.25,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    },
+    {
+      "id": "gpt-5.1-codex-max",
+      "name": "GPT-5.1 Codex Max",
+      "activeByDefault": false,
+      "inputPricePerM": 1.25,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.125,
+      "cacheWritePricePerM": 1.25,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    },
+    {
+      "id": "gpt-5.1-codex-mini",
+      "name": "GPT-5.1 Codex Mini",
+      "activeByDefault": false,
+      "inputPricePerM": 0.25,
+      "outputPricePerM": 2,
+      "cacheReadPricePerM": 0.025,
+      "cacheWritePricePerM": 0.25,
+      "supportsImages": true,
+      "contextWindow": 272000,
+      "maxOutputTokens": 0,
+      "collection": "legacy"
+    }
+  ]
+}
