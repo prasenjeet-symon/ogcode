@@ -1,4 +1,5 @@
 import { Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData, AgentPartData, Interruption, InterruptReason } from '../api/client';
 import AgentPart from './agent-part';
 import MarkdownContent from './markdown-content';
@@ -95,7 +96,26 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   // parses to an object with no `state` property.
   const state = (): ToolState => props.data.state ?? DEFAULT_TOOL_STATE;
   const tool = (): string => props.data.tool || 'unknown';
-  const [expanded, setExpanded] = createSignal(state().status === 'running');
+
+  // Agent housekeeping tools (codebase_map, file_map, compact_context,
+  // update_intent): the maps' dense labeled tree/outline output is how the
+  // agent orients itself in the codebase, compact_context's is the agent's
+  // note to itself about what it condensed, and update_intent's is the echoed
+  // plan + closing nudge. None of that is a result the user asked for, so the
+  // row is a flat one-line record rather than a disclosure: it has nothing to
+  // open, is not clickable and not focusable, and stays shut even while the
+  // tool runs. The rows carry a magic-wand glyph instead of the usual
+  // checkmark for the same reason — what the tool did was quietly maintain
+  // the agent's own state, not hand back something to read.
+  const isAgentNavTool = () =>
+    tool() === 'codebase_map' ||
+    tool() === 'file_map' ||
+    tool() === 'compact_context' ||
+    tool() === 'update_intent';
+
+  // A running tool opens its input so the user can see what is happening, but
+  // a housekeeping row has nothing to show: it stays shut from the first frame.
+  const [expanded, setExpanded] = createSignal(state().status === 'running' && !isAgentNavTool());
   const status = () => state().status;
   // bash, grep and glob hand back Result.Title = their own input, so the
   // collapsed row would print the command/pattern twice — once as the title
@@ -126,20 +146,6 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
 
   // File-editing tools render a GitHub-style before/after diff instead of raw input.
   const isFileEdit = () => tool() === 'edit' || tool() === 'write';
-
-  // Agent housekeeping tools (codebase_map, file_map, compact_context,
-  // update_intent): the maps' dense labeled tree/outline output is how the
-  // agent orients itself in the codebase, compact_context's is the agent's
-  // note to itself about what it condensed, and update_intent's is the echoed
-  // plan + closing nudge. They start collapsed like any other tool and open on
-  // demand, so the user can audit the agent's own state. The rows show a
-  // magic-wand glyph rather than the usual checkmark: what the tool did was
-  // quietly maintain the agent's own state, not hand back a result.
-  const isAgentNavTool = () =>
-    tool() === 'codebase_map' ||
-    tool() === 'file_map' ||
-    tool() === 'compact_context' ||
-    tool() === 'update_intent';
 
   // pdf_index / docx_index answer with a page -> labels JSON array. That shape
   // reads as a wall of quoted strings in a code block; the page list is what
@@ -273,6 +279,15 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     return ms != null && ms >= 2000;
   };
 
+  // The row's chrome: an open row sits on the raised surface, a closed one on
+  // the plain surface and lifts only on hover — and only when the row can be
+  // clicked at all.
+  const rowClass = () => {
+    if (expanded()) return 'bg-[color:var(--bg-elevated)] border-[color:var(--border-default)]';
+    if (isAgentNavTool()) return 'bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)]';
+    return 'bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)] hover:bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-default)]';
+  };
+
   const statusColor = () => {
     switch (status()) {
       case 'running':   return 'text-[color:var(--accent-ink)]';
@@ -293,23 +308,27 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
 
   return (
     <div class="my-1.5">
-      <button
-        type="button"
-        aria-expanded={expanded()}
-        onClick={() => setExpanded(!expanded())}
+      <Dynamic
+        component={isAgentNavTool() ? 'div' : 'button'}
+        type={isAgentNavTool() ? undefined : 'button'}
+        aria-expanded={isAgentNavTool() ? undefined : expanded()}
+        onClick={isAgentNavTool() ? undefined : () => setExpanded(!expanded())}
         class={`flex items-center gap-2 w-full text-left text-meta h-7 px-2 rounded-md border
-               transition-colors
-               ${expanded()
-                 ? 'bg-[color:var(--bg-elevated)] border-[color:var(--border-default)]'
-                 : 'bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)] hover:bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-default)]'
-               }`}
+               transition-colors ${rowClass()}`}
       >
-        <svg
-          class={`w-2.5 h-2.5 shrink-0 text-[color:var(--text-muted)] transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
+        {/* The chevron promises a disclosure. A housekeeping row has none, so
+            it keeps only the space, and every title stays on the same line. */}
+        <Show
+          when={!isAgentNavTool()}
+          fallback={<span class="w-2.5 h-2.5 shrink-0" aria-hidden="true" />}
         >
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+          <svg
+            class={`w-2.5 h-2.5 shrink-0 text-[color:var(--text-muted)] transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </Show>
         <div class={`flex-shrink-0 ${statusColor()}`}>
           <Show when={status() === 'running'}>
             <div class="w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
@@ -406,9 +425,9 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
             {outputLineCount()} {outputLineCount() === 1 ? 'line' : 'lines'}
           </span>
         </Show>
-      </button>
+      </Dynamic>
 
-      <Show when={expanded()}>
+      <Show when={!isAgentNavTool() && expanded()}>
         {/* .reveal animates the disclosure open from zero height without a
             magic max-height, so long outputs and one-liners open alike. */}
         <div class="reveal">

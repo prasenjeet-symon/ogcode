@@ -1,4 +1,5 @@
 import { createSignal, createMemo, createEffect, For, Show, type JSX } from 'solid-js';
+import { fuzzyMatch } from '../lib/fuzzy';
 
 export interface CommandItem {
   id: string;
@@ -9,19 +10,6 @@ export interface CommandItem {
   disabled?: boolean;
   keywords?: string; // extra searchable text
   onSelect: () => void;
-}
-
-// fuzzyMatch returns true when every character of query appears in text in order
-// (case-insensitive subsequence) — the same forgiving match Linear's menus use.
-function fuzzyMatch(text: string, query: string): boolean {
-  if (!query) return true;
-  const t = text.toLowerCase();
-  const q = query.toLowerCase();
-  let i = 0;
-  for (let j = 0; j < t.length && i < q.length; j++) {
-    if (t[j] === q[i]) i++;
-  }
-  return i === q.length;
 }
 
 // CommandMenu is a reusable Linear-style command palette: a centered, searchable,

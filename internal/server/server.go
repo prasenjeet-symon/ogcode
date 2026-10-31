@@ -104,6 +104,13 @@ type Server struct {
 	// are registered.)
 	searchSwitch *search.SwitchableBackend
 
+	// search is the full-text index over this project's .ogcode/memory/
+	// corpus, the store behind GET /api/session/search (the ⌘K palette).
+	// Distinct from searchBackend above: that is the web-search provider,
+	// this searches the agent's own past turns. Nil in embedders that built
+	// the server without it, which the handler answers with an empty page.
+	search *memfile.SearchStore
+
 	// PostHog analytics client (always on at startup with hardcoded credentials;
 	// no user toggle — the only gate is a non-empty API key constant).
 	posthogClient *PostHogClient
@@ -360,6 +367,13 @@ func (s *Server) serve(ctx context.Context) error {
 	// against recall. Both are cheap to construct even when the feature is off.
 	memfileStore := memfile.NewStore(database)
 	memBarrier := memfile.NewManager()
+	// The full-text index over that same corpus, behind the session palette:
+	// the turn index above answers "what did this conversation contain?", this
+	// one answers "which conversation was about this?". Cheap to construct even
+	// when the feature is off; Search falls back to a backfill on first use, so a
+	// project that predates the table still answers.
+	memorySearch := memfile.NewSearchStore(database)
+	s.search = memorySearch
 
 	// Recover notes stuck in "generating" status from a previous server crash.
 	if stuck, err := s.noteStore.RecoverStuckNotes(); err != nil {
@@ -569,6 +583,7 @@ func (s *Server) serve(ctx context.Context) error {
 		MaxAutoResumes: 2,
 		MemFiles:       memfileStore,
 		MemBarrier:     memBarrier,
+		Search:         memorySearch,
 		TurnMemory:     memfile.TurnMemoryEnabled(),
 		NoteStore:      s.noteStore,
 		// The runner reads the server's own flag, so the refresher's one store
@@ -677,6 +692,26 @@ func (s *Server) serve(ctx context.Context) error {
 		// A teammate's permission prompt is surfaced in the session that spawned
 		// it too, so the human sees it where they are working.
 		ParentSessionOf: s.parentSessionOf,
+	}
+
+	// Index whatever the memory corpus already holds, once per project per boot,
+	// so the first palette query is not the one that pays for it. ReindexProject
+	// is idempotent — a file whose mtime predates its row is skipped — and it runs
+	// detached so a large corpus never delays the listener.
+	if memfile.TurnMemoryEnabled() {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("memory search backfill: panic", "err", r)
+				}
+			}()
+			stats, err := memorySearch.ReindexProject(s.dir, "")
+			if err != nil {
+				slog.Warn("memory search backfill failed", "dir", s.dir, "err", err)
+				return
+			}
+			slog.Info("memory search backfill done", "dir", s.dir, "scanned", stats.Scanned, "indexed", stats.Indexed, "purged", stats.Purged)
+		}()
 	}
 
 	// Register deep_search after loopRunner is built (needs RunSearchSession).

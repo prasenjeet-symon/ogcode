@@ -5,8 +5,10 @@ import { createSignal, createMemo, createEffect, For, Show, onCleanup, onMount, 
 import { deleteSession, getBoardRoster, type BoardHandle } from '../api/client';
 import type { Session } from '../api/client';
 import { isLive, statusMeta } from '../lib/board-tree';
+import { loadPinned, savePinned } from '../lib/pinned-sessions';
 import { createSidebarWidth } from '../lib/sidebar-width';
 import Logo from './logo';
+import { openSessionPalette } from './session-palette';
 import SidebarShell from './sidebar-shell';
 
 function formatTime(ts: number): string {
@@ -32,25 +34,14 @@ function shortenPath(path: string): string {
   return `${collapsed.startsWith('~') ? '~' : ''}/…/${segments.slice(-2).join('/')}`;
 }
 
-// Pinned sessions are a local preference (there is no server field for them).
-// Stored as a plain list of ids; they keep the newest-first order they arrive in.
-const PIN_STORAGE_KEY = 'ogcode-pinned-sessions';
+// Pinned sessions are a local preference (there is no server field for them);
+// the key and its parsing live in lib/pinned-sessions so the ⌘K palette can
+// read the same list.
 // The last board roster the sidebar fetched, and whether any ever did. Kept
 // module-level because the sidebar is mounted per page — navigating remounts
 // it — and a remount must not start cold. See SessionSidebarInner.
 let ROSTER_CACHE: BoardHandle[] = [];
 let ROSTER_LOADED = false;
-
-function loadPinned(): Set<string> {
-  try {
-    const raw = localStorage.getItem(PIN_STORAGE_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? new Set(arr.filter((x) => typeof x === 'string')) : new Set();
-  } catch {
-    return new Set();
-  }
-}
 
 // The sidebar itself. Exported wrapped in SidebarShell so every page that
 // renders <SessionSidebar /> gets the drawer behaviour below lg for free.
@@ -76,7 +67,6 @@ function SessionSidebarInner() {
   const [pinned, setPinned] = createSignal<Set<string>>(loadPinned());
   const [pinnedOpen, setPinnedOpen] = createSignal(true);
   const sidebar = createSidebarWidth();
-  let searchInput: HTMLInputElement | undefined;
 
   const togglePin = (e: MouseEvent, id: string) => {
     e.stopPropagation();
@@ -84,25 +74,20 @@ function SessionSidebarInner() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      try {
-        localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify([...next]));
-      } catch {
-        // private mode / quota — the pin still holds for this session
-      }
+      savePinned(next);
       return next;
     });
   };
 
-  // ⌘K / Ctrl-K focuses the session search. Nothing else binds it. The shell
-  // renders two copies of this panel (desktop inline + mobile drawer), so the
-  // guard acts only on the visible one — the hidden copy has no offsetParent.
+  // ⌘K / Ctrl-K opens the session search palette — the fast way to a
+  // conversation you half-remember, by name or by what it was about. The
+  // palette binds the shortcut itself for routes with no sidebar; this copy
+  // keeps the chord honest in the panel the user is looking at. The input
+  // below stays a plain inline title filter for when the name is enough.
   const onSearchShortcut = (e: KeyboardEvent) => {
-    if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) return;
-    const el = searchInput;
-    if (!el || !el.offsetParent) return;
+    if (!((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k')) return;
     e.preventDefault();
-    el.focus();
-    el.select();
+    openSessionPalette();
   };
   if (typeof window !== 'undefined') {
     window.addEventListener('keydown', onSearchShortcut);
@@ -650,7 +635,6 @@ function SessionSidebarInner() {
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
-            ref={(el) => { searchInput = el; }}
             type="text"
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
@@ -662,7 +646,10 @@ function SessionSidebarInner() {
                    transition-colors"
           />
           <Show when={!query()}>
-            <kbd class="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-[10px] font-mono leading-none text-[color:var(--text-label)] bg-[color:var(--bg-elevated)] border border-[color:var(--border-subtle)] rounded px-1 py-px">
+            <kbd
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-[10px] font-mono leading-none text-[color:var(--text-label)] bg-[color:var(--bg-elevated)] border border-[color:var(--border-subtle)] rounded px-1 py-px"
+              title="Search what every session was about (⌘K)"
+            >
               ⌘K
             </kbd>
           </Show>

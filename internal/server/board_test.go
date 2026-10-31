@@ -1150,3 +1150,49 @@ func TestWaitTeammateKeepsWaitingWhenOnlyItsOpContextExpires(t *testing.T) {
 		t.Fatalf("wait notice = %q, want the still-running partial answer", res.Notice)
 	}
 }
+
+// TestBoardNoticeCountsIdleApartFromRunning pins the roster notice's story. An
+// idle row is an interactive session parked between turns — nothing is running
+// on it — so counting it as "still working" told the build agent that 70 agents
+// were busy when 2 were. The buckets are disjoint by construction and the
+// finished one covers every terminal status, so the three numbers always add up
+// to the roster.
+func TestBoardNoticeCountsIdleApartFromRunning(t *testing.T) {
+	srv := boardTestServer(t)
+	srv.store = session.NewStore(srv.db)
+	ctx := context.Background()
+
+	me := session.SessionID("ses_me")
+	createBoardSession(t, srv, me)
+	registerBoardAgent(t, srv, board.Handle{
+		Handle: "build-me", SessionID: string(me), Role: "build",
+		Kind: board.KindSession, Status: board.StatusRunning,
+	})
+	parked := session.SessionID("ses_parked")
+	createBoardSession(t, srv, parked)
+	registerBoardAgent(t, srv, board.Handle{
+		Handle: "build-parked", SessionID: string(parked), Role: "build",
+		Kind: board.KindSession, Status: board.StatusIdle,
+	})
+	registerBoardAgent(t, srv, board.Handle{
+		Handle: "dev-done", SessionID: "ses_done", Role: "build",
+		Kind: board.KindTeammate, SpawnedBy: "build-me", Status: board.StatusDone,
+	})
+	registerBoardAgent(t, srv, board.Handle{
+		Handle: "dev-stopped", SessionID: "ses_stopped", Role: "build",
+		Kind: board.KindTeammate, SpawnedBy: "build-me", Status: board.StatusStopped,
+	})
+	registerBoardAgent(t, srv, board.Handle{
+		Handle: "build-stale", SessionID: "ses_stale", Role: "build",
+		Kind: board.KindSession, Status: board.StatusStale,
+	})
+
+	res, err := srv.boardTool(ctx, string(me), tool.BoardRequest{})
+	if err != nil {
+		t.Fatalf("board roster: %v", err)
+	}
+	want := "5 agents in this project: 1 running, 1 idle between turns, 3 finished."
+	if res.Notice != want {
+		t.Fatalf("notice = %q, want %q", res.Notice, want)
+	}
+}

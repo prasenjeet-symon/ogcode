@@ -1,0 +1,22 @@
+/* session-palette.css — the two things the palette's rows cannot say in
+   Tailwind: the matched term inside a server snippet, and the one-line clamp
+   that keeps a long memory excerpt from pushing the row open. Every colour is
+   a theme variable, so light and dark both work. */
+
+/* The matched term. The snippet text arrives as plain text (the server wraps
+   each match in U+0002/U+0003), so this is a highlight, not markup. */
+.sp-mark {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text-primary);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* A snippet is one line: the row is 2 lines tall whether or not the excerpt
+   was long. */
+.sp-snippet {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -105,10 +105,16 @@ func formatBoard(roster []board.Handle, notice string) string {
 // cycle — two rows naming each other, which nothing writes but a hand-edited
 // database could hold — cannot hang the render: a handle is drawn once, and the
 // second visit is skipped.
+//
+// Roots and siblings are drawn newest first. The roster arrives in join order
+// (oldest first) and the tool output is capped by keeping its head, so drawing
+// it as it comes would spend the cap on history and cut the handles spawned in
+// this very turn — the rows a spawner reads the tree for.
 func treeText(roster []board.Handle) string {
 	byHandle := make(map[string]board.Handle, len(roster))
 	order := make([]string, 0, len(roster))
-	for _, h := range roster {
+	for i := len(roster) - 1; i >= 0; i-- {
+		h := roster[i]
 		byHandle[h.Handle] = h
 		order = append(order, h.Handle)
 	}
@@ -151,16 +157,4 @@ func treeText(roster []board.Handle) string {
 		walk(name, 0)
 	}
 	return b.String()
-}
-
-// liveCount is how many handles are still working: running, or idle between
-// turns of an interactive session.
-func liveCount(roster []board.Handle) int {
-	n := 0
-	for _, h := range roster {
-		if h.Status == board.StatusRunning || h.Status == board.StatusIdle {
-			n++
-		}
-	}
-	return n
 }

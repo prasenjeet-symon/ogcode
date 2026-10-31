@@ -63,22 +63,42 @@ func (s *Server) boardTool(ctx context.Context, sessionID string, req tool.Board
 	if err != nil {
 		return tool.BoardResult{}, err
 	}
+	sum := summarizeRoster(roster)
 	return tool.BoardResult{
 		Roster: roster,
-		Notice: fmt.Sprintf("%d agents in this project, %d still working.", len(roster), liveCount(roster)),
+		Notice: fmt.Sprintf("%d agents in this project: %d running, %d idle between turns, %d finished.",
+			len(roster), sum.running, sum.idle, sum.finished),
 	}, nil
 }
 
-// liveCount is how many handles are still working: running, or idle between
-// turns of an interactive session.
-func liveCount(roster []board.Handle) int {
-	n := 0
+// boardSummary is the roster split by what each handle is doing. The buckets are
+// disjoint: a row is running (a turn is in flight), idle (an interactive session
+// parked between turns — it can be messaged again, but no loop is running) or
+// finished (done, stopped or stale: nothing will move it again). Idle is not
+// working, which is why the notice counts the two apart.
+//
+// It is the same split the web UI draws (web/src/lib/board-tree.ts rosterSummary,
+// running = live - idle), so the one-line notice agrees with the tree under it.
+type boardSummary struct {
+	running  int
+	idle     int
+	finished int
+}
+
+// summarizeRoster tallies a roster into the disjoint buckets above.
+func summarizeRoster(roster []board.Handle) boardSummary {
+	var s boardSummary
 	for _, h := range roster {
-		if h.Status == board.StatusRunning || h.Status == board.StatusIdle {
-			n++
+		switch {
+		case h.Status == board.StatusRunning:
+			s.running++
+		case h.Status == board.StatusIdle:
+			s.idle++
+		case h.Terminal():
+			s.finished++
 		}
 	}
-	return n
+	return s
 }
 
 // boardHandle returns the handle a session is on the board as, joining it when

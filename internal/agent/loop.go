@@ -215,6 +215,13 @@ type LoopRunner struct {
 	// never sees a half-written index. nil (CLI, tests) disables memory.
 	MemFiles   *memfile.Store
 	MemBarrier *memfile.Manager
+	// Search is the full-text index over the same memory corpus, answering
+	// "which conversation was this about?" rather than "what did this one turn
+	// contain?". It is a separate store from MemFiles because it re-reads files
+	// a session memory file rewrites every turn — the one invariant the
+	// memory_turn_index contract deliberately does not bend for. nil (CLI,
+	// tests) disables content search.
+	Search     *memfile.SearchStore
 	TurnMemory bool
 	NoteStore  *note.Store
 	// SearchBridge is the web-search backend used by the deep-research pipeline
@@ -2735,6 +2742,14 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 			slog.Warn("writeTurnMemory: index summary failed", "path", path, "err", err)
 			return
 		}
+		if lr.Search != nil {
+			if err := lr.Search.IndexTurn(path, meta); err != nil {
+				slog.Warn("writeTurnMemory: search index failed", "path", path, "err", err)
+			}
+			if err := lr.Search.IndexSessionMemory(dir, string(sessionID)); err != nil {
+				slog.Warn("writeTurnMemory: session memory search index failed", "session", sessionID, "err", err)
+			}
+		}
 		slog.Info("writeTurnMemory: turn summary written and indexed", "session", sessionID, "path", path)
 	}()
 }
@@ -5033,6 +5048,37 @@ func replaceOrAppendSummary(system []string, prevSummary, newSummary string) []s
 	return append(system, newSummary)
 }
 
+// indexSessionSummary refreshes this session's entry in the memory search index
+// from the session table: its title, its rolling compaction summary, and when it
+// was last touched. A session's memory file (.ogcode/memory/sessions/<key>.md) is
+// indexed on every turn summary, but these two only change on a rename and on a
+// compaction, which is the only place that calls this. A nil Search — the CLI,
+// tests, and any path that built a LoopRunner without the server — is a no-op.
+func (lr *LoopRunner) indexSessionSummary(sessionID session.SessionID) {
+	if lr.Search == nil {
+		return
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("indexSessionSummary: panic", "err", r, "stack", string(debug.Stack()))
+			}
+		}()
+		sess, err := lr.Store.Get(sessionID)
+		if err != nil || sess == nil {
+			slog.Warn("indexSessionSummary: load session failed", "session", sessionID, "err", err)
+			return
+		}
+		dir := sess.Directory
+		if dir == "" {
+			dir = sess.ProjectID
+		}
+		if err := lr.Search.IndexSession(string(sess.ID), sess.Title, sess.CompactionSummary, project.Resolve(dir), sess.UpdatedAt); err != nil {
+			slog.Warn("indexSessionSummary: search index failed", "session", sessionID, "err", err)
+		}
+	}()
+}
+
 // compactRequest compacts a request's history in place: it summarizes the older
 // messages (folding in the prior summary so nothing is lost), swaps the trimmed
 // messages into streamReq, replaces the prior summary in the system prompt, and
@@ -5051,6 +5097,12 @@ func (lr *LoopRunner) compactRequest(ctx context.Context, p provider.Provider, m
 		if err := lr.Store.UpdateCompactionSummary(sessionID, summaryAddendum); err != nil {
 			slog.Error("persist compaction summary", "err", err)
 		}
+		// The row just persisted carries the two things a search result shows
+		// before the user opens it — the session title and the rolling summary —
+		// so refresh its index entry. Off the loop's goroutine: compaction is on
+		// the turn's critical path, and a missed update only costs this session a
+		// stale title until the next compaction or the boot backfill.
+		lr.indexSessionSummary(sessionID)
 	}
 	lr.Bus.Publish("loop.compacted", map[string]string{"sessionId": string(sessionID)})
 	return newSummary

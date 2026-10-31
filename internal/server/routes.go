@@ -113,6 +113,10 @@ func (s *Server) routes() http.Handler {
 		r.Get("/mcp", s.handleListMCP)
 		r.Post("/mcp/{name}", s.handleSetMCPEnabled)
 
+		// Static segment above the {sessionID} subrouter below: chi prefers it,
+		// and /session/search must never be read as a session id.
+		r.Get("/session/search", s.handleSearchSessions)
+
 		r.Route("/session", func(r chi.Router) {
 			r.Get("/", s.handleListSessions)
 			r.Post("/", s.handleCreateSession)

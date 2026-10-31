@@ -12,6 +12,7 @@ import { ThemeProvider } from './context/theme';
 import UpdateNotification from './components/update-notification';
 import DesktopNotificationBanner from './components/desktop-notification-banner';
 import ModelSwitchPopup from './components/model-switch-popup';
+import SessionPalette from './components/session-palette';
 import IndexConsentDialog from './components/index-consent-dialog';
 import Home from './pages/home';
 import Chat from './pages/session';
@@ -104,6 +105,9 @@ function AppWrapper(props: { children?: any }) {
                         <UpdateNotification />
                         <DesktopNotificationBanner />
                         <ModelSwitchPopup />
+                        {/* ⌘K lives here, not in a page: the palette has to open
+                            from every route, including the ones with no sidebar. */}
+                        <SessionPalette />
                         <IndexConsentDialog />
                       </DesktopNotificationProvider>
                     </NotificationProvider>

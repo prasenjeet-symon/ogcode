@@ -98,6 +98,47 @@ export function deleteSession(id: string): Promise<void> {
   return fetchAPI(`/session/${id}`, { method: 'DELETE' });
 }
 
+// Search a session's own memory, not its transcript: the per-turn summaries and
+// the session memory file are what "what was this about" is answerable from.
+// A query under 2 characters is rejected by the server (400), so callers must
+// not fire one.
+
+/** One page of turns a session search matched, so a row can say where. */
+export interface SessionSearchTurn {
+  at: number;
+  labels?: string[];
+  /** Match sentinels U+0002 / U+0003 around each matched term — never HTML. */
+  snippet?: string;
+}
+
+/** One session a search matched, with the evidence for why it is in the list. */
+export interface SessionSearchHit {
+  sessionId: string;
+  title: string;
+  model?: string;
+  updatedAt: number;
+  score: number;
+  /** How many turns mentioned the query (not capped like the score bonus). */
+  matchedTurns: number;
+  /** Which part of the memory carried the match. */
+  source: 'title' | 'turn' | 'memory';
+  labels?: string[];
+  /** Best matching turn's excerpt, with U+0002/U+0003 around each match. */
+  snippet?: string;
+  turns?: SessionSearchTurn[];
+}
+
+export interface SessionSearchResponse {
+  query: string;
+  results: SessionSearchHit[];
+}
+
+// searchSessions finds sessions by what they were about. `signal` aborts the
+// in-flight request when the user types again; the palette debounces first.
+export function searchSessions(q: string, signal?: AbortSignal): Promise<SessionSearchResponse> {
+  return fetchAPI(`/session/search?q=${encodeURIComponent(q)}&limit=20`, { signal });
+}
+
 // Message API
 export interface TokenCounts {
   total?: number;
