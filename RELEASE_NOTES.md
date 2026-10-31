@@ -1,3 +1,49 @@
+# Release Notes — v0.56.0
+
+## Major: Find the conversation you half remember
+
+The session list could only filter titles, so "which conversation was that about caching?"
+had no answer unless you remembered what you had called it. Every turn already writes a
+summary with its topics into `.ogcode/memory`, and that text was sitting there unread.
+Press ⌘K and it is a search box: type a few words and the palette answers with the
+conversations whose memory is about them, each with its matched turns, their dates and
+the labels those turns were filed under.
+
+The index is a new full-text table (migration 073, fts5 over title, labels and body),
+written by the server rather than by a trigger, so a document and its search row land
+in the same transaction. It backfills itself at boot from the project's memory
+directory and again on the first query of a fresh process, and it stats the files it
+holds before answering, so notes the agent wrote earlier in the same turn are
+searchable immediately. Ranking is not one bm25 pass. Each query term is matched
+separately and the results are unioned per conversation, so a question whose words
+are spread across different turns still finds the conversation that answers it. A
+best-turn score is multiplied by how much of the query the conversation covers, and
+label matches, title matches, breadth across turns and a 30-day recency tail sit on
+top. Two characters is the shortest query, a page is twenty conversations, and the
+answer is always a list, never null.
+
+As you type, the palette also fuzzy-matches titles locally, so picking up a
+conversation you can name but cannot spell stays instant, and your pinned sessions
+now read the same list from the sidebar and the palette. `GET /api/session/search`
+is the same search over HTTP for anything that is not the palette.
+
+## Minor: The agent board tells idle apart from working
+
+The board notice counted every agent that was not finished as still working, so a
+session parked between turns read as one that was busy. The count is now split three
+ways: running, idle between turns, finished. The tree also draws its newest rows
+first, because the notice's cap keeps the head of the list and the agents you just
+spawned are the ones you are waiting on.
+
+## Minor: The agent's housekeeping rows are records, not disclosures
+
+`codebase_map`, `file_map`, `compact_context` and `update_intent` maintain the agent's
+own state; none of them hands back something the user asked for. Their rows in the
+chat used to look like every other tool card and open on click, which promised a
+result that was not there. They are now flat one-line records: no chevron, not
+clickable, not focusable, and they stay shut even while the tool runs. Every real
+tool keeps its disclosure.
+
 # Release Notes — v0.55.0
 
 ## Major: Read a spreadsheet without reading it
