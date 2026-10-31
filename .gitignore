@@ -106,6 +106,12 @@ demo-recording/
 # personal to a checkout, and it is re-sent in full on every model request, so a
 # committed one becomes every contributor's per-turn token cost as well as ours.
 MEMORY.md
+# The two companions MEMORY.md delegates to — the dated log (HISTORY.md) and the
+# verified procedures (HOWTO.md) — are equally local: neither is loaded into the
+# prompt, both describe one checkout's own work, and a committed copy is dead
+# weight for every other contributor. They stay on disk, never in git.
+/HISTORY.md
+/HOWTO.md
 # Frozen pre-prune snapshots of the same file, kept beside it for reference.
 /MEMORY-ARCHIVE.md
 
