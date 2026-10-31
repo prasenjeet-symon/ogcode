@@ -158,6 +158,79 @@ Before, that was the kind of task an agent started and abandoned, because
 holding two workbooks in text was never a plan. Now the agent sees two
 labeled sheets on one profile screen and writes one sentence of SQL.
 
+## Three questions, answered from a real workbook
+
+Everything above is argued, not shown. So we capped it the way you cap any
+claim: pointed the same two tools, the profile and the query tool, at a real
+workbook. A 23 MB `.xlsx` with 541,909 rows: a year and nine days of online
+retail invoices, December 2010 to December 2011, 8 columns, 38 countries.
+Not one of those rows entered a conversation. Here are three questions the
+agent asked it, with the answers that came back. The queries are verbatim.
+
+**How did revenue move over the year?** One group-by, thirteen rows back.
+
+```sql
+SELECT strftime('%Y-%m', InvoiceDate) AS month,
+       ROUND(SUM(Quantity * UnitPrice)) AS revenue_gbp
+FROM "Online Retail"
+WHERE InvoiceNo NOT LIKE 'C%'
+GROUP BY 1 ORDER BY 1
+```
+
+![Monthly revenue, net of cancellations. Revenue climbs through autumn and peaks at £1.5m in November 2011. December 2011 is shaded because the export stops on the 9th.](/blog/media/retail-monthly.svg)
+
+Two things worth noticing, because an agent that only reads text could not
+have done either. The `NOT LIKE 'C%'` is the agent refusing to book
+cancellation invoices as revenue; without it, the peak months carry phantom
+sales. And the flat-looking December at the right end is not a downturn:
+that export stops on the 9th, and the honest answer says so instead of
+"revenue collapsed". One chart, and both traps already dodged.
+
+**Which products actually carry the store?** This one is a question in two
+takes, because the first take lies. "Top products by revenue" asked naively
+returns postage charges and administrative fees, which are stock codes like
+any other and quietly outearn most of the catalogue. The agent's second
+take restricts to real product codes, which all start with a digit:
+
+```sql
+SELECT Description,
+       ROUND(SUM(Quantity * UnitPrice)) AS revenue_gbp
+FROM "Online Retail"
+WHERE InvoiceNo NOT LIKE 'C%' AND Quantity > 0
+  AND StockCode GLOB '[0-9]*'
+GROUP BY Description ORDER BY 2 DESC LIMIT 10
+```
+
+![Bar chart of the ten products with the highest revenue. Regency Cakestand 3 Tier leads at £174k, closely followed by Paper Craft, Little Birdie at £168k and the White Hanging Heart T-Light Holder at £106k.](/blog/media/retail-products.svg)
+
+A £174k cakestand and a £168k craft kit. Ask by units instead of revenue and
+the ranking changes shape; that comparison is the same question with a
+different `ORDER BY`, not the same question against a second read of the
+file. Every follow-up costs one small answer, which is the part of this
+design we like most.
+
+**When does the money arrive?** Hour of day, one more group-by:
+
+```sql
+SELECT strftime('%H', InvoiceDate) AS hour,
+       ROUND(SUM(Quantity * UnitPrice)) AS revenue_gbp
+FROM "Online Retail"
+WHERE InvoiceNo NOT LIKE 'C%'
+GROUP BY 1 ORDER BY 1
+```
+
+![Bar chart of revenue by hour of day. Business starts near 8am, runs hot between 9am and 4pm, peaks at noon around £1.5m and fades to nearly nothing after 6pm.](/blog/media/retail-hours.svg)
+
+A clear office-hours rhythm: hot from 9 to 4, peak at noon, asleep by 7pm.
+The kind of shape you only ask for once the first two questions cost
+nothing, because it was never worth reading 541,909 rows to learn that.
+
+The same file also answers geography in ten rows: the United Kingdom
+accounts for the overwhelming share, with the Netherlands, EIRE, Germany and
+France a long way behind as the working international markets. Three charts
+of queries, one table of ten, and the whole workbook is still sitting on the
+disk where we found it.
+
 ## Where this could still be better
 
 No post about our own tools should pretend they are perfect. The limits,

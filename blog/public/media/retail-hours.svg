@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img"><rect width="960" height="420" fill="#151414"/><rect x="78" y="46" width="856" height="320" fill="#1d1c1b"/>
+<line x1="78" y1="366.0" x2="934" y2="366.0" stroke="rgba(255,255,255,0.08)"/>
+<text x="68" y="370.0" fill="#9a9390" font-size="12" text-anchor="end">0k</text>
+<line x1="78" y1="206.0" x2="934" y2="206.0" stroke="rgba(255,255,255,0.08)"/>
+<text x="68" y="210.0" fill="#9a9390" font-size="12" text-anchor="end">1.0m</text>
+<line x1="78" y1="46.0" x2="934" y2="46.0" stroke="rgba(255,255,255,0.08)"/>
+<text x="68" y="50.0" fill="#9a9390" font-size="12" text-anchor="end">2.0m</text>
+<rect x="88.8" y="366.0" width="35.4" height="0.0" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="106.5" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">06:00</text>
+<rect x="145.9" y="361.0" width="35.4" height="5.0" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="163.6" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">07:00</text>
+<rect x="203.0" y="320.6" width="35.4" height="45.4" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="220.7" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">08:00</text>
+<rect x="260.0" y="204.7" width="35.4" height="161.3" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="277.7" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">09:00</text>
+<rect x="317.1" y="137.4" width="35.4" height="228.6" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="334.8" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">10:00</text>
+<rect x="374.2" y="167.6" width="35.4" height="198.4" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="391.9" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">11:00</text>
+<rect x="431.2" y="132.4" width="35.4" height="233.6" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="448.9" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">12:00</text>
+<rect x="488.3" y="166.0" width="35.4" height="200.0" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="506.0" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">13:00</text>
+<rect x="545.4" y="180.4" width="35.4" height="185.6" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="563.1" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">14:00</text>
+<rect x="602.4" y="147.2" width="35.4" height="218.8" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="620.1" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">15:00</text>
+<rect x="659.5" y="247.6" width="35.4" height="118.4" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="677.2" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">16:00</text>
+<rect x="716.6" y="292.1" width="35.4" height="73.9" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="734.3" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">17:00</text>
+<rect x="773.6" y="342.8" width="35.4" height="23.2" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="791.3" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">18:00</text>
+<rect x="830.7" y="357.9" width="35.4" height="8.1" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="848.4" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">19:00</text>
+<rect x="887.8" y="363.0" width="35.4" height="3.0" rx="2.5" fill="#ff5e1f" opacity="0.85"/>
+<text x="905.5" y="386.0" fill="#9a9390" font-size="12" text-anchor="middle">20:00</text>
+<text x="448.9" y="122.4" fill="#fffbf5" font-size="13" text-anchor="middle" font-weight="600">noon peak: £1.5m</text>
+</svg>
