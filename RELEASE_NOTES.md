@@ -1,3 +1,66 @@
+# Release Notes — v0.55.0
+
+## Major: Read a spreadsheet without reading it
+
+A workbook of forty thousand rows was a blind spot: the indexer skipped it, and the
+only way at the numbers was opening the file. Spreadsheets are now documents ogcode
+reads like any other. `.xlsx`, `.xlsm`, `.csv` and `.tsv` are profiled by a new
+`internal/sheet` package — column types (integer, number, date, boolean, text)
+resolved from a lattice over the first thousand rows, sample values and ranges taken
+from a stride of later ones, the result kept inside a fixed profile budget instead
+of the whole file. Each sheet becomes its own page in the project index, so a
+three-sheet workbook shows three labelled sheets rather than one line carrying only
+the last of them.
+
+That profile is what makes the new `query_sheet` tool cheap. It loads the sheet into
+an in-memory SQLite table typed from the profile, then runs a single read-only
+`SELECT`: more than one statement is refused, so is anything that writes, queries
+stop at three seconds, output stops at 200 rows, and the connection goes
+`query_only` once the rows are in. Ask for "total spend per vendor, top ten" and you
+get a table back instead of forty thousand lines of context. Plain-delimited files
+above 256 MB are refused with a pointer to the workbook form, which streams.
+
+## Minor: The model catalogue syncs itself
+
+Ogcode ships 162 models, and a new one could not reach an installed copy without a
+release. The compiled-in list now sits on top of a shared JSON catalogue the server
+fetches itself: at boot, once a day afterwards, and on demand from a card in
+Settings → General that shows when it last landed and what the sync changed. Rows a
+user has edited still outrank it, ids the catalogue does not know arrive placed by
+collection, implausible entries are skipped rather than merged, and a failed fetch
+keeps whatever was already there. Point it elsewhere with `OGCODE_CATALOG_URL`, or
+turn syncing off with `OGCODE_CATALOG_SYNC=false`.
+
+## Minor: Every model row is editable
+
+A model no catalogue answers for was all guesswork: no window, no price, no output
+ceiling. Worse, a catalogue that guessed wrong could not be corrected at all. Any
+row — one you added, one a provider lists, one in the catalogue — now carries your
+own context window, output ceiling, price per million input and output tokens, cache
+read and write prices, and whether it takes images. Migrations 070 through 072 hold
+them, they survive a restart, and they layer over the listing rather than replacing
+it, so an edited catalogue model keeps its name, collection and provider routing. A
+window you set is now authoritative: a listing is often a heuristic, and a real
+overflow still self-corrects from evidence. The editor rides a pencil on each row, a
+catalogue figure sits in the field as its placeholder, and an "edited" tag marks a
+listed row carrying your numbers.
+
+## Minor: OGX is billed at the gateway's own rates
+
+OGX used to read as "included in your plan": its tokens were counted but never
+priced. The gateway publishes rates per model, and those are now what the usage page
+bills at. The vendor catalogue figure becomes a yardstick only, an unpublished rate
+shows as unpriced instead of free, and a price you set yourself still applies, cache
+rates included.
+
+## Minor: Tool output is there when you want it
+
+Every tool card in the chat opens now, the agent-navigation ones included, so an
+audit of what `file_map` or `update_intent` actually returned is one click away.
+`pdf_index` and `docx_index` render their answer as a page list — page number, then
+that page's labels — instead of a wall of quoted JSON, and the file viewer's index
+entry lists every page's labels with no truncation.
+
 # Release Notes — v0.54.0
 
 ## Major: Plan mode is gone
