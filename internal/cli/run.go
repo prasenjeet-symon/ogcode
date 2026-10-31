@@ -220,6 +220,9 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	docindexStore := docindex.NewStore(database)
 	toolRegistry := tool.NewRegistry()
 	tool.RegisterCoreTools(toolRegistry, docindexStore)
+	// query_sheet probes spreadsheets through the indexer's profiler — the
+	// seam lives here because tool cannot import indexer.
+	tool.SetSheetProfileLoader(server.SheetProfilesFromIndexer)
 
 	// Skills, from the same ogcode.json whose provider settings the registry
 	// above already consumed.

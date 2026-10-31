@@ -24,9 +24,15 @@ import (
 //     Models() has no static fallback: a catalogue that comes back empty means
 //     the plan carries nothing, and offering a fallback would present models
 //     the account cannot reach.
+//
 //   - The token is durable and per-install, and the gateway reads the
 //     prompt_cache_key field as the session identity for token spend, so every
 //     request carries it.
+//
+//   - The plan meters the tokens it serves at its own rates: the gateway
+//     publishes them on /v1/models, and nothing else prices ogx usage — the
+//     vendor's catalogue price is a comparison yardstick, never the bill
+//     (see meteredByOwnListing in pricing.go).
 //
 // Registration is gated on the stored link carrying a plan (session.OGXAccount
 // .HasPlan). A planless link contributes no provider at all, which is what keeps

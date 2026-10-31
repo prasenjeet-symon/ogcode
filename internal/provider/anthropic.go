@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 )
 
 // AnthropicProvider implements Provider for the Anthropic Messages API.
@@ -41,8 +40,9 @@ func (p *AnthropicProvider) ID() string { return "anthropic" }
 func (p *AnthropicProvider) BaseURL() string { return p.baseURL }
 
 func (p *AnthropicProvider) Models() []ModelInfo {
-	all := make([]ModelInfo, 0, len(AnthropicModels))
-	for _, m := range AnthropicModels {
+	models := anthropicCatalogList()
+	all := make([]ModelInfo, 0, len(models))
+	for _, m := range models {
 		all = append(all, ModelInfo{
 			ID:              m.ID,
 			Name:            m.Name,
@@ -78,10 +78,15 @@ func anthropicThinkingBlock(rp ReasoningPart) map[string]any {
 	}
 }
 
-var (
-	claudeCatalogOnce sync.Once
-	claudeCatalogIdx  catalogIndex
-)
+var claudeCatalogMemo = catalogMemo{build: func() catalogIndex {
+	var legacy []CatalogModel
+	for _, m := range legacyCatalogList() {
+		if strings.HasPrefix(m.ID, "claude-") {
+			legacy = append(legacy, m)
+		}
+	}
+	return newCatalogIndex(anthropicCatalogList(), legacy)
+}}
 
 // anthropicCatalogModel looks up a Claude model's catalogued facts under any of
 // its spellings — the undated alias the API also accepts, or a proxy's
@@ -90,16 +95,7 @@ var (
 // mode. A model the catalog does not know — a future ID — resolves to nothing,
 // and callers fall back to what is safe for any model.
 func anthropicCatalogModel(id string) (CatalogModel, bool) {
-	claudeCatalogOnce.Do(func() {
-		var legacy []CatalogModel
-		for _, m := range LegacyModels {
-			if strings.HasPrefix(m.ID, "claude-") {
-				legacy = append(legacy, m)
-			}
-		}
-		claudeCatalogIdx = newCatalogIndex(AnthropicModels, legacy)
-	})
-	return claudeCatalogIdx.lookup(id)
+	return claudeCatalogMemo.lookup(id)
 }
 
 // thinkingConfigFor returns the thinking configuration for a model, or nil when

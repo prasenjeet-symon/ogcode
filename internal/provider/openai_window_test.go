@@ -69,6 +69,42 @@ func TestFetchDynamicModelsCarriesContextLength(t *testing.T) {
 	}
 }
 
+// fetchDynamicModels must carry a listing's own cache prices into ModelInfo
+// (OpenRouter and the OGX gateway send input_cache_read/input_cache_write —
+// "-1" or absent = unknown, 0). Without this a self-metered gateway's
+// cache-read rate is dropped and the biller guesses 0.1x the input price.
+func TestFetchDynamicModelsCarriesCachePrices(t *testing.T) {
+	body := `{"data":	[
+		{"id":"ogx-deepseek-v4.1-flash","name":"DeepSeek V4.1 Flash","pricing":{"prompt":"0.00000045","completion":"0.0000018","input_cache_read":"0.000000009"}},
+		{"id":"router/marked","name":"Marked","pricing":{"prompt":"0.000002","completion":"0.000006","input_cache_read":"0.0000002","input_cache_write":"-1"}},
+		{"id":"plain/no-pricing","name":"No pricing object"}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := &OpenAIProvider{id: "ogx", baseURL: srv.URL, model: "m"}
+	got := p.fetchDynamicModels(context.Background())
+	if len(got) != 3 {
+		t.Fatalf("got %d models, want 3", len(got))
+	}
+	byID := map[string]ModelInfo{}
+	for _, m := range got {
+		byID[m.ID] = m
+	}
+	if m := byID["ogx-deepseek-v4.1-flash"]; m.InputPricePerM != 0.45 || m.OutputPricePerM != 1.8 ||
+		m.CacheReadPricePerM != 0.009 || m.CacheWritePricePerM != 0 {
+		t.Errorf("gateway listing cache prices = %+v; want input 0.45, output 1.8, cache read 0.009, cache write 0", m)
+	}
+	if m := byID["router/marked"]; m.CacheReadPricePerM != 0.2 || m.CacheWritePricePerM != 0 {
+		t.Errorf("marked-up listing cache prices = read %v, write %v; want 0.2 and 0 (-1 = unknown)", m.CacheReadPricePerM, m.CacheWritePricePerM)
+	}
+	if m := byID["plain/no-pricing"]; m.CacheReadPricePerM != 0 || m.CacheWritePricePerM != 0 {
+		t.Errorf("unpriced listing cache prices = read %v, write %v; want 0 and 0", m.CacheReadPricePerM, m.CacheWritePricePerM)
+	}
+}
+
 // Registry.ContextWindow must resolve the window through the provider's model
 // list, returning 0 for an unknown model id.
 func TestRegistryContextWindowResolvesListedModels(t *testing.T) {

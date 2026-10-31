@@ -41,5 +41,6 @@ func RegisterCoreTools(r *Registry, docIndex *docindex.Store) {
 	r.Register(NewPdfIndexTool(docIndex))
 	r.Register(ReadDocxPageTool{})
 	r.Register(NewDocxIndexTool(docIndex))
+	r.Register(QuerySheetTool{})
 	r.Register(NewProjectIndexTool(docIndex))
 }

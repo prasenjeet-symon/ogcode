@@ -54,26 +54,26 @@ package provider
 
 // CatalogModel is what is known about one model, whichever provider serves it.
 type CatalogModel struct {
-	ID string
+	ID string `json:"id"`
 	// Aliases are other ids for this model on other hosts; see the header.
-	Aliases         []string
-	Name            string
-	ActiveByDefault bool
-	InputPricePerM  float64 // USD per 1M input tokens (0 = unknown)
-	OutputPricePerM float64 // USD per 1M output tokens (0 = unknown)
+	Aliases         []string `json:"aliases,omitempty"`
+	Name            string   `json:"name,omitempty"`
+	ActiveByDefault bool     `json:"activeByDefault"`
+	InputPricePerM  float64  `json:"inputPricePerM"`  // USD per 1M input tokens (0 = unknown)
+	OutputPricePerM float64  `json:"outputPricePerM"` // USD per 1M output tokens (0 = unknown)
 	// CacheReadPricePerM and CacheWritePricePerM price cached input (0 = not
 	// published). Anthropic bills both; OpenAI bills writes only on GPT-5.6 and
 	// later (earlier models write at the plain input price, recorded as such),
 	// and most open-model APIs bill only reads. A model with no cache discount
 	// records its input price as the read price.
-	CacheReadPricePerM  float64
-	CacheWritePricePerM float64
-	SupportsImages      bool // whether the model accepts image input
+	CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
+	CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
+	SupportsImages      bool    `json:"supportsImages,omitempty"` // whether the model accepts image input
 	// ContextWindow is the most a request can hold, in tokens (0 = unknown →
 	// byte-size fallback). Where a vendor caps input below the total window —
 	// OpenAI's 1.05M models take at most 922K in, its 400K models 272K — the
 	// cap is recorded, since that is where a request starts to be rejected.
-	ContextWindow int
+	ContextWindow int `json:"contextWindow"`
 	// MaxOutputTokens is the most output the model produces in one response.
 	// 0 means unknown: no explicit limit is sent and the provider's own default
 	// applies. NEVER guess this upward — a value above the model's real ceiling
@@ -82,7 +82,7 @@ type CatalogModel struct {
 	// entries stay at 0 (no cap is needed there, and the published figure is in
 	// a comment), and no provider lists OpenModels, so their figure is only
 	// informational.
-	MaxOutputTokens int
+	MaxOutputTokens int `json:"maxOutputTokens"`
 	// Thinking names the reasoning mode to request for this model, for providers
 	// that must ask for it explicitly. "adaptive" is what Claude 4.6 and later
 	// accept: the model decides when and how deeply to think, and reasons
@@ -93,12 +93,12 @@ type CatalogModel struct {
 	// a tradeoff the agent loop does not currently make, since it leaves
 	// `max_tokens` at the provider default — and Haiku 4.5 cannot reason
 	// between tool calls at all, which is where an agent loop would spend it.
-	Thinking string
+	Thinking string `json:"thinking,omitempty"`
 	// RejectsSampling marks models that refuse temperature (and other sampling
 	// parameters) outright, thinking or not — Claude Opus 4.7 and later, Kimi's
 	// current models. Every provider drops the parameter for them rather than
 	// fail the request.
-	RejectsSampling bool
+	RejectsSampling bool `json:"rejectsSampling,omitempty"`
 
 	// OpenAI reasoning, which shapes a Chat Completions request (see
 	// shapeForOpenAIModel in openai.go). Unset for every other vendor.
@@ -108,17 +108,17 @@ type CatalogModel struct {
 	// that does not ask for thinking (every utility call) sends it, so a small
 	// output budget is not spent on reasoning. Any effort but "none" means the
 	// model is reasoning, and a reasoning model rejects temperature.
-	EffortFloor string
+	EffortFloor string `json:"effortFloor,omitempty"`
 	// ToolsNeedNoReasoning marks a model that takes tools on Chat Completions
 	// only with reasoning_effort "none" — GPT-5.4 and later. Tool calls with
 	// reasoning need the Responses API, which ogcode does not speak.
-	ToolsNeedNoReasoning bool
+	ToolsNeedNoReasoning bool `json:"toolsNeedNoReasoning,omitempty"`
 	// ResponsesOnly marks a model whose tool calling needs the Responses API
 	// (GPT-6 Astra, the pro and Codex models). The agent always sends tools
 	// over Chat Completions, so the OpenAI provider does not offer it; the
 	// catalogue still knows its window and price for a host that bridges the
 	// two (OpenRouter).
-	ResponsesOnly bool
+	ResponsesOnly bool `json:"responsesOnly,omitempty"`
 
 	// Efforts are the reasoning-effort levels the model itself accepts, lowest
 	// first, in ogcode's vocabulary (see effort.go): graded levels for a model
@@ -130,8 +130,18 @@ type CatalogModel struct {
 	// These are facts about the model. Whether a given endpoint can carry the
 	// level is the provider's call (see EffortSpecifier), so a model listed
 	// here can still have no picker behind a host that takes no effort field.
-	Efforts       []string
-	DefaultEffort string
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"defaultEffort,omitempty"`
+
+	// Collection places a model the upstream layer ADDS (one no compiled-in
+	// entry claims) with a provider that lists its own models: "anthropic"
+	// extends the Anthropic provider's picker, "openai" the OpenAI one,
+	// "google" the Gemini lookups, "open" the cross-provider open-weight
+	// catalogue, "legacy" the retired list. Anything else, including empty, is
+	// lookup-only: the entry enriches a user-declared model but no picker gains
+	// it. Compiled-in rows carry no collection; the upstream data file sets it
+	// when it is generated.
+	Collection string `json:"collection,omitempty"`
 }
 
 // Effort ladders shared by catalogue entries, lowest first. A ladder records

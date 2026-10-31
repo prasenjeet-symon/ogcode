@@ -368,6 +368,12 @@ func openRouterEfforts(r *oaiModelReasoning) (levels []string, def string) {
 type oaiModelPricing struct {
 	Prompt     any `json:"prompt"`
 	Completion any `json:"completion"`
+	// Cached-input prices, where the endpoint publishes them: OpenRouter and
+	// the OGX gateway both send these ("-1" or absent = unknown). Without
+	// them a self-metered gateway's cache-read rate would be dropped and the
+	// biller would guess 0.1x the input price instead.
+	InputCacheRead  any `json:"input_cache_read,omitempty"`
+	InputCacheWrite any `json:"input_cache_write,omitempty"`
 }
 
 // oaiPricePerM converts a models-list per-token price to per million tokens.
@@ -479,6 +485,8 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 		if m.Pricing != nil {
 			info.InputPricePerM = oaiPricePerM(m.Pricing.Prompt)
 			info.OutputPricePerM = oaiPricePerM(m.Pricing.Completion)
+			info.CacheReadPricePerM = oaiPricePerM(m.Pricing.InputCacheRead)
+			info.CacheWritePricePerM = oaiPricePerM(m.Pricing.InputCacheWrite)
 		}
 		info.Efforts, info.DefaultEffort = openRouterEfforts(m.Reasoning)
 		models = append(models, info)
@@ -616,8 +624,9 @@ func (p *OpenAIProvider) staticFallback() []ModelInfo {
 // whose tool calling needs the Responses API: every agent request carries
 // tools over Chat Completions, so offering one would only offer a failure.
 func openAICatalog() []ModelInfo {
-	list := make([]ModelInfo, 0, len(OpenAIModels))
-	for _, m := range OpenAIModels {
+	models := openAICatalogList()
+	list := make([]ModelInfo, 0, len(models))
+	for _, m := range models {
 		if m.ResponsesOnly {
 			continue
 		}
@@ -636,20 +645,16 @@ func openAICatalog() []ModelInfo {
 	return list
 }
 
-var (
-	openAICatalogOnce sync.Once
-	openAICatalogIdx  catalogIndex
-)
+var openAICatalogMemo = catalogMemo{build: func() catalogIndex {
+	return newCatalogIndex(openAICatalogList())
+}}
 
 // openAICatalogModel looks up an OpenAI model's catalogued facts under any of
 // its spellings — a dated snapshot, a proxy's "openai/gpt-6-sol". Only OpenAI
 // entries answer, so another vendor's model on a compatible endpoint keeps the
 // request exactly as the caller built it.
 func openAICatalogModel(id string) (CatalogModel, bool) {
-	openAICatalogOnce.Do(func() {
-		openAICatalogIdx = newCatalogIndex(OpenAIModels)
-	})
-	return openAICatalogIdx.lookup(id)
+	return openAICatalogMemo.lookup(id)
 }
 
 // shapeForOpenAIModel fits a Chat Completions request to what a catalogued

@@ -25,8 +25,20 @@ type ModelPreference struct {
 	// be grouped together in the UI instead of all collapsing under "OpenAI".
 	// Empty for built-in models and legacy custom models (falls back to providerId).
 	Collection string `json:"collection"`
-	CreatedAt  int64  `json:"createdAt"`
-	UpdatedAt  int64  `json:"updatedAt"`
+	// The rest is what the user told us about a custom model no catalogue knows.
+	// Each zero value (or false) means "not configured", so that field falls
+	// back to a catalogue or provider fact instead of overriding it.
+	ContextWindow       int     `json:"contextWindow"`
+	MaxOutputTokens     int     `json:"maxOutputTokens"`
+	InputPricePerM      float64 `json:"inputPricePerM"`
+	OutputPricePerM     float64 `json:"outputPricePerM"`
+	CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
+	CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
+	// SupportsImages can only ever force image support ON: a bool has no way to
+	// say "yes" from "unconfigured", and catalogue facts outrank a false.
+	SupportsImages bool  `json:"supportsImages"`
+	CreatedAt      int64 `json:"createdAt"`
+	UpdatedAt      int64 `json:"updatedAt"`
 }
 
 // ModelCapability is a probed/known capability record for a model, persisted so

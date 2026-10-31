@@ -33,14 +33,60 @@ func TestPriceOnQuotesTheCatalogueForMeteredAPIs(t *testing.T) {
 	}
 }
 
-// Local Ollama is free and Ollama Cloud and OGX are subscriptions: a catalogued
-// model served there has no per-token price to quote.
+// Local Ollama is free and Ollama Cloud is a subscription: a catalogued model
+// served there has no per-token price to quote. OGX meters its own published
+// rates and is pinned separately below.
 func TestPriceOnUnmeteredProvidersQuoteNothing(t *testing.T) {
 	cm := pricedClaude(t)
-	for _, pid := range []string{"ollama", "ogx"} {
-		if got, ok := NewRegistry().PriceOn(pid, cm.ID); ok {
-			t.Errorf("PriceOn(%s) = %+v, want no price", pid, got)
-		}
+	if got, ok := NewRegistry().PriceOn("ollama", cm.ID); ok {
+		t.Errorf("PriceOn(ollama) = %+v, want no price", got)
+	}
+}
+
+// OGX meters the plan's own rates: what the gateway publishes is the bill, the
+// vendor's catalogue price is not a stand-in for it, and the user's edits layer
+// on top of the published rate. Nothing published means nothing quotes —
+// unpriced, not free, not the vendor's price.
+func TestPriceOnOGXQuotesOnlyTheGateway(t *testing.T) {
+	cm := pricedClaude(t)
+	if got, ok := NewRegistry().PriceOn("ogx", cm.ID); ok {
+		t.Errorf("unpublished ogx quote = %+v, %v; want none — the catalogue is not the plan's rates", got, ok)
+	}
+	reg := NewRegistry()
+	reg.Register(windowProvider{id: "ogx", models: []ModelInfo{
+		// The gateway publishes its own cache-read rate alongside the plan's
+		// input/output rates (input_cache_read on the wire); every figure must
+		// come through, and the vendor's catalogue prices must not leak in.
+		{ID: cm.ID, InputPricePerM: 1, OutputPricePerM: 5, CacheReadPricePerM: 0.009},
+	}})
+	got, ok := reg.PriceOn("ogx", cm.ID)
+	if want := (ModelPrice{Input: 1, Output: 5, CacheRead: 0.009}); got != want || !ok {
+		t.Errorf("published ogx rate = %+v, %v; want %+v", got, ok, want)
+	}
+	// The user's edit layers on top, field by field — but the gateway's own
+	// cache rate survives it: the user edits only the input/output fields.
+	reg.SetModelOverride(cm.ID, CustomModelInfo{ProviderID: "ogx", InputPricePerM: 2})
+	got, ok = reg.PriceOn("ogx", cm.ID)
+	if want := (ModelPrice{Input: 2, Output: 5, CacheRead: 0.009}); got != want || !ok {
+		t.Errorf("edited ogx rate = %+v, %v; want %+v", got, ok, want)
+	}
+
+	// A cache rate the user records wins over the gateway's published one;
+	// an unset cache field still falls back to the gateway's own figure, even
+	// when the user edits the input price or a different cache field.
+	reg.Register(windowProvider{id: "ogx", models: []ModelInfo{
+		{ID: "ogx/user-read", InputPricePerM: 1, OutputPricePerM: 5, CacheReadPricePerM: 0.009, CacheWritePricePerM: 0.03},
+		{ID: "ogx/user-write", InputPricePerM: 1, OutputPricePerM: 5, CacheReadPricePerM: 0.009, CacheWritePricePerM: 0.03},
+	}})
+	reg.SetModelOverride("ogx/user-read", CustomModelInfo{ProviderID: "ogx", CacheReadPricePerM: 0.02})
+	got, ok = reg.PriceOn("ogx", "ogx/user-read")
+	if want := (ModelPrice{Input: 1, Output: 5, CacheRead: 0.02, CacheWrite: 0.03}); got != want || !ok {
+		t.Errorf("user ogx cache-read rate = %+v, %v; want %+v", got, ok, want)
+	}
+	reg.SetModelOverride("ogx/user-write", CustomModelInfo{ProviderID: "ogx", InputPricePerM: 2, CacheWritePricePerM: 0.3})
+	got, ok = reg.PriceOn("ogx", "ogx/user-write")
+	if want := (ModelPrice{Input: 2, Output: 5, CacheRead: 0.009, CacheWrite: 0.3}); got != want || !ok {
+		t.Errorf("user ogx cache-write rate = %+v, %v; want %+v — the gateway's read rate survives", got, ok, want)
 	}
 }
 
@@ -197,5 +243,91 @@ func TestEndpointHostNamesOnlyRepointedSlots(t *testing.T) {
 	}
 	if got := EndpointHost(nil); got != "" {
 		t.Errorf("EndpointHost(nil) = %q", got)
+	}
+}
+
+// TestPriceOnHonoursUserPricesForCustomModels pins the user's own per-1M prices
+// for a model the catalogue does not know: they win over the provider's listing
+// and the catalogue, field by field, so a user who knows only one of the two
+// fills in the other. The rules that decide before any price is read still win —
+// an unmetered provider bills nothing and a ":free" variant stays free.
+func TestPriceOnHonoursUserPricesForCustomModels(t *testing.T) {
+	cm := pricedClaude(t)
+	reg := NewRegistry()
+	// The provider's own listing is what the user's price has to beat.
+	reg.Register(windowProvider{id: "openrouter", models: []ModelInfo{
+		{ID: "vendor/hand-added", InputPricePerM: 1, OutputPricePerM: 2},
+		{ID: "vendor/output-only", InputPricePerM: 1, OutputPricePerM: 2},
+		{ID: "vendor/cached", InputPricePerM: 1, OutputPricePerM: 2, CacheReadPricePerM: 0.5, CacheWritePricePerM: 1.25},
+		{ID: "vendor/cache-read-only", InputPricePerM: 1, OutputPricePerM: 2, CacheReadPricePerM: 0.75, CacheWritePricePerM: 1.25},
+	}})
+	reg.RegisterCustomModelInfo("vendor/hand-added", CustomModelInfo{ProviderID: "openrouter", InputPricePerM: 3, OutputPricePerM: 9})
+	reg.RegisterCustomModelInfo("vendor/output-only", CustomModelInfo{ProviderID: "openrouter", OutputPricePerM: 99})
+	reg.RegisterCustomModelInfo("vendor/hand-added:free", CustomModelInfo{ProviderID: "openrouter", InputPricePerM: 3})
+	reg.RegisterCustomModelInfo("vendor/other-provider", CustomModelInfo{ProviderID: "openai", InputPricePerM: 3, OutputPricePerM: 9})
+	// Cache rates the user recorded by hand — the real figure a self-metered
+	// gateway publishes, not a multiple of anything: each wins over the
+	// listing's and the catalogue's on its own; an unset one keeps today's
+	// fallback exactly.
+	reg.RegisterCustomModelInfo("vendor/cached", CustomModelInfo{ProviderID: "openrouter", InputPricePerM: 3, OutputPricePerM: 9, CacheReadPricePerM: 0.18, CacheWritePricePerM: 2})
+	reg.RegisterCustomModelInfo("vendor/cache-read-only", CustomModelInfo{ProviderID: "openrouter", CacheReadPricePerM: 0.2})
+	// A catalogued model the user repriced: only its input price is theirs.
+	reg.RegisterCustomModelInfo(cm.ID, CustomModelInfo{ProviderID: "anthropic", InputPricePerM: 5})
+
+	tests := []struct {
+		name       string
+		providerID string
+		modelID    string
+		want       ModelPrice
+		wantOK     bool
+	}{
+		{
+			name:       "user prices win over the provider's listing",
+			providerID: "openrouter", modelID: "vendor/hand-added",
+			want: ModelPrice{Input: 3, Output: 9}, wantOK: true,
+		},
+		{
+			name:       "a zero field falls back to the listing",
+			providerID: "openrouter", modelID: "vendor/output-only",
+			want: ModelPrice{Input: 1, Output: 99}, wantOK: true,
+		},
+		{
+			name:       "user cache rates win over the listing, field by field",
+			providerID: "openrouter", modelID: "vendor/cached",
+			want: ModelPrice{Input: 3, Output: 9, CacheRead: 0.18, CacheWrite: 2}, wantOK: true,
+		},
+		{
+			name:       "a lone cache rate still edits, and unset cache fields fall back",
+			providerID: "openrouter", modelID: "vendor/cache-read-only",
+			want: ModelPrice{Input: 1, Output: 2, CacheRead: 0.2, CacheWrite: 1.25}, wantOK: true,
+		},
+		{
+			name:       "a user input price drops the catalogue's cache multipliers",
+			providerID: "anthropic", modelID: cm.ID,
+			want: ModelPrice{Input: 5, Output: cm.OutputPricePerM}, wantOK: true,
+		},
+		{
+			name:       "an unmetered provider bills nothing whatever the user typed",
+			providerID: "ollama", modelID: "vendor/hand-added",
+			want: ModelPrice{}, wantOK: false,
+		},
+		{
+			name:       "a free variant stays free",
+			providerID: "openrouter", modelID: "vendor/hand-added:free",
+			want: ModelPrice{}, wantOK: true,
+		},
+		{
+			name:       "a price configured for another provider is not applied",
+			providerID: "openrouter", modelID: "vendor/other-provider",
+			want: ModelPrice{}, wantOK: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := reg.PriceOn(tt.providerID, tt.modelID)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("PriceOn(%s, %s) = %+v, %v; want %+v, %v", tt.providerID, tt.modelID, got, ok, tt.want, tt.wantOK)
+			}
+		})
 	}
 }

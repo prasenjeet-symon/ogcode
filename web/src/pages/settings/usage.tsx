@@ -14,8 +14,9 @@ import { Chip, EmptyState, Group, Row, Spinner, Tag, matches, useShell } from '.
 // opens on this project, since that is what a page inside a project's settings
 // reads as, and says in words which projects and which period every figure
 // covers. Two kinds of money appear and are never blended into one headline:
-//   · Billed — what per-token providers charged, at their price;
-//   · Plan value (list price) — what OGX, Ollama Cloud and local models did,
+//   · Billed — what per-token providers charged, at their price; OGX bills
+//     there too, at the rates its gateway publishes;
+//   · Plan value (list price) — what Ollama Cloud and local models did,
 //     priced at the vendor's list price: the bill a plan spared, not a charge.
 // ---------------------------------------------------------------------------
 

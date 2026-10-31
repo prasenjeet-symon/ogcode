@@ -52,7 +52,7 @@ func projectIndexPrompt(role string, hasBash, hasDocTools bool) string {
 
 	// Held in a variable rather than inlined so the whole section, heading
 	// included, disappears for a shell-less agent.
-	docRule := `Documents are indexed too, but a PDF or DOCX leaf carries labels aggregated across the whole file, not a per-page breakdown, so it tells you which document is relevant but not which page: call "pdf_index" (or "docx_index") on that file for its per-page labels, then "read_pdf_page" (or "read_docx_page") for the page itself.`
+	docRule := `Documents are indexed too, but a PDF or DOCX leaf carries labels aggregated across the whole file, not a per-page breakdown, so it tells you which document is relevant but not which page: call "pdf_index" (or "docx_index") on that file for its per-page labels, then "read_pdf_page" (or "read_docx_page") for the page itself. Spreadsheets are indexed as well: call "query_sheet" on a CSV, TSV or XLSX/XLSM file to run one read-only SQL query against its sheets — each sheet becomes a SQLite table, so "SELECT * FROM Sheet1 LIMIT 20" is the cheapest way to see what the file holds.`
 	if !hasDocTools {
 		docRule = `Documents are indexed too, so PDF and DOCX files appear in the tree with labels aggregated across the whole file. You have no tool to open one. If the work depends on what is inside a document, say so explicitly rather than guessing at its contents.`
 	}

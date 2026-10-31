@@ -9,9 +9,11 @@ import (
 )
 
 // textExtensions is the set of file extensions treated as plain text or source code.
+// Delimited files (.csv, .tsv) are NOT here — they are spreadsheets (see
+// sheet.go), profiled one page per sheet instead of read as one giant dump.
 var textExtensions = map[string]struct{}{
 	// Plain text / docs
-	".txt": {}, ".md": {}, ".rst": {}, ".csv": {},
+	".txt": {}, ".md": {}, ".rst": {},
 	// Web
 	".html": {}, ".htm": {}, ".css": {}, ".scss": {}, ".sass": {},
 	".xml": {}, ".vue": {}, ".svelte": {},

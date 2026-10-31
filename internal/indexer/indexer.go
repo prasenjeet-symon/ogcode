@@ -269,7 +269,7 @@ func (idx *Indexer) collectFilesLimited(max int) ([]string, error) {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
-		if ext == ".pdf" || ext == ".docx" || IsTextFile(ext) {
+		if ext == ".pdf" || ext == ".docx" || isSheetExt(ext) || IsTextFile(ext) {
 			allFiles = append(allFiles, path)
 			if max > 0 && len(allFiles) >= max {
 				return filepath.SkipAll
@@ -302,6 +302,7 @@ type docItem struct {
 	corpora      []PageCorpus
 	isPDF        bool
 	isDocx       bool
+	isSheet      bool
 	keywordCount int // total keywords across all pages
 }
 
@@ -327,19 +328,21 @@ func (idx *Indexer) Run(ctx context.Context) error {
 	slog.Info("found indexable files", "count", len(allFiles))
 
 	// Log file type breakdown for debugging.
-	var pdfCount, docxCount, textCount int
+	var pdfCount, docxCount, sheetCount, textCount int
 	for _, f := range allFiles {
 		ext := strings.ToLower(filepath.Ext(f))
-		switch ext {
-		case ".pdf":
+		switch {
+		case ext == ".pdf":
 			pdfCount++
-		case ".docx":
+		case ext == ".docx":
 			docxCount++
+		case isSheetExt(ext):
+			sheetCount++
 		default:
 			textCount++
 		}
 	}
-	slog.Info("file type breakdown", "pdf", pdfCount, "docx", docxCount, "text", textCount)
+	slog.Info("file type breakdown", "pdf", pdfCount, "docx", docxCount, "sheets", sheetCount, "text", textCount)
 
 	// Purge stale entries: remove index rows for files that no longer exist on disk.
 	if err := idx.purgeDeletedDocs(ctx, allFiles); err != nil {
@@ -371,11 +374,14 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		}
 		isPDF := strings.ToLower(filepath.Ext(filePath)) == ".pdf"
 		isDocx := strings.ToLower(filepath.Ext(filePath)) == ".docx"
+		isSheet := isSheetExt(strings.ToLower(filepath.Ext(filePath)))
 		fileType := "text"
 		if isPDF {
 			fileType = "pdf"
 		} else if isDocx {
 			fileType = "docx"
+		} else if isSheet {
+			fileType = "sheet"
 		}
 		var pages []PageText
 		var err error
@@ -383,6 +389,8 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			pages, err = ExtractPages(filePath)
 		} else if isDocx {
 			pages, err = ExtractDocxPages(filePath)
+		} else if isSheet {
+			pages, err = ExtractSheetPages(filePath)
 		} else {
 			pages, err = ExtractTextFile(filePath)
 		}
@@ -405,6 +413,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			corpora:      corpora,
 			isPDF:        isPDF,
 			isDocx:       isDocx,
+			isSheet:      isSheet,
 			keywordCount: kwCount,
 		})
 	}
@@ -529,13 +538,15 @@ func (idx *Indexer) purgeDeletedDocs(ctx context.Context, allFiles []string) err
 }
 
 // batch represents a group of documents to be sent to a single LLM session,
-// or a single document (PDF or DOCX) that needs its own session due to size.
+// or a single multi-page document (PDF, DOCX or spreadsheet) that needs its
+// own session due to size.
 type batch struct {
 	// For multi-file batches (text/code files): multiple docItems
 	items []docItem
-	// For single-document batches (PDF or DOCX): one document
-	isPDF  bool
-	isDocx bool
+	// For single-document batches (PDF, DOCX or spreadsheet): one document
+	isPDF   bool
+	isDocx  bool
+	isSheet bool
 }
 
 // assembleBatches groups documents into batches. PDFs and DOCX files always get
@@ -545,11 +556,11 @@ type batch struct {
 func (idx *Indexer) assembleBatches(items []docItem) []*batch {
 	var batches []*batch
 
-	// Separate multi-page documents (PDF, DOCX) from text files.
+	// Separate multi-page documents (PDF, DOCX, spreadsheets) from text files.
 	var multiPageDocs []docItem
 	var textFiles []docItem
 	for _, item := range items {
-		if item.isPDF || item.isDocx {
+		if item.isPDF || item.isDocx || item.isSheet {
 			multiPageDocs = append(multiPageDocs, item)
 		} else {
 			textFiles = append(textFiles, item)
@@ -570,10 +581,12 @@ func (idx *Indexer) assembleBatches(items []docItem) []*batch {
 					corpora:      doc.corpora[start:end],
 					isPDF:        doc.isPDF,
 					isDocx:       doc.isDocx,
+					isSheet:      doc.isSheet,
 					keywordCount: doc.keywordCount,
 				}},
-				isPDF:  doc.isPDF,
-				isDocx: doc.isDocx,
+				isPDF:   doc.isPDF,
+				isDocx:  doc.isDocx,
+				isSheet: doc.isSheet,
 			})
 		}
 	}
@@ -606,8 +619,8 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 	var userText string
 	var title string
 
-	if b.isPDF || b.isDocx {
-		// Single multi-page document (PDF or DOCX): use the original per-file format.
+	if b.isPDF || b.isDocx || b.isSheet {
+		// Single multi-page document (PDF, DOCX or spreadsheet): per-file format.
 		item := b.items[0]
 		var sb strings.Builder
 		for _, c := range item.corpora {
@@ -656,7 +669,7 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 		title = fmt.Sprintf("Index batch: %d files", len(b.items))
 	}
 
-	slog.Info("processing batch", "title", title, "files", len(b.items), "isPDF", b.isPDF, "isDocx", b.isDocx)
+	slog.Info("processing batch", "title", title, "files", len(b.items), "isPDF", b.isPDF, "isDocx", b.isDocx, "isSheet", b.isSheet)
 
 	sess := &session.Session{
 		ID:          session.NewSessionID(),
@@ -745,10 +758,13 @@ func (idx *Indexer) IndexDocument(ctx context.Context, filePath string) error {
 	var err error
 	isPDF := strings.ToLower(filepath.Ext(filePath)) == ".pdf"
 	isDocx := strings.ToLower(filepath.Ext(filePath)) == ".docx"
+	isSheet := isSheetExt(strings.ToLower(filepath.Ext(filePath)))
 	if isPDF {
 		pages, err = ExtractPages(filePath)
 	} else if isDocx {
 		pages, err = ExtractDocxPages(filePath)
+	} else if isSheet {
+		pages, err = ExtractSheetPages(filePath)
 	} else {
 		pages, err = ExtractTextFile(filePath)
 	}
@@ -771,6 +787,7 @@ func (idx *Indexer) IndexDocument(ctx context.Context, filePath string) error {
 		corpora:      corpora,
 		isPDF:        isPDF,
 		isDocx:       isDocx,
+		isSheet:      isSheet,
 		keywordCount: kwCount,
 	}
 
@@ -799,13 +816,15 @@ type Plan struct {
 	// reads every file, an incremental run only the pending ones. A single
 	// breakdown would be shown next to whichever count the dialog is leading
 	// with and describe the other one.
-	PDF  int `json:"pdf"`
-	Docx int `json:"docx"`
-	Text int `json:"text"`
+	PDF   int `json:"pdf"`
+	Docx  int `json:"docx"`
+	Sheet int `json:"sheet"`
+	Text  int `json:"text"`
 
-	PendingPDF  int `json:"pendingPdf"`
-	PendingDocx int `json:"pendingDocx"`
-	PendingText int `json:"pendingText"`
+	PendingPDF   int `json:"pendingPdf"`
+	PendingDocx  int `json:"pendingDocx"`
+	PendingSheet int `json:"pendingSheet"`
+	PendingText  int `json:"pendingText"`
 }
 
 // Preview reports what Run would do, without extracting a page or calling a model.
@@ -827,11 +846,14 @@ func (idx *Indexer) Preview() (*Plan, error) {
 
 	for _, path := range files {
 		onDisk[path] = struct{}{}
-		switch strings.ToLower(filepath.Ext(path)) {
-		case ".pdf":
+		ext := strings.ToLower(filepath.Ext(path))
+		switch {
+		case ext == ".pdf":
 			plan.PDF++
-		case ".docx":
+		case ext == ".docx":
 			plan.Docx++
+		case isSheetExt(ext):
+			plan.Sheet++
 		default:
 			plan.Text++
 		}
@@ -839,7 +861,7 @@ func (idx *Indexer) Preview() (*Plan, error) {
 
 	if idx.docStore == nil {
 		plan.Pending = plan.Total
-		plan.PendingPDF, plan.PendingDocx, plan.PendingText = plan.PDF, plan.Docx, plan.Text
+		plan.PendingPDF, plan.PendingDocx, plan.PendingSheet, plan.PendingText = plan.PDF, plan.Docx, plan.Sheet, plan.Text
 		return plan, nil
 	}
 
@@ -862,16 +884,18 @@ func (idx *Indexer) Preview() (*Plan, error) {
 			plan.Indexed++
 			continue
 		}
-		switch strings.ToLower(filepath.Ext(path)) {
-		case ".pdf":
+		switch ext := strings.ToLower(filepath.Ext(path)); {
+		case ext == ".pdf":
 			plan.PendingPDF++
-		case ".docx":
+		case ext == ".docx":
 			plan.PendingDocx++
+		case isSheetExt(ext):
+			plan.PendingSheet++
 		default:
 			plan.PendingText++
 		}
 	}
-	plan.Pending = plan.PendingPDF + plan.PendingDocx + plan.PendingText
+	plan.Pending = plan.PendingPDF + plan.PendingDocx + plan.PendingSheet + plan.PendingText
 	return plan, nil
 }
 

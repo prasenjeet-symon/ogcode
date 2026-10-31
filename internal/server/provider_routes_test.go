@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/provider"
@@ -335,5 +336,201 @@ func TestSessionCarriesTheChosenProvider(t *testing.T) {
 	}
 	if updated.Provider != "openai" {
 		t.Fatalf("after PATCH provider = %q, want openai", updated.Provider)
+	}
+}
+
+// TestCustomModelMetadataRoundTrips pins the custom-model settings contract at
+// the HTTP boundary: the window, output ceiling, per-1M prices and image support
+// the user typed for a model no catalogue knows go in on
+// POST /api/models/preference and come back on GET /api/models — with the
+// compaction threshold derived from the configured window, so the context meter
+// agrees with what the loop will do.
+func TestCustomModelMetadataRoundTrips(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.routes()
+	srv.registry.ReplaceProviders(map[string]provider.Provider{
+		"openai": stubProvider{id: "openai"},
+	})
+
+	body := strings.NewReader(`{"id":"acme-vision-1","providerId":"openai","displayName":"Acme Vision","enabled":true,"isCustom":true,"collection":"Mine","contextWindow":200000,"maxOutputTokens":32000,"inputPricePerM":3.5,"outputPricePerM":14,"cacheReadPricePerM":0.18,"cacheWritePricePerM":2,"supportsImages":true}`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/models/preference", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST preference = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/models = %d, want 200", rec.Code)
+	}
+	var models []struct {
+		ID                  string  `json:"id"`
+		ProviderID          string  `json:"providerId"`
+		IsCustom            bool    `json:"isCustom"`
+		ContextWindow       int     `json:"contextWindow"`
+		CompactAtTokens     int     `json:"compactAtTokens"`
+		MaxOutputTokens     int     `json:"maxOutputTokens"`
+		InputPricePerM      float64 `json:"inputPricePerM"`
+		OutputPricePerM     float64 `json:"outputPricePerM"`
+		CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
+		CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
+		SupportsImages      bool    `json:"supportsImages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
+		t.Fatalf("decode models: %v (body: %s)", err, rec.Body.String())
+	}
+
+	var found bool
+	for _, m := range models {
+		if m.ID != "acme-vision-1" || m.ProviderID != "openai" {
+			continue
+		}
+		found = true
+		if !m.IsCustom {
+			t.Error("isCustom = false, want true")
+		}
+		if m.ContextWindow != 200000 {
+			t.Errorf("contextWindow = %d, want 200000", m.ContextWindow)
+		}
+		if want := agent.CompactionThreshold(200000); m.CompactAtTokens != want {
+			t.Errorf("compactAtTokens = %d, want %d", m.CompactAtTokens, want)
+		}
+		if m.MaxOutputTokens != 32000 {
+			t.Errorf("maxOutputTokens = %d, want 32000", m.MaxOutputTokens)
+		}
+		if m.InputPricePerM != 3.5 || m.OutputPricePerM != 14 {
+			t.Errorf("prices = %v/%v, want 3.5/14", m.InputPricePerM, m.OutputPricePerM)
+		}
+		if m.CacheReadPricePerM != 0.18 || m.CacheWritePricePerM != 2 {
+			t.Errorf("cache prices = %v/%v, want 0.18/2", m.CacheReadPricePerM, m.CacheWritePricePerM)
+		}
+		if !m.SupportsImages {
+			t.Error("supportsImages = false, want true")
+		}
+	}
+	if !found {
+		t.Fatalf("custom model missing from GET /api/models (body: %s)", rec.Body.String())
+	}
+}
+
+// TestListedModelMetadataOverrideRoundTrips pins the edit path for a model the
+// catalogue or a provider already lists: POST /api/models/preference with the
+// five facts records them as an override layered over the listing, so GET
+// /api/models answers with the user's window, output ceiling, prices and image
+// support while the model stays a listed model (isCustom false) with its
+// collection and catalogue name intact. The override rides the response for the
+// editor to prefill, survives a plain enable/disable save, and disappears when
+// every field is cleared so the listing answers again.
+func TestListedModelMetadataOverrideRoundTrips(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.routes()
+	srv.registry.ReplaceProviders(map[string]provider.Provider{
+		"openrouter": stubProvider{id: "openrouter", models: []provider.ModelInfo{{
+			ID: "acme/listed-1", ProviderID: "openrouter", ActiveByDefault: true,
+			ContextWindow: 64000, MaxOutputTokens: 4096,
+		}}},
+	})
+
+	post := func(body string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/models/preference", strings.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST preference = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+		}
+	}
+	type override struct {
+		ContextWindow       int     `json:"contextWindow"`
+		MaxOutputTokens     int     `json:"maxOutputTokens"`
+		InputPricePerM      float64 `json:"inputPricePerM"`
+		OutputPricePerM     float64 `json:"outputPricePerM"`
+		CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
+		CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
+		SupportsImages      bool    `json:"supportsImages"`
+	}
+	type entry struct {
+		ID              string    `json:"id"`
+		ProviderID      string    `json:"providerId"`
+		IsCustom        bool      `json:"isCustom"`
+		Enabled         bool      `json:"enabled"`
+		ContextWindow   int       `json:"contextWindow"`
+		CompactAtTokens int       `json:"compactAtTokens"`
+		MaxOutputTokens int       `json:"maxOutputTokens"`
+		InputPricePerM  float64   `json:"inputPricePerM"`
+		OutputPricePerM float64   `json:"outputPricePerM"`
+		SupportsImages  bool      `json:"supportsImages"`
+		Override        *override `json:"override"`
+	}
+	list := func() entry {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+		var models []entry
+		if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
+			t.Fatalf("decode models: %v (body: %s)", err, rec.Body.String())
+		}
+		for _, m := range models {
+			if m.ID == "acme/listed-1" && m.ProviderID == "openrouter" {
+				return m
+			}
+		}
+		t.Fatalf("listed model missing from GET /api/models (body: %s)", rec.Body.String())
+		return entry{}
+	}
+
+	// The same save the settings editor makes: the row's identity, its enabled
+	// state, and the figures the user typed.
+	post(`{"id":"acme/listed-1","providerId":"openrouter","displayName":"Acme Listed","enabled":true,"contextWindow":200000,"maxOutputTokens":32000,"inputPricePerM":3.5,"outputPricePerM":14,"cacheReadPricePerM":0.18,"cacheWritePricePerM":2,"supportsImages":true}`)
+
+	got := list()
+	if got.IsCustom {
+		t.Error("isCustom = true, want false: an edit must not turn a listed model into a custom one")
+	}
+	if got.ContextWindow != 200000 {
+		t.Errorf("contextWindow = %d, want the user's 200000", got.ContextWindow)
+	}
+	if want := agent.CompactionThreshold(200000); got.CompactAtTokens != want {
+		t.Errorf("compactAtTokens = %d, want %d", got.CompactAtTokens, want)
+	}
+	if got.MaxOutputTokens != 32000 {
+		t.Errorf("maxOutputTokens = %d, want the user's 32000", got.MaxOutputTokens)
+	}
+	if got.InputPricePerM != 3.5 || got.OutputPricePerM != 14 {
+		t.Errorf("prices = %v/%v, want the user's 3.5/14", got.InputPricePerM, got.OutputPricePerM)
+	}
+	if !got.SupportsImages {
+		t.Error("supportsImages = false, want the user's yes")
+	}
+	if got.Override == nil || got.Override.ContextWindow != 200000 || got.Override.InputPricePerM != 3.5 ||
+		got.Override.CacheReadPricePerM != 0.18 || got.Override.CacheWritePricePerM != 2 || !got.Override.SupportsImages {
+		t.Errorf("override = %+v, want the user's own record, cache prices included", got.Override)
+	}
+
+	// A toggle resends the override (the row replaces every metadata column), so
+	// disabling the model must not silently forget what the user configured.
+	post(`{"id":"acme/listed-1","providerId":"openrouter","displayName":"Acme Listed","enabled":false,"contextWindow":200000,"maxOutputTokens":32000,"inputPricePerM":3.5,"outputPricePerM":14,"cacheReadPricePerM":0.18,"cacheWritePricePerM":2,"supportsImages":true}`)
+	got = list()
+	if got.Enabled {
+		t.Error("enabled = true, want false after the toggle")
+	}
+	if got.ContextWindow != 200000 || !got.SupportsImages {
+		t.Errorf("the toggle dropped the edit: window %d, images %v", got.ContextWindow, got.SupportsImages)
+	}
+
+	// Clearing every field is how the editor says "use what the listing says".
+	post(`{"id":"acme/listed-1","providerId":"openrouter","displayName":"Acme Listed","enabled":false}`)
+	got = list()
+	if got.Override != nil {
+		t.Errorf("override = %+v, want none after clearing every field", got.Override)
+	}
+	if got.ContextWindow != 64000 {
+		t.Errorf("contextWindow after clearing = %d, want the listed 64000", got.ContextWindow)
+	}
+	if got.MaxOutputTokens != 4096 {
+		t.Errorf("maxOutputTokens after clearing = %d, want the listed 4096", got.MaxOutputTokens)
+	}
+	if got.SupportsImages {
+		t.Error("supportsImages = true, want the listed no")
 	}
 }

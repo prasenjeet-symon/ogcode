@@ -165,8 +165,12 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 	if err != nil {
 		return Result{}, fmt.Errorf("list docx files: %w", err)
 	}
+	sheetEntries, err := t.Store.ListSheetFiles(prefix)
+	if err != nil {
+		return Result{}, fmt.Errorf("list sheet files: %w", err)
+	}
 
-	totalFiles := len(textEntries) + countDistinctDocs(pdfEntries) + countDistinctDocs(docxEntries)
+	totalFiles := len(textEntries) + countDistinctDocs(pdfEntries) + countDistinctDocs(docxEntries) + countDistinctDocs(sheetEntries)
 	if totalFiles == 0 {
 		msg := "no indexed files found — run Index Docs first to build the project index"
 		if params.Subdir != "" {
@@ -179,7 +183,7 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 	// full and the drill-down reads naturally ("internal/tool/read.go", not
 	// "internal/tool/ internal/tool/ read.go"), while large folders inside it
 	// stay summarized.
-	tree := buildProjectTree(prefix, textEntries, pdfEntries, docxEntries)
+	tree := buildProjectTree(prefix, textEntries, pdfEntries, docxEntries, sheetEntries)
 
 	return Result{
 		Title:  fmt.Sprintf("%s — %s", title, levelSummary(tree, dirStatsOf(tree).files)),
@@ -202,12 +206,13 @@ func countDistinctDocs(entries []*docindex.PageEntry) int {
 }
 
 // docLabelCap is the maximum number of topic labels returned for a multi-page
-// document (PDF or DOCX) in the project tree. A multi-page document's labels are
-// collected across every page (de-duplicated, first-seen order), so unlike a
-// text file there is no natural bound and a cap is required. Set to
-// MaxLabelsPerPage: deep enough that the merged list reads as a real summary of
-// the document rather than a teaser. The full per-page breakdown is available
-// through the dedicated pdf_index / docx_index tools.
+// document (PDF, DOCX or spreadsheet) in the project tree. A multi-page
+// document's labels are collected across every page (de-duplicated, first-seen
+// order), so unlike a text file there is no natural bound and a cap is
+// required. Set to MaxLabelsPerPage: deep enough that the merged list reads as
+// a real summary of the document rather than a teaser. The full per-page
+// breakdown is available through the dedicated pdf_index / docx_index tools
+// (and query_sheet, which reads the file rather than the index).
 const docLabelCap = MaxLabelsPerPage
 
 // textLabelCap is the maximum number of topic labels shown per text/code file.
@@ -699,7 +704,12 @@ func renderProjectLevel(node map[string]any, b *strings.Builder, withLabels bool
 	}
 }
 
-func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntries []*docindex.PageEntry, docxEntries []*docindex.PageEntry) map[string]any {
+// buildProjectTree turns indexed entries into a nested map of the tree.
+// textEntries hold one entry per single-entry text/code file. docGroups is one
+// slice per multi-page document kind — PDF, DOCX, spreadsheets — each holding
+// one entry per page (a sheet, for a workbook), and every group is grouped by
+// DocPath and merged the same way.
+func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, docGroups ...[]*docindex.PageEntry) map[string]any {
 	root := make(map[string]any)
 
 	// Text/code files: one entry per file, leaf = labels array.
@@ -754,16 +764,15 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 		node[parts[len(parts)-1]] = labels
 	}
 
-	// Multi-page documents (PDF and DOCX): multiple entries (one per page) for
-	// the same file. Group them by DocPath, merge all page labels (de-duplicated,
-	// order-preserving), and place a flat label-array leaf — same shape as a
-	// text/code file.
+	// Multi-page documents (PDF, DOCX, spreadsheets): multiple entries (one per
+	// page) for the same file. Group them by DocPath, merge all page labels
+	// (de-duplicated, order-preserving), and place a flat label-array leaf —
+	// same shape as a text/code file.
 	pagesByDoc := make(map[string][]*docindex.PageEntry)
-	for _, e := range pdfEntries {
-		pagesByDoc[e.DocPath] = append(pagesByDoc[e.DocPath], e)
-	}
-	for _, e := range docxEntries {
-		pagesByDoc[e.DocPath] = append(pagesByDoc[e.DocPath], e)
+	for _, group := range docGroups {
+		for _, e := range group {
+			pagesByDoc[e.DocPath] = append(pagesByDoc[e.DocPath], e)
+		}
 	}
 
 	// Sort doc paths for deterministic ordering.
@@ -802,7 +811,7 @@ func buildProjectTree(baseDir string, textEntries []*docindex.PageEntry, pdfEntr
 		// Merge labels from every page, preserving first-seen order and
 		// dropping duplicates. Cap at docLabelCap so the map stays concise —
 		// the full per-page detail is available via the pdf_index / docx_index
-		// tools.
+		// tools, or query_sheet for a spreadsheet.
 		seen := make(map[string]struct{})
 		var merged []string
 		for _, e := range entries {

@@ -20,18 +20,20 @@ func toStored(models []provider.ModelInfo) []session.CatalogModel {
 	out := make([]session.CatalogModel, 0, len(models))
 	for _, m := range models {
 		out = append(out, session.CatalogModel{
-			ID:              m.ID,
-			Name:            m.Name,
-			ProviderID:      m.ProviderID,
-			ActiveByDefault: m.ActiveByDefault,
-			SupportsImages:  m.SupportsImages,
-			ContextWindow:   m.ContextWindow,
-			MaxOutputTokens: m.MaxOutputTokens,
-			Collection:      m.Collection,
-			InputPricePerM:  m.InputPricePerM,
-			OutputPricePerM: m.OutputPricePerM,
-			Efforts:         m.Efforts,
-			DefaultEffort:   m.DefaultEffort,
+			ID:                  m.ID,
+			Name:                m.Name,
+			ProviderID:          m.ProviderID,
+			ActiveByDefault:     m.ActiveByDefault,
+			SupportsImages:      m.SupportsImages,
+			ContextWindow:       m.ContextWindow,
+			MaxOutputTokens:     m.MaxOutputTokens,
+			Collection:          m.Collection,
+			InputPricePerM:      m.InputPricePerM,
+			OutputPricePerM:     m.OutputPricePerM,
+			CacheReadPricePerM:  m.CacheReadPricePerM,
+			CacheWritePricePerM: m.CacheWritePricePerM,
+			Efforts:             m.Efforts,
+			DefaultEffort:       m.DefaultEffort,
 		})
 	}
 	return out
@@ -42,18 +44,20 @@ func toProvider(rows []session.CatalogModel) []provider.ModelInfo {
 	out := make([]provider.ModelInfo, 0, len(rows))
 	for _, m := range rows {
 		out = append(out, provider.ModelInfo{
-			ID:              m.ID,
-			Name:            m.Name,
-			ProviderID:      m.ProviderID,
-			ActiveByDefault: m.ActiveByDefault,
-			SupportsImages:  m.SupportsImages,
-			ContextWindow:   m.ContextWindow,
-			MaxOutputTokens: m.MaxOutputTokens,
-			Collection:      m.Collection,
-			InputPricePerM:  m.InputPricePerM,
-			OutputPricePerM: m.OutputPricePerM,
-			Efforts:         m.Efforts,
-			DefaultEffort:   m.DefaultEffort,
+			ID:                  m.ID,
+			Name:                m.Name,
+			ProviderID:          m.ProviderID,
+			ActiveByDefault:     m.ActiveByDefault,
+			SupportsImages:      m.SupportsImages,
+			ContextWindow:       m.ContextWindow,
+			MaxOutputTokens:     m.MaxOutputTokens,
+			Collection:          m.Collection,
+			InputPricePerM:      m.InputPricePerM,
+			OutputPricePerM:     m.OutputPricePerM,
+			CacheReadPricePerM:  m.CacheReadPricePerM,
+			CacheWritePricePerM: m.CacheWritePricePerM,
+			Efforts:             m.Efforts,
+			DefaultEffort:       m.DefaultEffort,
 		})
 	}
 	return out

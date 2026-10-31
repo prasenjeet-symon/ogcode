@@ -18,8 +18,8 @@ import (
 const (
 	// BillingMetered is billed per token at a known price.
 	BillingMetered = "metered"
-	// BillingIncluded is a flat plan (OGX, Ollama Cloud) or a local model:
-	// nothing is billed per token.
+	// BillingIncluded is a flat plan (Ollama Cloud) or a local model: nothing
+	// is billed per token. OGX meters at the rates its gateway publishes.
 	BillingIncluded = "included"
 	// BillingUnpriced is billed per token at a price nothing publishes.
 	BillingUnpriced = "unpriced"

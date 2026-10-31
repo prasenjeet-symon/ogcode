@@ -371,3 +371,156 @@ func TestServingProviderNeverGuesses(t *testing.T) {
 		t.Error("ResolveProvider should still fall back for routing; the difference is the point")
 	}
 }
+
+// TestRegistryUserConfiguredCustomModel pins what the capability readers answer
+// for a model the user configured by hand: the user's figures are used as given,
+// the context window included — a host listing never caps or raises a window the
+// user set. Nothing is invented for a field the user left empty, and the
+// listing still answers for one they did not configure.
+func TestRegistryUserConfiguredCustomModel(t *testing.T) {
+	const model = "acme-coder-user"
+	tests := []struct {
+		name       string
+		info       CustomModelInfo
+		listed     int // the serving host's listed window; 0 = it does not list the model
+		listedMax  int
+		wantWindow int
+		wantOutput int
+		wantImages bool
+	}{
+		{
+			name:       "user figures answer when nothing else knows the model",
+			info:       CustomModelInfo{ContextWindow: 200000, MaxOutputTokens: 32000, SupportsImages: true},
+			wantWindow: 200000, wantOutput: 32000, wantImages: true,
+		},
+		{
+			name:   "the user's window wins over a smaller host listing",
+			info:   CustomModelInfo{ContextWindow: 400000},
+			listed: 128000, listedMax: 4096,
+			wantWindow: 400000, wantOutput: 4096,
+		},
+		{
+			name:       "a larger host listing does not raise the user's window",
+			info:       CustomModelInfo{ContextWindow: 128000},
+			listed:     200000,
+			wantWindow: 128000,
+		},
+		{
+			name:   "user max output wins over the host listing",
+			info:   CustomModelInfo{MaxOutputTokens: 32000},
+			listed: 128000, listedMax: 4096,
+			wantWindow: 128000, wantOutput: 32000,
+		},
+		{
+			name:   "nothing configured falls through to the host listing",
+			listed: 64000, listedMax: 8192,
+			wantWindow: 64000, wantOutput: 8192,
+		},
+		{
+			name: "nothing configured and nothing known is zero",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRegistry()
+			var models []ModelInfo
+			if tt.listed > 0 {
+				models = []ModelInfo{{ID: model, ProviderID: "openrouter", ContextWindow: tt.listed, MaxOutputTokens: tt.listedMax}}
+			}
+			r.Register(&fakeProvider{id: "openrouter", models: models})
+			info := tt.info
+			info.ProviderID = "openrouter"
+			r.RegisterCustomModelInfo(model, info)
+
+			if got := r.ContextWindow(model); got != tt.wantWindow {
+				t.Errorf("ContextWindow = %d, want %d", got, tt.wantWindow)
+			}
+			if got := r.MaxOutputTokens(model); got != tt.wantOutput {
+				t.Errorf("MaxOutputTokens = %d, want %d", got, tt.wantOutput)
+			}
+			if got := r.ModelSupportsImages(model); got != tt.wantImages {
+				t.Errorf("ModelSupportsImages = %v, want %v", got, tt.wantImages)
+			}
+		})
+	}
+}
+
+// TestSetModelOverrideLayersOnAListedModel pins the edit path for a model the
+// catalogue or a provider already lists: what the user configured answers as
+// their own figures, but the model itself stays listed — IsCustomModel is
+// false, so its routing, its collection and its catalogue name are untouched.
+// A record that configures nothing is no override at all, which is how an
+// editor that clears every field falls back to what the listing says.
+func TestSetModelOverrideLayersOnAListedModel(t *testing.T) {
+	const model = "acme-listed"
+	r := NewRegistry()
+	r.Register(&fakeProvider{id: "openrouter", models: []ModelInfo{{
+		ID: model, ProviderID: "openrouter", ContextWindow: 64000, MaxOutputTokens: 4096,
+	}}})
+
+	if _, ok := r.ModelOverride(model, "openrouter"); ok {
+		t.Fatal("a listed model starts with no override")
+	}
+	r.SetModelOverride(model, CustomModelInfo{
+		ProviderID: "openrouter", ContextWindow: 200000,
+		MaxOutputTokens: 32000, SupportsImages: true,
+	})
+
+	if r.IsCustomModel(model) {
+		t.Fatal("an override must not mark a listed model custom")
+	}
+	if got := r.ContextWindow(model); got != 200000 {
+		t.Errorf("ContextWindow = %d, want the user's 200000", got)
+	}
+	if got := r.MaxOutputTokens(model); got != 32000 {
+		t.Errorf("MaxOutputTokens = %d, want the user's 32000", got)
+	}
+	if !r.ModelSupportsImages(model) {
+		t.Error("ModelSupportsImages must honour the user's yes")
+	}
+	if info, ok := r.ModelOverride(model, "openrouter"); !ok || info.ContextWindow != 200000 {
+		t.Errorf("ModelOverride = %+v, %v; want the user's record", info, ok)
+	}
+
+	// Clearing every field clears the entry: the listed figures answer again.
+	r.SetModelOverride(model, CustomModelInfo{ProviderID: "openrouter"})
+	if _, ok := r.ModelOverride(model, "openrouter"); ok {
+		t.Fatal("an override configuring nothing must be dropped")
+	}
+	if got := r.ContextWindow(model); got != 64000 {
+		t.Errorf("ContextWindow after clearing = %d, want the listed 64000", got)
+	}
+	if got := r.MaxOutputTokens(model); got != 4096 {
+		t.Errorf("MaxOutputTokens after clearing = %d, want the listed 4096", got)
+	}
+	if r.ModelSupportsImages(model) {
+		t.Error("an images override must not survive its own removal")
+	}
+}
+
+// TestRegisterCustomModelStillMarksAModelCustom pins the predating signature:
+// callers that only know the provider still mark the model custom, and reading
+// it back yields that provider with every capability left unset, so catalogue
+// and listing facts still answer for them.
+func TestRegisterCustomModelStillMarksAModelCustom(t *testing.T) {
+	r := NewRegistry()
+	r.Register(newFake("anthropic", "claude-x"))
+	r.RegisterCustomModel("my-custom", "anthropic")
+
+	if !r.IsCustomModel("my-custom") {
+		t.Fatal("RegisterCustomModel must still mark the model custom")
+	}
+	info, ok := r.CustomModel("my-custom")
+	if !ok || info.ProviderID != "anthropic" {
+		t.Fatalf("CustomModel = %+v, %v; want the anthropic record", info, ok)
+	}
+	if info.ContextWindow != 0 || info.MaxOutputTokens != 0 || info.InputPricePerM != 0 || info.OutputPricePerM != 0 || info.SupportsImages {
+		t.Errorf("CustomModel = %+v, want every capability unset", info)
+	}
+	if r.IsCustomModel("claude-x") {
+		t.Error("a catalogued model is not custom")
+	}
+	if _, ok := r.CustomModel("claude-x"); ok {
+		t.Error("CustomModel must not answer for a model nobody registered")
+	}
+}

@@ -66,8 +66,8 @@ export default function IndexRunDialog(props: {
     const p = plan();
     if (!p) return [] as { label: string; count: number }[];
     const set = props.rebuild
-      ? [{ label: 'text', count: p.text }, { label: 'pdf', count: p.pdf }, { label: 'docx', count: p.docx }]
-      : [{ label: 'text', count: p.pendingText }, { label: 'pdf', count: p.pendingPdf }, { label: 'docx', count: p.pendingDocx }];
+      ? [{ label: 'text', count: p.text }, { label: 'pdf', count: p.pdf }, { label: 'docx', count: p.docx }, { label: 'spreadsheets', count: p.sheet }]
+      : [{ label: 'text', count: p.pendingText }, { label: 'pdf', count: p.pendingPdf }, { label: 'docx', count: p.pendingDocx }, { label: 'spreadsheets', count: p.pendingSheet }];
     return set.filter((t) => t.count > 0);
   });
 

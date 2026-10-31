@@ -2412,6 +2412,7 @@ var explorationToolNames = map[string]bool{
 	"pdf_index":             true,
 	"read_docx_page":        true,
 	"docx_index":            true,
+	"query_sheet":           true,
 	"memory_recall":         true,
 	"project_memory_recall": true,
 	"check_syntax":          true,

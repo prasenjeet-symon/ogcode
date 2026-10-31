@@ -3,7 +3,6 @@ package provider
 import (
 	"slices"
 	"strings"
-	"sync"
 )
 
 // Reasoning effort over the OpenAI-compatible protocol (see effort.go for the
@@ -472,19 +471,15 @@ func (p *OpenAIProvider) listedModel(id string) (ModelInfo, bool) {
 	return ModelInfo{}, false
 }
 
-var (
-	googleCatalogOnce sync.Once
-	googleCatalogIdx  catalogIndex
-)
+var googleCatalogMemo = catalogMemo{build: func() catalogIndex {
+	return newCatalogIndex(googleCatalogList())
+}}
 
 // googleCatalogModel looks up a Gemini model. Only Google's own entries
 // answer: Gemma on the Gemini API takes thinking differently, and its mapping
 // through the compatible endpoint is undocumented.
 func googleCatalogModel(id string) (CatalogModel, bool) {
-	googleCatalogOnce.Do(func() {
-		googleCatalogIdx = newCatalogIndex(GoogleModels)
-	})
-	return googleCatalogIdx.lookup(id)
+	return googleCatalogMemo.lookup(id)
 }
 
 // oaiReasoning is OpenRouter's reasoning control: a level, or the switch for

@@ -34,6 +34,7 @@ func codeFacingAgents() []Agent {
 var mandatoryPromptTools = []string{
 	"codebase_map", "file_map", "check_syntax",
 	"pdf_index", "read_pdf_page", "docx_index", "read_docx_page", "latex_to_pdf",
+	"query_sheet",
 	"skill",
 }
 

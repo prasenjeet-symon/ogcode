@@ -721,7 +721,12 @@ type ModelInfo struct {
 	ActiveByDefault bool    `json:"activeByDefault"`
 	InputPricePerM  float64 `json:"inputPricePerM"`
 	OutputPricePerM float64 `json:"outputPricePerM"`
-	SupportsImages  bool    `json:"supportsImages"`
+	// CacheReadPricePerM / CacheWritePricePerM are the endpoint's own cached-
+	// input prices in USD per 1M tokens (0 = not published, the biller then
+	// derives them from the input price).
+	CacheReadPricePerM  float64 `json:"cacheReadPricePerM,omitempty"`
+	CacheWritePricePerM float64 `json:"cacheWritePricePerM,omitempty"`
+	SupportsImages      bool    `json:"supportsImages"`
 	// ContextWindow is the model's total context length in tokens (0 = unknown).
 	// Used to size the compaction trigger; when 0 the loop falls back to a fixed
 	// byte-size heuristic.
@@ -769,17 +774,39 @@ type CatalogSetter interface {
 	SetCatalog(models []ModelInfo)
 }
 
+// CustomModelInfo is what the user told us about a model no catalogue knows.
+// Zero values mean "not configured" and fall back to catalogue/provider facts:
+// a window, output ceiling or price of 0 invents nothing, and SupportsImages
+// can only ever force image support ON (a bool cannot tell "no" from
+// "unconfigured", and a catalogue fact outranks silence).
+type CustomModelInfo struct {
+	ProviderID      string
+	ContextWindow   int
+	MaxOutputTokens int
+	InputPricePerM  float64
+	OutputPricePerM float64
+	// Absolute per-million cache-token prices the user records by hand — the
+	// gateway's published cache rate on a self-metered plan, for instance. A
+	// positive figure wins over the listing's and the catalogue's; 0 means
+	// "not configured" and falls back as today.
+	CacheReadPricePerM  float64
+	CacheWritePricePerM float64
+	SupportsImages      bool
+}
+
 type Registry struct {
 	mu           sync.RWMutex // protects providers
 	providers    map[string]Provider
-	customModels map[string]string // modelID -> providerID
-	customMu     sync.RWMutex
+	customModels map[string]CustomModelInfo // modelID -> the user's own definition
+	overrides    map[string]CustomModelInfo // overrideKey(id, provider) -> the user's facts about a listed model
+	customMu     sync.RWMutex               // protects customModels and overrides
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
 		providers:    make(map[string]Provider),
-		customModels: make(map[string]string),
+		customModels: make(map[string]CustomModelInfo),
+		overrides:    make(map[string]CustomModelInfo),
 	}
 }
 
@@ -901,11 +928,11 @@ type localRunner interface {
 // or, failing that, the provider that lists it says so.
 func (r *Registry) runsLocally(modelID string) bool {
 	r.customMu.RLock()
-	pid, custom := r.customModels[modelID]
+	info, custom := r.customModels[modelID]
 	r.customMu.RUnlock()
 	var p Provider
 	if custom {
-		p = r.Get(pid)
+		p = r.Get(info.ProviderID)
 	} else {
 		p, _, _ = r.lookupModel(modelID)
 	}
@@ -924,11 +951,16 @@ func (r *Registry) CatalogModel(modelID string) (CatalogModel, bool) {
 	return LookupCatalogModel(modelID)
 }
 
-// ModelSupportsImages reports whether the given model accepts image input. The
-// built-in catalogue answers for any model it knows, whichever provider serves
-// it (see CatalogModel); otherwise the provider's own listing does. Unknown
-// models default to false.
+// ModelSupportsImages reports whether the given model accepts image input. A
+// user who told us a model takes images is believed outright — the flag decides
+// whether images are sent at all — and otherwise the built-in catalogue answers
+// for any model it knows, whichever provider serves it (see CatalogModel);
+// failing that the provider's own listing does. Unknown models default to
+// false.
 func (r *Registry) ModelSupportsImages(modelID string) bool {
+	if info, ok := r.userModelInfo(modelID); ok && info.SupportsImages {
+		return true
+	}
 	if cm, ok := r.CatalogModel(modelID); ok {
 		return cm.SupportsImages
 	}
@@ -937,16 +969,25 @@ func (r *Registry) ModelSupportsImages(modelID string) bool {
 }
 
 // ContextWindow returns the most a request to the model can hold, in tokens,
-// or 0 when unknown. Two sources know it: the built-in catalogue, under any id
-// a host gives the model — including one a user added by hand that no provider
-// lists — and the serving host's own listing (OpenRouter's context_length,
-// Ollama Cloud's /api/show). When both do, the smaller wins: a host may serve
-// less than the vendor's window (MiniMax-M3 is 1M first-party, 512K elsewhere)
-// and a request must fit the host it is sent to, while a host that claims more
-// than the vendor (OpenRouter's 1M for a 200K model) is not to be trusted with
-// it. A model running on this machine gets only its listing's figure (see
-// CatalogModel). Callers treat 0 as "fall back to a size heuristic".
+// or 0 when unknown. Three sources know it: the window the user configured for
+// the model (one they added by hand or a built-in/fetched row they edited), the
+// built-in catalogue, under any id a host gives the model —
+// including one a user added by hand that no provider lists — and the serving
+// host's own listing (OpenRouter's context_length, Ollama Cloud's /api/show).
+//
+// A window the user configured is authoritative and returned as given: they are
+// correcting a claim, and listings are frequently heuristic (OpenRouter's 1M for
+// a 200K model, a host serving 512K of a 1M first-party model), so letting one
+// silently cap the edit would make raising it do nothing. Only when they
+// configured nothing do the catalogue and the listing answer, smaller winning.
+// A model running on this machine gets only its listing's figure (see
+// CatalogModel). A window that still does not fit the host self-corrects from
+// observation — agent.EffectiveContextWindow caps with a learned capability.
+// Callers treat 0 as "fall back to a size heuristic".
 func (r *Registry) ContextWindow(modelID string) int {
+	if info, ok := r.userModelInfo(modelID); ok && info.ContextWindow > 0 {
+		return info.ContextWindow
+	}
 	window := 0
 	if cm, ok := r.CatalogModel(modelID); ok {
 		window = cm.ContextWindow
@@ -961,7 +1002,12 @@ func (r *Registry) ContextWindow(modelID string) int {
 // unknown. Callers treat 0 as "send no explicit limit and let the provider
 // apply its own default" — overstating a ceiling makes every request fail, so
 // unknown must never be guessed upward.
+//
+// What the user configured for the model wins when set.
 func (r *Registry) MaxOutputTokens(modelID string) int {
+	if info, ok := r.userModelInfo(modelID); ok && info.MaxOutputTokens > 0 {
+		return info.MaxOutputTokens
+	}
 	_, m, ok := r.lookupModel(modelID)
 	if !ok {
 		return 0
@@ -969,16 +1015,105 @@ func (r *Registry) MaxOutputTokens(modelID string) int {
 	return m.MaxOutputTokens
 }
 
+// RegisterCustomModel marks modelID as a user-added model on providerID, with
+// nothing else configured about it — the shape every caller predating
+// CustomModelInfo uses.
 func (r *Registry) RegisterCustomModel(modelID, providerID string) {
+	r.RegisterCustomModelInfo(modelID, CustomModelInfo{ProviderID: providerID})
+}
+
+// RegisterCustomModelInfo records a user-added model and what the user told us
+// about it. A registration replaces the whole record: the caller sends the full
+// preference, so a field the user cleared must not survive a stale value.
+func (r *Registry) RegisterCustomModelInfo(modelID string, info CustomModelInfo) {
 	r.customMu.Lock()
-	r.customModels[modelID] = providerID
+	r.customModels[modelID] = info
 	r.customMu.Unlock()
+}
+
+// CustomModel returns what the user configured for a custom model, and false
+// when modelID is not one.
+func (r *Registry) CustomModel(modelID string) (CustomModelInfo, bool) {
+	r.customMu.RLock()
+	defer r.customMu.RUnlock()
+	info, ok := r.customModels[modelID]
+	return info, ok
 }
 
 func (r *Registry) UnregisterCustomModel(modelID string) {
 	r.customMu.Lock()
 	delete(r.customModels, modelID)
 	r.customMu.Unlock()
+}
+
+// overrideKey keys an override by the model id AND the provider its preference
+// row was edited on. The id alone is not unique: the same model is served by
+// ogx, a vendor slot and a cloud endpoint, each with its own prices, and the
+// preference rows are keyed (id, provider_id) the same way — an edit on one
+// slot must not stand for, or wipe, another's.
+func overrideKey(modelID, providerID string) string {
+	return modelID + "\x00" + providerID
+}
+
+// SetModelOverride records what the user configured about a model a catalogue
+// or a provider already lists — its window, output ceiling, prices, image
+// support — and leaves the model itself alone. Unlike RegisterCustomModelInfo
+// it does not make the model custom: routing, the catalogue's name and the
+// provider's listing keep answering exactly as they did, and a field left at
+// zero falls back to them. The record is keyed by the provider the row was
+// edited on as well as the id (see overrideKey). A record that configures
+// nothing is no override at all, so clearing every field clears the entry.
+func (r *Registry) SetModelOverride(modelID string, info CustomModelInfo) {
+	r.customMu.Lock()
+	defer r.customMu.Unlock()
+	key := overrideKey(modelID, info.ProviderID)
+	if info.ContextWindow <= 0 && info.MaxOutputTokens <= 0 &&
+		info.InputPricePerM <= 0 && info.OutputPricePerM <= 0 &&
+		info.CacheReadPricePerM <= 0 && info.CacheWritePricePerM <= 0 && !info.SupportsImages {
+		delete(r.overrides, key)
+		return
+	}
+	r.overrides[key] = info
+}
+
+// ModelOverride returns what the user configured about a listed model on a
+// provider, and false when they configured nothing there.
+func (r *Registry) ModelOverride(modelID, providerID string) (CustomModelInfo, bool) {
+	r.customMu.RLock()
+	defer r.customMu.RUnlock()
+	info, ok := r.overrides[overrideKey(modelID, providerID)]
+	return info, ok
+}
+
+// userModelInfo answers what the user configured for modelID, whether they added
+// the model themselves or edited one a catalogue already lists. A custom-model
+// registration wins: it is the whole definition, where an override only fills
+// in fields over facts that already exist. Overrides are keyed by the provider
+// the row was edited on too, and these readers are providerless — the window
+// and ceiling belong to the model wherever it is served — so the entry with
+// the smallest provider key answers. Edits on one id under two providers are
+// rare; when they exist, this is a deterministic pick.
+func (r *Registry) userModelInfo(modelID string) (CustomModelInfo, bool) {
+	r.customMu.RLock()
+	defer r.customMu.RUnlock()
+	if info, ok := r.customModels[modelID]; ok {
+		return info, true
+	}
+	var (
+		best      CustomModelInfo
+		bestOwner string
+		found     bool
+	)
+	for key, info := range r.overrides {
+		mid, owner, ok := strings.Cut(key, "\x00")
+		if !ok || mid != modelID {
+			continue
+		}
+		if !found || owner < bestOwner {
+			best, bestOwner, found = info, owner, true
+		}
+	}
+	return best, found
 }
 
 // IsCustomModel reports whether modelID was registered as a user-added custom
@@ -999,10 +1134,10 @@ func (r *Registry) IsCustomModel(modelID string) bool {
 // whose provider was never recorded, and a guess there would misstate a bill.
 func (r *Registry) ServingProvider(modelID string) Provider {
 	r.customMu.RLock()
-	customProvider, customOk := r.customModels[modelID]
+	customInfo, customOk := r.customModels[modelID]
 	r.customMu.RUnlock()
 	if customOk {
-		if p := r.Get(customProvider); p != nil {
+		if p := r.Get(customInfo.ProviderID); p != nil {
 			return p
 		}
 	}
@@ -1038,10 +1173,10 @@ func (r *Registry) ResolveProvider(modelID string) Provider {
 func (r *Registry) ResolveProviderFor(modelID, providerID string) Provider {
 	// Check custom model routing first
 	r.customMu.RLock()
-	customProvider, customOk := r.customModels[modelID]
+	customInfo, customOk := r.customModels[modelID]
 	r.customMu.RUnlock()
 	if customOk {
-		if p := r.Get(customProvider); p != nil {
+		if p := r.Get(customInfo.ProviderID); p != nil {
 			return p
 		}
 	}

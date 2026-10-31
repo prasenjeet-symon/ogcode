@@ -430,6 +430,7 @@ var contentReturningTools = map[string]bool{
 	"read_pdf_page":         true,
 	"docx_index":            true,
 	"read_docx_page":        true,
+	"query_sheet":           true,
 	"view_image":            true,
 	"skill":                 true,
 	"task":                  true,

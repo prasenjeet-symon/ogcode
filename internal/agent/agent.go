@@ -27,7 +27,7 @@ type Agent struct {
 // Only it holds this list directly: buildAgentTools adds `schedule`, which is
 // deliverable only to a build session running in the project directory, and the
 // other agents carry their own narrower read-only lists.
-var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task", "skill", "mcp_*"}
+var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "query_sheet", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "task", "skill", "mcp_*"}
 
 // buildAgentTools is the BuildAgent's toolset: codingAgentTools plus `schedule`.
 // A reminder reaches its session two ways — the per-session catch-up hook at the
@@ -124,7 +124,7 @@ var NoteAgent = Agent{
 	ID:               "note",
 	Name:             "Note",
 	Description:      "Note-taking agent — researches a query and produces a comprehensive, structured markdown note",
-	Tools:            []string{"bash", "read", "file_map", "glob", "grep", "deep_search", "codebase_map", "pdf_index", "read_pdf_page", "docx_index", "read_docx_page"},
+	Tools:            []string{"bash", "read", "file_map", "glob", "grep", "deep_search", "codebase_map", "pdf_index", "read_pdf_page", "docx_index", "read_docx_page", "query_sheet"},
 	FinalInstruction: "Reminder: your entire final response must be the note itself — start with the `#` title and output only markdown. No preamble, no \"here is the note:\", no trailing commentary.",
 	System: `You are a note-taking agent. Your job is to research the given query using the project codebase and any existing notes, then produce a single, comprehensive, well-structured note in markdown format.
 
@@ -238,7 +238,7 @@ var SubagentAgent = Agent{
 	ID:               "subagent",
 	Name:             "Subagent",
 	Description:      "Read-only investigation sub-agent invoked via the task tool",
-	Tools:            []string{"read", "file_map", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "codebase_map", "deep_search", "view_image"},
+	Tools:            []string{"read", "file_map", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "query_sheet", "codebase_map", "deep_search", "view_image"},
 	FinalInstruction: "Reminder: your entire final message is what the caller receives. Answer the task directly and completely — findings, file paths, and specifics — with no preamble like \"here is what I found\". If you could not determine something, say so plainly.",
 	System: `You are an autonomous investigation sub-agent. Another agent has delegated a single, self-contained task to you. You work from a clean context: you cannot see the parent's live conversation, only the task you were given. (project_memory_recall can still surface decisions recorded in this project's memory — use it when the task turns on history you were not given.) You are read-only — you explore and report, you never change anything.
 

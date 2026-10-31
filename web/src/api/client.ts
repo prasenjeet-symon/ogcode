@@ -594,9 +594,10 @@ export function getProviderPricing(provider: string): Promise<Record<string, num
 // Usage API — what models cost, priced on the server (internal/usage).
 //
 // billing says how a model's tokens are paid for: 'metered' is billed per token
-// at a known price, 'included' is a flat plan (OGX, Ollama Cloud) or a local
-// model that bills nothing per token, 'unpriced' is billed per token at a price
-// nothing publishes, and 'unknown' is work whose provider was never recorded
+// at a known price (OGX meters the plan's own published rates), 'included' is a
+// flat plan (Ollama Cloud) or a local model that bills nothing per token,
+// 'unpriced' is billed per token at a price nothing publishes, and 'unknown' is
+// work whose provider was never recorded
 // on a model nothing configured serves today — never counted as billed.
 export type Billing = 'metered' | 'included' | 'unpriced' | 'unknown';
 
@@ -798,10 +799,27 @@ export interface ModelInfo {
   collection: string;
   inputPricePerM: number;
   outputPricePerM: number;
+  // Cache-token prices the user configured for this model, in dollars per 1M
+  // tokens (absent = not configured; the provider's catalogue or the
+  // standard multipliers still answer).
+  cacheReadPricePerM?: number;
+  cacheWritePricePerM?: number;
+  // Whether the model takes image input — a catalogue fact, or what the user
+  // said when adding a custom model. False when unknown.
+  supportsImages: boolean;
   // The context window the agent loop sizes compaction against (catalogue, else
   // learned from an overflow error; absent = unknown), and the request size at
   // which the loop compacts. Read by the context meter.
   contextWindow?: number;
+  // The model's output ceiling (catalogue, else what the user configured;
+  // absent = unknown).
+  maxOutputTokens?: number;
+  // What the user configured about this model themselves, over whatever its
+  // catalogue and provider list: their window, output ceiling, price and image
+  // support. Absent when they configured nothing. It is what the settings editor
+  // prefills and what a plain enable/disable sends back, so a toggle never
+  // clears an edit.
+  override?: CustomModelMeta;
   compactAtTokens?: number;
   /** Reasoning-effort levels the model takes on its provider, lowest first;
    *  absent when it offers no effort picker. */
@@ -823,7 +841,51 @@ export function refreshModels(): Promise<ModelInfo[]> {
   return fetchAPI('/models/refresh', { method: 'POST' });
 }
 
-export interface ModelPreference {
+/** The upstream model catalogue — the shared list ogcode fetches itself and
+ *  lays over every provider's own rows. Synced at boot, refetched once a day;
+ *  the status is what the models page reports. */
+export interface CatalogSyncStatus {
+  synced: boolean;
+  /** RFC3339. Empty when synced is false. */
+  syncedAt?: string;
+  source?: string;
+  modelCount?: number;
+}
+
+export interface CatalogSyncResult extends CatalogSyncStatus {
+  installed?: number;
+  updated?: number;
+  skipped?: number;
+}
+
+export function getCatalogSyncStatus(): Promise<CatalogSyncStatus> {
+  return fetchAPI('/models/catalog/status');
+}
+
+// Force the shared catalogue to re-fetch now, returning where it landed and
+// what the sync did to the model list.
+export function syncModelCatalog(): Promise<CatalogSyncResult> {
+  return fetchAPI('/models/catalog/sync', { method: 'POST' });
+}
+
+/**
+ * The facts a user supplies for a model that no catalogue answers for it — its
+ * context window, output ceiling, price per 1M tokens and whether it takes
+ * images. Every field is optional — absent (and 0 / false on the wire) means
+ * "not set", and catalogue or provider facts answer instead. Set on a model a
+ * catalogue already lists, they are an override layered over those facts.
+ */
+export interface CustomModelMeta {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  inputPricePerM?: number;
+  outputPricePerM?: number;
+  cacheReadPricePerM?: number;
+  cacheWritePricePerM?: number;
+  supportsImages?: boolean;
+}
+
+export interface ModelPreference extends CustomModelMeta {
   id: string;
   providerId: string;
   displayName: string;
@@ -1217,9 +1279,11 @@ export interface IndexPlan {
   stale: number;
   pdf: number;
   docx: number;
+  sheet: number;
   text: number;
   pendingPdf: number;
   pendingDocx: number;
+  pendingSheet: number;
   pendingText: number;
 }
 

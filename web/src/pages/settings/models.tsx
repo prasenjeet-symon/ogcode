@@ -1,6 +1,6 @@
 import { For, Index, Show, createSignal, createMemo, createEffect, untrack, onMount, onCleanup, type JSX } from 'solid-js';
 import { useSession } from '../../context/session';
-import type { ModelInfo, ProviderConfig, OGXStatus } from '../../api/client';
+import type { ModelInfo, ProviderConfig, OGXStatus, CustomModelMeta } from '../../api/client';
 import {
   deleteProviderConfig,
   getProviderConfigs,
@@ -28,6 +28,7 @@ import {
   matches,
   useShell,
 } from './ui';
+import ModelMetaDialog, { EMPTY_META, metaFrom, type MetaForm } from './model-meta';
 import {
   PROVIDER_DEFS,
   COMPATIBLE_PRESETS,
@@ -447,6 +448,7 @@ export default function ModelsSettings() {
                 slot={slot()}
                 models={modelsFor(slot().id)}
                 onToggle={(m) => session.toggleModel(m, !m.enabled)}
+                onEditMeta={(m, meta) => session.updateModelMeta(m, meta)}
               />
             }
           >
@@ -459,17 +461,19 @@ export default function ModelsSettings() {
             onApplied={() => session.reloadModels()}
             onRemoveVendor={isVendorSlotId(slot().id) ? () => removeVendorById(slot().id) : undefined}
             onToggle={(m) => session.toggleModel(m, !m.enabled)}
+            onEditMeta={(m, meta) => session.updateModelMeta(m, meta)}
             onRemove={async (m) => {
               if (!confirm(`Remove "${m.name}"? This deletes the custom model.`)) return;
               await session.removeCustomModel(m.id, m.providerId);
             }}
-            onAdd={(id, name, collection) =>
-              session.addCustomModel(id, slot().id, name, collection || undefined)
+            onAdd={(id, name, collection, meta) =>
+              session.addCustomModel(id, slot().id, name, collection || undefined, meta)
             }
           />
           </Show>
         )}
       </Show>
+
     </Show>
   );
 }
@@ -521,6 +525,7 @@ function OGXSection(props: {
   slot: Slot;
   models: ModelInfo[];
   onToggle: (m: ModelInfo) => void | Promise<void>;
+  onEditMeta: (m: ModelInfo, meta: CustomModelMeta) => Promise<void>;
 }) {
   const session = useSession();
   const shell = useShell();
@@ -862,6 +867,7 @@ function OGXSection(props: {
                 configured={true}
                 filtering={!!shell.query().trim()}
                 onToggle={props.onToggle}
+                onEditMeta={props.onEditMeta}
                 // Never called: the slot is readOnly, so the add row is hidden,
                 // and no plan model is custom, so no row offers a remove button.
                 onRemove={() => {}}
@@ -926,8 +932,11 @@ function ProviderSection(props: {
   onSaved: (c: ProviderConfig) => void;
   onApplied: () => Promise<void>;
   onToggle: (m: ModelInfo) => void | Promise<void>;
+  /** Saves the user's own window, ceiling, price and image support for any of
+   *  this provider's models, catalogue ones included. */
+  onEditMeta: (m: ModelInfo, meta: CustomModelMeta) => Promise<void>;
   onRemove: (m: ModelInfo) => void;
-  onAdd: (id: string, name: string, collection: string) => Promise<void>;
+  onAdd: (id: string, name: string, collection: string, meta: CustomModelMeta) => Promise<void>;
   /** Present only for a vendor slot: removes the vendor entirely — config
    *  row, stored key and models. The builtin protocols have no way out. */
   onRemoveVendor?: () => Promise<void>;
@@ -1009,6 +1018,7 @@ function ProviderSection(props: {
           configured={configured()}
           filtering={!!shell.query().trim()}
           onToggle={props.onToggle}
+          onEditMeta={props.onEditMeta}
           onRemove={props.onRemove}
           onAdd={props.onAdd}
           suggestedCollection={
@@ -1329,8 +1339,9 @@ function ModelList(props: {
   configured: boolean;
   filtering: boolean;
   onToggle: (m: ModelInfo) => void | Promise<void>;
+  onEditMeta: (m: ModelInfo, meta: CustomModelMeta) => Promise<void>;
   onRemove: (m: ModelInfo) => void;
-  onAdd: (id: string, name: string, collection: string) => Promise<void>;
+  onAdd: (id: string, name: string, collection: string, meta: CustomModelMeta) => Promise<void>;
   suggestedCollection: string;
   /** Hide the enable/disable-all chips — for a short list they only add
    *  noise. On by default. */
@@ -1475,6 +1486,7 @@ function ModelList(props: {
                         included={props.included}
                         onToggle={() => props.onToggle(m)}
                         onRemove={() => props.onRemove(m)}
+                        onSave={(meta) => props.onEditMeta(m, meta)}
                       />
                     )}
                   </For>
@@ -1530,7 +1542,16 @@ function ModelList(props: {
   );
 }
 
-function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () => void; onRemove: () => void }) {
+function ModelItem(props: {
+  model: ModelInfo;
+  included?: string;
+  onToggle: () => void;
+  onRemove: () => void;
+  /** Save what the user configured about this model. Every row has one: a
+   *  catalogue or fetched model is edited exactly like one added by hand. */
+  onSave: (meta: CustomModelMeta) => Promise<void>;
+}) {
+  const [editing, setEditing] = createSignal(false);
   const hasPrice = () => props.model.inputPricePerM > 0 || props.model.outputPricePerM > 0;
   // A disabled row steps the text down one token instead of dimming the whole row
   // with opacity (which composites text toward the background and drops below
@@ -1538,6 +1559,7 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
   const nameColor = () => props.model.enabled ? 'text-[color:var(--text-primary)]' : 'text-[color:var(--text-secondary)]';
   const numColor = () => props.model.enabled ? 'text-[color:var(--text-tertiary)]' : 'text-[color:var(--text-muted)]';
   return (
+    <>
     <div
       class={`group/row flex items-center gap-3 h-8 border-b border-[color:var(--border-subtle)] last:border-b-0
               hover:bg-[color:var(--bg-hover)]/40 transition-colors`}
@@ -1567,6 +1589,11 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
         <Show when={props.model.isCustom}>
           <Tag>custom</Tag>
         </Show>
+        {/* Marked so an edit on a catalogue or fetched model is legible: the
+            row's figures are now partly the user's, not the catalogue's. */}
+        <Show when={!props.model.isCustom && props.model.override}>
+          <Tag>edited</Tag>
+        </Show>
       </div>
 
       <span
@@ -1585,6 +1612,20 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
         </Show>
       </span>
 
+      {/* The output ceiling, when one is known: catalogue for a built-in, the
+          user's own figure for a custom model. Absent means no column at all,
+          so every other row keeps exactly the width it had. */}
+      <Show when={props.model.maxOutputTokens}>
+        {(out) => (
+          <span
+            class={`hidden sm:block shrink-0 w-[3rem] text-micro font-mono tabular-nums text-right ${numColor()}`}
+            title={`Max output: ${out().toLocaleString()} tokens`}
+          >
+            {fmtWindow(out())}
+          </span>
+        )}
+      </Show>
+
       <span
         class={`shrink-0 w-[7rem] whitespace-nowrap text-micro font-mono tabular-nums text-right ${numColor()}`}
         title={props.included && !hasPrice() ? 'Covered by your plan' : 'Input / output price per 1M tokens'}
@@ -1594,7 +1635,16 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
         </Show>
       </span>
 
-      <span class="w-7 shrink-0 flex justify-end">
+      <span class="w-14 shrink-0 flex items-center justify-end gap-0.5">
+        <span
+          class={`transition-opacity ${editing() ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus-within:opacity-100'}`}
+        >
+          <IconButton
+            onClick={() => setEditing(true)}
+            label={`Edit ${props.model.name}`}
+            path="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4zM3 21h18"
+          />
+        </span>
         <Show when={props.model.isCustom}>
           <span class="opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 transition-opacity">
             <IconButton
@@ -1607,6 +1657,106 @@ function ModelItem(props: { model: ModelInfo; included?: string; onToggle: () =>
         </Show>
       </span>
     </div>
+    <Show when={editing()}>
+      <ModelMetaDialog model={props.model} onSave={props.onSave} onClose={() => setEditing(false)} />
+    </Show>
+    </>
+  );
+}
+
+/** The six fields in one row, for the add-a-model form. The per-row editor has
+ *  its own labelled layout in the metadata dialog; the two share the same form
+ *  shape so they cannot drift apart. */
+function MetaFields(props: {
+  form: MetaForm;
+  onChange: (next: Partial<MetaForm>) => void;
+  onKeyDown: (e: KeyboardEvent) => void;
+}) {
+  const field = `${fieldClass} min-w-0 text-meta`;
+  return (
+    <div class="flex items-center gap-2 flex-wrap">
+      <input
+        type="number"
+        min="0"
+        step="1000"
+        value={props.form.contextWindow}
+        onInput={(e) => props.onChange({ contextWindow: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="200000"
+        aria-label="Context window in tokens"
+        title="Context window (tokens) — how much history the loop sizes compaction against"
+        class={`${field} w-[9.5rem] tabular-nums`}
+      />
+      <input
+        type="number"
+        min="0"
+        step="1000"
+        value={props.form.maxOutput}
+        onInput={(e) => props.onChange({ maxOutput: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="Max output tokens"
+        aria-label="Max output tokens"
+        title="The model's output ceiling (tokens)"
+        class={`${field} w-[9.5rem] tabular-nums`}
+      />
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={props.form.inputPrice}
+        onInput={(e) => props.onChange({ inputPrice: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="$ in / 1M"
+        aria-label="Input price in dollars per 1M tokens"
+        title="What 1M input tokens cost, in dollars"
+        class={`${field} w-[7rem] tabular-nums`}
+      />
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={props.form.outputPrice}
+        onInput={(e) => props.onChange({ outputPrice: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="$ out / 1M"
+        aria-label="Output price in dollars per 1M tokens"
+        title="What 1M output tokens cost, in dollars"
+        class={`${field} w-[7rem] tabular-nums`}
+      />
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={props.form.cacheReadPrice}
+        onInput={(e) => props.onChange({ cacheReadPrice: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="cache read $/1M"
+        aria-label="Cache read price in dollars per 1M tokens"
+        title="What 1M tokens read from the prompt cache cost, in dollars"
+        class={`${field} w-[7rem] tabular-nums`}
+      />
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={props.form.cacheWritePrice}
+        onInput={(e) => props.onChange({ cacheWritePrice: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="cache write $/1M"
+        aria-label="Cache write price in dollars per 1M tokens"
+        title="What 1M tokens written to the prompt cache cost, in dollars"
+        class={`${field} w-[7rem] tabular-nums`}
+      />
+      <label class="inline-flex items-center gap-1.5 h-8 text-meta text-[color:var(--text-secondary)] cursor-pointer">
+        <input
+          type="checkbox"
+          checked={props.form.images}
+          onChange={(e) => props.onChange({ images: e.currentTarget.checked })}
+          class="shrink-0 accent-[color:var(--accent)] cursor-pointer"
+        />
+        Takes images
+      </label>
+    </div>
   );
 }
 
@@ -1614,12 +1764,20 @@ function AddModelRow(props: {
   providerLabel: string;
   suggestedCollection: string;
   showCollection: boolean;
-  onAdd: (id: string, name: string, collection: string) => Promise<void>;
+  onAdd: (id: string, name: string, collection: string, meta: CustomModelMeta) => Promise<void>;
 }) {
   const [open, setOpen] = createSignal(false);
   const [id, setId] = createSignal('');
   const [name, setName] = createSignal('');
   const [collection, setCollection] = createSignal('');
+  // A custom model's window, ceiling, price and image support are facts no
+  // catalogue can supply for an ID it has never seen. They stay folded behind
+  // one toggle, so the row reads exactly as it did before they existed.
+  const [advanced, setAdvanced] = createSignal(false);
+  // The five advanced fields live in one object, shared with the per-row
+  // editor, so the add row and the editor cannot drift apart.
+  const [form, setForm] = createSignal<MetaForm>(EMPTY_META);
+  const patch = (next: Partial<MetaForm>) => setForm({ ...form(), ...next });
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal(false);
 
@@ -1627,6 +1785,8 @@ function AddModelRow(props: {
     setId('');
     setName('');
     setCollection(props.suggestedCollection);
+    setAdvanced(false);
+    setForm(EMPTY_META);
     setError('');
     setOpen(true);
   };
@@ -1637,13 +1797,19 @@ function AddModelRow(props: {
     setBusy(true);
     setError('');
     try {
-      await props.onAdd(modelId, name().trim() || modelId, collection().trim());
+      await props.onAdd(modelId, name().trim() || modelId, collection().trim(), metaFrom(form()));
       setOpen(false);
     } catch (e: any) {
       setError(e?.message || 'Could not add that model.');
     } finally {
       setBusy(false);
     }
+  };
+
+  // Enter adds, Escape folds the form away — from any field, advanced ones too.
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') submit();
+    if (e.key === 'Escape') setOpen(false);
   };
 
   const field = `${fieldClass} min-w-0 text-meta`;
@@ -1673,10 +1839,7 @@ function AddModelRow(props: {
             type="text"
             value={id()}
             onInput={(e) => setId(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
-              if (e.key === 'Escape') setOpen(false);
-            }}
+            onKeyDown={onKey}
             placeholder="model-id (exactly as the provider names it)"
             aria-label="Model ID"
             class={`${field} font-mono flex-[1.4]`}
@@ -1685,10 +1848,7 @@ function AddModelRow(props: {
             type="text"
             value={name()}
             onInput={(e) => setName(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
-              if (e.key === 'Escape') setOpen(false);
-            }}
+            onKeyDown={onKey}
             placeholder="Display name (optional)"
             aria-label="Display name"
             class={`${field} flex-1`}
@@ -1698,10 +1858,7 @@ function AddModelRow(props: {
               type="text"
               value={collection()}
               onInput={(e) => setCollection(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submit();
-                if (e.key === 'Escape') setOpen(false);
-              }}
+              onKeyDown={onKey}
               placeholder="Group"
               aria-label="Group"
               title="Groups this model under a vendor name in the picker"
@@ -1711,11 +1868,36 @@ function AddModelRow(props: {
           <Button onClick={submit} disabled={busy()}>{busy() ? 'Adding…' : 'Add'}</Button>
           <Button variant="text" onClick={() => setOpen(false)}>Cancel</Button>
         </div>
-        <p class="mt-1.5 text-micro text-[color:var(--text-muted)]">
-          <Show when={error()} fallback="ogcode does not verify the ID — a typo shows up as a failed request on first use.">
-            <span style={{ color: 'var(--danger)' }}>{error()}</span>
-          </Show>
-        </p>
+        <div class="mt-1.5 flex items-start gap-3 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setAdvanced(!advanced())}
+            aria-expanded={advanced()}
+            class="inline-flex items-center gap-1 shrink-0 h-5 text-micro font-medium
+                   text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] transition-colors"
+          >
+            Advanced
+            <svg
+              class={`w-2.5 h-2.5 transition-transform ${advanced() ? 'rotate-180' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <p class="text-micro text-[color:var(--text-muted)]">
+            <Show when={error()} fallback="ogcode does not verify the ID — a typo shows up as a failed request on first use.">
+              <span style={{ color: 'var(--danger)' }}>{error()}</span>
+            </Show>
+          </p>
+        </div>
+        {/* Everything a catalogue would have said about this ID. Blank means
+            "not set": the row shows a dash and the loop falls back to what it
+            knows instead of guessing. */}
+        <Show when={advanced()}>
+          <div class="mt-2">
+            <MetaFields form={form()} onChange={patch} onKeyDown={onKey} />
+          </div>
+        </Show>
       </div>
     </Show>
   );

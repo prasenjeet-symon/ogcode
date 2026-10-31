@@ -438,9 +438,34 @@ export default function FileViewer(props: {
                   <Show when={keywords().length > 0}>
                     <div>
                       <p class="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[color:var(--text-muted)] mb-1">Keywords</p>
-                      <p class="text-micro font-mono text-[color:var(--text-tertiary)] leading-relaxed">
-                        {keywords().slice(0, 40).join(' · ')}{keywords().length > 40 ? ' …' : ''}
+                      {/* The popover body scrolls, so the whole union is reachable — no cap. */}
+                      <p class="text-micro font-mono text-[color:var(--text-tertiary)] leading-relaxed break-words">
+                        {keywords().join(' · ')}
                       </p>
+                    </div>
+                  </Show>
+                  <Show when={(entry()!.pages ?? []).length > 0}>
+                    <div>
+                      <p class="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[color:var(--text-muted)] mb-1">Pages</p>
+                      {/* The entry already carries each page's labels; listing them is what an
+                          agent searching the index actually matches on, per page. */}
+                      <div class="flex flex-col gap-1">
+                        <For each={entry()!.pages ?? []}>
+                          {(page) => (
+                            <div class="flex gap-2 items-baseline text-meta leading-snug">
+                              <span class="font-mono text-micro tabular-nums text-[color:var(--text-muted)] select-none shrink-0 w-8">
+                                p.{page.pageNum}
+                              </span>
+                              <Show
+                                when={(page.labels ?? []).length > 0}
+                                fallback={<span class="italic text-[color:var(--text-muted)]">(no labels)</span>}
+                              >
+                                <span class="min-w-0 break-words text-[color:var(--text-secondary)]">{page.labels.join(' · ')}</span>
+                              </Show>
+                            </div>
+                          )}
+                        </For>
+                      </div>
                     </div>
                   </Show>
                 </div>

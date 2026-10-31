@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/search"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
@@ -50,23 +52,45 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		availableProviders[id] = true
 	}
 
+	// ModelOverrideEntry is the user's own configuration for one model: the
+	// figures they edited in, not the ones a catalogue or a provider supplied.
+	// It rides the response so the settings editor can prefill, and clear,
+	// exactly their own numbers.
+	type ModelOverrideEntry struct {
+		ContextWindow       int     `json:"contextWindow,omitempty"`
+		MaxOutputTokens     int     `json:"maxOutputTokens,omitempty"`
+		InputPricePerM      float64 `json:"inputPricePerM,omitempty"`
+		OutputPricePerM     float64 `json:"outputPricePerM,omitempty"`
+		CacheReadPricePerM  float64 `json:"cacheReadPricePerM,omitempty"`
+		CacheWritePricePerM float64 `json:"cacheWritePricePerM,omitempty"`
+		SupportsImages      bool    `json:"supportsImages,omitempty"`
+	}
 	type ModelEntry struct {
-		ID              string  `json:"id"`
-		Name            string  `json:"name"`
-		ProviderID      string  `json:"providerId"`
-		Default         bool    `json:"default"`
-		Enabled         bool    `json:"enabled"`
-		IsCustom        bool    `json:"isCustom"`
-		Collection      string  `json:"collection"`
-		InputPricePerM  float64 `json:"inputPricePerM"`
-		OutputPricePerM float64 `json:"outputPricePerM"`
-		SupportsImages  bool    `json:"supportsImages"`
+		ID                  string  `json:"id"`
+		Name                string  `json:"name"`
+		ProviderID          string  `json:"providerId"`
+		Default             bool    `json:"default"`
+		Enabled             bool    `json:"enabled"`
+		IsCustom            bool    `json:"isCustom"`
+		Collection          string  `json:"collection"`
+		InputPricePerM      float64 `json:"inputPricePerM"`
+		OutputPricePerM     float64 `json:"outputPricePerM"`
+		CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
+		CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
+		SupportsImages      bool    `json:"supportsImages"`
 		// ContextWindow is the window the agent loop sizes compaction against
 		// (catalogue, else learned from an overflow; 0 = unknown), and
 		// CompactAtTokens is the request size at which it compacts. The context
 		// meter reads both, so it agrees with what the loop will actually do.
 		ContextWindow   int `json:"contextWindow,omitempty"`
 		CompactAtTokens int `json:"compactAtTokens"`
+		// MaxOutputTokens is the most output the model produces in one response
+		// (0 = unknown: the request carries no explicit limit).
+		MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+		// Override is what the user configured about this model themselves — the
+		// five facts the settings row lets them edit. Absent when they configured
+		// nothing, so the row shows what the catalogue and the provider say.
+		Override *ModelOverrideEntry `json:"override,omitempty"`
 		// Efforts are the reasoning-effort levels the model takes on its
 		// provider, lowest first (empty: no effort picker); DefaultEffort is the
 		// one it runs at when none is chosen; EffortNote says why a model that
@@ -74,6 +98,33 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		Efforts       []string `json:"efforts,omitempty"`
 		DefaultEffort string   `json:"defaultEffort,omitempty"`
 		EffortNote    string   `json:"effortNote,omitempty"`
+	}
+	// overrideOf reads the user's configuration for a model, or nil when they
+	// set none. A custom model's record is its whole definition; on a listed
+	// model the same facts are the override the registry layers over the
+	// catalogue and the provider's listing.
+	overrideOf := func(modelID, providerID string, custom bool) *ModelOverrideEntry {
+		var info provider.CustomModelInfo
+		var ok bool
+		if custom {
+			info, ok = s.registry.CustomModel(modelID)
+		} else {
+			info, ok = s.registry.ModelOverride(modelID, providerID)
+		}
+		if !ok || (info.ContextWindow <= 0 && info.MaxOutputTokens <= 0 &&
+			info.InputPricePerM <= 0 && info.OutputPricePerM <= 0 &&
+			info.CacheReadPricePerM <= 0 && info.CacheWritePricePerM <= 0 && !info.SupportsImages) {
+			return nil
+		}
+		return &ModelOverrideEntry{
+			ContextWindow:       info.ContextWindow,
+			MaxOutputTokens:     info.MaxOutputTokens,
+			InputPricePerM:      info.InputPricePerM,
+			OutputPricePerM:     info.OutputPricePerM,
+			CacheReadPricePerM:  info.CacheReadPricePerM,
+			CacheWritePricePerM: info.CacheWritePricePerM,
+			SupportsImages:      info.SupportsImages,
+		}
 	}
 	windowOf := func(modelID string) (int, int) {
 		w, _ := agent.EffectiveContextWindow(s.registry, s.db, modelID)
@@ -104,20 +155,30 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		if cap, ok, err := session.GetModelCapability(s.db, m.ID); err == nil && ok {
 			supportsImages = cap.SupportsImages
 		}
+		// The user's own answer decides whether images are sent, so it wins over
+		// both the catalogue and the probe — the same rule a custom model gets.
+		override := overrideOf(m.ID, m.ProviderID, false)
+		if override != nil && override.SupportsImages {
+			supportsImages = true
+		}
 		window, compactAt := windowOf(m.ID)
 		entry := ModelEntry{
-			ID:              m.ID,
-			Name:            m.Name,
-			ProviderID:      m.ProviderID,
-			Default:         m.Default,
-			Enabled:         defaultEnabled,
-			IsCustom:        false,
-			Collection:      m.Collection,
-			InputPricePerM:  price.Input,
-			OutputPricePerM: price.Output,
-			SupportsImages:  supportsImages,
-			ContextWindow:   window,
-			CompactAtTokens: compactAt,
+			ID:                  m.ID,
+			Name:                m.Name,
+			ProviderID:          m.ProviderID,
+			Default:             m.Default,
+			Enabled:             defaultEnabled,
+			IsCustom:            false,
+			Collection:          m.Collection,
+			InputPricePerM:      price.Input,
+			OutputPricePerM:     price.Output,
+			CacheReadPricePerM:  price.CacheRead,
+			CacheWritePricePerM: price.CacheWrite,
+			SupportsImages:      supportsImages,
+			ContextWindow:       window,
+			CompactAtTokens:     compactAt,
+			MaxOutputTokens:     s.registry.MaxOutputTokens(m.ID),
+			Override:            override,
 		}
 		result = append(result, withEffort(entry))
 	}
@@ -129,10 +190,12 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		if !availableProviders[p.ProviderID] && !p.Enabled {
 			continue
 		}
-		// A custom model is whatever id the user typed. If the built-in catalogue
-		// knows it under that name, its facts apply; otherwise a probed/cached
-		// result is the only source of truth for image support, and false until
-		// the model has been probed (mirrors the built-in branch above).
+		// A custom model is whatever id the user typed, and the stored preference
+		// is the source of truth for what they told us about it: the registry
+		// already carries that record (RegisterCustomModelInfo), so PriceOn,
+		// ContextWindow and MaxOutputTokens answer with the user's figures. Each
+		// field falls back to a catalogue fact, the provider's listing or a
+		// probed/cached result when the user said nothing.
 		supportsImages := false
 		if cm, ok := s.registry.CatalogModel(p.ID); ok {
 			supportsImages = cm.SupportsImages
@@ -141,20 +204,41 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		if cap, ok, err := session.GetModelCapability(s.db, p.ID); err == nil && ok {
 			supportsImages = cap.SupportsImages
 		}
-		window, compactAt := windowOf(p.ID)
+		// The user's own answer decides whether images are sent, so it wins over
+		// both the catalogue and the probe.
+		if p.SupportsImages {
+			supportsImages = true
+		}
+		window, _ := windowOf(p.ID)
+		if window <= 0 && p.ContextWindow > 0 {
+			window = p.ContextWindow
+		}
+		maxOutput := s.registry.MaxOutputTokens(p.ID)
+		if maxOutput <= 0 {
+			maxOutput = p.MaxOutputTokens
+		}
+		if maxOutput <= 0 {
+			if cm, ok := s.registry.CatalogModel(p.ID); ok {
+				maxOutput = cm.MaxOutputTokens
+			}
+		}
 		result = append(result, withEffort(ModelEntry{
-			ID:              p.ID,
-			Name:            p.DisplayName,
-			ProviderID:      p.ProviderID,
-			Default:         false,
-			Enabled:         p.Enabled,
-			IsCustom:        true,
-			Collection:      p.Collection,
-			InputPricePerM:  price.Input,
-			OutputPricePerM: price.Output,
-			SupportsImages:  supportsImages,
-			ContextWindow:   window,
-			CompactAtTokens: compactAt,
+			ID:                  p.ID,
+			Name:                p.DisplayName,
+			ProviderID:          p.ProviderID,
+			Default:             false,
+			Enabled:             p.Enabled,
+			IsCustom:            true,
+			Collection:          p.Collection,
+			InputPricePerM:      price.Input,
+			OutputPricePerM:     price.Output,
+			CacheReadPricePerM:  price.CacheRead,
+			CacheWritePricePerM: price.CacheWrite,
+			SupportsImages:      supportsImages,
+			ContextWindow:       window,
+			CompactAtTokens:     agent.CompactionThreshold(window),
+			MaxOutputTokens:     maxOutput,
+			Override:            overrideOf(p.ID, p.ProviderID, true),
 		}))
 	}
 
@@ -308,6 +392,52 @@ func (s *Server) handleValidateSearchKey(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleModelsRefresh(w http.ResponseWriter, r *http.Request) {
 	s.refreshModelCatalogsNow(r.Context())
 	s.handleModels(w, r)
+}
+
+// The upstream catalogue: a shared model list ogcode fetches from its catalogue
+// endpoint and installs over every provider's own rows. handleCatalogStatus
+// reports when it last landed; handleCatalogSync forces a fetch now and returns
+// what that sync did, on the JSON error shape the rest of the routes use.
+func (s *Server) handleCatalogStatus(w http.ResponseWriter, r *http.Request) {
+	syncedAt, source, modelCount, ok := provider.UpstreamCatalogInfo()
+	var when string
+	if ok {
+		when = syncedAt.Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"synced":     ok,
+		"syncedAt":   when,
+		"source":     source,
+		"modelCount": modelCount,
+	})
+}
+
+// handleCatalogSync runs one upstream sync synchronously on the request — the
+// caller pressed a button and wants the outcome, the same trade the manual
+// /models/refresh path makes. Bounded by the refresh timeout. A failed fetch
+// is a 502 with the error, never a half-flipped state; the kill switch is
+// configuration, not an upstream failure, so it is a 409 instead.
+func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), modelCatalogRefreshTimeout)
+	defer cancel()
+	res, err := provider.SyncUpstreamCatalog(ctx)
+	if err != nil {
+		if errors.Is(err, provider.ErrUpstreamSyncDisabled) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	_, _, modelCount, _ := provider.UpstreamCatalogInfo()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"syncedAt":   res.FetchedAt.Format(time.RFC3339),
+		"source":     res.Source,
+		"installed":  res.Installed,
+		"updated":    res.Updated,
+		"skipped":    res.Skipped,
+		"modelCount": modelCount,
+	})
 }
 
 func (s *Server) handleVCS(w http.ResponseWriter, r *http.Request) {

@@ -22,6 +22,10 @@ type CatalogModel struct {
 	Collection      string  `json:"collection"`
 	InputPricePerM  float64 `json:"inputPricePerM"`
 	OutputPricePerM float64 `json:"outputPricePerM"`
+	// Per-million USD cache rates the provider published; 0 when it publishes
+	// none.
+	CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
+	CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
 	// Efforts and DefaultEffort are the reasoning levels the host reported for
 	// the model (empty when it reported none).
 	Efforts       []string `json:"efforts,omitempty"`
@@ -33,7 +37,9 @@ func GetModelCatalog(database *db.DB) ([]CatalogModel, error) {
 	rows, err := database.Query(
 		`SELECT provider_id, model_id, name, active_by_default, supports_images,
 		        context_window, max_output_tokens, collection,
-		        input_price_per_m, output_price_per_m, efforts, default_effort
+		        input_price_per_m, output_price_per_m,
+		        cache_read_price_per_m, cache_write_price_per_m,
+		        efforts, default_effort
 		 FROM model_catalog`,
 	)
 	if err != nil {
@@ -49,7 +55,8 @@ func GetModelCatalog(database *db.DB) ([]CatalogModel, error) {
 		if err := rows.Scan(
 			&m.ProviderID, &m.ID, &m.Name, &active, &images,
 			&m.ContextWindow, &m.MaxOutputTokens, &m.Collection,
-			&m.InputPricePerM, &m.OutputPricePerM, &efforts, &m.DefaultEffort,
+			&m.InputPricePerM, &m.OutputPricePerM,
+			&m.CacheReadPricePerM, &m.CacheWritePricePerM, &efforts, &m.DefaultEffort,
 		); err != nil {
 			return nil, err
 		}
@@ -90,11 +97,15 @@ func SetModelCatalog(database *db.DB, providerID string, models []CatalogModel) 
 			`INSERT INTO model_catalog
 			   (provider_id, model_id, name, active_by_default, supports_images,
 			    context_window, max_output_tokens, collection,
-			    input_price_per_m, output_price_per_m, efforts, default_effort, fetched_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			    input_price_per_m, output_price_per_m,
+			    cache_read_price_per_m, cache_write_price_per_m,
+			    efforts, default_effort, fetched_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			providerID, m.ID, m.Name, active, images,
 			m.ContextWindow, m.MaxOutputTokens, m.Collection,
-			m.InputPricePerM, m.OutputPricePerM, strings.Join(m.Efforts, ","), m.DefaultEffort, now,
+			m.InputPricePerM, m.OutputPricePerM,
+			m.CacheReadPricePerM, m.CacheWritePricePerM,
+			strings.Join(m.Efforts, ","), m.DefaultEffort, now,
 		); err != nil {
 			return err
 		}

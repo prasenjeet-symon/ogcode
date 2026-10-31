@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/modelcatalog"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 )
 
 // The model catalogue of every provider is persisted in the global config DB so
@@ -24,6 +27,11 @@ import (
 // costs nothing but a later update, while re-fetching an unreachable endpoint
 // too eagerly would burn connections.
 const modelCatalogRefreshTimeout = 45 * time.Second
+
+// upstreamCatalogSyncInterval bounds how stale the persisted upstream catalogue
+// may be before it is re-fetched: at boot when nothing is persisted yet or the
+// last sync is older than this, then on a daily re-check while the server runs.
+const upstreamCatalogSyncInterval = 24 * time.Hour
 
 // catalogRefreshState serializes catalogue refreshes. A refresh holds `running`
 // for its whole span (one fetch per provider); a caller that arrives while one
@@ -124,4 +132,60 @@ func (s *Server) refreshModelCatalogsInBackground() {
 		}()
 		s.refreshModelCatalogsNow(context.Background())
 	}()
+}
+
+// loadUpstreamCatalog re-installs the upstream catalogue a previous run
+// persisted, so the shared model list answers on startup without a network
+// call — the same reason seedModelCatalog seeds each provider's own list.
+// A missing file is normal (the first boot) and reads as "never synced"; a
+// real failure is logged and the sync below still runs, so a bad file can
+// never leave the server without a catalogue.
+func loadUpstreamCatalog() {
+	if err := provider.LoadPersistedUpstreamCatalog(); err != nil {
+		slog.Warn("failed to load persisted upstream model catalog", "err", err)
+	}
+}
+
+// startUpstreamCatalogSync keeps the upstream catalogue fresh for as long as
+// the server runs: one sync right away (skipped when the persisted state is
+// still young), then a daily re-check. It must be called after the listener is
+// live — it can hit the network and must never delay startup — and every
+// failure is log-only: a sync that fails leaves the good persisted state in
+// force until the next check, and OGCODE_CATALOG_SYNC=false opts out entirely
+// (in which case the seam would refuse anyway; the check only skips the churn).
+func (s *Server) startUpstreamCatalogSync(ctx context.Context) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("upstream catalog sync panicked", "panic", r)
+			}
+		}()
+		syncUpstreamCatalogIfStale(ctx)
+		ticker := time.NewTicker(upstreamCatalogSyncInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				syncUpstreamCatalogIfStale(ctx)
+			}
+		}
+	}()
+}
+
+// syncUpstreamCatalogIfStale re-fetches the upstream catalogue when nothing has
+// been persisted yet, or the last sync lies further back than
+// upstreamCatalogSyncInterval. Errors only log.
+func syncUpstreamCatalogIfStale(ctx context.Context) {
+	if strings.EqualFold(os.Getenv("OGCODE_CATALOG_SYNC"), "false") {
+		return
+	}
+	syncedAt, _, _, ok := provider.UpstreamCatalogInfo()
+	if ok && time.Since(syncedAt) < upstreamCatalogSyncInterval {
+		return
+	}
+	if _, err := provider.SyncUpstreamCatalog(ctx); err != nil {
+		slog.Warn("upstream model catalog sync failed", "err", err)
+	}
 }

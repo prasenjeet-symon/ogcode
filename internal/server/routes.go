@@ -46,6 +46,10 @@ func (s *Server) routes() http.Handler {
 		r.Get("/agent", s.handleAgents)
 		r.Get("/models", s.handleModels)
 		r.Post("/models/refresh", s.handleModelsRefresh)
+		// Upstream catalogue: the shared model list ogcode fetches itself.
+		// Status reads when it last landed; sync forces a fetch now.
+		r.Get("/models/catalog/status", s.handleCatalogStatus)
+		r.Post("/models/catalog/sync", s.handleCatalogSync)
 		r.Get("/config", s.handleConfig)
 		r.Get("/git/status", s.handleGitStatus)
 		r.Get("/git/diff", s.handleGitDiff)

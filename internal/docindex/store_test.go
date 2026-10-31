@@ -1,6 +1,7 @@
 package docindex
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -151,5 +152,110 @@ func TestModTimeRoundTrips(t *testing.T) {
 	}
 	if entries[0].ModTime != 0 {
 		t.Errorf("ModTime = %d, want 0", entries[0].ModTime)
+	}
+}
+
+// TestSheetExtensionsPinned keeps the shared list exactly what the whole
+// pipeline (indexer dispatch, store queries, internal/sheet's leaf copy)
+// agrees on. .xls/.ods belong to no list at all — excelize cannot read
+// BIFF/ODF, so they are indexed by neither the sheet path nor the text path.
+func TestSheetExtensionsPinned(t *testing.T) {
+	want := []string{".xlsx", ".xlsm", ".csv", ".tsv"}
+	if len(SheetExtensions) != len(want) {
+		t.Fatalf("SheetExtensions = %v, want %v", SheetExtensions, want)
+	}
+	for i := range want {
+		if SheetExtensions[i] != want[i] {
+			t.Errorf("SheetExtensions[%d] = %q, want %q", i, SheetExtensions[i], want[i])
+		}
+	}
+	for _, absent := range []string{".xls", ".ods"} {
+		for _, ext := range SheetExtensions {
+			if ext == absent {
+				t.Errorf("%q must stay out of SheetExtensions", absent)
+			}
+		}
+	}
+}
+
+// TestListSheetFilesEveryPage pins the pair of listings against each other:
+// every page (not just the first) of a document with a sheet extension lands
+// in the sheet listing, and none of its pages — including page 1 — leaks into
+// the text listing.
+func TestListSheetFilesEveryPage(t *testing.T) {
+	s := newTestStore(t)
+
+	var entries []*PageEntry
+	for i, ext := range SheetExtensions {
+		path := fmt.Sprintf("/proj/book%d%s", i, ext)
+		entries = append(entries,
+			&PageEntry{DocPath: path, PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+			&PageEntry{DocPath: path, PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
+		)
+	}
+	for _, e := range entries {
+		if err := s.Upsert(e); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	sheets, err := s.ListSheetFiles("/proj")
+	if err != nil {
+		t.Fatalf("ListSheetFiles: %v", err)
+	}
+	if len(sheets) != 2*len(SheetExtensions) {
+		t.Fatalf("ListSheetFiles returned %d rows, want one per page of every sheet extension (=%d)", len(sheets), 2*len(SheetExtensions))
+	}
+
+	text, err := s.ListTextFiles("/proj")
+	if err != nil {
+		t.Fatalf("ListTextFiles: %v", err)
+	}
+	for _, e := range text {
+		t.Errorf("ListTextFiles leaked sheet page %q (page %d)", e.DocPath, e.PageNum)
+	}
+}
+
+// TestListTextFilesOnlyFirstPages pins the page_num = 1 filter the sheet
+// listing already relies on: a multi-page document kind whose extension
+// carries no exclusion clause yet (a kind added after this one) can only ever
+// contribute its first page to the text listing, never its later pages —
+// otherwise a caller counting rows as files resurrects the last-write-wins
+// bug across pages.
+func TestListTextFilesOnlyFirstPages(t *testing.T) {
+	s := newTestStore(t)
+
+	entries := []*PageEntry{
+		{DocPath: "/proj/notes.md", PageNum: 1, Keywords: []string{"notes"}, Labels: []string{"L"}},
+		// The known four are excluded by extension wholesale: no page appears.
+		{DocPath: "/proj/book.xlsx", PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+		{DocPath: "/proj/book.xlsx", PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
+		// A hypothetical future multi-page kind with no exclusion clause: page
+		// 1 is indistinguishable from a single-entry file and stays listed;
+		// page 2 must not leak in.
+		{DocPath: "/proj/fut.parquet", PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+		{DocPath: "/proj/fut.parquet", PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
+	}
+	for _, e := range entries {
+		if err := s.Upsert(e); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	got, err := s.ListTextFiles("/proj")
+	if err != nil {
+		t.Fatalf("ListTextFiles: %v", err)
+	}
+	want := map[string]int{
+		"/proj/notes.md":    1,
+		"/proj/fut.parquet": 1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ListTextFiles returned %d rows, want %d: %v", len(got), len(want), got)
+	}
+	for _, e := range got {
+		if want[e.DocPath] != e.PageNum {
+			t.Errorf("ListTextFiles returned %q page %d, only first pages are allowed", e.DocPath, e.PageNum)
+		}
 	}
 }

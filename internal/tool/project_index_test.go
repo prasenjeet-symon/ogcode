@@ -258,6 +258,46 @@ func TestProjectIndex_MixedDocumentTypesAggregateIntoFolderStats(t *testing.T) {
 	}
 }
 
+// A workbook is one file with one page per sheet. Spreadsheets used to arrive
+// through ListTextFiles, where every sheet looked like a separate text file:
+// the tree kept only the last sheet's labels, because buildProjectTree assigned
+// node[filename] once per row. Exercises the real store, since the split
+// between ListTextFiles and ListSheetFiles is the SQL being pinned.
+func TestProjectIndex_WorkbookKeepsEverySheetsLabels(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	store := docindex.NewStore(database)
+
+	const dir = "/proj"
+	for _, e := range []*docindex.PageEntry{
+		{DocPath: dir + "/notes.go", PageNum: 1, Labels: []string{"code topic"}},
+		{DocPath: dir + "/book.xlsx", PageNum: 1, Labels: []string{"forecast scenario"}},
+		{DocPath: dir + "/book.xlsx", PageNum: 2, Labels: []string{"budget assumptions"}},
+		{DocPath: dir + "/book.xlsx", PageNum: 3, Labels: []string{"headcount plan"}},
+	} {
+		if err := store.Upsert(e); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	res, err := NewProjectIndexTool(store).Execute(context.Background(), nil, Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	// Every sheet's labels, in page order — not only the last page's.
+	if !strings.Contains(res.Output, "book.xlsx — forecast scenario; budget assumptions; headcount plan") {
+		t.Errorf("workbook line does not merge every sheet's labels:\n%s", res.Output)
+	}
+	// One leaf, whatever the sheet count — the rendered total comes from the
+	// tree, so a per-sheet leaf would inflate it.
+	if !strings.Contains(res.Output, "2 files indexed in this project.") {
+		t.Errorf("workbook counted per sheet rather than as one file:\n%s", res.Output)
+	}
+}
+
 // Labels are the bulk of this output, so a file is capped at the index's own
 // per-page ceiling — but no lower. A stored label the model paid a step to
 // produce must not be hidden by the render, so textLabelCap equals

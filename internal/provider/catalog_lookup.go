@@ -90,18 +90,58 @@ func (idx catalogIndex) lookup(id string) (CatalogModel, bool) {
 	return CatalogModel{}, false
 }
 
-var (
-	catalogOnce sync.Once
-	catalogIdx  catalogIndex
-)
+// catalogMemo memoises a package-level catalogIndex over lists that can be
+// re-installed at runtime (the upstream layer, upstream.go), where a sync.Once
+// could never rebuild. Builds stay lazy — the first lookup after an install
+// pays for the index, sub-millisecond over a few hundred entries — and a
+// lookup never blocks on anything but the read lock.
+type catalogMemo struct {
+	mu    sync.RWMutex
+	dirty bool
+	build func() catalogIndex
+	idx   catalogIndex
+}
 
-// LookupCatalogModel finds a model in the built-in catalogue under any of its
-// names, whichever provider serves it. The catalogue is the authority on a
-// known model's context window, pricing and image support; a false return means
-// "not catalogued" — unknown, never free or zero.
+func (m *catalogMemo) lookup(id string) (CatalogModel, bool) {
+	m.mu.RLock()
+	idx, dirty := m.idx, m.dirty
+	m.mu.RUnlock()
+	// A zero-initialized memo (nil idx, !dirty) has never built: treat it as
+	// stale so the first lookup pays for the index instead of answering from
+	// an empty map.
+	if !dirty && idx == nil {
+		dirty = true
+	}
+	if !dirty {
+		return idx.lookup(id)
+	}
+	m.mu.Lock()
+	if m.dirty || m.idx == nil {
+		m.idx = m.build()
+		m.dirty = false
+	}
+	idx = m.idx
+	m.mu.Unlock()
+	return idx.lookup(id)
+}
+
+// invalidate marks the memo stale; the next lookup rebuilds it from whatever
+// the list accessors now serve.
+func (m *catalogMemo) invalidate() {
+	m.mu.Lock()
+	m.dirty = true
+	m.mu.Unlock()
+}
+
+var lookupCatalogMemo = catalogMemo{build: func() catalogIndex {
+	return newCatalogIndex(catalogLists()...)
+}}
+
+// LookupCatalogModel finds a model in the catalogue under any of its names,
+// whichever provider serves it — the compiled-in tables, plus the upstream
+// layer's replacements and additions once one is installed. The catalogue is
+// the authority on a known model's context window, pricing and image support;
+// a false return means "not catalogued" — unknown, never free or zero.
 func LookupCatalogModel(id string) (CatalogModel, bool) {
-	catalogOnce.Do(func() {
-		catalogIdx = newCatalogIndex(AnthropicModels, OpenAIModels, GoogleModels, OpenModels, LegacyModels)
-	})
-	return catalogIdx.lookup(id)
+	return lookupCatalogMemo.lookup(id)
 }

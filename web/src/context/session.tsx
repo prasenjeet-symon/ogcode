@@ -5,6 +5,7 @@ import {
   type SessionIntent,
   type MessageWithParts,
   type ModelInfo,
+  type CustomModelMeta,
   type ImagePartData,
   type ToolPartData,
   listSessions,
@@ -152,7 +153,10 @@ interface SessionContextValue {
   /** Force a live re-fetch of provider catalogues (after a credential change). */
   reloadModels: () => Promise<void>;
   toggleModel: (model: ModelInfo, enabled: boolean) => Promise<void>;
-  addCustomModel: (id: string, providerId: string, displayName: string, collection?: string) => Promise<void>;
+  addCustomModel: (id: string, providerId: string, displayName: string, collection?: string, meta?: CustomModelMeta) => Promise<void>;
+  /** Save what the user configured about a model — a catalogue one included —
+   *  over the figures its catalogue and provider list. Rethrows on failure. */
+  updateModelMeta: (model: ModelInfo, meta: CustomModelMeta) => Promise<void>;
   removeCustomModel: (id: string, providerId?: string) => Promise<void>;
   refresh: () => void;
   modelSlots: () => (string | null)[];
@@ -719,6 +723,10 @@ export const SessionProvider: ParentComponent = (props) => {
         enabled,
         isCustom: model.isCustom,
         collection: model.collection,
+        // A preference row replaces every metadata column, so the figures the
+        // user edited in ride along; without them a toggle would silently wipe
+        // the window, ceiling and price they set on a catalogue model.
+        ...(model.override ?? {}),
       });
     } catch (e) {
       setModels(prev); // restore the exact prior objects on failure
@@ -726,7 +734,13 @@ export const SessionProvider: ParentComponent = (props) => {
     }
   }
 
-  async function addCustomModel(id: string, providerId: string, displayName: string, collection?: string) {
+  async function addCustomModel(
+    id: string,
+    providerId: string,
+    displayName: string,
+    collection?: string,
+    meta?: CustomModelMeta,
+  ) {
     try {
       const updated = await setModelPreference({
         id,
@@ -735,6 +749,9 @@ export const SessionProvider: ParentComponent = (props) => {
         enabled: true,
         isCustom: true,
         collection: collection || '',
+        // Only what the user actually set: an absent field stays absent, so the
+        // server keeps its own value (and never decodes an undefined as null).
+        ...meta,
       });
       setModels(updated || []);
     } catch (e) {
@@ -749,6 +766,26 @@ export const SessionProvider: ParentComponent = (props) => {
     } catch (e) {
       console.error('remove custom model failed:', e);
     }
+  }
+
+  // Record what the user configured about a model, over what its catalogue and
+  // provider say. Works the same for a model they added by hand and for one a
+  // catalogue or endpoint already lists — the server keeps the figures in the
+  // provider registry either way, so the loop's request, the context meter and
+  // price accounting read one copy. A field left blank is not configured, so
+  // leaving one out clears it back to the catalogue's own fact. Rethrows, so the
+  // row's editor can say the save failed instead of closing on nothing.
+  async function updateModelMeta(model: ModelInfo, meta: CustomModelMeta) {
+    const updated = await setModelPreference({
+      id: model.id,
+      providerId: model.providerId,
+      displayName: model.name,
+      enabled: model.enabled,
+      isCustom: model.isCustom,
+      collection: model.collection,
+      ...meta,
+    });
+    setModels(updated || []);
   }
 
   async function selectSession(id: string) {
@@ -1739,6 +1776,7 @@ export const SessionProvider: ParentComponent = (props) => {
     reloadModels,
     toggleModel,
     addCustomModel,
+    updateModelMeta,
     removeCustomModel,
     refresh,
     modelSlots,

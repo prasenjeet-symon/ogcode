@@ -203,3 +203,48 @@ func TestSessionProviderRoundTrips(t *testing.T) {
 		t.Fatalf("after update provider = %q, want openai", again.Provider)
 	}
 }
+
+// TestSetModelPreference_RoundTripsCustomModelMetadata pins the five columns a
+// user fills in for a model no catalogue knows — window, output ceiling, per-1M
+// prices and image support. They must survive the write, read back on the same
+// (id, providerId) row, and be cleared by a write that leaves them empty, since
+// 0/false means "not configured" and falls back to catalogue/provider facts.
+func TestSetModelPreference_RoundTripsCustomModelMetadata(t *testing.T) {
+	database := newCapabilityDB(t)
+
+	want := &ModelPreference{
+		ID: "my-custom-model", ProviderID: "openai", DisplayName: "My Model",
+		Enabled: true, IsCustom: true, Collection: "Mine",
+		ContextWindow: 200000, MaxOutputTokens: 32000,
+		InputPricePerM: 3.5, OutputPricePerM: 14,
+		SupportsImages: true, CreatedAt: 1, UpdatedAt: 1,
+	}
+	if err := SetModelPreference(database, want); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	prefs, err := GetModelPreferences(database)
+	if err != nil || len(prefs) != 1 {
+		t.Fatalf("get: err=%v n=%d", err, len(prefs))
+	}
+	got := prefs[0]
+	if got.ContextWindow != 200000 || got.MaxOutputTokens != 32000 ||
+		got.InputPricePerM != 3.5 || got.OutputPricePerM != 14 || !got.SupportsImages {
+		t.Errorf("round trip = %+v, want 200000/32000/3.5/14/images", got)
+	}
+
+	// An upsert that leaves the metadata empty clears it.
+	if err := SetModelPreference(database, &ModelPreference{
+		ID: want.ID, ProviderID: want.ProviderID, Enabled: false, IsCustom: true,
+		CreatedAt: 2, UpdatedAt: 2,
+	}); err != nil {
+		t.Fatalf("second set: %v", err)
+	}
+	prefs, err = GetModelPreferences(database)
+	if err != nil || len(prefs) != 1 {
+		t.Fatalf("second get: err=%v n=%d", err, len(prefs))
+	}
+	if got := prefs[0]; got.ContextWindow != 0 || got.MaxOutputTokens != 0 ||
+		got.InputPricePerM != 0 || got.OutputPricePerM != 0 || got.SupportsImages || got.Enabled {
+		t.Errorf("after clearing write = %+v, want every metadata field zero and disabled", got)
+	}
+}

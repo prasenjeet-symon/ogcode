@@ -15,7 +15,10 @@ type ModelPreferenceStore struct{}
 // GetModelPreferences returns all model preference overrides from the database.
 func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 	rows, err := database.Query(
-		`SELECT id, enabled, provider_id, display_name, is_custom, collection, time_created, time_updated
+		`SELECT id, enabled, provider_id, display_name, is_custom, collection,
+		        context_window, max_output_tokens, input_price_per_m, output_price_per_m,
+		        cache_read_price_per_m, cache_write_price_per_m, supports_images,
+		        time_created, time_updated
 		 FROM model_preference ORDER BY time_created ASC`,
 	)
 	if err != nil {
@@ -28,12 +31,21 @@ func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 		var p ModelPreference
 		var enabled int
 		var isCustom int
+		var supportsImages int
 		var collection sql.NullString
-		if err := rows.Scan(&p.ID, &enabled, &p.ProviderID, &p.DisplayName, &isCustom, &collection, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		// Scan order must match the SELECT above exactly: a column listed there
+		// but missed here is a silent runtime error, not a compile error.
+		if err := rows.Scan(
+			&p.ID, &enabled, &p.ProviderID, &p.DisplayName, &isCustom, &collection,
+			&p.ContextWindow, &p.MaxOutputTokens, &p.InputPricePerM, &p.OutputPricePerM,
+			&p.CacheReadPricePerM, &p.CacheWritePricePerM, &supportsImages,
+			&p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		p.Enabled = enabled == 1
 		p.IsCustom = isCustom == 1
+		p.SupportsImages = supportsImages == 1
 		p.Collection = collection.String
 		prefs = append(prefs, &p)
 	}
@@ -55,16 +67,33 @@ func SetModelPreference(database *db.DB, p *ModelPreference) error {
 	if p.IsCustom {
 		isCustom = 1
 	}
+	supportsImages := 0
+	if p.SupportsImages {
+		supportsImages = 1
+	}
 	_, err := database.Exec(
-		`INSERT INTO model_preference (id, enabled, provider_id, display_name, is_custom, collection, time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO model_preference (id, enabled, provider_id, display_name, is_custom, collection,
+				context_window, max_output_tokens, input_price_per_m, output_price_per_m,
+				cache_read_price_per_m, cache_write_price_per_m, supports_images,
+				time_created, time_updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id, provider_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			display_name = excluded.display_name,
 			is_custom = excluded.is_custom,
 			collection = excluded.collection,
+			context_window = excluded.context_window,
+			max_output_tokens = excluded.max_output_tokens,
+			input_price_per_m = excluded.input_price_per_m,
+			output_price_per_m = excluded.output_price_per_m,
+			cache_read_price_per_m = excluded.cache_read_price_per_m,
+			cache_write_price_per_m = excluded.cache_write_price_per_m,
+			supports_images = excluded.supports_images,
 			time_updated = excluded.time_updated`,
-		p.ID, enabled, p.ProviderID, p.DisplayName, isCustom, p.Collection, p.CreatedAt, p.UpdatedAt,
+		p.ID, enabled, p.ProviderID, p.DisplayName, isCustom, p.Collection,
+		p.ContextWindow, p.MaxOutputTokens, p.InputPricePerM, p.OutputPricePerM,
+		p.CacheReadPricePerM, p.CacheWritePricePerM, supportsImages,
+		p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }

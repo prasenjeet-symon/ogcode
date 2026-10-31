@@ -13,6 +13,12 @@ import (
 type PageText struct {
 	PageNum int
 	Text    string
+	// Sheet marks pages extracted from a spreadsheet profile (ExtractSheetPages).
+	// Besides the usual word keywords, the profile's distinctive VALUES — row
+	// counts, min/max extremes, ISO dates, decimal amounts — join the keyword
+	// corpus, so two sheets with identical generic column names still differ
+	// by their values when the label agent names them.
+	Sheet bool
 }
 
 // PageCorpus holds the deduplicated keyword corpus for a single PDF page.
@@ -76,7 +82,8 @@ func ExtractPages(pdfPath string) ([]PageText, error) {
 
 // BuildCorpora converts page texts to keyword corpora in parallel.
 // Each corpus is deduplicated, lowercased, and stripped of stop words and
-// non-alphabetic tokens.
+// non-alphabetic tokens; sheet pages additionally carry their profile's
+// numeric/date values (see PageText.Sheet and extractSheetValueKeywords).
 func BuildCorpora(pages []PageText) []PageCorpus {
 	corpora := make([]PageCorpus, len(pages))
 
@@ -85,9 +92,13 @@ func BuildCorpora(pages []PageText) []PageCorpus {
 		wg.Add(1)
 		go func(idx int, p PageText) {
 			defer wg.Done()
+			keywords := extractKeywords(p.Text)
+			if p.Sheet {
+				keywords = append(keywords, extractSheetValueKeywords(p.Text)...)
+			}
 			corpora[idx] = PageCorpus{
 				PageNum:  p.PageNum,
-				Keywords: extractKeywords(p.Text),
+				Keywords: keywords,
 			}
 		}(i, pt)
 	}

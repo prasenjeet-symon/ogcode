@@ -23,7 +23,6 @@ export function providerLabel(id: string): string {
 /** Why an included model costs nothing per token. */
 export function includedNote(m: Pick<ModelUsage, 'provider' | 'model' | 'inferredProvider'>): string {
   const provider = m.provider || m.inferredProvider || '';
-  if (provider === 'ogx') return 'Included in your OGX plan';
   // Ollama serves both: cloud models (tagged :cloud / -cloud) on the Ollama
   // plan, everything else on this machine.
   if (provider === 'ollama' && /[:-]cloud$/i.test(m.model)) return 'Included in your Ollama plan';

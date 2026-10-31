@@ -29,6 +29,7 @@ func TestModelCatalogRoundTrips(t *testing.T) {
 			ActiveByDefault: true, SupportsImages: true,
 			ContextWindow: 200000, MaxOutputTokens: 8192,
 			Collection: "OpenRouter", InputPricePerM: 3, OutputPricePerM: 15,
+			CacheReadPricePerM: 0.55, CacheWritePricePerM: 0.9,
 		},
 		{ID: "m2", Name: "Model Two", ProviderID: "openrouter"},
 	}
@@ -50,7 +51,8 @@ func TestModelCatalogRoundTrips(t *testing.T) {
 	one := byID["m1"]
 	if one.Name != "Model One" || !one.ActiveByDefault || !one.SupportsImages ||
 		one.ContextWindow != 200000 || one.MaxOutputTokens != 8192 ||
-		one.Collection != "OpenRouter" || one.InputPricePerM != 3 || one.OutputPricePerM != 15 {
+		one.Collection != "OpenRouter" || one.InputPricePerM != 3 || one.OutputPricePerM != 15 ||
+		one.CacheReadPricePerM != 0.55 || one.CacheWritePricePerM != 0.9 {
 		t.Errorf("m1 round trip lost a field: %+v", one)
 	}
 	if two := byID["m2"]; two.ActiveByDefault || two.SupportsImages || two.ContextWindow != 0 {

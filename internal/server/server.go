@@ -382,6 +382,9 @@ func (s *Server) serve(ctx context.Context) error {
 	// server offers.
 	toolRegistry := tool.NewRegistry()
 	tool.RegisterCoreTools(toolRegistry, s.docindexStore)
+	// query_sheet probes spreadsheets through the indexer's profiler — the
+	// seam lives here because tool cannot import indexer.
+	tool.SetSheetProfileLoader(SheetProfilesFromIndexer)
 	toolRegistry.Register(tool.NewSubmitDocIndexTool(s.docindexStore))
 	toolRegistry.Register(tool.NewMemoryMapTool(memfileStore))
 	// board and teammate are registered for every turn that shares this
@@ -527,14 +530,17 @@ func (s *Server) serve(ctx context.Context) error {
 	// first backfill any that predate the move (non-destructively).
 	s.migrateModelPreferencesToGlobal()
 
-	// Load custom model preferences from the global DB and register their routing.
+	// Load model preferences from the global DB and register what the user
+	// configured: a custom model's routing and whole definition, and on a listed
+	// model the window, ceiling, price and image support they edited in over the
+	// catalogue's own facts.
 	prefs, err := session.GetModelPreferences(s.globalDB)
 	if err != nil {
 		slog.Warn("failed to load model preferences", "err", err)
 	} else {
 		for _, p := range prefs {
+			s.registerModelConfig(p)
 			if p.IsCustom {
-				s.registry.RegisterCustomModel(p.ID, p.ProviderID)
 				slog.Info("registered custom model", "id", p.ID, "provider", p.ProviderID)
 			}
 		}
@@ -814,6 +820,15 @@ func (s *Server) serve(ctx context.Context) error {
 	// listeners are live: the picker already answers from the seeded catalogue,
 	// and this only fills it in with whatever the endpoints report today.
 	s.refreshModelCatalogsInBackground()
+
+	// The upstream catalogue — the shared model list ogcode itself fetches and
+	// installs over every provider's rows — re-installs from the persisted
+	// copy, then re-syncs in the background on the same listener-live terms as
+	// the refresh above: once when missing or a day stale, then a daily
+	// re-check. The load is a disk read; the sync may hit the network, and both
+	// log their failures rather than dropping a good persisted state.
+	loadUpstreamCatalog()
+	s.startUpstreamCatalogSync(ctx)
 
 	// Keep the feature-flag decisions current: PostHog can flip one while a
 	// session is open. The decisions drive the note and device-panel routes, the

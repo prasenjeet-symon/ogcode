@@ -7,6 +7,7 @@ import { useNote } from '../context/note';
 import { useSession } from '../context/session';
 import { useServer } from '../context/server';
 import DeliveryTicks, { formatLatency } from './delivery-ticks';
+import IndexEntries from './index-entries';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -130,16 +131,45 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   // update_intent): the maps' dense labeled tree/outline output is how the
   // agent orients itself in the codebase, compact_context's is the agent's
   // note to itself about what it condensed, and update_intent's is the echoed
-  // plan + closing nudge — none is something the user reads in raw JSON. Keep
-  // the collapsed status row, but never offer disclosure into input/output.
-  // These rows show a magic-wand glyph rather than the usual checkmark: what
-  // the tool did was quietly maintain the agent's own state, not hand back a
-  // result.
+  // plan + closing nudge. They start collapsed like any other tool and open on
+  // demand, so the user can audit the agent's own state. The rows show a
+  // magic-wand glyph rather than the usual checkmark: what the tool did was
+  // quietly maintain the agent's own state, not hand back a result.
   const isAgentNavTool = () =>
     tool() === 'codebase_map' ||
     tool() === 'file_map' ||
     tool() === 'compact_context' ||
     tool() === 'update_intent';
+
+  // pdf_index / docx_index answer with a page -> labels JSON array. That shape
+  // reads as a wall of quoted strings in a code block; the page list is what
+  // the user actually wants. Anything else — the plain-text "no index found …
+  // run `ogcode index` first" reply, a failure — falls back to the raw block.
+  const isDocIndex = () => tool() === 'pdf_index' || tool() === 'docx_index';
+  const docIndexEntries = createMemo((): { page: number; labels: string[] }[] | null => {
+    if (!isDocIndex()) return null;
+    const s = state();
+    if (s.status === 'error' || s.status === 'denied') return null;
+    const text = s.output || '';
+    if (!text) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(parsed)) return null;
+    const entries: { page: number; labels: string[] }[] = [];
+    for (const raw of parsed) {
+      const page = (raw as { page?: unknown })?.page;
+      const labels = (raw as { labels?: unknown })?.labels;
+      if (typeof page !== 'number' || !Array.isArray(labels) || !labels.every((l) => typeof l === 'string')) {
+        return null;
+      }
+      entries.push({ page, labels });
+    }
+    return entries;
+  });
   const fileDiff = createMemo((): { oldText: string; newText: string; mode: 'create' | 'edit' | 'overwrite'; omitted: boolean } | null => {
     if (!isFileEdit()) return null;
     const input = state().input || {};
@@ -265,24 +295,21 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     <div class="my-1.5">
       <button
         type="button"
-        disabled={isAgentNavTool()}
-        aria-expanded={isAgentNavTool() ? undefined : expanded()}
+        aria-expanded={expanded()}
         onClick={() => setExpanded(!expanded())}
         class={`flex items-center gap-2 w-full text-left text-meta h-7 px-2 rounded-md border
                transition-colors
-               ${!isAgentNavTool() && expanded()
+               ${expanded()
                  ? 'bg-[color:var(--bg-elevated)] border-[color:var(--border-default)]'
-                 : `bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)]${isAgentNavTool() ? '' : ' hover:bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-default)]'}`
+                 : 'bg-[color:var(--bg-surface)] border-[color:var(--border-subtle)] hover:bg-[color:var(--bg-elevated)] hover:border-[color:var(--border-default)]'
                }`}
       >
-        <Show when={!isAgentNavTool()}>
-          <svg
-            class={`w-2.5 h-2.5 shrink-0 text-[color:var(--text-muted)] transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-        </Show>
+        <svg
+          class={`w-2.5 h-2.5 shrink-0 text-[color:var(--text-muted)] transition-transform duration-200 ${expanded() ? 'rotate-90' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
         <div class={`flex-shrink-0 ${statusColor()}`}>
           <Show when={status() === 'running'}>
             <div class="w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
@@ -374,14 +401,14 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
             {durationLabel()}
           </span>
         </Show>
-        <Show when={hasOutput() && (isAgentNavTool() || !expanded()) && !isFileEdit()}>
+        <Show when={hasOutput() && !expanded() && !isFileEdit()}>
           <span class="text-micro text-[color:var(--text-muted)] font-mono shrink-0 tabular-nums">
             {outputLineCount()} {outputLineCount() === 1 ? 'line' : 'lines'}
           </span>
         </Show>
       </button>
 
-      <Show when={!isAgentNavTool() && expanded()}>
+      <Show when={expanded()}>
         {/* .reveal animates the disclosure open from zero height without a
             magic max-height, so long outputs and one-liners open alike. */}
         <div class="reveal">
@@ -397,10 +424,17 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
                 <CodeBlock label="input" maxHeight={160} text={safeStringify(state().input)} />
               </Show>
               <Show when={state().output && !isFileEdit()}>
-                <Show when={isDeepSearch()} fallback={<CodeBlock label="output" maxHeight={280} text={state().output || ''} />}>
-                  <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-3 max-h-[600px] overflow-y-auto">
-                    <MarkdownContent text={state().output || ''} />
-                  </div>
+                <Show
+                  when={docIndexEntries()}
+                  fallback={
+                    <Show when={isDeepSearch()} fallback={<CodeBlock label="output" maxHeight={280} text={state().output || ''} />}>
+                      <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-3 max-h-[600px] overflow-y-auto">
+                        <MarkdownContent text={state().output || ''} />
+                      </div>
+                    </Show>
+                  }
+                >
+                  {(entries) => <IndexEntries entries={entries()} />}
                 </Show>
               </Show>
               <Show when={state().error}>
@@ -638,7 +672,13 @@ function TeammatePane(props: { parts: Part[] }) {
 function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
   const [wrap, setWrap] = createSignal(true);
   const [copied, setCopied] = createSignal(false);
+  const [expanded, setExpanded] = createSignal(false);
   let copyTimer: ReturnType<typeof setTimeout>;
+
+  // Approximate overflow test: the clamp only earns a toggle when the text
+  // really spills past it. The line count catches dense output, the byte floor
+  // catches a few very long lines that wrap past the visible box.
+  const canExpand = () => props.text.split('\n').length > 12 || props.text.length > 1200;
 
   const handleCopy = (e: MouseEvent) => {
     e.stopPropagation();
@@ -694,6 +734,20 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
             </Show>
             {copied() ? 'Copied' : 'Copy'}
           </button>
+          <Show when={canExpand()}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setExpanded(!expanded()); }}
+              title={expanded() ? 'Collapse block' : 'Expand block'}
+              aria-label={expanded() ? 'Collapse block' : 'Expand block'}
+              class="h-6 px-1.5 rounded text-micro font-medium transition flex items-center gap-1 text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]"
+            >
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d={expanded() ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'} />
+              </svg>
+              {expanded() ? 'Collapse' : 'Expand'}
+            </button>
+          </Show>
         </div>
       </div>
       <pre
@@ -702,7 +756,7 @@ function CodeBlock(props: { label: string; text: string; maxHeight: number }) {
         class={`text-micro text-[color:var(--text-secondary)] font-mono leading-[1.6] p-2.5 overflow-y-auto
           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[color:var(--accent)]
           ${wrap() ? 'whitespace-pre-wrap break-words overflow-x-hidden' : 'whitespace-pre overflow-x-auto'}`}
-        style={{ 'max-height': `${props.maxHeight}px` }}
+        style={{ 'max-height': expanded() ? '70vh' : `${props.maxHeight}px` }}
       >
         {props.text}
       </pre>
