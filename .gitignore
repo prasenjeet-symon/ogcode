@@ -64,16 +64,42 @@ ogcode-live-demo.mov
 ogcode-live-demo.mp4
 demo-recording/
 
-# Local scratch documents — planning notes kept machine-local; untracked now.
-# The planning/research documents live in plans/ (committed); these rules are
-# root-anchored (/), so they match only a vestigial copy re-created at the repo
-# root — never the tracked file under plans/.
+# Local scratch documents — planning notes kept machine-local, out of the
+# published repo. Every rule is root-anchored (/), so it matches exactly one
+# path and never a same-named file elsewhere: a bare `GIT_DIFF_PLAN.md` rule
+# once silently swallowed the tracked `plans/GIT_DIFF_PLAN.md`.
 /exponential_equations.tex
 /polynomial_equations.pdf
 /GIT_DIFF_PLAN.md
 /MCP_IMPLEMENTATION_PLAN.md
 /MCP_OAUTH_PLAN.md
 /SKILL_FEATURE_IMPLEMENTATION.md
+
+# Historical implementation plans whose features have shipped: the design
+# record stays on the machine that wrote it. Code still cites two plans as the
+# design of record — INCUS_WORKERS_PLAN.md (controlplane/) and
+# MULTI_USER_REPOS_PLAN.md (Phase 4, not built) — and those two stay tracked.
+/plans/ARCHITECTURE_AUDIT.md
+/plans/BOARD_PUSH_PLAN.md
+/plans/CONFLICT_FREE_MUTATIONS_PLAN.md
+/plans/GIT_DIFF_PLAN.md
+/plans/HOWTO_MD_PLAN.md
+/plans/MCP_IMPLEMENTATION_PLAN.md
+/plans/MCP_OAUTH_PLAN.md
+/plans/MULTI_AGENT_COMMS_PLAN.md
+/plans/REMOTE_AGENT_WORKERS_PLAN.md
+/plans/RELEASE.md
+/plans/SKILL_FEATURE_IMPLEMENTATION.md
+/plans/TASK_SCHEDULING_PLAN.md
+/plans/spreadsheet-index.md
+
+# An empty AGENT.md placeholder: inert (LoadAgentMD skips a zero-byte file) and
+# pointless in a fresh checkout, so it stays local.
+/AGENT.md
+
+# docs/DEPLOY.md is a redirect stub; the guide lives in the docs site
+# (https://ogcode.in/docs/deployment/).
+/docs/DEPLOY.md
 
 # Project long-term memory — machine-local working notes, loaded at runtime by
 # LoadMemoryMD from whatever directory ogcode is opened in. Never tracked: it is

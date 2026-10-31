@@ -82,8 +82,9 @@ Done when: `version` prints `vX.Y.Z`, `/api/config` answers 200, and `git --vers
 Verified: 2026-10-19 @ v0.48.0 — migrated from MEMORY.md, not re-run
 Touches: the host's nginx/Caddy config, systemd unit or `docker run` flags, environment
 
-1. Open `docs/DEPLOY.md` and pick one of the three supported setups — SSH tunnel, reverse proxy +
-   HTTPS/auth, Docker. There is no VPN option, and the server has **no built-in authentication**.
+1. Open <https://ogcode.in/docs/deployment/> and pick one of the three supported setups — SSH
+   tunnel, reverse proxy + HTTPS/auth, Docker. There is no VPN option, and the server has **no
+   built-in authentication**.
 2. `ogcode serve` binds **all interfaces by default** (only `--port`/`-p` exists) — put it behind
    the tunnel or the proxy, never on the open internet.
 3. Turn off proxy buffering for the event stream or the UI looks frozen: `proxy_buffering off`
