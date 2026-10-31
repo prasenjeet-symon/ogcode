@@ -31,6 +31,11 @@ type serverHost struct {
 	srv    *server.Server
 	cancel context.CancelFunc
 	port   int
+	// done is closed when the Serve goroutine has returned — by then the
+	// server has released its listener, closed its DBs and written its last
+	// byte into the worktree's .ogcode/, so a caller tearing the directory
+	// down afterwards cannot race a still-running server.
+	done chan struct{}
 }
 
 func newServerManager(ctx context.Context, logger *slog.Logger) *serverManager {
@@ -85,7 +90,7 @@ func (m *serverManager) ensure(dir string) (*serverHost, error) {
 			c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port)))
 			if err == nil {
 				c.Close()
-				h := &serverHost{srv: srv, cancel: cancel, port: port}
+				h := &serverHost{srv: srv, cancel: cancel, port: port, done: serveDone}
 				m.servers[dir] = h
 				return h, nil
 			}
@@ -109,9 +114,16 @@ func (m *serverManager) get(dir string) *serverHost {
 	return m.servers[dir]
 }
 
-// stopAll cancels every hosted server's context. The Serve goroutines return
-// on their own; the worker's shutdown waits on nothing beyond this because
-// Serve's graceful shutdown closes each server's DBs before returning.
+// stopShutdownGrace bounds how long stopAll waits for the hosted servers to
+// finish their own graceful shutdown. Serve's own HTTP grace is 3s, so this
+// leaves room for the DB and MCP closes that follow it.
+const stopShutdownGrace = 10 * time.Second
+
+// stopAll cancels every hosted server's context and waits (bounded) for each
+// Serve goroutine to return. Waiting matters: Serve closes the server's DBs and
+// finishes writing under the worktree only on its way out, so a caller that
+// deletes the directory right after stopAll — a test's TempDir cleanup — would
+// otherwise race it.
 func (m *serverManager) stopAll() {
 	m.mu.Lock()
 	hosts := make([]*serverHost, 0, len(m.servers))
@@ -122,5 +134,14 @@ func (m *serverManager) stopAll() {
 	m.mu.Unlock()
 	for _, h := range hosts {
 		h.cancel()
+	}
+	deadline := time.Now().Add(stopShutdownGrace)
+	for _, h := range hosts {
+		select {
+		case <-h.done:
+		case <-time.After(time.Until(deadline)):
+			m.logger.Warn("worktree server still shutting down at the grace deadline", "port", h.port)
+			return
+		}
 	}
 }
