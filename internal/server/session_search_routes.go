@@ -69,6 +69,16 @@ func (s *Server) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 	projectID := project.Resolve(s.dir)
 	hits, err := s.search.Search(r.Context(), projectID, s.dir, q, limit)
 	if err != nil {
+		// The palette aborts the previous keystroke's request on every new one
+		// (its own AbortController, so a stale answer cannot overwrite a newer
+		// one), and nothing is left to answer a request whose client is gone.
+		// The store runs on r.Context(), so the abort surfaces here as
+		// "context canceled" mid-query: that is the palette working, not a
+		// failure, and logging it at ERROR turned ordinary typing into a wall
+		// of "search sessions" errors.
+		if r.Context().Err() != nil {
+			return
+		}
 		slog.Error("search sessions", "query", q, "err", err)
 		writeError(w, http.StatusInternalServerError, "search failed")
 		return

@@ -1457,6 +1457,19 @@ textarea.auto-resize {
   }
 }
 
+/* Compact number fields drop the platform spinner: it is drawn inside the
+   field, over the right padding, and clips short values. The field already
+   takes the arrow keys and the wheel is not a step control here. */
+input[type='number'].no-spin::-webkit-outer-spin-button,
+input[type='number'].no-spin::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'].no-spin {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Viewport height correction for the overflow-x-auto sheets (kanban board,
    markdown previews): -webkit-overflow-scrolling momentum is default now. */
 

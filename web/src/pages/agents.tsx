@@ -4,7 +4,7 @@ import { useServer } from '../context/server';
 import { useSession } from '../context/session';
 import SessionSidebar from '../components/session-sidebar';
 import { DrawerToggle } from '../components/sidebar-shell';
-import AgentForceGraph from '../components/agent-force-graph';
+import AgentBoardGraph from '../components/agent-board-graph';
 import { getBoardRoster, stopBoardTeammate, type BoardHandle } from '../api/client';
 import { buildTree, rosterSummary } from '../lib/board-tree';
 
@@ -299,10 +299,10 @@ export default function AgentsPage() {
             </div>
           </Show>
 
-          {/* The graph, full bleed: no card, no toolbar, no max-height — wide as
+          {/* The board, full bleed: no card, no toolbar, no max-height — wide as
               the page and tall as the viewport allows. Every agent is always
-              shown; status rides colour alone and the hover tooltip is the only
-              text surface on the page. */}
+              shown, each family inside its own cell; status rides colour alone
+              and the hover tooltip is the only text surface on the page. */}
           <div class="relative flex-1 min-h-[320px] flex flex-col">
             <Show
               when={loaded() || loadError()}
@@ -335,7 +335,7 @@ export default function AgentsPage() {
                   onKeyDown={onTreeKey}
                   class="flex-1"
                 >
-                  <AgentForceGraph
+                  <AgentBoardGraph
                     rows={tree()}
                     isMe={mine()}
                     now={now()}
@@ -365,12 +365,6 @@ export default function AgentsPage() {
               </Show>
             </Show>
           </div>
-
-          <p class="shrink-0 text-micro leading-[1.5] text-[color:var(--text-muted)] px-4 sm:px-6 py-2.5">
-            Agents share this directory and edit it directly. A teammate reports back to the agent that spawned
-            it when it finishes: its last message is the result. A background task (task-*) is a read-only
-            investigation that reports the same way — stop it if you no longer want its answer.
-          </p>
         </div>
       </div>
     </main>

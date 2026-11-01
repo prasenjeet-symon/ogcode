@@ -242,22 +242,74 @@ func TestEmbedded_UpdateSkillMatchesDetection(t *testing.T) {
 // the value is supplied through `skills.env`. The built-in skill that documents
 // ogcode.json is the only place an agent learns this, so it has to name both
 // halves — a user asking "why won't this skill load" is answered from this text.
-func TestEmbedded_CustomizeSkillDocumentsRequires(t *testing.T) {
+func TestEmbedded_KnowledgeSkillDocumentsRequires(t *testing.T) {
 	skills, _ := Embedded()
-	var customize *Skill
+	var knowledge *Skill
 	for i := range skills {
-		if skills[i].Name == "customize-ogcode" {
-			customize = &skills[i]
+		if skills[i].Name == "ogcode-knowledge" {
+			knowledge = &skills[i]
 			break
 		}
 	}
-	if customize == nil {
-		t.Fatal("the built-in customize-ogcode skill is missing")
+	if knowledge == nil {
+		t.Fatal("the built-in ogcode-knowledge skill is missing")
 	}
 	for _, want := range []string{"requires", "skills.env"} {
-		if !strings.Contains(customize.Content, want) {
-			t.Errorf("customize-ogcode does not document %q; an agent could not tell a user how to supply a missing credential", want)
+		if !strings.Contains(knowledge.Content, want) {
+			t.Errorf("ogcode-knowledge does not document %q; an agent could not tell a user how to supply a missing credential", want)
 		}
+	}
+}
+
+// The audit log is invisible from the project's own files — nothing in a
+// checkout mentions .ogcode/tool_calls.csv — so the knowledge skill is the only
+// place an agent learns where the audit lives and how to read it. These strings
+// are what a recall of "how do I see tool calls" has to match on.
+func TestEmbedded_KnowledgeSkillDocumentsToolAudit(t *testing.T) {
+	skills, _ := Embedded()
+	var knowledge *Skill
+	for i := range skills {
+		if skills[i].Name == "ogcode-knowledge" {
+			knowledge = &skills[i]
+			break
+		}
+	}
+	if knowledge == nil {
+		t.Fatal("the built-in ogcode-knowledge skill is missing")
+	}
+	for _, want := range []string{".ogcode/tool_calls.csv", "query_sheet", "OGCODE_TOOL_AUDIT", "duration_ms"} {
+		if !strings.Contains(knowledge.Content, want) {
+			t.Errorf("ogcode-knowledge does not document the tool-call audit %q", want)
+		}
+	}
+	if !strings.Contains(knowledge.Description, "tool_calls.csv") {
+		t.Error("ogcode-knowledge description does not surface the audit path; the matcher would miss audit questions")
+	}
+}
+
+// The web UI's own files are not something a user reads, and the skill is the
+// only cross-project text that tells an agent where each page and Settings tab
+// lives. These strings are what "how do I navigate the UI" and "where do I
+// configure X" have to match on.
+func TestEmbedded_KnowledgeSkillDocumentsUI(t *testing.T) {
+	skills, _ := Embedded()
+	var knowledge *Skill
+	for i := range skills {
+		if skills[i].Name == "ogcode-knowledge" {
+			knowledge = &skills[i]
+			break
+		}
+	}
+	if knowledge == nil {
+		t.Fatal("the built-in ogcode-knowledge skill is missing")
+	}
+	for _, want := range []string{"/agents", "/preview", "/docindex", "/settings", "Model catalogue", "context window", "approval mode", "Ask", "Auto", "Yolo", "public/", "ports.json"} {
+		if !strings.Contains(knowledge.Content, want) {
+			t.Errorf("ogcode-knowledge does not document the web UI %q", want)
+		}
+	}
+	if !strings.Contains(knowledge.Description, "web UI") {
+		t.Error("ogcode-knowledge description does not surface the web UI; the matcher would miss navigation questions")
 	}
 }
 

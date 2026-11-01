@@ -76,11 +76,10 @@ type Field = {
   label: string;
   unit: string;
   step: string;
-  /** What the box shows when it is empty and the model has no such figure. */
-  example: string;
   /** What the model currently reports for this figure. */
   known: (m: ModelInfo) => number | undefined;
-  /** How that figure is written out for a person. */
+  /** How that figure is written into the box — bare, since the unit is
+   *  already labelled above it. */
   fmt: (n: number) => string;
   hint: string;
 };
@@ -91,9 +90,8 @@ const FIELDS: Field[] = [
     label: 'Context window',
     unit: 'tokens',
     step: '1000',
-    example: '200000',
     known: (m) => m.contextWindow,
-    fmt: (n) => `${n.toLocaleString()} tokens`,
+    fmt: (n) => n.toLocaleString(),
     hint: 'How much history the loop keeps before it compacts.',
   },
   {
@@ -101,9 +99,8 @@ const FIELDS: Field[] = [
     label: 'Max output tokens',
     unit: 'tokens',
     step: '1000',
-    example: '64000',
     known: (m) => m.maxOutputTokens,
-    fmt: (n) => `${n.toLocaleString()} tokens`,
+    fmt: (n) => n.toLocaleString(),
     hint: 'The ceiling on what one reply may contain.',
   },
   {
@@ -111,9 +108,8 @@ const FIELDS: Field[] = [
     label: 'Input price',
     unit: '$ per 1M tokens',
     step: '0.01',
-    example: '0.45',
     known: (m) => m.inputPricePerM,
-    fmt: (n) => `$${n.toFixed(2)}`,
+    fmt: (n) => n.toFixed(2),
     hint: 'What 1M input tokens cost.',
   },
   {
@@ -121,9 +117,8 @@ const FIELDS: Field[] = [
     label: 'Output price',
     unit: '$ per 1M tokens',
     step: '0.01',
-    example: '1.80',
     known: (m) => m.outputPricePerM,
-    fmt: (n) => `$${n.toFixed(2)}`,
+    fmt: (n) => n.toFixed(2),
     hint: 'What 1M output tokens cost.',
   },
   {
@@ -131,9 +126,8 @@ const FIELDS: Field[] = [
     label: 'Cache read price',
     unit: '$ per 1M tokens',
     step: '0.01',
-    example: '0.05',
     known: (m) => m.cacheReadPricePerM,
-    fmt: (n) => `$${n.toFixed(2)}`,
+    fmt: (n) => n.toFixed(2),
     hint: 'What 1M tokens read from the prompt cache cost.',
   },
   {
@@ -141,9 +135,8 @@ const FIELDS: Field[] = [
     label: 'Cache write price',
     unit: '$ per 1M tokens',
     step: '0.01',
-    example: '0.60',
     known: (m) => m.cacheWritePricePerM,
-    fmt: (n) => `$${n.toFixed(2)}`,
+    fmt: (n) => n.toFixed(2),
     hint: 'What 1M tokens written to the prompt cache cost.',
   },
 ];
@@ -191,12 +184,13 @@ export default function ModelMetaDialog(props: {
     }
   };
 
-  /** The figure this box falls back to while it is empty — the model's own
-   *  current number, which is the catalogue's unless the user has set one. */
-  const fallback = (f: Field) => {
-    if (form()[f.key].trim() !== '') return undefined;
+  /** The figure in effect while a box is empty — the model's own current
+   *  number, which is the catalogue's unless the user has set one. It rides
+   *  the empty box as its placeholder, so the box never advertises a figure
+   *  that would not be saved. */
+  const inherited = (f: Field) => {
     const n = f.known(props.model);
-    return n && n > 0 ? f.fmt(n) : undefined;
+    return n && n > 0 ? f.fmt(n) : '';
   };
 
   const uid = `model-meta-${props.model.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -245,14 +239,12 @@ export default function ModelMetaDialog(props: {
                   step={f.step}
                   value={form()[f.key]}
                   onInput={(e) => patch({ [f.key]: e.currentTarget.value } as Partial<MetaForm>)}
-                  placeholder={f.example}
+                  placeholder={inherited(f)}
                   aria-label={`${f.label} in ${f.unit}`}
-                  class={`${fieldClass} w-full tabular-nums`}
+                  class={`${fieldClass} w-full tabular-nums no-spin`}
                 />
                 <span class="mt-1 block text-micro text-[color:var(--text-muted)] leading-snug">
-                  <Show when={fallback(f)} fallback={f.hint}>
-                    {(v) => <>Falls back to {v()}.</>}
-                  </Show>
+                  {f.hint}
                 </span>
               </label>
             )}
@@ -276,7 +268,7 @@ export default function ModelMetaDialog(props: {
       {/* ---- Footer ---- */}
       <div class="shrink-0 px-5 py-3 border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-base)]/40 flex items-center justify-between gap-3">
         <p class="text-micro text-[color:var(--text-muted)] leading-snug min-w-0">
-          <Show when={error()} fallback="Blank falls back to what the catalogue and provider say.">
+          <Show when={error()} fallback="Blank keeps the greyed figure.">
             <span style={{ color: 'var(--danger)' }}>{error()}</span>
           </Show>
         </p>

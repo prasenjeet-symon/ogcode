@@ -83,7 +83,8 @@ function SessionSidebarInner() {
   // conversation you half-remember, by name or by what it was about. The
   // palette binds the shortcut itself for routes with no sidebar; this copy
   // keeps the chord honest in the panel the user is looking at. The input
-  // below stays a plain inline title filter for when the name is enough.
+  // below is the palette's trigger too: a click on it opens the dialog (the
+  // title filter stays reachable by keyboard, for when the name is enough).
   const onSearchShortcut = (e: KeyboardEvent) => {
     if (!((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k')) return;
     e.preventDefault();
@@ -638,6 +639,8 @@ function SessionSidebarInner() {
             type="text"
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
+            onClick={() => openSessionPalette()}
+            title="Search what every session was about (⌘K)"
             placeholder="Search sessions"
             aria-label="Search sessions"
             class="w-full h-7 pl-7 pr-10 bg-[color:var(--bg-base)] border border-transparent
@@ -695,8 +698,8 @@ function SessionSidebarInner() {
       {/* Workspace nav — above footer. Sits in an inset panel so the static
           workspace region reads as its own surface, apart from the session
           list scrolling above it. */}
-      <div class="shrink-0 px-2 pt-1 pb-1.5">
-      <div class="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] px-1 pt-0.5 pb-1">
+      <div class="shrink-0 pt-1 pb-1.5">
+      <div class="border-y border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)] px-3 pt-0.5 pb-1">
         <div class="px-2 pt-1.5 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
           Workspace
         </div>

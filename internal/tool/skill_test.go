@@ -108,7 +108,7 @@ func TestSkillTool_RefusesADeniedSkill(t *testing.T) {
 // it looking for files that were never there.
 func TestSkillTool_BuiltInReportsNoBaseDirectory(t *testing.T) {
 	project := skillProject(t, nil)
-	out := runSkillTool(t, skill.Config{}, project, "customize-ogcode").Output
+	out := runSkillTool(t, skill.Config{}, project, "ogcode-knowledge").Output
 
 	if strings.Contains(out, "Base directory for this skill") {
 		t.Errorf("a built-in skill must not claim a base directory: %s", out)

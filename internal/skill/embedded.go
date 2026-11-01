@@ -12,7 +12,7 @@ import (
 // They are stored as raw SKILL.md text and parsed through the same Parse used
 // for files, so a built-in cannot drift into a shape a disk skill would be
 // rejected for.
-var embeddedSources = []string{customizeOgcodeSkill, updateOgcodeSkill, browserTakeoverSkill}
+var embeddedSources = []string{ogcodeKnowledgeSkill, updateOgcodeSkill, browserTakeoverSkill}
 
 var (
 	embeddedOnce sync.Once
@@ -40,18 +40,24 @@ func Embedded() ([]Skill, []error) {
 	return embedded, embeddedErrs
 }
 
-// customizeOgcodeSkill documents the files a user edits to configure ogcode. It
-// is the one piece of project knowledge no project's own files can carry: a
-// fresh checkout has no AGENT.md explaining what AGENT.md is for.
-const customizeOgcodeSkill = `---
-name: customize-ogcode
-description: How to configure ogcode for a project — ogcode.json provider, skill, and MCP server settings, AGENT.md behavioural rules, MEMORY.md project knowledge, and authoring new skills. Load this when the user asks to change ogcode's own configuration or behaviour.
+// ogcodeKnowledgeSkill is ogcode's own knowledge base — how ogcode works and
+// where everything lives. It documents the files a user edits to configure
+// ogcode and teach it, the runtime state .ogcode/ and ~/.ogcode/ hold, and the
+// tool-call audit log with the query that reads it. It is the one piece of
+// project knowledge no project's own files can carry: a fresh checkout has no
+// AGENT.md explaining what AGENT.md is for.
+const ogcodeKnowledgeSkill = `---
+name: ogcode-knowledge
+description: Ogcode's own knowledge base — how ogcode works and where everything lives. Load it to configure ogcode (ogcode.json providers, MCP servers, skills, AGENT.md, MEMORY.md), to author a skill, to find ogcode's runtime state (.ogcode/ session database, ~/.ogcode/ config.db, ports.json), to inspect the tool-call audit log at .ogcode/tool_calls.csv — its columns, statuses, and how to query it with query_sheet — or to give a tour of the web UI: the sidebar and ⌘K session search, the chat composer's model / effort / approval-mode controls and expandable tool cards, the Agents, Preview and Project Index pages, and what every Settings tab edits.
 ---
 
-# Customizing ogcode
+# Ogcode knowledge
 
-Four files control how ogcode behaves in a project. They serve different
-purposes and are not interchangeable.
+This is ogcode's own knowledge base. Five things to know about, in the order
+the sections cover them: the files used to configure ogcode, the runtime state
+it writes for itself in .ogcode/ and ~/.ogcode/, the tool-call audit CSV it
+appends to, the web UI it serves — pages, Settings tabs, and the controls for
+permissions, models and agents — and the server underneath that UI.
 
 ## ogcode.json — connection and skill settings
 
@@ -203,11 +209,159 @@ Files shipped beside SKILL.md (scripts, references) are listed to the agent when
 the skill loads, and relative paths in the body resolve against the skill's own
 directory.
 
-## .ogcode/ — runtime state, not configuration
+## The tool-call audit — .ogcode/tool_calls.csv
 
-` + "`.ogcode/`" + ` holds the session database, notes, plan archives, and git
-worktrees. It is written by ogcode. Never hand-edit it, and never put skills or
-configuration there.
+Every finished tool call appends one CSV row to ` + "`.ogcode/tool_calls.csv`" + ` in
+the project directory — built-in and MCP tools alike, across every session,
+every agent (teammates included), and CLI runs. The file starts with this
+header, written once (a file written before ` + "`target`" + ` existed is migrated
+to it in place, older rows left with an empty ` + "`target`" + `):
+
+` + "```" + `
+at,session,agent,tool,target,status,duration_ms,model,provider,error
+` + "```" + `
+
+- ` + "`at`" + ` is when the call started (RFC3339Nano). ` + "`duration_ms`" + ` covers the
+  whole lifecycle, including any wait for permission.
+- ` + "`status`" + ` is one of ` + "`completed`" + `, ` + "`error`" + `, ` + "`denied`" + `, ` + "`cancelled`" + `,
+  ` + "`disallowed`" + `, ` + "`unknown`" + ` (outcome not recorded), or ` + "`panic`" + `. The first
+  three match the transcript's per-tool states, so rows join with the session
+  database.
+- ` + "`model` and `provider`" + ` are what the call's turn ran on. ` + "`error`" + ` carries
+  the failure text for an errored call; it is empty otherwise.
+- ` + "`target`" + ` is the full path of the file the call aimed at, when the
+  tool names one in its arguments — ` + "`path`" + ` for ` + "`read`" + `, ` + "`write`" + `,
+  ` + "`edit`" + ` and their kin, ` + "`file`" + ` for ` + "`query_sheet`" + `, or the first
+  entry of ` + "`read`" + `'s ` + "`files`" + ` list. Calls that name no file — ` + "`bash`" + `,
+  ` + "`glob`" + `, a skill, most MCP tools — leave it empty.
+
+Query the file with the ` + "`query_sheet`" + ` tool — the CSV loads as ` + "`Sheet1`" + `:
+
+` + "```sql" + `
+SELECT tool, status, COUNT(*) AS n, AVG(duration_ms) AS avg_ms
+FROM Sheet1 GROUP BY tool, status ORDER BY n DESC
+` + "```" + `
+
+Any spreadsheet application opens the same file (it is valid, quoted CSV).
+Tally it when the user asks how often a tool ran, how long calls took, what
+failed, or who ran what. The rows only go back as far as the file exists;
+there is no separate history.
+
+` + "`OGCODE_TOOL_AUDIT=off`" + ` (also ` + "`0`/`false`/`no`" + `) turns the log off. It is
+best-effort: if the file cannot be written (unwritable directory, full disk),
+the problem is warned about once and tool execution is never affected.
+
+## .ogcode/ and ~/.ogcode/ — runtime state, not configuration
+
+` + "`.ogcode/`" + ` (per project) and ` + "`~/.ogcode/`" + ` (per machine) hold what ogcode
+writes at runtime. Never hand-edit the databases, and never put skills or
+configuration in these directories.
+
+In ` + "`.ogcode/`" + `: the session database ` + "`ogcode.db`" + ` (the transcript — ` + "`message`" + `
+rows with metadata, content in ` + "`part.data`" + `), per-session memory files under
+` + "`.ogcode/memory/sessions/`" + `, the tool-call audit CSV above, the server lock,
+notes, plan archives, and git worktrees.
+
+In ` + "`~/.ogcode/`" + `: ` + "`config.db`" + ` (machine-wide permission grants, the default
+mode, and model preference rows), ` + "`ports.json`" + ` (the port a project's server
+keeps across restarts), ` + "`ogx-app-secret`" + ` (0600, never paste it),
+` + "`mcp-tokens/`" + ` (OAuth tokens for remote MCP servers), and
+` + "`catalog-upstream.json`" + ` (the last synced model catalogue).
+
+## The web UI — where everything lives
+
+The UI is served by the same ogcode process that runs the agent — a bare ` + "`ogcode`" + `
+or ` + "`ogcode serve`" + ` starts it and the browser points at that port, so there is no
+separate dashboard to launch.
+
+### Getting around
+
+- The left sidebar has ` + "`New session`" + ` at the top and a ` + "`Search sessions`" + ` field.
+  Each session row carries a status dot while its task is running or failed, and
+  pin, rename, and delete actions. The bottom of the rail links ` + "`Notes`" + `,
+  ` + "`Project Index`" + `, ` + "`Agents`" + `, and ` + "`Settings`" + `, with a connection dot beside them.
+- ` + "`⌘K`" + ` opens the session palette from anywhere: full-text search over this
+  project's past sessions — titles, memory files, and past turns — ranked by
+  relevance. It searches ogcode's own memory, not the project's source.
+- While the agent runs, its stop control is the composer's send button, which
+  turns into a stop glyph.
+
+### The chat page
+
+- The composer toolbar packs the model selector, the effort selector, the ` + "`+`" + `
+  menu that attaches images, and the command approval mode: **Ask** (approve
+  every command, write, and edit — the default), **Auto** (safe commands run,
+  risky ones ask), **Yolo** (everything runs, no guardrails). A grant a
+  permission prompt was given is remembered and never expires, and a mode
+  change in the composer also sets the machine-wide default.
+- Permission prompts and questions render in the stream and block the turn
+  until answered — a teammate agent's prompt is mirrored into your composer
+  too, so answer it where you see it.
+- Every real tool call renders as an expandable card: click the header to open
+  its input and output, and running tools auto-open. A few agent-housekeeping
+  rows (` + "`codebase_map`" + `, ` + "`file_map`" + `, ` + "`compact_context`" + `, ` + "`update_intent`" + `) render as plain,
+  non-expanding rows on purpose — none of them hands back a result to read.
+- The token pill near the composer shows the turn's token spend; the intent
+  pill shows the plan the agent stated for this turn.
+
+### Other pages
+
+- ` + "`/`" + ` — home: a new session and recent sessions.
+- ` + "`/agents`" + ` — the agent board: every agent in the workspace, drawn as a
+  family tree of this session and the teammates it spawned, with running,
+  idle, and finished states.
+- ` + "`/preview`" + ` — tiles for the loopback services the agent announced (a dev
+  server, a built site), one per port, each opening the service through this
+  server at a ` + "`<port>.preview.<host>`" + ` hostname.
+- ` + "`/docindex`" + ` — the project index: project documents (PDF, DOCX, spreadsheets)
+  with per-page topic labels the indexer wrote, plus manual index runs and
+  scoping.
+- ` + "`/notes`" + ` and ` + "`/device`" + ` exist only behind feature flags; when a flag is off the
+  page 404s.
+
+### Settings (/settings)
+
+- **General**: appearance (light / dark / system, plus accent color — the
+  setting is server-global, shared by every viewer of this server), workspace
+  info, project-index settings, model hotkeys, keyboard shortcuts, and the
+  Model catalogue card for the shared upstream model list with a
+  ` + "`Sync now`" + ` button.
+- **Models**: one tab per provider — ` + "`anthropic`" + `, ` + "`openai`" + `, ` + "`openrouter`" + `,
+  ` + "`ollama`" + `, a read-only ` + "`OGX`" + ` tab, and one tab per custom vendor endpoint.
+  Every model row's metadata is editable: context window, max output tokens,
+  input / output price, and cache read / write price. A user-entered context
+  window is authoritative over anything fetched, and a price greater than zero
+  overrides the provider's figure; zero keeps old behaviour. API keys and base
+  URLs are not edited here — they live in ` + "`ogcode.json`" + `.
+- **Search**: picks the search backend the web tools use; the save replaces
+  the whole struct, and a validate button tests the credentials first.
+- **Usage**: token spend and billing.
+- **Skills**: every discovered skill with its description — built-in and
+  project skills alike. Skills are files, so adding one means writing a
+  SKILL.md, not using this page.
+- **MCP Servers**: which declared servers connected and which tools they
+  expose. Configuration is edited in ` + "`ogcode.json`" + `; this page reports state.
+- **About**: version, build, and links.
+
+## The server behind the UI
+
+One ogcode server serves one project directory. A bare ` + "`ogcode`" + ` re-uses the
+port recorded in ` + "`~/.ogcode/ports.json`" + `, so a project keeps its address across
+restarts; there is a server per directory, and an advisory file lock keeps two
+from running on the same one — a free port does not mean the old process is
+dead until it has actually exited. ` + "`GET /api/config`" + ` answering 200 is the
+health probe.
+
+Anything placed in the workspace's ` + "`public/`" + ` directory is served by the same
+server at ` + "`/public/<file>`" + ` — a built site, a report, a chart, a download. Files
+meant for the user's browser go there.
+
+## Where else ogcode ships its knowledge
+
+Built-in skills cover topics this one does not: ` + "`update-ogcode`" + ` for
+updating ogcode and its install channels, ` + "`browser-takeover`" + ` for driving
+the user's real browser. A project that writes its own skill with the same
+name replaces any built-in, so these names can also be pointed at custom text.
 `
 
 // browserTakeoverSkill teaches the agent to drive the user's real browser

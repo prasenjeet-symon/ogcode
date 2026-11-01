@@ -1682,10 +1682,10 @@ function MetaFields(props: {
         value={props.form.contextWindow}
         onInput={(e) => props.onChange({ contextWindow: e.currentTarget.value })}
         onKeyDown={props.onKeyDown}
-        placeholder="200000"
+        placeholder="context window"
         aria-label="Context window in tokens"
-        title="Context window (tokens) — how much history the loop sizes compaction against"
-        class={`${field} w-[9.5rem] tabular-nums`}
+        title="Context window in tokens — how much history the loop sizes compaction against. Blank means not set."
+        class={`${field} w-[9.5rem] tabular-nums no-spin`}
       />
       <input
         type="number"
@@ -1694,10 +1694,10 @@ function MetaFields(props: {
         value={props.form.maxOutput}
         onInput={(e) => props.onChange({ maxOutput: e.currentTarget.value })}
         onKeyDown={props.onKeyDown}
-        placeholder="Max output tokens"
+        placeholder="max output"
         aria-label="Max output tokens"
-        title="The model's output ceiling (tokens)"
-        class={`${field} w-[9.5rem] tabular-nums`}
+        title="The model's output ceiling in tokens. Blank means not set."
+        class={`${field} w-[9.5rem] tabular-nums no-spin`}
       />
       <input
         type="number"
@@ -1706,10 +1706,10 @@ function MetaFields(props: {
         value={props.form.inputPrice}
         onInput={(e) => props.onChange({ inputPrice: e.currentTarget.value })}
         onKeyDown={props.onKeyDown}
-        placeholder="$ in / 1M"
+        placeholder="input $/1M"
         aria-label="Input price in dollars per 1M tokens"
-        title="What 1M input tokens cost, in dollars"
-        class={`${field} w-[7rem] tabular-nums`}
+        title="What 1M input tokens cost, in dollars. Blank means not set."
+        class={`${field} w-[7rem] tabular-nums no-spin`}
       />
       <input
         type="number"
@@ -1718,10 +1718,10 @@ function MetaFields(props: {
         value={props.form.outputPrice}
         onInput={(e) => props.onChange({ outputPrice: e.currentTarget.value })}
         onKeyDown={props.onKeyDown}
-        placeholder="$ out / 1M"
+        placeholder="output $/1M"
         aria-label="Output price in dollars per 1M tokens"
-        title="What 1M output tokens cost, in dollars"
-        class={`${field} w-[7rem] tabular-nums`}
+        title="What 1M output tokens cost, in dollars. Blank means not set."
+        class={`${field} w-[7rem] tabular-nums no-spin`}
       />
       <input
         type="number"
@@ -1732,8 +1732,8 @@ function MetaFields(props: {
         onKeyDown={props.onKeyDown}
         placeholder="cache read $/1M"
         aria-label="Cache read price in dollars per 1M tokens"
-        title="What 1M tokens read from the prompt cache cost, in dollars"
-        class={`${field} w-[7rem] tabular-nums`}
+        title="What 1M tokens read from the prompt cache cost, in dollars. Blank means not set."
+        class={`${field} w-[8.5rem] tabular-nums no-spin`}
       />
       <input
         type="number"
@@ -1744,8 +1744,8 @@ function MetaFields(props: {
         onKeyDown={props.onKeyDown}
         placeholder="cache write $/1M"
         aria-label="Cache write price in dollars per 1M tokens"
-        title="What 1M tokens written to the prompt cache cost, in dollars"
-        class={`${field} w-[7rem] tabular-nums`}
+        title="What 1M tokens written to the prompt cache cost, in dollars. Blank means not set."
+        class={`${field} w-[8.5rem] tabular-nums no-spin`}
       />
       <label class="inline-flex items-center gap-1.5 h-8 text-meta text-[color:var(--text-secondary)] cursor-pointer">
         <input
@@ -1896,6 +1896,13 @@ function AddModelRow(props: {
         <Show when={advanced()}>
           <div class="mt-2">
             <MetaFields form={form()} onChange={patch} onKeyDown={onKey} />
+            {/* A blank box here has no catalogue row to inherit from, unlike the
+                per-row editor's — so say what blank means instead of letting the
+                same six boxes read as two different promises. */}
+            <p class="mt-1 text-micro text-[color:var(--text-muted)] leading-snug">
+              Leave a box blank to leave that figure unset: the row shows a dash and the
+              loop falls back to what it knows instead of guessing.
+            </p>
           </div>
         </Show>
       </div>

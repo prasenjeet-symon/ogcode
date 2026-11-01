@@ -1,31 +1,34 @@
-/* agent-force-graph.css — the force-graph canvas styles the component cannot
-   express as Tailwind classes: the flat plotting surface, the frosted control
-   cluster and the hover tooltip. Every colour is a theme variable so light and
-   dark both work. */
+/* agent-board-graph.css — the board canvas styles the component cannot express
+   as Tailwind classes: the flat plotting surface, the frosted control cluster
+   and the hover tooltip. Every colour is a theme variable so light and dark
+   both work. */
 
-.afg-host {
+.abg-host {
   position: relative;
   width: 100%;
   height: 100%;
   background-color: var(--bg-base);
   overflow: hidden;
+  /* The board owns its gestures: a drag pans it, it must never scroll the page. */
+  touch-action: none;
 }
 
-.afg-host canvas {
+.abg-canvas {
   position: absolute;
   inset: 0;
   display: block;
+  touch-action: none;
 }
 
-/* Frosted overlay cluster (fit / zoom buttons). */
-.afg-float {
+/* Frosted overlay cluster (frame / zoom buttons). */
+.abg-float {
   background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border-subtle);
 }
 
-.afg-ctl {
+.abg-ctl {
   position: absolute;
   right: 10px;
   bottom: 10px;
@@ -37,7 +40,7 @@
   z-index: 3;
 }
 
-.afg-ctl button {
+.abg-ctl button {
   display: flex;
   width: 26px;
   height: 26px;
@@ -50,23 +53,23 @@
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.afg-ctl button svg {
+.abg-ctl button svg {
   width: 13px;
   height: 13px;
 }
 
-.afg-ctl button:hover {
+.abg-ctl button:hover {
   background: color-mix(in srgb, var(--text-tertiary) 12%, transparent);
   color: var(--text-primary);
 }
 
-.afg-ctl button:focus-visible {
+.abg-ctl button:focus-visible {
   box-shadow: 0 0 0 2px var(--accent-ring);
 }
 
 /* Hover tooltip — frosted, anchored near its node. Teleported to <body> so
    it must not depend on the host's stacking/positioning context. */
-.afg-tip {
+.abg-tip {
   position: fixed;
   z-index: 4;
   width: 228px;
@@ -85,14 +88,14 @@
     0 12px 28px rgb(0 0 0 / 0.16);
 }
 
-.afg-tip-head {
+.abg-tip-head {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.afg-tip-handle {
+.abg-tip-handle {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-primary);
@@ -102,7 +105,7 @@
   white-space: nowrap;
 }
 
-.afg-tip-kind {
+.abg-tip-kind {
   flex-shrink: 0;
   margin-left: auto;
   font-size: 9px;
@@ -114,7 +117,7 @@
   padding: 1px 6px;
 }
 
-.afg-tip-title {
+.abg-tip-title {
   font-size: 10.5px;
   line-height: 1.4;
   color: var(--text-secondary);
@@ -124,7 +127,7 @@
   overflow: hidden;
 }
 
-.afg-tip-meta {
+.abg-tip-meta {
   font-size: 9.5px;
   color: var(--text-tertiary);
   overflow: hidden;
@@ -132,13 +135,13 @@
   white-space: nowrap;
 }
 
-.afg-tip-actions {
+.abg-tip-actions {
   display: flex;
   gap: 5px;
   margin-top: 2px;
 }
 
-.afg-btn {
+.abg-btn {
   flex: 1;
   height: 24px;
   border-radius: 6px;
@@ -152,27 +155,27 @@
   transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
 }
 
-.afg-btn:hover {
+.abg-btn:hover {
   border-color: var(--border-default);
 }
 
-.afg-btn:focus-visible {
+.abg-btn:focus-visible {
   box-shadow: 0 0 0 2px var(--accent-ring);
 }
 
 /* Destructive: armed turns the button red before it acts. */
-.afg-btn-stop {
+.abg-btn-stop {
   flex: 0 1 auto;
 }
 
-.afg-btn-stop.afg-armed,
-.afg-btn-stop:hover {
+.abg-btn-stop.abg-armed,
+.abg-btn-stop:hover {
   border-color: #f87171;
   color: #f87171;
   background: color-mix(in srgb, #f87171 12%, var(--bg-base));
 }
 
-.afg-btn-stop:disabled {
+.abg-btn-stop:disabled {
   opacity: 0.55;
   cursor: default;
 }

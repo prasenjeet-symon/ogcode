@@ -60,17 +60,17 @@ func TestLoader_BuiltInIsPresentAndOverridable(t *testing.T) {
 	project := t.TempDir()
 
 	reg := NewLoader(Config{}).Load(project)
-	builtin, ok := reg.Get("customize-ogcode")
+	builtin, ok := reg.Get("ogcode-knowledge")
 	if !ok {
-		t.Fatal("the built-in customize-ogcode skill is missing")
+		t.Fatal("the built-in ogcode-knowledge skill is missing")
 	}
 	if builtin.Source != SourceEmbedded {
 		t.Errorf("source = %q, want built-in", builtin.Source)
 	}
 
-	writeSkill(t, filepath.Join(project, ".agents", "skills"), "customize-ogcode",
-		"---\nname: customize-ogcode\ndescription: ours\n---\nours\n")
-	override, _ := NewLoader(Config{}).Load(project).Get("customize-ogcode")
+	writeSkill(t, filepath.Join(project, ".agents", "skills"), "ogcode-knowledge",
+		"---\nname: ogcode-knowledge\ndescription: ours\n---\nours\n")
+	override, _ := NewLoader(Config{}).Load(project).Get("ogcode-knowledge")
 	if override.Source != SourceProject {
 		t.Errorf("source = %q, want the project's version to replace the built-in", override.Source)
 	}

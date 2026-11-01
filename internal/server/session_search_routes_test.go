@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -73,6 +74,32 @@ func TestSessionSearchRejectsShortQueries(t *testing.T) {
 		if body["error"] != "query too short" {
 			t.Fatalf("q=%q: error = %q, want %q", q, body["error"], "query too short")
 		}
+	}
+}
+
+// TestSessionSearchIgnoresACanceledClient pins the silence the palette needs:
+// it aborts every superseded keystroke's request (session-palette.tsx), which
+// cancels the search's context mid-query. That is the client walking away, not
+// a server failure — answering 500 and logging it at ERROR turned ordinary
+// typing into a wall of "context canceled" lines.
+func TestSessionSearchIgnoresACanceledClient(t *testing.T) {
+	t.Setenv("OGCODE_TURN_MEMORY", "")
+	srv := newTestServer(t)
+	srv.store = session.NewStore(srv.db)
+	srv.search = memfile.NewSearchStore(srv.db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/session/search?q=auth", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("canceled search = %d, want the handler to answer nothing (200 with an empty body): %s",
+			rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("canceled search wrote a body, want silence: %s", rec.Body.String())
 	}
 }
 

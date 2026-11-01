@@ -3066,12 +3066,16 @@ func (lr *LoopRunner) resolveImageSupport(ctx context.Context, p provider.Provid
 	return supports
 }
 
-func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.SessionID, messageID session.MessageID, tc pendingToolCall, a Agent, workDir string, modelSupportsImages bool, model, providerID string) (tool.Result, error) {
+// executeTool runs one tool call and returns the result plus the call's
+// outcome (one of the toolOutcome* statuses) and error. The outcome covers the
+// whole call — disallow-list check, permission gate, unknown tool — not just
+// the Execute call, and is what the tool-audit CSV's status column records.
+func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.SessionID, messageID session.MessageID, tc pendingToolCall, a Agent, workDir string, modelSupportsImages bool, model, providerID string) (tool.Result, string, error) {
 	// Reject tools not in the agent's allowed list — guards against prompt injection
 	// or a misbehaving model calling tools it was never offered.
 	if !a.HasTool(tc.Name) {
 		slog.Warn("agent called disallowed tool, rejecting", "agent", a.ID, "tool", tc.Name)
-		return tool.Result{Output: fmt.Sprintf("tool %q is not available to the %s agent", tc.Name, a.ID)}, nil
+		return tool.Result{Output: fmt.Sprintf("tool %q is not available to the %s agent", tc.Name, a.ID)}, toolOutcomeDisallowed, nil
 	}
 
 	// Permission gate: for interactive, gated sessions, mutating tools
@@ -3080,7 +3084,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 	if lr.Permissions != nil && PermissionGatingEnabled(ctx) {
 		action, err := lr.requestPermission(ctx, sessionID, tc, model, providerID)
 		if err != nil {
-			return tool.Result{}, err // context cancelled while awaiting approval
+			return tool.Result{}, toolOutcomeCancelled, err // context cancelled while awaiting approval
 		}
 		if action == permission.Deny {
 			slog.Info("tool call denied by user", "session", sessionID, "tool", tc.Name)
@@ -3088,7 +3092,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 				Denied: true,
 				Title:  tc.Name,
 				Output: fmt.Sprintf("Permission denied by the user — the %s call was not run. Do not retry it; ask the user how to proceed or take a different approach.", tc.Name),
-			}, nil
+			}, toolOutcomeDenied, nil
 		}
 	}
 
@@ -3117,13 +3121,20 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 		// gives every tool a single cooperative cancellation point, so the loop
 		// doesn't kick off new tool work after the user has already cancelled.
 		if err := ctx.Err(); err != nil {
-			return tool.Result{}, err
+			return tool.Result{}, toolOutcomeCancelled, err
 		}
 		res, err := t.Execute(ctx, tc.Input, tctx)
 		if err == nil {
 			res = capToolOutput(res)
 		}
-		return res, err
+		outcome := toolOutcomeCompleted
+		if err != nil {
+			outcome = toolOutcomeError
+			if errors.Is(err, context.Canceled) {
+				outcome = toolOutcomeCancelled
+			}
+		}
+		return res, outcome, err
 	}
 
 	// The tool was on the list this turn was offered but is not in the registry
@@ -3133,7 +3144,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 	// given. Still an error, so it lands as a tool-level failure the agent can
 	// recover from without the turn dying.
 	slog.Warn("unknown tool requested", "tool", tc.Name)
-	return tool.Result{}, fmt.Errorf("tool %q is no longer available — it was offered at the "+
+	return tool.Result{}, toolOutcomeUnknown, fmt.Errorf("tool %q is no longer available — it was offered at the "+
 		"start of this turn but has since been removed (an MCP server may have been disabled or "+
 		"disconnected). Do not retry it; use another approach or tell the user", tc.Name)
 }
@@ -3219,6 +3230,7 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 	// apply in the order written rather than whichever takes its lock first.
 	runInFileOrder(toolCtx, sameFileWaits(readyCalls, workDir), func(idx int) {
 		tc := readyCalls[idx]
+		start := time.Now()
 		// A panic in a tool runs on this goroutine, where nothing above it
 		// can recover: an unrecovered panic in any goroutine takes the whole
 		// process down, so one bad tool call kills every session the server
@@ -3232,11 +3244,24 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 					"stack", string(debug.Stack()))
 				execInfos[idx].result = tool.Result{}
 				execInfos[idx].err = fmt.Errorf("tool %s panicked: %v", tc.Name, r)
+				auditToolCall(workDir, string(sessionID), agent.ID, tc.Name, tc.Input,
+					toolOutcomePanic, start, time.Since(start), modelID, providerID, execInfos[idx].err.Error())
 			}
 		}()
-		result, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID, providerID)
+		result, outcome, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID, providerID)
 		execInfos[idx].result = result
 		execInfos[idx].err = err
+		if outcome == "" {
+			outcome = toolOutcomeCompleted
+		}
+		took := time.Since(start)
+		slog.Info("tool call finished", "session", sessionID, "agent", agent.ID,
+			"tool", tc.Name, "status", outcome, "duration_ms", took.Milliseconds())
+		errText := ""
+		if err != nil {
+			errText = err.Error()
+		}
+		auditToolCall(workDir, string(sessionID), agent.ID, tc.Name, tc.Input, outcome, start, took, modelID, providerID, errText)
 	})
 
 	// Fold this step's reading into the turn's running total and, if a reminder is
