@@ -1,3 +1,84 @@
+# Release Notes — v0.57.0
+
+## Major: Every tool call now leaves a row you can query
+
+The transcript knew when each tool call started and finished, but only inside the
+session database, one conversation at a time. There was no single answer to "how often
+did `bash` run this week" or "which calls were slow, and on what".
+
+Every finished tool call now appends one row to `.ogcode/tool_calls.csv` in the project
+directory: built-in and MCP tools alike, across every session and every agent a session
+spawns, CLI runs included. The columns are
+`at,session,agent,tool,target,status,duration_ms,model,provider,error`, which is when
+the call started, who ran what and for how long (permission waits included), the model
+and provider its turn was on, the failure text when there was one, and the file the
+call aimed at when its arguments name one. `status` is `completed`, `error`, `denied`,
+`cancelled`, `disallowed`, `unknown` or `panic`; the first three match the transcript's
+per-tool states, so a row joins with the session database.
+
+The file is ordinary quoted CSV, so any spreadsheet opens it, and the agent can read it
+without leaving the chat: `query_sheet` loads it as `Sheet1`, and `SELECT tool, status,
+COUNT(*) FROM Sheet1 GROUP BY tool, status` is the tally. Writing it is best effort, so
+an unwritable project directory warns once and never affects tool execution, and
+`OGCODE_TOOL_AUDIT=off` turns the log off entirely.
+
+## Major: The agent board is a map, not a simulation
+
+The Agents page drew every agent with a force simulation, so nodes drifted until they
+settled and any poll that changed a status could set the whole graph moving again. It
+is now a board with fixed geometry. Each family, one connected component of the
+spawned-by edges, gets its own bordered cell with a radial tree inside, and the cells
+are shelf-packed in an order that never depends on status, so an agent going from
+running to idle never reshuffles the page. A family of one is a small chip card rather
+than a tree holding a single node. Painting is one canvas with no per-element DOM: the
+board redraws on interaction, and pulses and flow particles run only while something
+is alive.
+
+The view follows the work. While an agent is running the board frames the cells that
+hold it, all of them however far apart; a manual pan or zoom hands the view to you and
+the frame button takes it back. The wheel pans and ctrl or meta with the wheel zooms,
+so the board behaves like a map instead of a scene you scroll through. `force-graph`
+and `d3` are gone from the web dependencies.
+
+## Minor: The built-in skill is now a knowledge base
+
+`customize-ogcode` became `ogcode-knowledge` and grew from a configuration primer into
+ogcode's own knowledge base. Beyond `ogcode.json`, `AGENT.md`, `MEMORY.md` and skill
+authoring, it now covers the runtime state in `.ogcode/` and `~/.ogcode/` (the
+transcript, per-session memory, the server lock, `config.db`, `ports.json`, MCP tokens,
+the cached model catalogue), the tool-call audit above with the query that reads it,
+and a tour of the served UI: the sidebar and ⌘K search, what the composer's model,
+effort and approval controls mean, why some tool rows expand and some do not, and what
+every page and Settings tab edits. A project skill with the same name still replaces
+it.
+
+## Minor: The sidebar's search field opens the palette
+
+The field above the session list was a plain title filter sitting next to a palette
+that searches far more than titles. Clicking it now opens the palette, which matches
+session titles, their memory and their past turns; the inline title filter stays
+reachable for when the name is enough. The workspace links at the foot of the rail lost
+their floating card and read as a plain band.
+
+## Minor: Cancelled keystrokes are no longer errors
+
+The palette aborts the previous keystroke's request whenever you type again, which is
+what stops a stale answer from overwriting a newer one. The server read the resulting
+cancellation as a failure and answered 500 with an ERROR log line, so ordinary typing
+produced a wall of `context canceled` errors in the log. A request whose client is
+already gone is now answered with silence, and a test pins it.
+
+## Minor: The model metadata editor stops inventing numbers
+
+The six boxes in the Edit model dialog showed example figures (`200000`, `0.45`) as
+placeholders while the line underneath said the value would fall back to a real one, so
+each box contradicted the text below it. The greyed placeholder is now the figure
+actually in effect for that model, the sub-line says what the field is for, and the
+footer says what a blank box means. Native number spinners, which sat on top of a
+value in a field this narrow, are gone, the cache price boxes are wide enough for
+their labels, and the add-model row says plainly that a blank box leaves that figure
+unset.
+
 # Release Notes — v0.56.0
 
 ## Major: Find the conversation you half remember
