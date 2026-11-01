@@ -1,5 +1,5 @@
 ---
-title: "How Ogcode reads a large PDF one page at a time"
+title: "Your agent doesn't need RAG to read PDFs"
 description: "Hand an agent a 37-page paper and most assistants either load the whole thing into context or bolt a RAG pipeline onto it. Ogcode takes a third path: label every page once, store the labels in a table you can read, and open only the pages a question actually needs."
 pubDate: 2026-11-01
 tags: ["agents", "pdf", "context-engine"]
