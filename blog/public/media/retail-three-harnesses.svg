@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
 <title id="t">Three ways to hand a spreadsheet to an agent</title>
-<desc id="d">Three lanes. Dump the sheet: 100,000 rows to CSV is 8,352,978 characters, about 2,090,000 tokens per question, and the context window cuts it silently; there is nothing to build. RAG pipeline: 4,092 windows of about 344 tokens are embedded into a vector store, and the top five, about 2,540 tokens, are retrieved, 0.12 percent of the file, straddling row boundaries; it is a second copy of the data, cold on every question. Ogcode: one 292-token profile page per sheet, then SQL runs against the file itself in SQLite, and an answer of 49 to 87 tokens comes back while the workbook stays on disk; no chunker, no embeddings, no retriever.</desc>
+<desc id="d">Three lanes. Dump the sheet: 100,000 rows to CSV is 8,352,978 characters, about 2,090,000 tokens per question, and the context window cuts it silently; there is nothing to build. RAG pipeline: 4,092 windows of about 510 tokens are embedded into a vector store, and the top five, about 2,540 tokens, are retrieved, 0.12 percent of the file, straddling row boundaries; it is a second copy of the data, cold on every question. Ogcode: one 292-token profile page per sheet, then SQL runs against the file itself in SQLite, and an answer of 49 to 87 tokens comes back while the workbook stays on disk; no chunker, no embeddings, no retriever.</desc>
 <defs>
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
 <path d="M0,0 L10,5 L0,10 z" fill="#6b6462"/>
@@ -35,7 +35,7 @@
 <text x="353" y="112" fill="#fffbf5" font-size="13" font-weight="600" letter-spacing="0.6">02 &#183; RAG PIPELINE</text>
 <rect x="351" y="128" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
 <text x="365" y="148" fill="#fffbf5" font-size="12.5">4,092 windows</text>
-<text x="365" y="165" fill="#9a9390" font-size="11">&#8776;344 tokens each</text>
+<text x="365" y="165" fill="#9a9390" font-size="11">&#8776;510 tokens each</text>
 <line x1="479" y1="178" x2="479" y2="192" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
 <rect x="351" y="196" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
 <text x="365" y="216" fill="#fffbf5" font-size="12.5">embedded</text>
