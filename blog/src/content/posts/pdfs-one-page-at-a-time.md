@@ -188,7 +188,7 @@ pretending to be equivalent, and where one of them is simply the best.
 |---|---|---|---|
 || Setup | nothing to build | chunk the text into ~500-token windows, embed all ~1,040 fragments into a vector store, tune top-k | one background labeling job: the model reads ~400k tokens of page keywords across twelve sessions and returns ~100k tokens of labels |
 || What the model sees per question | all 1,151 pages, ~532,000 tokens — more than most context windows will accept | the top ~5 fragments (~1,500 tokens), picked by cosine similarity | the label table (the full catalog is ~100,000 tokens; the folded map view is a few hundred) plus one page, ~460 tokens |
-|| A ten-question session | ~5,300,000 PDF tokens carried through the window | ~15,000 fragment tokens, plus ten embedding round trips | ~12,000 page tokens, often less: some answers come from labels alone |
+|| A ten-question session | ~5,300,000 PDF tokens carried through the window | ~15,000 fragment tokens, plus ten embedding round trips | ~13,000 page tokens, measured in the gauntlet below; some answers cost only the labels |
 || Where the answer lives | whole pages, all of them, all at once | fragments with no neighbors and no page numbers | whole pages you can cite by number |
 || How it fails quietly | the blob gets cut, and the model answers from whatever survived the cut | the retriever misses the chunk, and nothing tells you | a wrong label costs exactly one page read to correct |
 || Where the cost goes as questions pile up | nowhere good: the blob rides every turn | flat per question, but rebuilt from zero every time | down: after the first two questions the agent knows the map and opens only pages |
@@ -207,7 +207,7 @@ once in the background, split across twelve sessions, and never enters the
 working conversation at all. Amortized over every question this file will
 ever get asked, it is the cheapest line in the table.
 
-![Line chart on a log scale: cumulative PDF tokens entering the model across ten questions on the 1,151-page book. Dump climbs from 532,000 to about 5,300,000. RAG and Ogcode start tied at 1,500, then Ogcode flattens to roughly 12,000 by question ten while RAG reaches 15,000, with an occasional labels-only question pulling it lower.](/blog/media/pdfs-cumulative-ten-questions.svg?v=2)
+![Line chart on a log scale: cumulative PDF tokens entering the model across ten questions on the 1,151-page book. Dump climbs from 532,000 to about 5,300,000. RAG and Ogcode start tied at 1,500, then Ogcode flattens to about 13,000 by question ten (measured in the gauntlet below) while RAG reaches 15,000, with an occasional labels-only question pulling it lower.](/blog/media/pdfs-cumulative-ten-questions.svg?v=2)
 
 Speed is not close either. The catalog lives in SQLite, so pdf_index never
 opens the 44.7 MB file: a label lookup is a database read, effectively
@@ -226,6 +226,34 @@ your context cannot hold". The dump's cost curve ends in a wall. Retrieval's
 cost curve stays flat but maps the book with fragments, cold every time. This
 one stays flat too, it maps the book with citable pages, and it is the only
 one that gets cheaper as the questions add up.
+
+## Ten questions, asked, answered, and measured
+
+Estimates are cheap, and the Ogcode row in the table above is still arithmetic on a page count. So we ran it for real: ten straight questions, eight on the deep learning book and two on *Mathematics for Machine Learning*, answered through the actual flow. Labels first, then only the pages the labels point at, with every page recorded. Tokens are extracted characters divided by four, the same convention as before, and page numbers are the PDF's own numbering.
+
+| Question asked | Pages opened | Page tokens |
+|---|---|---|
+| **d2l** · Derive the attention pooling estimator (Nadaraya-Watson) and say where it lives. → A weighted average over kernel similarities (boxcar, Gaussian, Epanechnikov); the from-scratch code normalizes kernel weights and averages training labels. | 455–457 | ≈1,600 |
+| **d2l** · Why does Xavier initialization pick the variance it does? → Forward and backward stability cannot both hold exactly; the book splits the difference at σ² = 2/(n_in + n_out). | 227–228 | ≈1,325 |
+| **d2l** · What separates overfitting from underfitting, and how do you diagnose it? → The training-vs-validation gap, read against model complexity; overfitting "is not always a bad thing". | 154–155 | ≈1,550 |
+| **d2l** · Show the GRU implemented from scratch. → Three gate weight triples, blending H = Z⊙H + (1−Z)⊙H̃, then the concise nn.GRU version. | 419–420 | ≈900 |
+| **d2l** · Why do residual connections help deep networks train? → Nested function classes: learning the identity is trivial, so a deeper model never has to do worse. | 342–344 | ≈1,750 |
+| **d2l** · Which image augmentations does the book demonstrate, and where? → Horizontal and vertical flip, resized crop (10–100% of area, ratio 0.5–2), color jitter, on CIFAR-10. | 633–634 | ≈900 |
+| **d2l** · Softmax regression and cross-entropy: what is the key gradient? → ∂l/∂oⱼ = softmax(o)ⱼ − yⱼ, the same shape as linear regression. | 169–170 | ≈1,425 |
+| **d2l** · What does the book argue for moment-based optimizers over plain SGD? → A leaky average replaces the instantaneous gradient; Adam adds a second moment; Yogi when variance is high. | 550, 573, 576 | ≈1,550 |
+| **mml** · Where is the SVD defined, and what is it used for? → Theorem 4.22, A = UΣVᵀ, which "applies to all matrices"; used for low-rank approximation, compression, topic modeling. | 125, 135 | ≈1,050 |
+| **mml** · Where is the Gaussian defined, and what does the section emphasize? → Univariate and multivariate densities; marginals and conditionals of Gaussians are Gaussians. | 203–204 | ≈995 |
+| **All ten questions** | **23 page opens** | **≈13,000** |
+
+That is the whole context bill for ten substantive questions about two books: about 13,000 tokens of PDF text, against 532,000 per question for the dump and about 1,500 plus an embedding call per question for the RAG pipeline. It also lands a rounding error away from the ~12,000 the table estimated, which is the point of measuring: the estimate was arithmetic, and the arithmetic held.
+
+Accuracy held too. Question two is a fair sample of the rest. Asked why Xavier initialization chooses the variance it does, the agent read the labels, opened pages 227 and 228, and came back with the real argument: keeping activation variance stable in the forward pass wants n_in·σ² = 1, keeping gradient variance stable in the backward pass wants n_out·σ² = 1, and both cannot hold at once, so the book splits the difference at σ² = 2/(n_in + n_out). Then the book's own closing line: "This is the reasoning underlying the now-standard and practically beneficial Xavier initialization." Two pages, no retrieval infrastructure, and a citation you can check by turning to the page.
+
+Across the run, twenty-three pages were opened and not one of them was a miss. That is the honest version of the trade the labels make: they steer, the page proves, and when a label is wrong it costs exactly one page read to find out, which is the failure mode you can watch.
+
+One wrinkle worth keeping in view: pdf_index reports a file's whole catalog in one response, and on book-sized indexes that response trims itself to fit its output budget. Both runs hit the trim, on 1,151 pages and again on 417. On the smaller book, one question's labels sat past the trim, and the agent still landed on the exact section by calibrating printed page numbers against a page it had opened. Nothing was lost, because the catalog is an ordinary table the agent can read any slice of, but a paging parameter would let the tool tell the whole story on its own. It is on the list below.
+
+![Bar chart, measured: PDF page tokens opened per question across ten questions, eight on the 1,151-page deep learning book (solid bars) and two on the 417-page Mathematics for Machine Learning book (faded). Every bar sits between 900 and 1,750 tokens on an axis ending at 2,000; the whole-file dump would be 532,000 tokens per question, about 300 times past the right edge. Ten-question total: about 13,000 tokens.](/blog/media/pdfs-qa-gauntlet.svg)
 
 ## Which one, then
 
@@ -266,6 +294,9 @@ correct, because the page is always one call away.
   ("AssumeTheModel" instead of "Assume the model"). The labels survived it
   on our test book, but a cleaner extraction pass would make thin labels
   rarer.
+- `pdf_index` reports a file's catalog in a single response. On book-sized
+  indexes that response trims itself to fit its output budget, so a paging
+  or query parameter would let the tool show long catalogs in full.
 
 ## The idea in one sentence
 
