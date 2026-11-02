@@ -1,10 +1,12 @@
 import { Show, For, createSignal, createEffect, on, onMount, type JSX } from 'solid-js';
 import { useServer } from '../../context/server';
 import {
+  fetchAPI,
   getSearchConfig,
   setSearchConfig,
   type SearchProvider,
   type SearchBrowser,
+  type SearchConfig,
 } from '../../api/client';
 import {
   Group,
@@ -17,6 +19,7 @@ import {
   StatusChip,
   Banner,
   Mono,
+  Value,
   Spinner,
   fieldClass,
   matches,
@@ -25,6 +28,52 @@ import {
 
 const ICONS = {
   globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3 7.5 7.03 7.5 12s2.015 9 4.5 9zm-8.716-5.25h17.432M3.284 8.25h17.432',
+  // A stack of disks: the cache is a store, not a page of web results.
+  cache: 'M4 6c0-1.657 3.582-3 8-3s8 1.343 8 3-3.582 3-8 3-8-1.343-8-3zm0 0v12c0 1.657 3.582 3 8 3s8-1.343 8-3V6M4 12c0 1.657 3.582 3 8 3s8-1.343 8-3',
+};
+
+// A minute count in the words people use for it: 1440 reads as "24 hours"
+// rather than a number to convert in your head, and a week as "7 days". Only
+// whole hours and whole days get named; anything else stays in minutes.
+function humanMinutes(min: number): string {
+  const n = Math.round(min);
+  if (!Number.isFinite(n) || n <= 0) return 'not set';
+  const days = n / 1440;
+  if (Number.isInteger(days) && days >= 2) return `${days} days`;
+  if (n % 60 === 0) {
+    const hours = n / 60;
+    return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  }
+  return `${n} min`;
+}
+
+function humanBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+// What GET /api/search/cache reports. Its TTLs are seconds, which is why they
+// are not read through humanMinutes above.
+interface WebCacheStats {
+  enabled: boolean;
+  entries: number;
+  bytes: number;
+  hits: number;
+  misses: number;
+  evictions: number;
+  ttlSeconds: { search: number; page: number; answer: number };
+}
+
+// The cache knobs POST /api/search/config carries beside the search ones. The
+// TTLs are minutes; the server clamps each to 1..10080 (a week).
+type CacheConfig = {
+  cacheEnabled: boolean;
+  cacheSearchTTL: number;
+  cachePageTTL: number;
+  cacheAnswerTTL: number;
 };
 
 // The providers on offer, as tabs. Native is the built-in engine; more can be
@@ -75,6 +124,17 @@ export default function SearchSettings() {
   const [fetchTopK, setFetchTopK] = createSignal(4);
   const [pageChars, setPageChars] = createSignal(6000);
   const [browser, setBrowser] = createSignal<SearchBrowser>('');
+  // The web cache: one switch, three TTLs in minutes, and the counters the
+  // cache itself reports. The TTLs are read when the backend is built, so a
+  // change needs a restart, the same as the native knobs above.
+  const [cacheEnabled, setCacheEnabled] = createSignal(true);
+  const [cacheSearchTTL, setCacheSearchTTL] = createSignal(60);
+  const [cachePageTTL, setCachePageTTL] = createSignal(1440);
+  const [cacheAnswerTTL, setCacheAnswerTTL] = createSignal(360);
+  const [cacheStats, setCacheStats] = createSignal<WebCacheStats | null>(null);
+  const [cacheStatsError, setCacheStatsError] = createSignal('');
+  const [clearing, setClearing] = createSignal(false);
+  const [clearStatus, setClearStatus] = createSignal('');
   // The knobs past the engine itself stay folded away until asked for.
   const [advanced, setAdvanced] = createSignal(false);
   // The Safari setup steps stay folded behind "Show me how" until asked for.
@@ -117,7 +177,19 @@ export default function SearchSettings() {
     if (b === 'safari') setShowHow(true);
   }));
 
+  // The stats line stands on its own, so a failed config read still leaves it
+  // saying what the cache holds.
+  const loadCacheStats = async () => {
+    try {
+      setCacheStats(await fetchAPI<WebCacheStats>('/search/cache'));
+      setCacheStatsError('');
+    } catch (err) {
+      setCacheStatsError(err instanceof Error ? err.message : 'Could not read the cache');
+    }
+  };
+
   onMount(async () => {
+    void loadCacheStats();
     try {
       const cfg = await getSearchConfig();
       setEnabled(cfg.enabled);
@@ -127,6 +199,13 @@ export default function SearchSettings() {
       setBrowser(cfg.browser ?? '');
       setDbKeySet(cfg.tavilyApiKey === '__SET__');
       setEnvKeySet(!!cfg.tavilyEnvKeySet);
+      // The cache knobs ride the same object. A server that predates them
+      // replies without the keys, so keep the defaults already on screen.
+      const cache = cfg as SearchConfig & Partial<CacheConfig>;
+      setCacheEnabled(cache.cacheEnabled ?? true);
+      setCacheSearchTTL(cache.cacheSearchTTL || 60);
+      setCachePageTTL(cache.cachePageTTL || 1440);
+      setCacheAnswerTTL(cache.cacheAnswerTTL || 360);
     } catch (err) {
       // Keep the defaults on screen, but say the read failed.
       setLoadError(err instanceof Error ? err.message : 'Could not load the search settings');
@@ -151,14 +230,23 @@ export default function SearchSettings() {
   const save = async (opts: { restart?: boolean; live?: boolean; key?: string }) => {
     setSaving(true);
     try {
-      const result = await setSearchConfig({
+      // The cache knobs travel with the rest of the config: there is one save
+      // path, and the server stores these four beside the search settings.
+      // Sent as a variable because the shared SearchConfig type has not been
+      // widened to the cache keys yet.
+      const payload = {
         enabled: enabled(),
         provider: provider(),
         tavilyApiKey: opts.key ?? resolveKey(),
         fetchTopK: fetchTopK(),
         pageChars: pageChars(),
         browser: browser(),
-      });
+        cacheEnabled: cacheEnabled(),
+        cacheSearchTTL: cacheSearchTTL(),
+        cachePageTTL: cachePageTTL(),
+        cacheAnswerTTL: cacheAnswerTTL(),
+      };
+      const result = await setSearchConfig(payload);
       setDbKeySet(result.tavilyApiKey === '__SET__');
       if (opts.restart) setRestartNeeded(true);
       if (opts.live) flashApplied();
@@ -215,6 +303,65 @@ export default function SearchSettings() {
     } catch {
       setBrowser(prev);
     }
+  };
+
+  // The cache switch takes effect on the next restart, like the knobs above.
+  const toggleCache = async (next: boolean) => {
+    setCacheEnabled(next);
+    setClearStatus('');
+    try {
+      await save({ restart: true });
+    } catch {
+      setCacheEnabled(!next);
+    }
+  };
+
+  // A TTL changed. Clamped to the range the store accepts, so the field never
+  // sends a value the server would reject.
+  const changeTTL = async (which: 'search' | 'page' | 'answer', raw: string) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return;
+    const v = Math.min(10080, Math.max(1, Math.round(n)));
+    if (which === 'search') setCacheSearchTTL(v);
+    else if (which === 'page') setCachePageTTL(v);
+    else setCacheAnswerTTL(v);
+    try {
+      await save({ restart: true });
+    } catch {
+      // the flashed value stays; the next read reconciles it
+    }
+  };
+
+  const clearCache = async () => {
+    if (!confirm('Clear every cached search result, page and answer from ogcode?')) return;
+    setClearing(true);
+    setClearStatus('');
+    try {
+      const res = await fetchAPI<{ deleted: number }>('/search/cache/clear', { method: 'POST' });
+      const n = res.deleted;
+      setClearStatus(
+        n === 0
+          ? 'Nothing was cached.'
+          : `Removed ${n.toLocaleString()} ${n === 1 ? 'entry' : 'entries'}.`,
+      );
+      await loadCacheStats();
+    } catch {
+      setClearStatus('Could not clear the cache.');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  // One line for the whole store: what it holds, how much room that takes, and
+  // how often it answered. An untouched cache honestly says so.
+  const cacheStatsLine = () => {
+    if (cacheStatsError()) return 'Could not read the cache.';
+    const s = cacheStats();
+    if (!s) return 'Reading…';
+    const entries = `${s.entries.toLocaleString()} ${s.entries === 1 ? 'entry' : 'entries'}`;
+    const seen = s.hits + s.misses;
+    const rate = seen === 0 ? 'no traffic yet' : `hit rate ${Math.round((s.hits / seen) * 100)}%`;
+    return `${entries} · ${humanBytes(s.bytes)} · ${rate}${s.enabled ? '' : ' · off on the server'}`;
   };
 
   const saveKey = async () => {
@@ -506,6 +653,123 @@ export default function SearchSettings() {
           </div>
         </Show>
       </Group>
+
+      {/* The cache sits beside web search rather than inside a provider tab: it
+          fronts whichever engine answers, so its knobs belong to neither. */}
+      <Show when={!loading() && enabled()}>
+        <Group
+          id="cache"
+          title="Web cache"
+          icon={ICONS.cache}
+          description="Cached copies are safe to delete at any time. The only cost is fetching that page or answer again."
+        >
+          <Row
+            label="Cache search results, pages and answers"
+            helper={
+              <>
+                Kept in <Mono>~/.ogcode/config.db</Mono>, so the cache survives restarts and is
+                shared by every project on this machine. Only public web content is stored.
+              </>
+            }
+            hidden={hide(
+              'Cache search results, pages and answers',
+              'web cache caching disk config db shared restart',
+            )}
+          >
+            <Switch
+              checked={cacheEnabled()}
+              disabled={saving()}
+              onChange={toggleCache}
+              label="Cache search results, pages and answers"
+            />
+          </Row>
+
+          <Row
+            label="Search results stay for"
+            helper="How long a search's ranked results are reused before the engine is asked again. Applies after ogcode restarts."
+            hidden={hide('Search results stay for', 'cache ttl search results minutes hours expiry')}
+          >
+            <input
+              type="number"
+              min="1"
+              max="10080"
+              value={cacheSearchTTL()}
+              disabled={saving() || !cacheEnabled()}
+              aria-label="Search results cache in minutes"
+              onChange={(e) => changeTTL('search', e.currentTarget.value)}
+              class={`${fieldClass} w-[6rem] tabular-nums`}
+            />
+            <span class="text-meta tabular-nums text-[color:var(--text-tertiary)]">
+              {humanMinutes(cacheSearchTTL())}
+            </span>
+          </Row>
+
+          <Row
+            label="Pages stay for"
+            helper="How long a fetched page's text is reused instead of being fetched again. Applies after ogcode restarts."
+            hidden={hide('Pages stay for', 'cache ttl pages fetch minutes hours expiry')}
+          >
+            <input
+              type="number"
+              min="1"
+              max="10080"
+              value={cachePageTTL()}
+              disabled={saving() || !cacheEnabled()}
+              aria-label="Page cache in minutes"
+              onChange={(e) => changeTTL('page', e.currentTarget.value)}
+              class={`${fieldClass} w-[6rem] tabular-nums`}
+            />
+            <span class="text-meta tabular-nums text-[color:var(--text-tertiary)]">
+              {humanMinutes(cachePageTTL())}
+            </span>
+          </Row>
+
+          <Row
+            label="Answers stay for"
+            helper="How long a deep search's written answer is reused. Applies after ogcode restarts."
+            hidden={hide('Answers stay for', 'cache ttl answers deep search minutes hours expiry')}
+          >
+            <input
+              type="number"
+              min="1"
+              max="10080"
+              value={cacheAnswerTTL()}
+              disabled={saving() || !cacheEnabled()}
+              aria-label="Answer cache in minutes"
+              onChange={(e) => changeTTL('answer', e.currentTarget.value)}
+              class={`${fieldClass} w-[6rem] tabular-nums`}
+            />
+            <span class="text-meta tabular-nums text-[color:var(--text-tertiary)]">
+              {humanMinutes(cacheAnswerTTL())}
+            </span>
+          </Row>
+
+          <Row
+            label="Cached now"
+            helper="What this machine's cache holds at the moment."
+            hidden={hide('Cached now', 'cache entries size bytes hit rate statistics stats')}
+          >
+            <Value>{cacheStatsLine()}</Value>
+          </Row>
+
+          <Row
+            label="Clear the cache"
+            helper="Deletes every cached entry. Nothing else is touched, and the next search fetches fresh."
+            hidden={hide('Clear the cache', 'clear delete remove empty cache entries')}
+          >
+            <Show when={clearStatus()}>
+              <span class="text-micro text-[color:var(--text-tertiary)]">{clearStatus()}</span>
+            </Show>
+            <Button
+              variant="danger"
+              onClick={clearCache}
+              disabled={saving() || clearing() || !cacheEnabled()}
+            >
+              {clearing() ? 'Clearing…' : 'Clear cache'}
+            </Button>
+          </Row>
+        </Group>
+      </Show>
     </>
   );
 }

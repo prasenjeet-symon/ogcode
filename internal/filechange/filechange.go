@@ -53,7 +53,9 @@ type Change struct {
 	Session session.SessionID `json:"session,omitempty"`
 	// Agent is the agent id that made it ("build", "task", …).
 	Agent string `json:"agent,omitempty"`
-	// Tool is "write", "edit", or "bash" for a change a shell command made.
+	// Tool is "write", "edit", or "bash" for a change a shell command made,
+	// or "session-memory" for the loop recording a deep search in the
+	// session memory file on the agent's behalf.
 	Tool string `json:"tool"`
 	// Note is the caller's description, verbatim.
 	Note string `json:"note,omitempty"`

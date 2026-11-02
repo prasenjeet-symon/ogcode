@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prasenjeet-symon/ogcode/internal/memfile"
 	"github.com/prasenjeet-symon/ogcode/internal/skill"
 )
 
@@ -347,7 +348,7 @@ func sessionMemoryPrompt(canWriteFiles, hasContent bool, relPath string) string 
 		return base
 	}
 
-	base += "### How to maintain session memory\n- The same authoring rules as MEMORY.md apply: write only what you have seen hold, mark an unchecked inference \"(unverified)\" or leave it out, and update in place rather than append a growing log.\n- Keep it small — it reloads every turn of this session too. If it grows past a few KB, promote the durable lines to MEMORY.md (deleting them here) and drop what the conversation has settled.\n- Edits take effect from the next turn: the file is read once at turn start, not re-read mid-turn."
+	base += "### How to maintain session memory\n- The `" + memfile.DeepSearchHeading + "` section is written for you: the loop appends a line every time a turn runs a deep search, so the conversation knows which research it already paid for. Leave those lines in place when you rewrite the file.\n- The same authoring rules as MEMORY.md apply: write only what you have seen hold, mark an unchecked inference \"(unverified)\" or leave it out, and update in place rather than append a growing log.\n- Keep it small — it reloads every turn of this session too. If it grows past a few KB, promote the durable lines to MEMORY.md (deleting them here) and drop what the conversation has settled.\n- Edits take effect from the next turn: the file is read once at turn start, not re-read mid-turn."
 	return base
 }
 

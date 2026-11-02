@@ -42,6 +42,7 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 	"github.com/prasenjeet-symon/ogcode/internal/usage"
 	"github.com/prasenjeet-symon/ogcode/internal/version"
+	"github.com/prasenjeet-symon/ogcode/internal/webcache"
 )
 
 type Server struct {
@@ -103,6 +104,15 @@ type Server struct {
 	// restart. (The enable toggle still needs a restart — it changes which tools
 	// are registered.)
 	searchSwitch *search.SwitchableBackend
+
+	// webCache is the persistent cache for search results, fetched pages and
+	// deep-research answers, over the global config DB so it survives a restart.
+	// It wraps searchSwitch rather than sitting inside it: the tools and the
+	// deep-research pipeline hold search.WithCache(searchSwitch, webCache), so a
+	// provider change swaps what the switchable holds and the warm cache stays.
+	// Nil when caching is off or the table could not be opened — every method on
+	// *webcache.Cache tolerates a nil receiver, so nothing downstream branches.
+	webCache *webcache.Cache
 
 	// search is the full-text index over this project's .ogcode/memory/
 	// corpus, the store behind GET /api/session/search (the ⌘K palette).
@@ -500,6 +510,11 @@ func (s *Server) serve(ctx context.Context) error {
 		searchEnabled = strings.EqualFold(v, "true")
 	}
 
+	// The web cache, opened here so the backend below can be wrapped in it.
+	// A failure to open costs speed, never the server: OpenWebCache warns and
+	// returns nil, which reads as "caching off" everywhere.
+	s.webCache = OpenWebCache(globalDatabase, searchCfg)
+
 	// searchBackend is an interface, so only ever assign a non-nil implementation
 	// to it: a typed-nil pointer would still compare != nil and would get dead
 	// tools registered against it.
@@ -511,11 +526,16 @@ func (s *Server) serve(ctx context.Context) error {
 		// backend, so swapping it in place needs no re-registration.
 		sw := search.NewSwitchableBackend(buildSearchBackend(searchCfg))
 		s.searchSwitch = sw
-		searchBackend = sw
-		s.searchBackend = sw
+		// The cache wraps the SWITCHABLE, never the concrete backend inside it:
+		// handleSetSearchConfig calls searchSwitch.Set to apply a provider
+		// change, and a cache underneath would be discarded with the backend it
+		// was built around. Above the switchable, one cache is shared by both
+		// tools and the deep-research pipeline and survives the switch.
+		searchBackend = search.WithCache(sw, s.webCache)
+		s.searchBackend = searchBackend
 
-		toolRegistry.Register(tool.WebSearchTool{Bridge: sw})
-		toolRegistry.Register(tool.FetchPageTool{Bridge: sw})
+		toolRegistry.Register(tool.WebSearchTool{Bridge: searchBackend})
+		toolRegistry.Register(tool.FetchPageTool{Bridge: searchBackend})
 		logSearchProvider("web search enabled", searchCfg)
 		slog.Info("web_search and fetch_page tools registered")
 	} else {
@@ -716,7 +736,7 @@ func (s *Server) serve(ctx context.Context) error {
 
 	// Register deep_search after loopRunner is built (needs RunSearchSession).
 	if searchBackend != nil {
-		toolRegistry.Register(tool.DeepSearchTool{Run: s.loopRunner.RunSearchSession})
+		toolRegistry.Register(tool.DeepSearchTool{Run: s.loopRunner.RunSearchSession, Cache: s.webCache})
 		slog.Info("deep_search tool registered")
 	}
 
@@ -877,6 +897,10 @@ func (s *Server) serve(ctx context.Context) error {
 	// teammate's report — it must not cut the stream out from under it.
 	go s.pollReminders(ctx)
 
+	// Reclaim what a previous process left expired in the web cache: expiry is
+	// enforced on read, so this only returns disk space, and nothing waits on it.
+	s.startWebCacheSweep(ctx)
+
 	// signalCh owns process signals; stopCh is the programmatic Stop() path, so
 	// a ctx-driven caller (the worker hosting N servers) is never torn down by a
 	// signal meant for some other component.
@@ -976,6 +1000,14 @@ func (s *Server) serve(ctx context.Context) error {
 	if s.searchSwitch != nil {
 		if err := s.searchSwitch.Close(); err != nil {
 			slog.Warn("close search backend", "err", err)
+		}
+	}
+	// Opened over s.globalDB, so this must come before the database closes
+	// below. Close releases nothing on its own (the cache does not own the
+	// handle), but it keeps the shutdown story in one place.
+	if s.webCache != nil {
+		if err := s.webCache.Close(); err != nil {
+			slog.Warn("close web cache", "err", err)
 		}
 	}
 
@@ -1256,6 +1288,141 @@ func openBrowser(url string) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// Defaults for the web cache's two levels, taken from webcache's own
+// constants so the two spellings cannot drift. The disk level is what a
+// restart keeps, so it is sized to hold a long research session without
+// crowding config.db; the memory level is a read-through LRU of the hot keys.
+const (
+	webCacheL1Entries = webcache.DefaultL1Entries
+	webCacheL1Bytes   = webcache.DefaultL1Bytes
+	webCacheL2Rows    = webcache.DefaultL2Rows
+	webCacheL2Bytes   = webcache.DefaultL2Bytes
+
+	// webCacheSweepInterval is how often expired disk rows are reclaimed. Read
+	// paths already treat an expired row as a miss, so this is housekeeping and
+	// never correctness.
+	webCacheSweepInterval = 10 * time.Minute
+)
+
+// OpenWebCache resolves cfg's cache settings (environment included) and opens
+// the persistent cache over database's own handle, then sweeps the rows a
+// previous process left expired. A nil return means "no caching": the table
+// could not be reached, and every *webcache.Cache method tolerates nil, so
+// callers wire it unconditionally.
+//
+// Exported and shared with the headless CLI the way buildSearchBackend is, so
+// `ogcode run` and the server read and warm the same cache with the same
+// rules instead of drifting apart.
+func OpenWebCache(database *db.DB, cfg *session.SearchConfig) *webcache.Cache {
+	if database == nil || cfg == nil {
+		return nil
+	}
+	opts := resolveWebCacheOptions(cfg)
+	cache, err := webcache.Open(database.DB, opts)
+	if err != nil {
+		slog.Warn("web cache: open failed; caching stays off", "err", err)
+		return nil
+	}
+	if !cache.Enabled() {
+		return cache
+	}
+	if n, err := cache.Sweep(); err != nil {
+		slog.Warn("web cache: initial sweep", "err", err)
+	} else if n > 0 {
+		slog.Info("web cache: swept expired rows", "rows", n)
+	}
+	slog.Info("web cache enabled",
+		"search_ttl", cache.TTL(webcache.KindSearch),
+		"page_ttl", cache.TTL(webcache.KindPage),
+		"answer_ttl", cache.TTL(webcache.KindAnswer))
+	return cache
+}
+
+// resolveWebCacheOptions turns the stored search config into cache options. The
+// environment wins over the stored row, mirroring OGCODE_SEARCH_ENABLED: an
+// explicit kill switch can turn the cache off for a scripted or CI run, and a
+// TTL can be overridden without editing the settings row.
+func resolveWebCacheOptions(cfg *session.SearchConfig) webcache.Options {
+	opts := webcache.Options{
+		Enabled: cfg.CacheEnabled,
+		TTL: map[webcache.Kind]time.Duration{
+			webcache.KindSearch: cacheTTLFromMinutes(cfg.CacheSearchTTL, webcache.DefaultSearchTTL),
+			webcache.KindPage:   cacheTTLFromMinutes(cfg.CachePageTTL, webcache.DefaultPageTTL),
+			webcache.KindAnswer: cacheTTLFromMinutes(cfg.CacheAnswerTTL, webcache.DefaultAnswerTTL),
+		},
+		L1Entries: webCacheL1Entries,
+		L1Bytes:   webCacheL1Bytes,
+		L2Rows:    webCacheL2Rows,
+		L2Bytes:   webCacheL2Bytes,
+	}
+	// Only an explicit falsey value turns the cache off; unset (or anything
+	// else) leaves the stored toggle in force.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OGCODE_SEARCH_CACHE"))) {
+	case "off", "0", "false":
+		opts.Enabled = false
+	}
+	for _, o := range []struct {
+		env  string
+		kind webcache.Kind
+	}{
+		{"OGCODE_SEARCH_CACHE_SEARCH_TTL", webcache.KindSearch},
+		{"OGCODE_SEARCH_CACHE_PAGE_TTL", webcache.KindPage},
+		{"OGCODE_SEARCH_CACHE_ANSWER_TTL", webcache.KindAnswer},
+	} {
+		v := strings.TrimSpace(os.Getenv(o.env))
+		if v == "" {
+			continue
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			slog.Warn("web cache: ignoring unusable TTL from environment", "env", o.env, "value", v)
+			continue
+		}
+		opts.TTL[o.kind] = d
+	}
+	return opts
+}
+
+// cacheTTLFromMinutes converts a stored minute count into a lifetime, falling
+// back to def for 0 — the "unset" value a row from before the column existed
+// reads back as.
+func cacheTTLFromMinutes(minutes int, def time.Duration) time.Duration {
+	if minutes <= 0 {
+		return def
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// startWebCacheSweep reclaims expired disk rows for as long as the server runs.
+// It rides the server's own lifecycle context like the reminder poller and the
+// feature-flag refresher — no separate shutdown path of its own.
+func (s *Server) startWebCacheSweep(ctx context.Context) {
+	if s.webCache == nil || !s.webCache.Enabled() {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(webCacheSweepInterval)
+		defer ticker.Stop()
+		for {
+			s.stopMu.Lock()
+			stopCh := s.stopCh
+			s.stopMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return
+			case <-stopCh: // nil until serve() allocates it; a nil case never fires
+				return
+			case <-ticker.C:
+			}
+			if n, err := s.webCache.Sweep(); err != nil {
+				slog.Warn("web cache: sweep", "err", err)
+			} else if n > 0 {
+				slog.Debug("web cache: swept expired rows", "rows", n)
+			}
+		}
+	}()
 }
 
 // buildSearchBackend adapts this server's config to search.BuildBackend, which

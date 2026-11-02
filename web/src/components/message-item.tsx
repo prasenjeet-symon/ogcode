@@ -98,20 +98,22 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   const tool = (): string => props.data.tool || 'unknown';
 
   // Agent housekeeping tools (codebase_map, file_map, compact_context,
-  // update_intent): the maps' dense labeled tree/outline output is how the
-  // agent orients itself in the codebase, compact_context's is the agent's
-  // note to itself about what it condensed, and update_intent's is the echoed
-  // plan + closing nudge. None of that is a result the user asked for, so the
-  // row is a flat one-line record rather than a disclosure: it has nothing to
-  // open, is not clickable and not focusable, and stays shut even while the
-  // tool runs. The rows carry a magic-wand glyph instead of the usual
-  // checkmark for the same reason — what the tool did was quietly maintain
-  // the agent's own state, not hand back something to read.
+  // update_intent, deep_search): the maps' dense labeled tree/outline output is
+  // how the agent orients itself in the codebase, compact_context's is the
+  // agent's note to itself about what it condensed, update_intent's is the
+  // echoed plan + closing nudge, and deep_search's is the research answer the
+  // agent reads and then reports in its own words. None of that is a result the
+  // user asked for as a card, so the row is a flat one-line record rather than a
+  // disclosure: it has nothing to open, is not clickable and not focusable, and
+  // stays shut even while the tool runs. The rows carry a magic-wand glyph
+  // instead of the usual checkmark for the same reason — what the tool did was
+  // quietly maintain the agent's own state, not hand back something to read.
   const isAgentNavTool = () =>
     tool() === 'codebase_map' ||
     tool() === 'file_map' ||
     tool() === 'compact_context' ||
-    tool() === 'update_intent';
+    tool() === 'update_intent' ||
+    tool() === 'deep_search';
 
   // A running tool opens its input so the user can see what is happening, but
   // a housekeeping row has nothing to show: it stays shut from the first frame.
@@ -131,17 +133,12 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     }
     return t;
   };
-  const summary = () => {
-    if (isDeepSearch() && state().status === 'completed') return 'Search results';
-    return summaryInput();
-  };
   const summaryInput = () => summarizeInput(tool(), state().input);
   const hasOutput = () => !!state().output;
   const outputLineCount = () => (state().output || '').split('\n').length;
 
-  // Deep search results contain the full synthesised answer (markdown with
-  // Sources section). Render them as markdown instead of a code block, and
-  // auto-expand on completion so the user sees the answer immediately.
+  // deep_search is the one tool that is slow by design, so its flat row keeps
+  // the exact total once it finishes (see showDuration) and says so on hover.
   const isDeepSearch = () => tool() === 'deep_search';
 
   // File-editing tools render a GitHub-style before/after diff instead of raw input.
@@ -232,17 +229,11 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     };
   });
 
-  // Auto-collapse when tool finishes (running/completed -> completed/error/denied)
-  // Exception: deep_search auto-expands so the user sees the answer.
+  // Auto-collapse when tool finishes (running/completed -> completed/error/denied).
+  // A housekeeping row has nothing to open, so it is shut in every state.
   createEffect(() => {
     const s = status();
-    if (s === 'completed' || s === 'error' || s === 'denied') {
-      if (isDeepSearch()) {
-        setExpanded(true);
-      } else {
-        setExpanded(false);
-      }
-    }
+    if (s === 'completed' || s === 'error' || s === 'denied') setExpanded(false);
   });
 
   // Elapsed-time readout. Any tool that is still running ticks a signal every
@@ -382,9 +373,9 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
         <Show when={status() === 'denied'}>
           <span class="text-micro text-amber-400 font-medium shrink-0">denied</span>
         </Show>
-        <Show when={summary()} fallback={<span class="flex-1" />}>
+        <Show when={summaryInput()} fallback={<span class="flex-1" />}>
           <span class="text-[color:var(--text-muted)] font-mono text-micro truncate flex-1 min-w-0">
-            {summary()}
+            {summaryInput()}
           </span>
         </Show>
         <Show when={diffStats()}>
@@ -439,19 +430,13 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
               <Show when={syntaxIssue()?.note}>
                 <CodeBlock label="syntax" maxHeight={200} text={syntaxIssue()!.note} />
               </Show>
-              <Show when={!isFileEdit() && state().input && Object.keys(state().input).length > 0 && !(isDeepSearch() && status() === 'completed')}>
+              <Show when={!isFileEdit() && state().input && Object.keys(state().input).length > 0}>
                 <CodeBlock label="input" maxHeight={160} text={safeStringify(state().input)} />
               </Show>
               <Show when={state().output && !isFileEdit()}>
                 <Show
                   when={docIndexEntries()}
-                  fallback={
-                    <Show when={isDeepSearch()} fallback={<CodeBlock label="output" maxHeight={280} text={state().output || ''} />}>
-                      <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-3 max-h-[600px] overflow-y-auto">
-                        <MarkdownContent text={state().output || ''} />
-                      </div>
-                    </Show>
-                  }
+                  fallback={<CodeBlock label="output" maxHeight={280} text={state().output || ''} />}
                 >
                   {(entries) => <IndexEntries entries={entries()} />}
                 </Show>

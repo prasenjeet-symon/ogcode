@@ -79,6 +79,70 @@ func TestSearchConfigNativeKnobsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSearchConfigCacheSettingsRoundTrip pins the web cache's knobs. The enable
+// flag defaults ON for the same reason search itself does: a fresh install
+// should get the fast path with nothing configured, and an explicit off must
+// survive a round trip or the settings toggle would silently do nothing.
+func TestSearchConfigCacheSettingsRoundTrip(t *testing.T) {
+	database := newSearchTestDB(t)
+
+	def, err := GetSearchConfig(database)
+	if err != nil {
+		t.Fatalf("get search config: %v", err)
+	}
+	if !def.CacheEnabled {
+		t.Error("the web cache should be enabled by default on a fresh database")
+	}
+	if def.CacheSearchTTL != DefaultCacheSearchTTL || def.CachePageTTL != DefaultCachePageTTL || def.CacheAnswerTTL != DefaultCacheAnswerTTL {
+		t.Fatalf("fresh defaults lost: got %+v", def)
+	}
+
+	if err := SetSearchConfig(database, &SearchConfig{
+		Enabled:        true,
+		CacheEnabled:   true,
+		CacheSearchTTL: 30,
+		CachePageTTL:   2880,
+		CacheAnswerTTL: 120,
+	}); err != nil {
+		t.Fatalf("set search config: %v", err)
+	}
+	cfg, err := GetSearchConfig(database)
+	if err != nil {
+		t.Fatalf("get search config: %v", err)
+	}
+	if !cfg.CacheEnabled || cfg.CacheSearchTTL != 30 || cfg.CachePageTTL != 2880 || cfg.CacheAnswerTTL != 120 {
+		t.Fatalf("round trip lost the cache settings: got %+v", cfg)
+	}
+
+	if err := SetSearchConfig(database, &SearchConfig{Enabled: true, CacheEnabled: false}); err != nil {
+		t.Fatalf("set search config: %v", err)
+	}
+	if off, err := GetSearchConfig(database); err != nil {
+		t.Fatalf("get search config: %v", err)
+	} else if off.CacheEnabled {
+		t.Error("an explicitly disabled cache came back enabled")
+	}
+
+	// Out of range clamps to the nearest bound; unset (zero) falls back to the
+	// default rather than clamping up to the minimum.
+	if err := SetSearchConfig(database, &SearchConfig{
+		Enabled:        true,
+		CacheEnabled:   true,
+		CacheSearchTTL: 999999,
+		CachePageTTL:   1,
+		CacheAnswerTTL: 0,
+	}); err != nil {
+		t.Fatalf("set search config: %v", err)
+	}
+	clamped, err := GetSearchConfig(database)
+	if err != nil {
+		t.Fatalf("get search config: %v", err)
+	}
+	if clamped.CacheSearchTTL != MaxCacheTTLMinutes || clamped.CachePageTTL != MinCacheTTLMinutes || clamped.CacheAnswerTTL != DefaultCacheAnswerTTL {
+		t.Fatalf("clamping lost: got %+v", clamped)
+	}
+}
+
 // TestSearchConfigNormalisesNativeKnobs pins the read/write guard: an
 // out-of-range value clamps to the nearest bound, an unset (zero) value falls
 // back to the default, and an unrecognised browser collapses to the empty

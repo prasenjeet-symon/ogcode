@@ -1253,16 +1253,25 @@ type ttlEntry[T any] struct {
 	expiresAt time.Time
 }
 
+// ttlCacheMaxEntries is the default cap on one leaf cache. Every backend keeps
+// a handful of these (search results, fetched pages, referers) and they live as
+// long as the process does, so without a cap a long-running server accumulates
+// one entry per distinct query forever.
+const ttlCacheMaxEntries = 512
+
 // ttlCache is a small mutex-guarded expiring map. Entries are evicted lazily on
 // read; a research run is short-lived, so no background sweeper is warranted.
+// maxEntries bounds the map: when it is full, set drops the entry closest to
+// expiry to make room (0 means unbounded, which no call site should ask for).
 type ttlCache[T any] struct {
-	mu      sync.Mutex
-	ttl     time.Duration
-	entries map[string]ttlEntry[T]
+	mu         sync.Mutex
+	ttl        time.Duration
+	maxEntries int
+	entries    map[string]ttlEntry[T]
 }
 
 func newTTLCache[T any](ttl time.Duration) *ttlCache[T] {
-	return &ttlCache[T]{ttl: ttl, entries: make(map[string]ttlEntry[T])}
+	return &ttlCache[T]{ttl: ttl, maxEntries: ttlCacheMaxEntries, entries: make(map[string]ttlEntry[T])}
 }
 
 func (c *ttlCache[T]) get(key string) (T, bool) {
@@ -1280,5 +1289,29 @@ func (c *ttlCache[T]) get(key string) (T, bool) {
 func (c *ttlCache[T]) set(key string, value T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, exists := c.entries[key]; !exists && c.maxEntries > 0 && len(c.entries) >= c.maxEntries {
+		c.evictOne()
+	}
 	c.entries[key] = ttlEntry[T]{value: value, expiresAt: time.Now().Add(c.ttl)}
+}
+
+// evictOne drops the entry nearest its expiry to make room for a new one.
+//
+// Expiry order is the closest stand-in for recency this cache has — every entry
+// is written with the same TTL, so it is write order — and because expiry is
+// absolute, an already-expired entry always sorts first. A full cache therefore
+// never keeps a dead entry alive at the cost of a live one.
+func (c *ttlCache[T]) evictOne() {
+	var (
+		victim   string
+		victimAt time.Time
+	)
+	for k, e := range c.entries {
+		if victim == "" || e.expiresAt.Before(victimAt) {
+			victim, victimAt = k, e.expiresAt
+		}
+	}
+	if victim != "" {
+		delete(c.entries, victim)
+	}
 }

@@ -325,11 +325,19 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if v := os.Getenv("OGCODE_SEARCH_ENABLED"); v != "" {
 		searchEnabled = strings.EqualFold(v, "true")
 	}
+	// The same persistent cache the server opens, resolved by the same helper, so
+	// a headless run reuses what the server (or an earlier run) already fetched
+	// rather than paying for the same page twice. globalDatabase is already open
+	// here for the search config and the usage ledger, so this needs no new
+	// handle; a failure leaves it nil, which reads as "caching off". No sweep
+	// ticker: a run outlives nothing, and OpenWebCache sweeps once on the way in.
+	webCache := server.OpenWebCache(globalDatabase, searchCfg)
+	defer webCache.Close()
 	// Only ever assign a non-nil implementation: Backend is an interface, and a
 	// typed-nil would compare != nil and get dead tools registered against it.
 	var searchBridge search.Backend
 	if searchEnabled {
-		searchBridge = search.BuildBackend(searchCfg.Provider, searchCfg.TavilyAPIKey, searchCfg.Browser)
+		searchBridge = search.WithCache(search.BuildBackend(searchCfg.Provider, searchCfg.TavilyAPIKey, searchCfg.Browser), webCache)
 		toolRegistry.Register(tool.WebSearchTool{Bridge: searchBridge})
 		toolRegistry.Register(tool.FetchPageTool{Bridge: searchBridge})
 	} else {
@@ -395,7 +403,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	// registering it would offer the model a call that can only fail.
 	toolRegistry.Register(tool.TaskTool{Run: lr.RunTaskSession})
 	if searchBridge != nil {
-		toolRegistry.Register(tool.DeepSearchTool{Run: lr.RunSearchSession})
+		toolRegistry.Register(tool.DeepSearchTool{Run: lr.RunSearchSession, Cache: webCache})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

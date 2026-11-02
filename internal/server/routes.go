@@ -74,6 +74,12 @@ func (s *Server) routes() http.Handler {
 		r.Post("/search/config", s.handleSetSearchConfig)
 		r.Post("/search/config/validate", s.handleValidateSearchKey)
 
+		// The web cache that sits above the search backend: size and counters for
+		// the settings screen, and a clear button. Both answer 200 with the cache
+		// disabled, so a client never has to special-case "off".
+		r.Get("/search/cache", s.handleGetSearchCache)
+		r.Post("/search/cache/clear", s.handleClearSearchCache)
+
 		r.Get("/providers/config", s.handleGetProviderConfigs)
 		r.Post("/providers/config/{id}", s.handleSetProviderConfig)
 		r.Post("/providers/config/{id}/validate", s.handleValidateProviderConfig)

@@ -193,3 +193,67 @@ func TestTTLCacheExpires(t *testing.T) {
 		t.Errorf("fresh entry = %q,%v; want \"v\",true", v, ok)
 	}
 }
+
+// TestTTLCacheEvictsAtCapacity pins the cap: every backend keeps several of
+// these leaf caches for the life of the process, so before the cap a
+// long-running server grew one entry per distinct query and never shrank.
+func TestTTLCacheEvictsAtCapacity(t *testing.T) {
+	c := newTTLCache[string](time.Hour)
+	if c.maxEntries != ttlCacheMaxEntries {
+		t.Fatalf("newTTLCache cap = %d; want the default %d", c.maxEntries, ttlCacheMaxEntries)
+	}
+
+	c.maxEntries = 2
+	c.set("a", "1")
+	c.set("b", "2")
+	// Pin distinct expiries so the eviction order is not a coin flip on a
+	// coarse clock: a expires first, so a is the one that must go.
+	c.entries["a"] = ttlEntry[string]{value: "1", expiresAt: time.Now().Add(time.Minute)}
+	c.entries["b"] = ttlEntry[string]{value: "2", expiresAt: time.Now().Add(2 * time.Hour)}
+
+	c.set("c", "3")
+
+	if got := len(c.entries); got != 2 {
+		t.Errorf("cache holds %d entries; want 2", got)
+	}
+	if _, ok := c.get("a"); ok {
+		t.Error("the entry nearest its expiry survived eviction")
+	}
+	for _, k := range []string{"b", "c"} {
+		if _, ok := c.get(k); !ok {
+			t.Errorf("entry %q was evicted; only the oldest should go", k)
+		}
+	}
+
+	// Overwriting a key must not evict anything: the map did not grow.
+	c.set("b", "2b")
+	if got := len(c.entries); got != 2 {
+		t.Errorf("overwriting an entry shrank the cache to %d entries; want 2", got)
+	}
+	if v, ok := c.get("b"); !ok || v != "2b" {
+		t.Errorf("overwritten entry = %q,%v; want \"2b\",true", v, ok)
+	}
+}
+
+// TestTTLCacheEvictionDropsAnExpiredEntryFirst pins that a full cache spends its
+// eviction on an entry that was already dead rather than on a live one, so the
+// cap can never make stale data outlive fresh data.
+func TestTTLCacheEvictionDropsAnExpiredEntryFirst(t *testing.T) {
+	c := newTTLCache[string](time.Hour)
+	c.maxEntries = 2
+	c.set("live", "new")
+	c.set("dead", "old")
+	c.entries["dead"] = ttlEntry[string]{value: "old", expiresAt: time.Now().Add(-time.Second)}
+
+	c.set("third", "x")
+
+	if _, ok := c.get("dead"); ok {
+		t.Error("an expired entry was served from a cache that had to make room")
+	}
+	if _, ok := c.get("live"); !ok {
+		t.Error("the live entry was evicted while an expired one was available")
+	}
+	if _, ok := c.get("third"); !ok {
+		t.Error("the newly written entry is missing")
+	}
+}

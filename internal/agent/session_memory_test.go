@@ -115,6 +115,9 @@ func TestSessionMemoryPrompt_BranchesAndSplitRules(t *testing.T) {
 	if !strings.Contains(written, "`"+rel+"`") {
 		t.Errorf("the file's path must be named:\n%s", written)
 	}
+	if !strings.Contains(written, memfile.DeepSearchHeading) {
+		t.Errorf("the writable branch must tell the agent the deep-search section is loop-maintained:\n%s", written)
+	}
 	readonly := sessionMemoryPrompt(false, true, rel)
 	if !strings.Contains(readonly, "read-only reference") || !strings.Contains(readonly, "Do not modify the session memory file") {
 		t.Errorf("read-only branch must forbid editing:\n%s", readonly)

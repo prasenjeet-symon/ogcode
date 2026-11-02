@@ -112,6 +112,30 @@ func TestRingKeepsFiftyAndReportsTruncation(t *testing.T) {
 	}
 }
 
+// TestRecordSurvivesACancelledContext pins why Record detaches its writes: a
+// turn's context can already be cancelled by the time end-of-turn bookkeeping
+// runs — LoopRunner's deferred recordDeepSearches passes the turn ctx straight
+// in — and the file change note must land anyway. The call derives its own
+// deadline with context.WithoutCancel; this test fails the moment that guard
+// is dropped.
+func TestRecordSurvivesACancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	l := memoryLog(t)
+	var sinks int
+	l.Sink = func(_ context.Context, _ Change) error {
+		sinks++
+		return nil
+	}
+	l.Persist = func(_ context.Context, _ Bookmark) error { return nil }
+	if rev := l.Record(ctx, "/a", Change{Session: "s1", Agent: "build", Tool: "session-memory"}); rev != 1 {
+		t.Fatalf("rev = %d, want 1", rev)
+	}
+	if sinks != 1 {
+		t.Fatalf("sink calls = %d, want exactly 1 despite the cancelled context", sinks)
+	}
+}
+
 func TestRecordCallsSinkOnceAndWarnsOnError(t *testing.T) {
 	ctx := context.Background()
 	l := memoryLog(t)

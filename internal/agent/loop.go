@@ -475,6 +475,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// slog line in the server's stdout. The client saw a loop that stopped for
 	// no stated reason. Carry the text so it has something to show.
 	exitReason := "error"
+	// Deep searches this turn ran, recorded in the conversation's session
+	// memory on the way out (see recordDeepSearches). Declared ahead of the
+	// defers below so the exit defer can see the slice the turn collected; the
+	// write itself is registered further down, once the working directory is
+	// known.
+	var deepSearches []memfile.DeepSearchNote
 	defer func() {
 		// The turn is over: a clean finish (stop, length, aborted, step_limit)
 		// clears the running marker, while an error or panic leaves it failed.
@@ -565,6 +571,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	if sess != nil && sess.Directory != "" {
 		workDir = sess.Directory
 	}
+	// Registered here, not with the exit defer above: that one is registered
+	// before the session is loaded, so it cannot name the directory the note is
+	// written under. LIFO runs this first on every exit path, and the closure —
+	// not arguments, which would freeze the still-empty slice — sees the
+	// searches collected after this point.
+	defer func() { lr.recordDeepSearches(ctx, sessionID, deepSearches, workDir, agent.ID) }()
 	agentMDContent := LoadAgentMD(workDir)
 	memoryMDContent := LoadMemoryMD(workDir)
 	// Session memory is a per-conversation file, so it is keyed by the ROOT
@@ -2350,6 +2362,29 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				intentFind.annotate(&intent)
 				lr.setSessionIntent(sessionID, &intent)
 			}
+			// deep_search: remember the question, so the conversation's memory
+			// records research it has already paid for. The tool stamps a search
+			// that produced an answer — fresh or replayed from the web cache —
+			// with its query; a failed or empty one stamps nothing and is not
+			// recorded.
+			for _, tc := range readyCalls {
+				if tc.Name != "deep_search" {
+					continue
+				}
+				res, ran := toolResults[tc.CallID]
+				if !ran {
+					continue
+				}
+				query, cached, ok := tool.DeepSearchRecord(res)
+				if !ok {
+					continue
+				}
+				deepSearches = append(deepSearches, memfile.DeepSearchNote{
+					Query:  query,
+					Cached: cached,
+					At:     time.Now(),
+				})
+			}
 		}
 
 		// If tool calls were executed, always continue the loop regardless of
@@ -2946,6 +2981,39 @@ func truncateForDigest(s string) string {
 		return s
 	}
 	return s[:digestInputCap] + fmt.Sprintf("… (+%d chars)", len(s)-digestInputCap)
+}
+
+// recordDeepSearches writes one line per deep search this turn ran into the
+// conversation's session memory file, so a later turn — or a teammate picking
+// the conversation up — knows the research already happened rather than paying
+// for the same pipeline again.
+//
+// It writes the ROOT session's file, the same one the prompt loaded and the
+// agent itself maintains, so a teammate's research lands where the conversation
+// will look for it. The write is recorded in the file change log like any other
+// mutation: the loop changed those bytes, and leaving it unrecorded would make
+// the session's next shell command see an unattributed change to a file the
+// gate tracks. A failure is logged, never fatal — the turn is over and its
+// answer is not at stake.
+func (lr *LoopRunner) recordDeepSearches(ctx context.Context, sessionID session.SessionID, notes []memfile.DeepSearchNote, workDir, agentName string) {
+	if len(notes) == 0 || workDir == "" {
+		return
+	}
+	key := sessionMemoryKey(sessionID, lr.ParentSessionOf)
+	changed, err := memfile.AppendDeepSearches(workDir, key, notes)
+	if err != nil {
+		slog.Warn("record deep searches in session memory", "session", sessionID, "err", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	lr.FileLog.Record(ctx, tool.FileKey(workDir, memfile.SessionMemoryPath(workDir, key)), filechange.Change{
+		Session: sessionID,
+		Agent:   agentName,
+		Tool:    "session-memory",
+		Note:    "recorded deep searches",
+	})
 }
 
 // turnMemorableSession reports whether a session type is a real unit of work
