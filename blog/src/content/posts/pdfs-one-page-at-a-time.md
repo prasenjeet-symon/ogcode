@@ -158,6 +158,102 @@ sentences to quote, it is plenty. What matters is the shape of the trade:
 one page of tokens, on demand, instead of 37 pages of PDF parked in
 everyone's context for the whole session.
 
+## The same paper, three harnesses
+
+Numbers, because "fewer tokens" is easy to claim and easier to fudge. Same
+paper, the three ways a harness can meet a PDF. Token counts here are
+character counts divided by four, the standard back of the envelope: treat
+each figure as an estimate, and trust the shape.
+
+A single question on a small paper flatters every harness. Nobody actually
+works that way. Real use is a pile of questions against the same file: what
+does this table say, where is the ablation, which page defines the metric.
+Multi-question sessions are where the three strategies stop pretending to be
+equivalent, and where one of them is simply the best.
+
+| | Dump the file | RAG pipeline | Ogcode: labels, then pages |
+|---|---|---|---|
+| Setup | nothing to build | chunk the text into ~500-token windows, embed all ~60 fragments into a vector store, tune top-k | one background labeling call: the model reads ~20k tokens of page keywords once and returns ~3k tokens of labels |
+| What the model sees per question | all 37 pages, ~23,000 tokens, parked in context | the top ~5 fragments (~1,500 tokens), picked by cosine similarity | the label table (the full catalog is ~3,200 tokens; the folded map view is a few hundred) plus one page, ~900 tokens |
+| A ten-question session | ~230,000 PDF tokens carried through the window | ~15,000 fragment tokens, plus ten embedding round trips | ~12,000 page tokens, often less: some answers come from labels alone |
+| Where the answer lives | whole pages, all of them, all at once | fragments with no neighbors and no page numbers | whole pages you can cite by number |
+| How it fails quietly | on a bigger file the blob gets cut, and the model answers from whatever survived | the retriever misses the chunk, and nothing tells you | a wrong label costs exactly one page read to correct |
+| Where the cost goes as questions pile up | nowhere good: the blob rides every turn | flat per question, but rebuilt from zero every time | down: after the first two questions the agent knows the map and opens only pages |
+
+One footnote, kept honest: on a first question, RAG and Ogcode spend about
+the same number of tokens. Five chunks and one page are the same order of
+size, and we will not pretend otherwise. From the second question on, the two
+part ways. RAG rebuilds its answer from zero every time: rank the chunks,
+re-embed, hand over fragments that carry no memory of the question before.
+Ogcode's agent has already read the label map, so a later question usually
+costs one page read, and some cost nothing but the labels. The labeling pass
+itself costs about as much as the blob would (~23k tokens of keyword input
+in, ~3k of labels out), but on a different clock: the blob enters your
+working session and rides along every turn, while the labeling call happens
+once in the background and never enters the working conversation at all.
+
+![Line chart on a log scale: cumulative PDF tokens entering the model across ten questions on the 37-page paper. Dump climbs from 23,000 to about 230,000. RAG and Ogcode start tied at 1,500, then Ogcode flattens to roughly 12,000 by question ten while RAG reaches 15,000, with an occasional labels-only question pulling it lower.](/blog/media/pdfs-cumulative-ten-questions.svg)
+
+Speed is not close either. The catalog lives in SQLite, so pdf_index never
+opens the 8.1 MB file: a label lookup is a database read, effectively
+instant, and read_pdf_page renders a single page. No embedding round trip,
+no retrieval service to wake up, and the first question costs the same as the
+tenth. Against the dump, the win is bigger than tokens: a smaller context is
+a faster model. Twenty thousand tokens of figures and references slow down
+every answer in the session, whether or not the question touches the paper.
+
+![Bar chart: tokens of PDF entering the model per question, dump 23,000 versus RAG 1,500 versus Ogcode 900, on the 37-page test paper](/blog/media/pdfs-tokens-per-question.svg)
+
+## Now the same test on a book
+
+A 37-page paper is a gentle test. The kind of PDF you actually resent is the
+thousand-page one, so we repeated the measurements on a downloaded copy of the
+*Dive into Deep Learning* book: 1,151 pages, 44.7 MB, real typeset text. The
+same character-count-over-four arithmetic applies, and every number below is
+measured on the file.
+
+- **The dump stops existing.** The extracted text is 2.1 million characters,
+  about 532,000 tokens. Most context windows cannot hold it, and on the few
+  models that stretch that far you would be paying for the whole book on
+  every single question. At 37 pages the blob was inadvisable; here it is
+  undiscussable.
+- **RAG still works, unchanged.** The book chunks into roughly 1,040
+  fragments, and a ten-question session still spends about the same ~15,000
+  fragment tokens as before. This is the fair point in RAG's favor: per
+  question, its token bill barely moves with document size. What grows is the
+  blind part, a thousand neighbor-less fragments as the only map of the book.
+- **Ogcode's bill per question barely moves either.** A median page of this
+  book is about 460 tokens, so an answer costs one or two page reads. The
+  label table is the interesting part: at book scale it would be around
+  100,000 tokens, far past the point where anyone should paste it anywhere.
+  But pasting it was never the plan. It lives in SQLite, the map view folds it
+  down to a few hundred tokens, and pdf_index reads from the same database a
+  slice at a time. The catalog growing a hundredfold changes nothing that the
+  agent actually does.
+- **The setup work grows, on the right clock.** The keyword pass feeding the
+  labeling sessions is about 400,000 tokens of input here. The indexer never
+  sends a document that size in one call: multi-page documents are labeled in
+  sessions of 100 pages each, so this book runs as twelve background calls
+  while you do something else. Nothing of it enters a working session.
+
+The shape of the result is the point. At 37 pages the argument is "fewer
+tokens"; at 1,151 pages it is "fewer tokens versus a file your context cannot
+hold". The dump's cost curve ends in a wall. Retrieval's cost curve stays
+flat but maps the book with fragments, cold every time. This one stays flat
+too, it maps the book with citable pages, and it is the only one that gets
+cheaper as the questions add up.
+
+## Which one, then
+
+For a single throwaway question on a short paper, paste the dump. It is
+fine, and there is nothing to build. For every other way a PDF gets used,
+which is to say more than a couple of questions on the same file, the page
+index is the best harness overall: cheapest per answer after a short
+warmup, the only approach that still works at book scale, and the only one
+whose failure mode is visible instead of silent. RAG's one genuine
+advantage, a flat per-question bill, Ogcode matches, without the chunking,
+the embeddings, the vector store, or the retriever you have to keep fed.
+
 ## What this is not
 
 **Not RAG.** There is no chunking, no embeddings, no vector store, no cosine
@@ -182,6 +278,10 @@ correct, because the page is always one call away.
 - A label names a page; it cannot say "this concept spans pages 5 through
   9." The agent infers that itself by reading a few neighboring pages, which
   works, but it is inference, not index.
+- The plain-text extractor glues words together on some LaTeX-set PDFs
+  ("AssumeTheModel" instead of "Assume the model"). The labels survived it on
+  both of our test files, but a cleaner extraction pass would make thin
+  labels rarer.
 
 ## The idea in one sentence
 
