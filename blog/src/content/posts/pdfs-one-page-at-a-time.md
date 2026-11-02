@@ -207,7 +207,7 @@ once in the background, split across twelve sessions, and never enters the
 working conversation at all. Amortized over every question this file will
 ever get asked, it is the cheapest line in the table.
 
-![Line chart on a log scale: cumulative PDF tokens entering the model across ten questions on the 1,151-page book. Dump climbs from 532,000 to about 5,300,000. RAG and Ogcode start tied at 1,500, then Ogcode flattens to about 13,000 by question ten (measured in the gauntlet below) while RAG reaches 15,000, with an occasional labels-only question pulling it lower.](/blog/media/pdfs-cumulative-ten-questions.svg?v=2)
+![Line chart on a log scale: cumulative PDF tokens entering the model across ten questions on the 1,151-page book. Dump climbs from 532,000 to about 5,300,000. RAG and Ogcode start tied at 1,500, then Ogcode flattens to about 13,000 by question ten (measured in the gauntlet below) while RAG reaches 15,000, with an occasional labels-only question pulling it lower.](/blog/media/pdfs-cumulative-ten-questions.svg?v=3)
 
 Speed is not close either. The catalog lives in SQLite, so pdf_index never
 opens the 44.7 MB file: a label lookup is a database read, effectively
@@ -253,7 +253,7 @@ Across the run, twenty-three pages were opened and not one of them was a miss. T
 
 One wrinkle worth keeping in view: pdf_index reports a file's whole catalog in one response, and on book-sized indexes that response trims itself to fit its output budget. Both runs hit the trim, on 1,151 pages and again on 417. On the smaller book, one question's labels sat past the trim, and the agent still landed on the exact section by calibrating printed page numbers against a page it had opened. Nothing was lost, because the catalog is an ordinary table the agent can read any slice of, but a paging parameter would let the tool tell the whole story on its own. It is on the list below.
 
-![Bar chart, measured: PDF page tokens opened per question across ten questions, eight on the 1,151-page deep learning book (solid bars) and two on the 417-page Mathematics for Machine Learning book (faded). Every bar sits between 900 and 1,750 tokens on an axis ending at 2,000; the whole-file dump would be 532,000 tokens per question, about 300 times past the right edge. Ten-question total: about 13,000 tokens.](/blog/media/pdfs-qa-gauntlet.svg)
+![Bar chart, measured: PDF page tokens opened per question across ten questions, eight on the 1,151-page deep learning book (solid bars) and two on the 417-page Mathematics for Machine Learning book (faded). Every bar sits between 900 and 1,750 tokens on an axis ending at 2,000; the whole-file dump would be 532,000 tokens per question, about 300 times past the right edge. Ten-question total: about 13,000 tokens.](/blog/media/pdfs-qa-gauntlet.svg?v=2)
 
 ## Which one, then
 

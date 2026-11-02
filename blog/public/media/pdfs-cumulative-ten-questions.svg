@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img">
 <rect width="960" height="400" fill="#151414"/>
-<text x="78" y="30" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.5">Cumulative PDF tokens entering the model, questions 1 to 10 (log scale, 1,151-page book)</text>
+<text x="78" y="28" fill="#fffbf5" font-size="13.5" font-weight="600" letter-spacing="0.4">Cumulative PDF tokens entering the model, ten questions (log scale, 1,151-page book)</text>
+<text x="78" y="50" fill="#9a9390" font-size="11.5">first question: RAG and Ogcode tie at ~1,500 tokens</text>
 <line x1="78" y1="330" x2="850" y2="330" stroke="#2a2726" stroke-width="1"/>
 <line x1="78" y1="254" x2="850" y2="254" stroke="#2a2726" stroke-width="1"/>
 <line x1="78" y1="178" x2="850" y2="178" stroke="#2a2726" stroke-width="1"/>
@@ -14,12 +15,11 @@
 <text x="850" y="352" fill="#9a9390" font-size="12" text-anchor="middle">Q10</text>
 <polyline points="78,122.8 163.8,100.0 249.6,86.6 335.3,77.1 421.1,69.7 506.9,63.8 592.7,58.7 678.4,54.3 764.2,50.4 850,46.8" fill="none" stroke="#ff5e1f" stroke-width="3" stroke-linecap="round"/>
 <polyline points="78,316.6 163.8,293.7 249.6,280.4 335.3,270.8 421.1,263.5 506.9,257.5 592.7,252.4 678.4,248.0 764.2,244.1 850,240.6" fill="none" stroke="#9a9390" stroke-width="2.5" stroke-dasharray="7 5" stroke-linecap="round"/>
-<polyline points="78,316.6 163.8,299.2 249.6,288.1 335.3,279.9 421.1,273.4 506.9,267.7 592.7,262.6 678.4,258.3 764.2,254.7 850,251.2" fill="none" stroke="#fffbf5" stroke-width="3" stroke-linecap="round"/>
+<polyline points="78.0,314.5 163.8,294.6 249.6,280.5 335.3,274.5 421.1,265.2 506.9,261.3 592.7,255.9 678.4,250.9 764.2,247.8 850.0,245.2" fill="none" stroke="#fffbf5" stroke-width="3" stroke-linecap="round"/>
 <circle cx="850" cy="46.8" r="4.5" fill="#ff5e1f"/>
 <circle cx="850" cy="240.6" r="4.5" fill="#9a9390"/>
-<circle cx="850" cy="251.2" r="4.5" fill="#fffbf5"/>
-<text x="838" y="41" fill="#ff5e1f" font-size="12.5" text-anchor="end" font-weight="600">Dump, ~5.3M</text>
-<text x="838" y="236" fill="#9a9390" font-size="12.5" text-anchor="end">RAG, ~15k</text>
-<text x="838" y="267" fill="#fffbf5" font-size="12.5" text-anchor="end">Ogcode, ~12k</text>
-<text x="88" y="306" fill="#fffbf5" font-size="11.5" text-anchor="start" opacity="0.85">first question: RAG and Ogcode tie</text>
+<circle cx="850" cy="245.2" r="4.5" fill="#fffbf5"/>
+<text x="838" y="70" fill="#ff5e1f" font-size="12.5" text-anchor="end" font-weight="600">Dump, ~5.3M</text>
+<text x="838" y="232" fill="#9a9390" font-size="12.5" text-anchor="end">RAG, ~15k</text>
+<text x="838" y="270" fill="#fffbf5" font-size="12.5" text-anchor="end">Ogcode, ~13k</text>
 </svg>

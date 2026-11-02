@@ -2,56 +2,56 @@
 <rect width="960" height="440" fill="#151414"/>
 <text x="78" y="30" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.5">PDF page tokens per question, measured across ten questions</text>
 <text x="78" y="50" fill="#9a9390" font-size="12">solid: d2l, 8 questions &#183; faded: mml, 2 questions &#183; the whole-file dump would be &#8776;532,000 per question</text>
-<line x1="428" y1="60" x2="428" y2="384" stroke="#2a2726" stroke-width="1"/>
-<line x1="548" y1="60" x2="548" y2="384" stroke="#2a2726" stroke-width="1"/>
-<line x1="668" y1="60" x2="668" y2="384" stroke="#2a2726" stroke-width="1"/>
-<line x1="788" y1="60" x2="788" y2="384" stroke="#2a2726" stroke-width="1"/>
-<rect x="307.5" y="60" width="1" height="324" fill="#555"/>
+<line x1="461.0" y1="60" x2="461.0" y2="384" stroke="#2a2726" stroke-width="1"/>
+<line x1="570.0" y1="60" x2="570.0" y2="384" stroke="#2a2726" stroke-width="1"/>
+<line x1="679.0" y1="60" x2="679.0" y2="384" stroke="#2a2726" stroke-width="1"/>
+<line x1="788.0" y1="60" x2="788.0" y2="384" stroke="#2a2726" stroke-width="1"/>
+<line x1="352.0" y1="60" x2="352.0" y2="324" stroke="#555" stroke-width="1"/>
 
 <text x="78" y="83" fill="#fffbf5" font-size="12.5">1 &#183; Nadaraya-Watson attention</text>
-<rect x="308" y="68" width="384" height="20" rx="3" fill="#ff7038"/>
-<text x="700" y="83" fill="#fffbf5" font-size="12.5">1,600</text>
+<rect x="352" y="68" width="348.8" height="20" rx="3" fill="#ff7038"/>
+<text x="709" y="83" fill="#fffbf5" font-size="12.5">1,600</text>
 
 <text x="78" y="115" fill="#fffbf5" font-size="12.5">2 &#183; Xavier initialization</text>
-<rect x="308" y="100" width="318" height="20" rx="3" fill="#ff7038"/>
-<text x="634" y="115" fill="#fffbf5" font-size="12.5">1,325</text>
+<rect x="352" y="100" width="288.9" height="20" rx="3" fill="#ff7038"/>
+<text x="649" y="115" fill="#fffbf5" font-size="12.5">1,325</text>
 
 <text x="78" y="147" fill="#fffbf5" font-size="12.5">3 &#183; overfitting vs underfitting</text>
-<rect x="308" y="132" width="372" height="20" rx="3" fill="#ff7038"/>
-<text x="688" y="147" fill="#fffbf5" font-size="12.5">1,550</text>
+<rect x="352" y="132" width="337.9" height="20" rx="3" fill="#ff7038"/>
+<text x="698" y="147" fill="#fffbf5" font-size="12.5">1,550</text>
 
 <text x="78" y="179" fill="#fffbf5" font-size="12.5">4 &#183; GRU from scratch</text>
-<rect x="308" y="164" width="216" height="20" rx="3" fill="#ff7038"/>
-<text x="532" y="179" fill="#fffbf5" font-size="12.5">900</text>
+<rect x="352" y="164" width="196.2" height="20" rx="3" fill="#ff7038"/>
+<text x="556" y="179" fill="#fffbf5" font-size="12.5">900</text>
 
 <text x="78" y="211" fill="#fffbf5" font-size="12.5">5 &#183; residual connections</text>
-<rect x="308" y="196" width="420" height="20" rx="3" fill="#ff7038"/>
-<text x="736" y="211" fill="#fffbf5" font-size="12.5">1,750</text>
+<rect x="352" y="196" width="381.5" height="20" rx="3" fill="#ff7038"/>
+<text x="742" y="211" fill="#fffbf5" font-size="12.5">1,750</text>
 
 <text x="78" y="243" fill="#fffbf5" font-size="12.5">6 &#183; image augmentation</text>
-<rect x="308" y="228" width="216" height="20" rx="3" fill="#ff7038"/>
-<text x="532" y="243" fill="#fffbf5" font-size="12.5">900</text>
+<rect x="352" y="228" width="196.2" height="20" rx="3" fill="#ff7038"/>
+<text x="556" y="243" fill="#fffbf5" font-size="12.5">900</text>
 
 <text x="78" y="275" fill="#fffbf5" font-size="12.5">7 &#183; softmax cross-entropy gradient</text>
-<rect x="308" y="260" width="342" height="20" rx="3" fill="#ff7038"/>
-<text x="658" y="275" fill="#fffbf5" font-size="12.5">1,425</text>
+<rect x="352" y="260" width="310.6" height="20" rx="3" fill="#ff7038"/>
+<text x="671" y="275" fill="#fffbf5" font-size="12.5">1,425</text>
 
 <text x="78" y="307" fill="#fffbf5" font-size="12.5">8 &#183; Adam vs plain SGD</text>
-<rect x="308" y="292" width="372" height="20" rx="3" fill="#ff7038"/>
-<text x="688" y="307" fill="#fffbf5" font-size="12.5">1,550</text>
+<rect x="352" y="292" width="337.9" height="20" rx="3" fill="#ff7038"/>
+<text x="698" y="307" fill="#fffbf5" font-size="12.5">1,550</text>
 
 <text x="78" y="339" fill="#fffbf5" font-size="12.5">9 &#183; SVD (mml book)</text>
-<rect x="308" y="324" width="253" height="20" rx="3" fill="#ff7038" opacity="0.55"/>
-<text x="569" y="339" fill="#fffbf5" font-size="12.5">1,050</text>
+<rect x="352" y="324" width="228.9" height="20" rx="3" fill="#ff7038" opacity="0.55"/>
+<text x="589" y="339" fill="#fffbf5" font-size="12.5">1,050</text>
 
 <text x="78" y="371" fill="#fffbf5" font-size="12.5">10 &#183; Gaussian (mml book)</text>
-<rect x="308" y="356" width="239" height="20" rx="3" fill="#ff7038" opacity="0.55"/>
-<text x="555" y="371" fill="#fffbf5" font-size="12.5">995</text>
+<rect x="352" y="356" width="216.9" height="20" rx="3" fill="#ff7038" opacity="0.55"/>
+<text x="577" y="371" fill="#fffbf5" font-size="12.5">995</text>
 
-<text x="308" y="404" fill="#9a9390" font-size="12" text-anchor="middle">0</text>
-<text x="428" y="404" fill="#9a9390" font-size="12" text-anchor="middle">500</text>
-<text x="548" y="404" fill="#9a9390" font-size="12" text-anchor="middle">1,000</text>
-<text x="668" y="404" fill="#9a9390" font-size="12" text-anchor="middle">1,500</text>
-<text x="788" y="404" fill="#9a9390" font-size="12" text-anchor="middle">2,000</text>
-<text x="548" y="428" fill="#9a9390" font-size="12" text-anchor="middle">tokens of extracted PDF text per question (chars &#247; 4)</text>
+<text x="352.0" y="404" fill="#9a9390" font-size="12" text-anchor="middle">0</text>
+<text x="461.0" y="404" fill="#9a9390" font-size="12" text-anchor="middle">500</text>
+<text x="570.0" y="404" fill="#9a9390" font-size="12" text-anchor="middle">1,000</text>
+<text x="679.0" y="404" fill="#9a9390" font-size="12" text-anchor="middle">1,500</text>
+<text x="788.0" y="404" fill="#9a9390" font-size="12" text-anchor="middle">2,000</text>
+<text x="570.0" y="428" fill="#9a9390" font-size="12" text-anchor="middle">tokens of extracted PDF text per question (chars &#247; 4)</text>
 </svg>
