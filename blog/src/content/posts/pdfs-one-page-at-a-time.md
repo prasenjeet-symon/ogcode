@@ -136,7 +136,7 @@ table, no file opened (labels trimmed for fit):
 **Step two: ask the question against the labels.** "Where does the book walk
 through the Transformer architecture, and how does it train one?" The labels
 answer it before any page is read: page 14 carries the whole Transformer
-cluster — model, encoder, decoder, training. The card catalog alone did the
+cluster: model, encoder, decoder, training. The card catalog alone did the
 finding.
 
 **Step three: one page gets read.** `read_pdf_page`, page 14:
@@ -162,8 +162,8 @@ finding.
 451
 ```
 
-That is the honest raw output: the exact section numbers and page numbers —
-440 to 451 — where the book defines, implements, and trains the transformer.
+That is the honest raw output: the exact section numbers and page numbers,
+440 to 451, where the book defines, implements, and trains the transformer.
 You can also see the extractor's one imperfection on dense pages: inside-line
 spacing sometimes collapses, so "PositionwiseFeed-ForwardNetworks" reads as
 one word. For an agent that wanted to know where, it is plenty: it now reads
@@ -184,14 +184,14 @@ does this section say, where is the derivation, which page defines the
 metric. Multi-question sessions are where the three strategies stop
 pretending to be equivalent, and where one of them is simply the best.
 
-|| | Dump the file | RAG pipeline | Ogcode: labels, then pages |
+| Dimension | Dump the file | RAG pipeline | Ogcode: labels, then pages |
 |---|---|---|---|
-|| Setup | nothing to build | chunk the text into ~500-token windows, embed all ~1,040 fragments into a vector store, tune top-k | one background labeling job: the model reads ~400k tokens of page keywords across twelve sessions and returns ~100k tokens of labels |
-|| What the model sees per question | all 1,151 pages, ~532,000 tokens — more than most context windows will accept | the top ~5 fragments (~1,500 tokens), picked by cosine similarity | the label table (the full catalog is ~100,000 tokens; the folded map view is a few hundred) plus one page, ~460 tokens |
-|| A ten-question session | ~5,300,000 PDF tokens carried through the window | ~15,000 fragment tokens, plus ten embedding round trips | ~13,000 page tokens, measured in the gauntlet below; some answers cost only the labels |
-|| Where the answer lives | whole pages, all of them, all at once | fragments with no neighbors and no page numbers | whole pages you can cite by number |
-|| How it fails quietly | the blob gets cut, and the model answers from whatever survived the cut | the retriever misses the chunk, and nothing tells you | a wrong label costs exactly one page read to correct |
-|| Where the cost goes as questions pile up | nowhere good: the blob rides every turn | flat per question, but rebuilt from zero every time | down: after the first two questions the agent knows the map and opens only pages |
+| Setup | nothing to build | chunk the text into ~500-token windows, embed all ~1,040 fragments into a vector store, tune top-k | one background labeling job: the model reads ~400k tokens of page keywords across twelve sessions and returns ~100k tokens of labels |
+| What the model sees per question | all 1,151 pages, ~532,000 tokens, more than most context windows will accept | the top ~5 fragments (~1,500 tokens), picked by cosine similarity | the label table (the full catalog is ~100,000 tokens; the folded map view is a few hundred) plus one page, ~460 tokens |
+| A ten-question session | ~5,300,000 PDF tokens carried through the window | ~15,000 fragment tokens, plus ten embedding round trips | ~13,000 page tokens, measured in the gauntlet below; some answers cost only the labels |
+| Where the answer lives | whole pages, all of them, all at once | fragments with no neighbors and no page numbers | whole pages you can cite by number |
+| How it fails quietly | the blob gets cut, and the model answers from whatever survived the cut | the retriever misses the chunk, and nothing tells you | a wrong label costs exactly one page read to correct |
+| Where the cost goes as questions pile up | nowhere good: the blob rides every turn | flat per question, but rebuilt from zero every time | down: after the first two questions the agent knows the map and opens only pages |
 
 One footnote, kept honest: on a first question, RAG and Ogcode spend about
 the same number of tokens. Five chunks and a page or two are the same order
