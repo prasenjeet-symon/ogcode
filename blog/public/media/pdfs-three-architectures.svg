@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
+<title id="t">Three ways to hand a 1,151-page book to an agent</title>
+<desc id="d">Dump the file: extract every page into one blob of about 532,000 tokens that the context window cuts when it overflows. RAG pipeline: chunk into about 1,040 fragments of 500 tokens, embed them, store them in a vector database, retrieve the top five, which straddle page boundaries. Ogcode: label every page once in a background pass, keep one SQLite table of doc path, page number and labels, then read one page by number.</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#6b6462"/>
+</marker>
+</defs>
+<rect width="960" height="640" fill="#151414"/>
+<text x="44" y="34" fill="#fffbf5" font-size="15" font-weight="600" letter-spacing="0.4">Three ways to hand a book to an agent</text>
+<text x="44" y="54" fill="#9a9390" font-size="12">the same 1,151-page PDF &#183; what you have to build, and what the model actually sees</text>
+
+<!-- lane 1: dump -->
+<rect x="24" y="72" width="912" height="150" rx="10" fill="#191817" stroke="#2a2726"/>
+<text x="44" y="98" fill="#fffbf5" font-size="13" font-weight="600" letter-spacing="0.6">01 &#183; DUMP THE FILE</text>
+<text x="916" y="98" fill="#9a9390" font-size="11.5" text-anchor="end">nothing to build</text>
+
+<rect x="44" y="120" width="140" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="58" y="145" fill="#fffbf5" font-size="12.5">PDF</text>
+<text x="58" y="164" fill="#9a9390" font-size="11">1,151 pages, 44.7 MB</text>
+
+<line x1="186" y1="152" x2="212" y2="152" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="216" y="120" width="168" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="230" y="145" fill="#fffbf5" font-size="12.5">extract every page</text>
+<text x="230" y="164" fill="#9a9390" font-size="11">2.1M characters</text>
+
+<line x1="386" y1="152" x2="412" y2="152" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="416" y="120" width="196" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="430" y="145" fill="#fffbf5" font-size="12.5">one blob</text>
+<text x="430" y="164" fill="#9a9390" font-size="11">&#8776;532,000 tokens</text>
+
+<line x1="614" y1="152" x2="640" y2="152" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="644" y="120" width="272" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="658" y="145" fill="#fffbf5" font-size="12.5">the context window</text>
+<text x="658" y="164" fill="#9a9390" font-size="11">cut when it overflows, silently</text>
+
+<text x="44" y="208" fill="#9a9390" font-size="11.5">fine on a paper. On a book it overflows, and what fell off is invisible to both of you.</text>
+
+<!-- lane 2: rag -->
+<rect x="24" y="234" width="912" height="150" rx="10" fill="#191817" stroke="#2a2726"/>
+<text x="44" y="260" fill="#fffbf5" font-size="13" font-weight="600" letter-spacing="0.6">02 &#183; RAG PIPELINE</text>
+<text x="916" y="260" fill="#9a9390" font-size="11.5" text-anchor="end">chunker + embedding model + vector store</text>
+
+<rect x="44" y="282" width="120" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="58" y="307" fill="#fffbf5" font-size="12.5">PDF</text>
+<text x="58" y="326" fill="#9a9390" font-size="11">1,151 pages</text>
+
+<line x1="166" y1="314" x2="192" y2="314" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="196" y="282" width="170" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="210" y="307" fill="#fffbf5" font-size="12.5">chunk</text>
+<text x="210" y="326" fill="#9a9390" font-size="11">&#8776;500-token windows</text>
+
+<line x1="368" y1="314" x2="394" y2="314" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="398" y="282" width="150" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="412" y="307" fill="#fffbf5" font-size="12.5">embed</text>
+<text x="412" y="326" fill="#9a9390" font-size="11">every fragment</text>
+
+<line x1="550" y1="314" x2="576" y2="314" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="580" y="282" width="160" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="594" y="307" fill="#fffbf5" font-size="12.5">vector store</text>
+<text x="594" y="326" fill="#9a9390" font-size="11">cosine, top-5</text>
+
+<line x1="742" y1="314" x2="768" y2="314" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="772" y="282" width="144" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="786" y="307" fill="#fffbf5" font-size="12.5">5 fragments</text>
+<text x="786" y="326" fill="#9a9390" font-size="11">straddle pages</text>
+
+<text x="44" y="370" fill="#9a9390" font-size="11.5">&#8776;1,040 fragments to embed, store, and keep in sync. The unit you retrieve is a slice, not a page.</text>
+
+<!-- lane 3: ogcode -->
+<rect x="24" y="396" width="912" height="190" rx="10" fill="#191817" stroke="#5a3423"/>
+<text x="44" y="422" fill="#ff7038" font-size="13" font-weight="600" letter-spacing="0.6">03 &#183; OGCODE: LABEL ONCE, OPEN ONE PAGE</text>
+<text x="916" y="422" fill="#9a9390" font-size="11.5" text-anchor="end">one table + two tools &#183; no services</text>
+
+<rect x="44" y="444" width="110" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="58" y="469" fill="#fffbf5" font-size="12.5">PDF</text>
+<text x="58" y="488" fill="#9a9390" font-size="11">1,151 pages</text>
+
+<line x1="156" y1="476" x2="182" y2="476" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="186" y="444" width="224" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="200" y="469" fill="#fffbf5" font-size="12.5">label every page once</text>
+<text x="200" y="488" fill="#9a9390" font-size="11">background pass, 12 sessions</text>
+
+<line x1="412" y1="476" x2="438" y2="476" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="442" y="444" width="196" height="64" rx="6" fill="#211f1e" stroke="#ff7038" stroke-opacity="0.55"/>
+<text x="456" y="469" fill="#ff7038" font-size="12.5">one SQLite table</text>
+<text x="456" y="488" fill="#9a9390" font-size="11">doc_path &#183; page_num &#183; labels</text>
+
+<line x1="640" y1="476" x2="666" y2="476" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="670" y="444" width="246" height="64" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="684" y="469" fill="#fffbf5" font-size="12.5">read_pdf_page(14)</text>
+<text x="684" y="488" fill="#9a9390" font-size="11">&#8776;460 tokens, citable</text>
+
+<text x="44" y="536" fill="#9a9390" font-size="11.5">the agent reads the labels (pdf_index, a table query), picks a page, and answers from that page.</text>
+<text x="44" y="556" fill="#9a9390" font-size="11.5">auditing what it knows about your PDFs is a SELECT, not a similarity search.</text>
+
+<text x="44" y="614" fill="#6b6462" font-size="11">no chunk-size tuning, no top-k, no re-embedding: a changed file is relabeled, and nothing else moves.</text>
+</svg>

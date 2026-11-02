@@ -1,6 +1,6 @@
 ---
 title: "Your agent doesn't need RAG to read PDFs"
-description: "Hand an agent a 1,151-page book and most assistants either load the whole thing into context or bolt a RAG pipeline onto it. Ogcode takes a third path: label every page once, store the labels in a table you can read, and open only the pages a question actually needs."
+description: "Hand an agent a 1,151-page book and most assistants either load the whole thing into context or bolt a RAG pipeline onto it. Ogcode takes a third path: label every page once, keep the labels in a table you can read, open only the pages a question actually needs, and answer with a page number you can check."
 pubDate: 2026-11-01
 tags: ["agents", "pdf", "context-engine"]
 hero: "/blog/media/pdfs-one-page-at-a-time-hero.jpg"
@@ -22,7 +22,9 @@ pages you might want.
 
 This post is about the third path we wired into Ogcode: label every page
 once, keep the labels in an ordinary table, and let the agent open exactly
-the pages a question needs.
+the pages a question needs. It is cheap per question, it is small enough to
+hold in your head, and it is the only one of the three that can tell you
+which page it read.
 
 ## First, how does an agent usually meet a PDF?
 
@@ -190,6 +192,7 @@ pretending to be equivalent, and where one of them is simply the best.
 | What the model sees per question | all 1,151 pages, ~532,000 tokens, more than most context windows will accept | the top ~5 fragments (~1,500 tokens), picked by cosine similarity | the label table (the full catalog is ~100,000 tokens; the folded map view is a few hundred) plus one page, ~460 tokens |
 | A ten-question session | ~5,300,000 PDF tokens carried through the window | ~15,000 fragment tokens, plus ten embedding round trips | ~13,000 page tokens, measured in the gauntlet below; some answers cost only the labels |
 | Where the answer lives | whole pages, all of them, all at once | fragments with no neighbors and no page numbers | whole pages you can cite by number |
+| How you check the answer | re-read the blob and hope it survived intact | the similarity scores, if you kept them | turn to the page number in the answer |
 | How it fails quietly | the blob gets cut, and the model answers from whatever survived the cut | the retriever misses the chunk, and nothing tells you | a wrong label costs exactly one page read to correct |
 | Where the cost goes as questions pile up | nowhere good: the blob rides every turn | flat per question, but rebuilt from zero every time | down: after the first two questions the agent knows the map and opens only pages |
 
@@ -247,13 +250,103 @@ Estimates are cheap, and the Ogcode row in the table above is still arithmetic o
 
 That is the whole context bill for ten substantive questions about two books: about 13,000 tokens of PDF text, against 532,000 per question for the dump and about 1,500 plus an embedding call per question for the RAG pipeline. It also lands a rounding error away from the ~12,000 the table estimated, which is the point of measuring: the estimate was arithmetic, and the arithmetic held.
 
-Accuracy held too. Question two is a fair sample of the rest. Asked why Xavier initialization chooses the variance it does, the agent read the labels, opened pages 227 and 228, and came back with the real argument: keeping activation variance stable in the forward pass wants n_in·σ² = 1, keeping gradient variance stable in the backward pass wants n_out·σ² = 1, and both cannot hold at once, so the book splits the difference at σ² = 2/(n_in + n_out). Then the book's own closing line: "This is the reasoning underlying the now-standard and practically beneficial Xavier initialization." Two pages, no retrieval infrastructure, and a citation you can check by turning to the page.
-
-Across the run, twenty-three pages were opened and not one of them was a miss. That is the honest version of the trade the labels make: they steer, the page proves, and when a label is wrong it costs exactly one page read to find out, which is the failure mode you can watch.
-
 One wrinkle worth keeping in view: pdf_index reports a file's whole catalog in one response, and on book-sized indexes that response trims itself to fit its output budget. Both runs hit the trim, on 1,151 pages and again on 417. On the smaller book, one question's labels sat past the trim, and the agent still landed on the exact section by calibrating printed page numbers against a page it had opened. Nothing was lost, because the catalog is an ordinary table the agent can read any slice of, but a paging parameter would let the tool tell the whole story on its own. It is on the list below.
 
 ![Bar chart, measured: PDF page tokens opened per question across ten questions, eight on the 1,151-page deep learning book (solid bars) and two on the 417-page Mathematics for Machine Learning book (faded). Every bar sits between 900 and 1,750 tokens on an axis ending at 2,000; the whole-file dump would be 532,000 tokens per question, about 300 times past the right edge. Ten-question total: about 13,000 tokens.](/blog/media/pdfs-qa-gauntlet.svg?v=2)
+
+## Accuracy: the page is the citation
+
+Tokens are easy to count and accuracy is easy to gesture at, so here is what
+the ten questions showed.
+
+Twenty-three pages were opened and not one of them was a miss. Every answer in
+the table above came back attached to a page you can turn to, and most carried
+the book's own words or formulas. Question two is a fair sample. Asked why
+Xavier initialization chooses the variance it does, the agent read the labels,
+opened pages 227 and 228, and came back with the real argument: keeping
+activation variance stable in the forward pass wants n_in·σ² = 1, keeping
+gradient variance stable in the backward pass wants n_out·σ² = 1, and both
+cannot hold at once, so the book splits the difference at
+σ² = 2/(n_in + n_out). Then the book's own closing line: "This is the
+reasoning underlying the now-standard and practically beneficial Xavier
+initialization." Two pages, no retrieval infrastructure, and a citation you
+can check by turning to the page.
+
+That is not luck from a good run. Three properties of the design put it there.
+
+**The unit you retrieve is the unit you cite.** A page carries a number, and
+the number survives all the way into the answer. A 500-token window carries
+whatever the chunker decided to cut, so if you want a page number back you
+have to store one alongside every fragment and hope the sentence you need did
+not land across the boundary.
+
+**Answers need their neighbors.** The Xavier explanation is two paragraphs of
+argument: what the forward pass wants, what the backward pass wants, and why
+neither can have its way. A retriever that returns the second paragraph alone
+hands the model a conclusion with the premise missing, and the model will
+still write something confident. A page keeps the passage whole, and the next
+page is one call away, so reading on is a decision the agent makes instead of
+a fragment boundary deciding for it.
+
+**A miss is visible.** When a label is wrong, the page it pointed at does not
+contain the answer. You see that for the price of one page read, and the right
+page is one call further on. The dump fails by cutting text you cannot tell
+was cut; a retriever fails by returning a fragment that looks like an answer.
+This one fails by handing you a page that is not about the question, which is
+the rare failure mode that announces itself.
+
+Some questions do not turn on degree at all. Three of the ten asked where
+something lives, and for those the label table narrowed a whole book to a page
+or two before anything was read: the SVD on pages 125 and 135, the Gaussian on
+203 and 204. A dump flattens the book into a stream, and a fragment is a slice
+of that stream; neither keeps a page boundary it was not built to keep. The
+index is a page boundary, so "which page" is a question it can answer at all.
+
+**What this does not prove.** We did not run a graded head-to-head against a
+tuned RAG pipeline, and a number from a hurried one would be a rigged
+comparison, not a measurement. Embedding retrieval is good at finding
+passages, and on many questions it will put the right material in front of
+the model. The claim here is narrower and measured: on this book, with this
+index, every answer came back attached to a page, and every page opened was
+on topic.
+
+## What you actually run
+
+Whatever you build, you also have to keep alive. Here is the whole of each
+approach, side by side:
+
+![Three-lane diagram. Dump the file: extract every page into one blob of about 532,000 tokens that the context window cuts silently when it overflows. RAG pipeline: about 1,040 fragments of roughly 500 tokens are embedded, stored in a vector store, and the top five are retrieved, straddling page boundaries. Ogcode: label every page once in a background pass of twelve sessions, keep one SQLite table of document path, page number and labels, and read one page by number for about 460 tokens, citable.](/blog/media/pdfs-three-architectures.svg)
+
+The dump needs nothing, which is its one virtue. RAG needs a chunker, an
+embedding model, a vector store, and a retrieval step, plus the tuning that
+makes them agree with each other and the second copy of every document that
+lives in the store instead of on your disk.
+
+Ogcode's PDF path needs a labeler, a table, and a reader. The table is the
+project's own SQLite database, one row per page: the file path, the page
+number, the page's keywords, its labels, and when it was indexed. That is the
+whole data model. There is no chunker to tune, no embedding model to choose,
+no vector store to run, no top-k to guess, and no reranker.
+
+Three properties fall out of that, and they are the difference between simple
+and merely small:
+
+- **The index outlives the model.** Labels are text, so they read the same to
+  whichever model you route the next question to. An embedding index is bound
+  to the model that built it: switch embedding models and the whole corpus
+  goes back through the mill before the next search is trustworthy.
+- **Auditing is a query.** You can print what the agent believes about every
+  page of a document, diff an index before and after a rebuild, or grep it. A
+  nearest-neighbour neighbourhood is not a thing you can read.
+- **The failure is local.** A wrong answer traces to a row and a page: the
+  label was thin, or the page did not say what its label promised, and either
+  way the next step is one more read. The same miss inside a retriever is a
+  number you argue with.
+
+None of this makes the index free: the labeling pass costs about 400k tokens
+of keyword input and 100k tokens of labels for this book, in the background,
+once. What it buys is that the expensive, unfamiliar machinery never exists,
+and what remains is a table you could have written yourself.
 
 ## Which one, then
 
@@ -261,19 +354,18 @@ For a single throwaway question on a file small enough to paste, paste the
 dump. It is fine, and there is nothing to build. For every other way a PDF
 gets used, which is to say more than a couple of questions on the same file,
 the page index is the best harness overall: cheapest per answer after a short
-warmup, the only approach that still works at book scale, and the only one
-whose failure mode is visible instead of silent. RAG's one genuine
-advantage, a flat per-question bill, Ogcode matches, without the chunking,
-the embeddings, the vector store, or the retriever you have to keep fed.
+warmup, the only approach that still works at book scale, the only one whose
+answers come with a page number you can check, and the only one whose failure
+mode is visible instead of silent. RAG's one genuine advantage, a flat
+per-question bill, Ogcode matches, without the chunking, the embeddings, the
+vector store, or the retriever you have to keep fed.
 
 ## What this is not
 
-**Not RAG.** There is no chunking, no embeddings, no vector store, no cosine
-similarity, no top-k. The index is a table of short text labels, one row per
-page. It takes up a few kilobytes and you can dump it into any database
-viewer and read it. Questions are answered by the agent scanning labels and
-choosing pages, which is a decision you can watch and audit, not a
-retriever's guess.
+**Not RAG.** The index is a table of short text labels, one row per page, a
+few kilobytes you can open in any database viewer. Questions are answered by
+the agent reading labels and choosing pages, which is a decision you can
+watch, not a retriever's guess.
 
 **Not magic either.** The labels come from the words on each page, so a
 scanned PDF with no text layer pages will produce thin, best-guess labels.
