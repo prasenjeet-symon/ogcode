@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
+<title id="t">Three ways to hand a spreadsheet to an agent</title>
+<desc id="d">Three lanes. Dump the sheet: 100,000 rows to CSV is 8,352,978 characters, about 2,090,000 tokens per question, and the context window cuts it silently; there is nothing to build. RAG pipeline: 4,092 windows of about 344 tokens are embedded into a vector store, and the top five, about 2,540 tokens, are retrieved, 0.12 percent of the file, straddling row boundaries; it is a second copy of the data, cold on every question. Ogcode: one 292-token profile page per sheet, then SQL runs against the file itself in SQLite, and an answer of 49 to 87 tokens comes back while the workbook stays on disk; no chunker, no embeddings, no retriever.</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#6b6462"/>
+</marker>
+</defs>
+<rect width="960" height="480" fill="#151414"/>
+<text x="24" y="34" fill="#fffbf5" font-size="15" font-weight="600" letter-spacing="0.4">Three ways to hand a spreadsheet to an agent</text>
+<text x="24" y="54" fill="#9a9390" font-size="12">the same 100,000-row cut of the retail workbook &#183; what you have to build, and what the model actually sees</text>
+
+<!-- lane 1: dump the sheet -->
+<rect x="24" y="84" width="292" height="348" rx="10" fill="#191817" stroke="#2a2726"/>
+<text x="44" y="112" fill="#fffbf5" font-size="13" font-weight="600" letter-spacing="0.6">01 &#183; DUMP THE SHEET</text>
+<rect x="42" y="128" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="56" y="148" fill="#fffbf5" font-size="12.5">100,000 rows to CSV</text>
+<text x="56" y="165" fill="#9a9390" font-size="11">the whole sheet, once</text>
+<line x1="170" y1="178" x2="170" y2="192" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="42" y="196" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="56" y="216" fill="#fffbf5" font-size="12.5">8,352,978 characters</text>
+<text x="56" y="233" fill="#9a9390" font-size="11">one string, no structure</text>
+<line x1="170" y1="246" x2="170" y2="260" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="42" y="264" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="56" y="284" fill="#fffbf5" font-size="12.5">&#8776;2,090,000 tokens</text>
+<text x="56" y="301" fill="#9a9390" font-size="11">per question, every time</text>
+<line x1="170" y1="314" x2="170" y2="328" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="42" y="332" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="56" y="352" fill="#fffbf5" font-size="12.5">the context window</text>
+<text x="56" y="369" fill="#9a9390" font-size="11">cuts it silently, no error</text>
+<text x="42" y="406" fill="#9a9390" font-size="10.5">nothing to build</text>
+
+<!-- lane 2: rag pipeline -->
+<rect x="333" y="84" width="292" height="348" rx="10" fill="#191817" stroke="#2a2726"/>
+<text x="353" y="112" fill="#fffbf5" font-size="13" font-weight="600" letter-spacing="0.6">02 &#183; RAG PIPELINE</text>
+<rect x="351" y="128" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="365" y="148" fill="#fffbf5" font-size="12.5">4,092 windows</text>
+<text x="365" y="165" fill="#9a9390" font-size="11">&#8776;344 tokens each</text>
+<line x1="479" y1="178" x2="479" y2="192" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="351" y="196" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="365" y="216" fill="#fffbf5" font-size="12.5">embedded</text>
+<text x="365" y="233" fill="#9a9390" font-size="11">into a vector store</text>
+<line x1="479" y1="246" x2="479" y2="260" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="351" y="264" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="365" y="284" fill="#fffbf5" font-size="12.5">top 5 retrieved</text>
+<text x="365" y="301" fill="#9a9390" font-size="11">&#8776;2,540 tokens</text>
+<line x1="479" y1="314" x2="479" y2="328" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="351" y="332" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="365" y="352" fill="#fffbf5" font-size="12.5">0.12% of the file</text>
+<text x="365" y="369" fill="#9a9390" font-size="11">straddling row boundaries</text>
+<text x="351" y="406" fill="#9a9390" font-size="10.5">a second copy of the data,</text>
+<text x="351" y="421" fill="#9a9390" font-size="10.5">cold on every question</text>
+
+<!-- lane 3: ogcode -->
+<rect x="642" y="84" width="292" height="348" rx="10" fill="#191817" stroke="#5a3423"/>
+<text x="662" y="112" fill="#ff7038" font-size="13" font-weight="600" letter-spacing="0.2">03 &#183; OGCODE: PROFILE, THEN QUERY</text>
+<rect x="660" y="128" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="674" y="148" fill="#fffbf5" font-size="12.5">one profile page per sheet</text>
+<text x="674" y="165" fill="#9a9390" font-size="11">292 tokens, labelled once</text>
+<line x1="788" y1="178" x2="788" y2="192" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="660" y="196" width="256" height="48" rx="6" fill="#211f1e" stroke="#ff7038" stroke-opacity="0.55"/>
+<text x="674" y="216" fill="#ff7038" font-size="12.5">SQL against the file</text>
+<text x="674" y="233" fill="#9a9390" font-size="11">in SQLite, on disk</text>
+<line x1="788" y1="246" x2="788" y2="260" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="660" y="264" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="674" y="284" fill="#fffbf5" font-size="12.5">an answer comes back</text>
+<text x="674" y="301" fill="#9a9390" font-size="11">49 to 87 tokens, measured</text>
+<line x1="788" y1="314" x2="788" y2="328" stroke="#6b6462" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="660" y="332" width="256" height="48" rx="6" fill="#211f1e" stroke="#2a2726"/>
+<text x="674" y="352" fill="#fffbf5" font-size="12.5">the workbook stays on disk</text>
+<text x="674" y="369" fill="#9a9390" font-size="11">never enters the conversation</text>
+<text x="660" y="406" fill="#9a9390" font-size="10.5">no chunker, no embeddings,</text>
+<text x="660" y="421" fill="#9a9390" font-size="10.5">no retriever</text>
+
+<text x="24" y="462" fill="#6b6462" font-size="11">measured on the same 100,000 rows &#183; every answer checked against an independent count of those rows.</text>
+</svg>

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
+<title id="t">Ten questions on a 100,000-row sheet: tokens per answer</title>
+<desc id="d">A bar chart of the tokens entering the model per answer across ten questions on the 100,000-row cut of the retail workbook. Values are 55, 62, 87, 50, 61, 49, 49, 58, 57 and 62 tokens on a y axis that ends at 100. The ten answers together cost 590 tokens. The whole sheet as a CSV dump would be about 2,090,000 tokens per question, roughly 21,000 times past the axis.</desc>
+<rect width="960" height="420" fill="#151414"/>
+<text x="78" y="30" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.5">Ten questions on a 100,000-row sheet: tokens per answer</text>
+<text x="78" y="50" fill="#9a9390" font-size="12">one SQL query per answer &#183; every bar is exactly what entered the model</text>
+<text x="78" y="70" fill="#6b6462" font-size="11.5">for scale: the whole sheet as CSV is 2,090,000 tokens per question, about 21,000x past this axis</text>
+
+<line x1="78" y1="110" x2="596" y2="110" stroke="rgba(255,255,255,0.08)"/>
+<text x="68" y="114" fill="#9a9390" font-size="12" text-anchor="end">100</text>
+<line x1="78" y1="165" x2="596" y2="165" stroke="rgba(255,255,255,0.08)"/>
+<text x="68" y="169" fill="#9a9390" font-size="12" text-anchor="end">75</text>
+<line x1="78" y1="220" x2="596" y2="220" stroke="rgba(255,255,255,0.08)"/>
+<text x="68" y="224" fill="#9a9390" font-size="12" text-anchor="end">50</text>
+<line x1="78" y1="275" x2="596" y2="275" stroke="rgba(255,255,255,0.08)"/>
+<text x="68" y="279" fill="#9a9390" font-size="12" text-anchor="end">25</text>
+<text x="68" y="334" fill="#9a9390" font-size="12" text-anchor="end">0</text>
+<line x1="78" y1="110" x2="78" y2="330" stroke="#555" stroke-width="1"/>
+<line x1="78" y1="330" x2="596" y2="330" stroke="#555" stroke-width="1"/>
+
+<rect x="86.9" y="209.0" width="34" height="121.0" rx="3" fill="#ff7038"/>
+<text x="103.9" y="202.0" fill="#fffbf5" font-size="12" text-anchor="middle">55</text>
+<rect x="138.7" y="193.6" width="34" height="136.4" rx="3" fill="#ff7038"/>
+<text x="155.7" y="186.6" fill="#fffbf5" font-size="12" text-anchor="middle">62</text>
+<rect x="190.5" y="138.6" width="34" height="191.4" rx="3" fill="#ff7038"/>
+<text x="207.5" y="131.6" fill="#fffbf5" font-size="12" text-anchor="middle">87</text>
+<rect x="242.3" y="220.0" width="34" height="110.0" rx="3" fill="#ff7038"/>
+<text x="259.3" y="213.0" fill="#fffbf5" font-size="12" text-anchor="middle">50</text>
+<rect x="294.1" y="195.8" width="34" height="134.2" rx="3" fill="#ff7038"/>
+<text x="311.1" y="188.8" fill="#fffbf5" font-size="12" text-anchor="middle">61</text>
+<rect x="345.9" y="222.2" width="34" height="107.8" rx="3" fill="#ff7038"/>
+<text x="362.9" y="215.2" fill="#fffbf5" font-size="12" text-anchor="middle">49</text>
+<rect x="397.7" y="222.2" width="34" height="107.8" rx="3" fill="#ff7038"/>
+<text x="414.7" y="215.2" fill="#fffbf5" font-size="12" text-anchor="middle">49</text>
+<rect x="449.5" y="202.4" width="34" height="127.6" rx="3" fill="#ff7038"/>
+<text x="466.5" y="195.4" fill="#fffbf5" font-size="12" text-anchor="middle">58</text>
+<rect x="501.3" y="204.6" width="34" height="125.4" rx="3" fill="#ff7038"/>
+<text x="518.3" y="197.6" fill="#fffbf5" font-size="12" text-anchor="middle">57</text>
+<rect x="553.1" y="193.6" width="34" height="136.4" rx="3" fill="#ff7038"/>
+<text x="570.1" y="186.6" fill="#fffbf5" font-size="12" text-anchor="middle">62</text>
+
+<text x="103.9" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q1</text>
+<text x="155.7" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q2</text>
+<text x="207.5" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q3</text>
+<text x="259.3" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q4</text>
+<text x="311.1" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q5</text>
+<text x="362.9" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q6</text>
+<text x="414.7" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q7</text>
+<text x="466.5" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q8</text>
+<text x="518.3" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q9</text>
+<text x="570.1" y="350" fill="#9a9390" font-size="11.5" text-anchor="middle">q10</text>
+<text x="337" y="374" fill="#9a9390" font-size="12" text-anchor="middle">tokens per answer</text>
+
+<rect x="640" y="116" width="11" height="11" rx="2" fill="#ff7038"/>
+<text x="659" y="126" fill="#9a9390" font-size="11.5">one answer &#183; one SQL query</text>
+<text x="640" y="156" fill="#fffbf5" font-size="13.5" font-weight="600">all ten answers together:</text>
+<text x="640" y="188" fill="#ff7038" font-size="26" font-weight="600">590 tokens</text>
+<text x="640" y="210" fill="#9a9390" font-size="11.5">10 answers &#183; average 59 tokens</text>
+<line x1="640" y1="230" x2="936" y2="230" stroke="#2a2726"/>
+<text x="640" y="254" fill="#9a9390" font-size="11.5">the whole sheet as CSV, per question:</text>
+<text x="640" y="282" fill="#6b6462" font-size="20" font-weight="600">2,090,000 tokens</text>
+<text x="640" y="302" fill="#6b6462" font-size="11">21,000x past the 100-token axis &#183; the</text>
+<text x="640" y="316" fill="#6b6462" font-size="11">context window cuts it long before the end</text>
+
+<text x="78" y="400" fill="#9a9390" font-size="11">measured on the 100,000-row cut &#183; each answer is one query against the workbook on disk</text>
+</svg>

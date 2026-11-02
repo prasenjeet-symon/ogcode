@@ -231,15 +231,161 @@ France a long way behind as the working international markets. Three charts
 of queries, one table of ten, and the whole workbook is still sitting on the
 disk where we found it.
 
+## The same workbook, three harnesses
+
+Everything above is our tool arguing for itself. So we did what we did for
+the PDF post: ran the same questions through the three ways a harness can
+meet a spreadsheet, and counted what each one put into the conversation.
+
+One thing decides the test. A SQL answer is exact only over the rows the
+tool actually holds, and the question tool loads at most 100,000 rows of a
+sheet. So the head-to-head runs on the first 100,000 rows of the same
+workbook: December 2010 through 23 February 2011, 8 columns, 4,657 invoices.
+Every lane sees exactly those rows, so every lane can in principle be right,
+and the comparison is about cost and accuracy instead of about one tool
+quietly seeing a tenth of the file. Token counts are characters divided by
+four, the same convention as the PDF post: estimates, trust the shape.
+
+| Dimension | Dump the sheet | RAG pipeline | Ogcode: profile, then a query |
+|---|---|---|---|
+| Setup | nothing to build | cut 100,000 rows into 4,092 windows of about 2,000 characters, embed all of them, tune top-k | one profile page per sheet, written by the same index pass that labels PDFs |
+| What the model sees per question | all 100,000 rows as CSV, 8,352,978 characters, about 2,090,000 tokens | the top five windows, about 2,540 tokens, 117 to 134 rows, roughly 0.12 percent of the file | a 292-token profile page, plus SQL that usually costs less than the profile |
+| What one answer costs | the dump bill is paid once and then rides every turn | about 2,540 tokens, plus an embedding round trip | 49 to 87 tokens, measured; all ten questions together cost 590 |
+| Where the answer comes from | the model doing arithmetic over 100,000 rows | the rows the retriever happened to return | the database, computing |
+| How you check it | you cannot, the sum is the model's word | the similarity scores, if you kept them | run the query again |
+| How it fails quietly | the blob is cut and the model answers from what survived | the retriever returns a thin slice, and a sum over a slice looks just like a sum | it does not, a wrong query returns a visibly wrong number |
+| Cost as questions pile up | the whole sheet rides every turn | flat, rebuilt from zero each time | flat, and a follow-up is one more line of SQL |
+
+## Ten questions, asked, answered, and measured
+
+The table above is arithmetic on a file size, and estimates are cheap. So we
+ran the tool for real: ten questions a merchandiser would actually ask, one
+after another against the same 100,000 rows, with each answer recorded
+exactly as the conversation received it. Every reply also carries the
+sheet's one-line schema, and on the smallest answers that line is most of
+the bill: about forty of the forty-nine tokens.
+
+| Question | What came back | Tokens |
+|---|---|---|
+| Total net sales, and how many invoices behind them? | £1,727,708 across 4,657 invoices | 55 |
+| Which month earned the most? | 2010-12 at £823,746, then 2011-01 at £691,365 | 62 |
+| Top products by revenue, postage and fees excluded? | Medium Ceramic Top Storage Jar £77,184, Regency Cakestand 3 Tier £50,580, White Hanging Heart T-Light Holder £30,093 | 87 |
+| What share of revenue comes from the top 20 products? | 17.7 percent | 50 |
+| Top three customers by spend? | 12346 at £77,184, then 14646 at £57,866 | 61 |
+| How much of net revenue is the United Kingdom? | 85.1 percent | 49 |
+| Cancelled value as a share of sold value? | 11.7 percent | 49 |
+| Busiest hour of the day by revenue? | 10h at £291,849, then 15h at £283,691 | 58 |
+| Rows with no customer ID, and their share of revenue? | 34,915 rows, 19.03 percent | 57 |
+| Best non-UK market by revenue? | Netherlands £58,408, then EIRE £44,186, Germany £40,044 | 62 |
+| **All ten** | **every answer matches an independent count of the same rows** | **590** |
+
+Ten answers, each narrower than the question that produced it, for less than
+the price of one row of the dump. The slow part is not the answer: the first
+query against a file builds the in-memory database, 5.2 to 6.4 seconds and
+about 537 MB for these 100,000 rows, and every question after it reuses
+that.
+
+![Bar chart, measured: tokens entering the model per answer across ten questions on the 100,000-row cut of the retail workbook. Every bar sits between 49 and 87 tokens on an axis that ends at 100, and the ten answers together total 590 tokens. The whole sheet as a CSV dump would be about 2,090,000 tokens per question, roughly 21,000 times past the right edge.](/blog/media/retail-qa-gauntlet.svg)
+
+## Accuracy: the answer is a computation
+
+Tokens are easy to count. Accuracy is the part that decides whether any of
+this is worth doing, so we asked the same ten questions through a retrieval
+lane built from the same rows: 4,092 windows, BM25 ranking, top five, about
+2,540 tokens per question, with each answer computed from the 117 to 134
+rows that actually came back.
+
+That lane was wrong on all ten.
+
+- Total net sales: £1,392, from the 126 rows it saw. True figure £1,727,708.
+- Best month: 2011-02 at £2,710. True: 2010-12 at £823,746.
+- Top product: Regency Cakestand 3 Tier at £50. True: the storage jar at
+  £77,184.
+- Top 20 share: 54.6 percent of the retrieved rows. True: 17.7 percent of
+  the file.
+- Top customer: number 17975 at £314. True: 12346 at £77,184.
+- UK share: 100 percent. True: 85.1 percent. Every window it found held UK
+  rows.
+- Cancellation rate: 0.1 percent. True: 11.7 percent.
+- Busiest hour: 13h at £687. True: 10h at £291,849.
+- Missing customer IDs: 50 of 122 rows. True: 34,915 rows.
+- Best non-UK market: nothing. Not one of the five windows contained a
+  non-UK row.
+
+None of those are careless errors, and that is the point. Every one has the
+same shape: retrieval returns a representative sample, and an aggregate over
+a representative sample looks exactly like an aggregate over the file. The
+failure is not a missing sentence you could read around. It is a number with
+no error bar and no way to see the edge of what it counted.
+
+Three properties of the query design put the answers where they landed.
+
+**The unit you retrieve is the unit you compute on.** A retrieved row is only
+worth having if the count runs over all of them. Retrieval hands back 120
+rows out of 100,000 and cannot tell you the other 99,880 exist, because the
+question left the sample behind. SQL runs against the file, so the
+denominator is the file.
+
+**The adding happens in the engine.** The model's job is to write the
+question, not to total a hundred thousand rows in its head. "The top 20
+products are 17.7 percent of revenue" is SQLite's arithmetic over every row,
+and the model's part of it is one sentence of SQL you can read. The dump's
+answer, even when the blob fits, is the model's arithmetic, and the model has
+no way to show its work.
+
+**A wrong answer is visible.** 17.7 percent and 54.6 percent are not close
+enough to argue about. Re-run the query, or change one clause, and the number
+moves or it does not. A retriever's miss comes back in the same shape as its
+hit.
+
+**What this does not prove.** This was not a tuned RAG pipeline: no reranker,
+no row-level embeddings, no metadata filter, no hybrid search. A serious one
+would do better, and there are questions where retrieval is the right tool.
+The claim here is narrower and measured: on this workbook, every answer from
+the query lane matched an independent count of the same rows, and the
+retrieval lane, as built, was wrong on every one.
+
+## What you actually run
+
+![Three-lane diagram. Dump the sheet: 100,000 rows to CSV is 8,352,978 characters, about 2,090,000 tokens, which the context window cuts silently, and there is nothing to build. RAG pipeline: 4,092 windows of about 344 tokens are embedded into a vector store and the top five, about 2,540 tokens, are retrieved, straddling row boundaries over a second copy of the data. Ogcode: one 292-token profile page per sheet, SQL runs against the file itself in SQLite, and an answer of 49 to 87 tokens comes back while the workbook stays on disk.](/blog/media/retail-three-harnesses.svg)
+
+The dump needs nothing, and on a sheet of a few hundred rows it is the right
+answer. It stops being an answer the moment the sheet is bigger than the
+window, and a spreadsheet that matters usually is.
+
+RAG needs a chunker, an embedding model, a vector store, a retrieval step,
+and the tuning that makes those four agree with each other, plus a second
+copy of the data living in the store instead of on your disk.
+
+Ogcode's spreadsheet path needs two things: a profiler that writes one page
+per sheet, and a query tool that builds SQLite from the file and runs the
+agent's SQL against it. There is no second copy and no index to keep in
+sync, and no embedding model to re-run when you switch providers. The
+profile is regenerated from the file itself, so a workbook edited yesterday
+answers questions about yesterday's numbers.
+
+What it costs is bounded and stated out loud: the first question against a
+file pays a load. At up to 100,000 rows, five to seven seconds here. Beyond
+that the tool answers from the rows it loaded and tells you it did.
+
 ## Where this could still be better
 
 No post about our own tools should pretend they are perfect. The limits,
 in the open:
 
 - **Very big sheets are capped at load time.** The question tool loads up
-  to 100,000 rows per sheet, and it says so in every answer it gives. A
-  count over a two-million-row sheet sees the loaded subset, honestly
-  labeled, no pretended exactness.
+  to 100,000 rows per sheet, and it says so in every answer it gives. The
+  cap is not arbitrary: lifting it on the full 541,909-row workbook above
+  takes 13.8 seconds and about 1.3 GB of memory to build the database, per
+  file. A count over a two-million-row sheet sees the loaded subset,
+  honestly labeled, no pretended exactness. The three charts earlier in
+  this post came from the full file, before the cap; the ten-question
+  gauntlet runs on a 100,000-row cut so that every lane can be exactly
+  right.
+- **Numbers come back as the engine prints them.** A money column can
+  arrive as `1.72770842e+06` rather than `1,727,708`, because the cell is
+  formatted by Go's default float printing. A model reads it fine; a human
+  skimming the transcript may not. Rounding the output is on the list.
 - **Old formats are out.** The tool speaks `.xlsx`, `.xlsm`, `.csv` and
   `.tsv`. The ancient `.xls` binary and the OpenDocument `.ods` are not
   read today; save them as `.xlsx` or CSV and everything works.
