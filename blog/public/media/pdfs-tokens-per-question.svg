@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img">
 <rect width="960" height="300" fill="#151414"/>
-<text x="78" y="30" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.5">PDF tokens entering the model, per question (37-page paper)</text>
+<text x="78" y="30" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.5">PDF tokens entering the model, per question (1,151-page book)</text>
 <text x="68" y="103" fill="#9a9390" font-size="12.5" text-anchor="end">&#160;</text>
 <text x="78" y="103" fill="#fffbf5" font-size="12.5">Dump the whole file</text>
 <rect x="308" y="85" width="420" height="30" rx="3" fill="#ff5e1f" opacity="1"/>
-<text x="738" y="103" fill="#fffbf5" font-size="12.5">&#8776;23,000 every turn</text>
-<text x="78" y="167" fill="#9a9390" font-size="12.5">&#160;</text>
+<text x="738" y="103" fill="#fffbf5" font-size="12.5">&#8776;532,000 every turn</text>
+<text x="68" y="167" fill="#9a9390" font-size="12.5">&#160;</text>
 <text x="78" y="167" fill="#fffbf5" font-size="12.5">RAG, top-5 chunks</text>
-<rect x="308" y="149" width="27" height="30" rx="3" fill="#ff7038" opacity="1"/>
-<text x="345" y="167" fill="#fffbf5" font-size="12.5">&#8776;1,500 + an embedding call</text>
-<text x="78" y="231" fill="#9a9390" font-size="12.5">&#160;</text>
+<rect x="308" y="149" width="32" height="30" rx="3" fill="#ff7038" opacity="1"/>
+<text x="350" y="167" fill="#fffbf5" font-size="12.5">&#8776;1,500 + an embedding call</text>
+<text x="68" y="231" fill="#9a9390" font-size="12.5">&#160;</text>
 <text x="78" y="231" fill="#fffbf5" font-size="12.5">Ogcode: labels + one page</text>
 <rect x="308" y="213" width="16" height="30" rx="3" fill="#ff7038" opacity="0.75"/>
 <text x="334" y="231" fill="#fffbf5" font-size="12.5">&#8776;900, page you can cite</text>
