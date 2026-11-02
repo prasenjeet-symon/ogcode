@@ -1,3 +1,43 @@
+# Release Notes — v0.58.0
+
+## Major: Requests no longer die on an oversized body, and the free daily allowance reads as one
+
+An ogcode turn that accumulated one screenshot per step used to hit one of the
+gateway's hard size ceilings and fail with a terse 400, with no repair offered.
+The ceiling is now applied against nginx's own 20 MiB limit, and a body that is
+still over it is repaired by shedding the oldest image frames — tool-result
+screenshots first, the user's own attachments last, each replaced in place with a
+short note of what was removed — resending until it fits. A turn where no image
+is left to drop says so plainly and asks for a shorter conversation instead of
+retrying the same oversized body.
+
+A 429 from the gateway can now also be the spent free daily allowance rather
+than a plan budget: it refills with the UTC day, so it is reported as a
+resumable wait whose reset time it names, classified ahead of the plan-budget
+429.
+
+## Major: A finished turn no longer looks like it is still running tools
+
+A loop that ended between writing an assistant message and running its tool
+calls left those parts marked running, and every client and re-read treated the
+turn as live — the "Running N tools" indicator, guidance mode, the running tool
+list. The parts are closed at loop exit, and reconciled sessions repair parts
+that already received a result by copying its ending so the panel states the
+outcome instead of a generic one. The web side reads the live tool list only
+while the session status is running, inspects only the tail assistant message,
+and skips a call a user-side tool result already answered.
+
+## Minor: First-party analytics proxy, on by default
+
+Capture, decide and log shipping now go through `a.ogcode.in` instead of
+`*.posthog.com`, avoiding domain-level blockers, and log shipping is on unless
+explicitly turned off or `DO_NOT_TRACK` is set.
+
+## Minor: Settings navigation
+
+The settings sidebar is resizable, folds to a 48 px icon rail, and the wordings
+for resizing and collapsing are clarified.
+
 # Release Notes — v0.57.0
 
 ## Major: Every tool call now leaves a row you can query
