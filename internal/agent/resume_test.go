@@ -156,6 +156,134 @@ func TestReconcile_ClosesDanglingToolCalls(t *testing.T) {
 	}
 }
 
+// A part left non-terminal while its answer was already written is a repair of a
+// different kind from a dangling call: the session can be continued, but every
+// transcript read re-sends the stale status, so a finished turn shows a tool
+// still running — and a client reading a live tool as a live loop leaves its
+// composer in guidance mode on a session nothing is working on.
+func TestReconcile_ClosesToolPartsAnsweredButLeftRunning(t *testing.T) {
+	lr, sess, prompt := resumeFixture(t)
+
+	stop := "stop"
+	step := addAssistant(t, lr, sess, prompt, nil, &stop, map[string]bool{"call_leaked": true})
+
+	// Recreate the leak: the call ran and its result was written, but the part's
+	// own terminal write never landed.
+	messages, err := lr.Store.GetMessages(sess.ID, "", 100)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	var leaked *session.Part
+	for _, m := range messages {
+		if m.Info.ID != step {
+			continue
+		}
+		for _, p := range m.Parts {
+			var d session.ToolPartData
+			if json.Unmarshal(p.Data, &d) != nil || d.CallID != "call_leaked" {
+				continue
+			}
+			d.State.Status = session.ToolRunning
+			data, _ := json.Marshal(d)
+			part := p
+			part.Data = data
+			if err := lr.Store.UpdatePart(&part); err != nil {
+				t.Fatalf("update tool part: %v", err)
+			}
+			leaked = &part
+		}
+	}
+	if leaked == nil {
+		t.Fatal("fixture did not build the leaked tool part")
+	}
+
+	// A later turn, so the stale part is not the tail: the dangling-call path only
+	// looks at the tail turn, and it is this sweep that has to reach further back.
+	addAssistant(t, lr, sess, step, nil, &stop, nil)
+
+	if _, err := lr.ReconcileSession(sess.ID); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	got, err := lr.Store.GetPart(leaked.ID)
+	if err != nil {
+		t.Fatalf("get part: %v", err)
+	}
+	var state session.ToolPartData
+	if err := json.Unmarshal(got.Data, &state); err != nil {
+		t.Fatalf("unmarshal part: %v", err)
+	}
+	if state.State.Status != session.ToolCompleted {
+		t.Errorf("tool part status = %q, want %q; a finished turn still reads as running",
+			state.State.Status, session.ToolCompleted)
+	}
+	if state.State.Output == nil || *state.State.Output != "ok" {
+		t.Errorf("tool part output = %v, want the result the loop already wrote", state.State.Output)
+	}
+}
+
+// A turn can end between writing the assistant message and executing the calls
+// it carries — a step limit, an abort, a panic. Nothing pairs those calls, so
+// the parts keep their non-terminal status and every transcript read shows a
+// finished turn still running tools. The loop's exit sweep is what closes them,
+// and it borrows the ending of a call that did leave a written result rather
+// than overwriting it with "interrupted".
+func TestCloseNonTerminalToolPartsClosesCallsThatNeverRan(t *testing.T) {
+	lr, sess, prompt := resumeFixture(t)
+	finish := "tool_calls"
+	step := addAssistant(t, lr, sess, prompt, nil, &finish,
+		map[string]bool{"call_pending": false, "call_answered": true})
+
+	lr.closeNonTerminalToolParts(sess.ID)
+
+	states := map[string]session.ToolPartData{}
+	messages, err := lr.Store.GetMessages(sess.ID, "", 100)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	for _, m := range messages {
+		if m.Info.ID != step {
+			continue
+		}
+		for _, p := range m.Parts {
+			if p.Type != session.PartTool {
+				continue
+			}
+			var d session.ToolPartData
+			if json.Unmarshal(p.Data, &d) == nil {
+				states[d.CallID] = d
+			}
+		}
+	}
+
+	neverRan, ok := states["call_pending"]
+	if !ok {
+		t.Fatal("pending call missing from the transcript")
+	}
+	if neverRan.State.Status != session.ToolError {
+		t.Errorf("never-run call status = %q, want %q; a finished turn still reads as running",
+			neverRan.State.Status, session.ToolError)
+	}
+	if neverRan.State.Error == nil {
+		t.Error("never-run call closed without an error for the model to read")
+	}
+	if string(neverRan.State.Input) != `{"command":"ls"}` {
+		t.Errorf("never-run call input = %s, want the input the call was made with", neverRan.State.Input)
+	}
+
+	answered, ok := states["call_answered"]
+	if !ok {
+		t.Fatal("answered call missing from the transcript")
+	}
+	if answered.State.Status != session.ToolCompleted {
+		t.Errorf("answered call status = %q, want %q; the written result has the ending",
+			answered.State.Status, session.ToolCompleted)
+	}
+	if answered.State.Output == nil || *answered.State.Output != "ok" {
+		t.Errorf("answered call output = %v, want the result already written", answered.State.Output)
+	}
+}
+
 // Reconciling is reached from the error path, from startup, and from the resume
 // request itself. Running it more than once must not keep appending results for
 // calls it already closed.

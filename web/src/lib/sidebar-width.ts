@@ -8,18 +8,26 @@ const MIN_WIDTH = 208;
 const MAX_WIDTH = 420;
 const DEFAULT_WIDTH = 260;
 
-function clamp(n: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
+export interface SidebarWidthOptions {
+  /** Panel width is remembered per panel, so each one gets its own key. */
+  key?: string;
+  min?: number;
+  max?: number;
+  defaultWidth?: number;
 }
 
-function loadWidth(): number {
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
+
+function loadWidth(key: string, min: number, max: number, fallback: number): number {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_WIDTH;
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
     const n = Number.parseInt(raw, 10);
-    return Number.isFinite(n) ? clamp(n) : DEFAULT_WIDTH;
+    return Number.isFinite(n) ? clamp(n, min, max) : fallback;
   } catch {
-    return DEFAULT_WIDTH;
+    return fallback;
   }
 }
 
@@ -32,12 +40,16 @@ export interface SidebarWidth {
   max: number;
 }
 
-export function createSidebarWidth(): SidebarWidth {
-  const [width, setWidth] = createSignal(loadWidth());
+export function createSidebarWidth(options: SidebarWidthOptions = {}): SidebarWidth {
+  const key = options.key ?? STORAGE_KEY;
+  const min = options.min ?? MIN_WIDTH;
+  const max = options.max ?? MAX_WIDTH;
+  const fallback = clamp(options.defaultWidth ?? DEFAULT_WIDTH, min, max);
+  const [width, setWidth] = createSignal(loadWidth(key, min, max, fallback));
 
   const persist = () => {
     try {
-      localStorage.setItem(STORAGE_KEY, String(width()));
+      localStorage.setItem(key, String(width()));
     } catch {
       // private mode / quota — resizing still works for this session
     }
@@ -47,7 +59,7 @@ export function createSidebarWidth(): SidebarWidth {
     e.preventDefault();
     const x0 = e.clientX;
     const w0 = width();
-    const onMove = (ev: PointerEvent) => setWidth(clamp(w0 + (ev.clientX - x0)));
+    const onMove = (ev: PointerEvent) => setWidth(clamp(w0 + (ev.clientX - x0), min, max));
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
@@ -66,14 +78,14 @@ export function createSidebarWidth(): SidebarWidth {
     switch (e.key) {
       case 'ArrowLeft': next = width() - step; break;
       case 'ArrowRight': next = width() + step; break;
-      case 'Home': next = MIN_WIDTH; break;
-      case 'End': next = MAX_WIDTH; break;
+      case 'Home': next = min; break;
+      case 'End': next = max; break;
       default: return;
     }
     e.preventDefault();
-    setWidth(clamp(next));
+    setWidth(clamp(next, min, max));
     persist();
   };
 
-  return { width, start, nudge, min: MIN_WIDTH, max: MAX_WIDTH };
+  return { width, start, nudge, min, max };
 }

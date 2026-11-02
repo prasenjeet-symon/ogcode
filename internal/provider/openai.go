@@ -461,10 +461,11 @@ func (p *OpenAIProvider) fetchDynamicModels(ctx context.Context) []ModelInfo {
 			// Some endpoints (a local Ollama, say) report no human name,
 			// only an id. Prefer the catalogue's curated name when we
 			// recognise the id, so the model shows up as "DeepSeek V4.1
-			// Flash" rather than "deepseek-v4.1-flash". OGX is the
-			// exception: its gateway advertises house ids
-			// ("ogx-deepseek-v4.1-flash") that are what the plan actually
-			// grants, so it keeps the raw id as the name.
+			// Flash" rather than "deepseek-v4.1-flash". OGX is skipped:
+			// its gateway sends its own name for each model
+			// ("DeepSeek V4.1 Flash" for "ogx-deepseek-v4.1-flash"), and
+			// when it sends none the raw id is what its own listing calls
+			// the model.
 			if cm, ok := LookupCatalogModel(m.ID); ok {
 				name = cm.Name
 			}
@@ -587,9 +588,9 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 // staticFallback returns the compiled-in list for this provider, used before any
 // catalogue has been fetched or seeded. It is the same catalogue RefreshCatalog
 // leaves in place on a failed fetch, so a cold start and a failed refresh show
-// the user the same thing. Ollama and OGX deliberately have none: an Ollama
-// endpoint lists only what it actually serves, and a planless gateway serves
-// nothing — a guess at what might work is worse than an empty list.
+// the user the same thing. Ollama and OGX deliberately have none: each lists
+// only what its own account actually serves, and a guess at what might work is
+// worse than an empty list.
 func (p *OpenAIProvider) staticFallback() []ModelInfo {
 	switch p.id {
 	case "openrouter":
@@ -885,6 +886,9 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	// images attached to tool results and emit them as a follow-up user message
 	// once all of the turn's consecutive tool messages have been appended.
 	var pendingImages []MessageImage
+	// Every image part on the wire, in order, so an over-limit body can shed the
+	// oldest frames instead of failing the turn (see dropOldestImage).
+	var wireImages []wireImage
 	flushImages := func() {
 		if len(pendingImages) == 0 {
 			return
@@ -893,13 +897,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 			"type": "text",
 			"text": "Rendered image(s) for the preceding tool result:",
 		}}
+		at := len(messages)
 		for _, img := range pendingImages {
-			parts = append(parts, map[string]any{
-				"type": "image_url",
-				"image_url": map[string]any{
-					"url": fmt.Sprintf("data:%s;base64,%s", img.MediaType, img.Data),
-				},
-			})
+			wireImages = append(wireImages, wireImage{message: at, part: len(parts), tool: true})
+			parts = append(parts, imageURLPart(img))
 		}
 		messages = append(messages, oaiMessage{Role: "user", Content: parts})
 		pendingImages = nil
@@ -950,13 +951,10 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 			if text != "" {
 				parts = append(parts, map[string]any{"type": "text", "text": text})
 			}
+			at := len(messages)
 			for _, img := range m.Images {
-				parts = append(parts, map[string]any{
-					"type": "image_url",
-					"image_url": map[string]any{
-						"url": fmt.Sprintf("data:%s;base64,%s", img.MediaType, img.Data),
-					},
-				})
+				wireImages = append(wireImages, wireImage{message: at, part: len(parts)})
+				parts = append(parts, imageURLPart(img))
 			}
 			msg.Content = parts
 		} else {
@@ -1026,7 +1024,25 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 	if err := p.checkBodyFits(len(jsonBody)); err != nil {
-		return nil, err
+		// A body the gateway would refuse is usually one long turn carrying a
+		// screenshot per step: browser_screenshot alone adds ~400 KB of base64
+		// each time. Shed the oldest images and send what remains rather than
+		// failing the turn — the newest frames are the ones this step reasons
+		// about, and the note left in their place tells the model what is gone.
+		// body.Messages aliases messages, so a shed part reaches the marshal.
+		dropped := 0
+		for p.overBodyLimit(len(jsonBody)) && dropOldestImage(messages, wireImages) {
+			dropped++
+			if jsonBody, err = json.Marshal(body); err != nil {
+				return nil, fmt.Errorf("marshal request: %w", err)
+			}
+		}
+		if dropped > 0 {
+			slog.Warn("shed images to fit the gateway body limit", "provider", p.id, "model", model, "images", dropped, "body_bytes", len(jsonBody))
+		}
+		if err := p.checkBodyFits(len(jsonBody)); err != nil {
+			return nil, err
+		}
 	}
 
 	url := strings.TrimRight(p.baseURL, "/") + "/chat/completions"
@@ -1155,20 +1171,91 @@ func (p *OpenAIProvider) isOGX() bool {
 	return p.id == OGXProviderID || strings.Contains(strings.ToLower(p.baseURL), "ogx.ogcode.in")
 }
 
-// ogxMaxRequestBytes is the gateway's cap on an inbound completion body
-// (oglab's internal/router/chat.go maxChatBodyBytes). A body over it is
-// refused with a terse 400 before any model sees it.
-const ogxMaxRequestBytes = 4 << 20
+// ogxMaxRequestBytes is the outermost ceiling on an inbound completion body:
+// nginx's client_max_body_size 20m on the gateway vhost. The hops underneath
+// are the router's 16 MiB read (oglab internal/router/chat.go
+// maxChatBodyBytes), which answers a terse 400 for anything above it, and
+// nginx's own 413 past 20m. Mirroring the nginx hop keeps the pre-flight
+// refusal aligned with what the edge will carry.
+const ogxMaxRequestBytes = 20 << 20
+
+// OGXBodyLimitMiB names that ceiling in whole MiB, for user-facing text that
+// must not restate the number.
+func OGXBodyLimitMiB() int { return ogxMaxRequestBytes >> 20 }
+
+// overBodyLimit reports whether a marshalled body is past the gateway's cap.
+func (p *OpenAIProvider) overBodyLimit(n int) bool {
+	return p.isOGX() && n > ogxMaxRequestBytes
+}
 
 // checkBodyFits refuses a marshalled request the gateway would reject for
 // size. It says what to do instead of leaving the user with "invalid request
 // body", which is all the gateway itself can say.
 func (p *OpenAIProvider) checkBodyFits(n int) error {
-	if !p.isOGX() || n <= ogxMaxRequestBytes {
+	if !p.overBodyLimit(n) {
 		return nil
 	}
-	return fmt.Errorf("%w: this request is %.1f MiB, over the gateway's %d MiB limit — remove or shrink image attachments and retry",
-		ErrRequestTooLarge, float64(n)/(1<<20), ogxMaxRequestBytes>>20)
+	return fmt.Errorf("%w: this request is %.1f MiB, over the gateway's %d MiB limit — older images are already dropped, so start a new session or shorten the conversation",
+		ErrRequestTooLarge, float64(n)/(1<<20), OGXBodyLimitMiB())
+}
+
+// wireImage locates one image part in the assembled request: the message it
+// rides, its index inside that message's content array, and whether it is a
+// tool result's rendered frame rather than a user attachment.
+type wireImage struct {
+	message int
+	part    int
+	tool    bool
+	dropped bool
+}
+
+// omittedImageNote stands in for a shed image, so the model reads why a frame it
+// may still refer to is no longer attached.
+func omittedImageNote() string {
+	return fmt.Sprintf("(older image omitted: the request exceeded the gateway's %d MiB limit)", OGXBodyLimitMiB())
+}
+
+// imageURLPart renders one image as an OpenAI content part.
+func imageURLPart(img MessageImage) map[string]any {
+	return map[string]any{
+		"type": "image_url",
+		"image_url": map[string]any{
+			"url": fmt.Sprintf("data:%s;base64,%s", img.MediaType, img.Data),
+		},
+	}
+}
+
+// dropOldestImage sheds one image from the assembled messages — the oldest
+// tool-result frame first, and a user attachment only once none is left — and
+// reports whether it shed one.
+//
+// A turn that screens the browser carries roughly 400 KB of base64 per
+// screenshot, so a long one pushes the body past the gateway's cap on its
+// own. The newest frames are the ones the current step is reasoning
+// about, so the oldest go first: the same choice a person would make scrolling
+// a thread. The part is REPLACED in place, not removed, so the part indexes
+// recorded in wireImages stay valid for the next call.
+func dropOldestImage(messages []oaiMessage, images []wireImage) bool {
+	shed := func(toolOnly bool) bool {
+		for i := range images {
+			img := &images[i]
+			if img.dropped || (toolOnly && !img.tool) {
+				continue
+			}
+			img.dropped = true
+			if img.message >= len(messages) {
+				continue
+			}
+			parts, ok := messages[img.message].Content.([]any)
+			if !ok || img.part >= len(parts) {
+				continue
+			}
+			parts[img.part] = map[string]any{"type": "text", "text": omittedImageNote()}
+			return true
+		}
+		return false
+	}
+	return shed(true) || shed(false)
 }
 
 // isOpenRouter reports whether this provider's endpoint is OpenRouter. The gate

@@ -235,10 +235,61 @@ function SessionSidebarInner() {
     return session.sessions().filter((s) => matches(s) && (q || !childIds.has(s.id)));
   });
 
+  // A session whose turn is in flight is being modified right now, but the
+  // server only stamps the session row when the prompt lands — never while the
+  // loop works (SetStatus deliberately leaves time_updated alone). So the
+  // sidebar keeps its own clock: a 'running' row reads "now" and lives in the
+  // Working zone pinned above everything else.
+  const [nowTick, setNowTick] = createSignal(Date.now());
+  onMount(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 5_000);
+    onCleanup(() => clearInterval(id));
+  });
+
+  // And when a long turn ends the server timestamp is still the prompt time —
+  // a session that just worked 40 minutes would read "40m" again the moment it
+  // went idle. Every running→idle transition latches the end time, so the row
+  // keeps showing a fresh clock until some server-side change of its own
+  // (next prompt, rename, …) moves updatedAt past it.
+  const [endedAt, setEndedAt] = createSignal(new Map<string, number>());
+  const lastStatus = new Map<string, string>();
+  createEffect(() => {
+    const list = session.sessions();
+    setEndedAt((prev) => {
+      let next: Map<string, number> | null = null;
+      for (const s of list) {
+        const before = lastStatus.get(s.id) ?? '';
+        lastStatus.set(s.id, s.status ?? '');
+        if (before === 'running' && s.status !== 'running') {
+          if (next === null) next = new Map(prev);
+          next.set(s.id, Date.now());
+        }
+      }
+      return next ?? prev;
+    });
+  });
+
+  // What a row shows and sorts by: the live clock while it works, the latched
+  // end time after (kept reactive to the clock so "now" ages into "1m"), the
+  // plain server timestamp for every settled row.
+  const rowTime = (s: Session) => {
+    if (s.status === 'running') return nowTick();
+    const ended = endedAt().get(s.id) ?? 0;
+    if (ended > s.updatedAt) {
+      nowTick();
+      return ended;
+    }
+    return s.updatedAt;
+  };
+
   // Sessions arrive newest-first, so bucketing them by age keeps that order
   // while giving the eye somewhere to land. A flat list of 40 near-identical
   // rows reads as a wall; "Today / Yesterday / …" turns it into a timeline you
   // can skim for the conversation you half-remember having last week.
+  //
+  // Rows still working (status 'running') never reach the buckets: they are
+  // lifted into the Working zone at the top, and rows only just finished sort
+  // by their latched end time, not their stale prompt timestamp.
   const GROUPS: { label: string; maxAgeDays: number }[] = [
     { label: 'Today', maxAgeDays: 0 },
     { label: 'Yesterday', maxAgeDays: 1 },
@@ -252,18 +303,33 @@ function SessionSidebarInner() {
     startOfToday.setHours(0, 0, 0, 0);
     const dayMs = 86_400_000;
 
-    const list = filtered().filter((s) => !pinned().has(s.id));
+    const list = filtered().filter((s) => !pinned().has(s.id) && s.status !== 'running');
     const buckets = GROUPS.map((g) => ({ label: g.label, items: [] as typeof list }));
     for (const s of list) {
       // Age in calendar days, so "yesterday at 11pm" never reads as "today".
-      const days = Math.floor((startOfToday.getTime() - s.updatedAt) / dayMs) + 1;
+      const t = rowTime(s);
+      const days = Math.floor((startOfToday.getTime() - t) / dayMs) + 1;
       const idx = GROUPS.findIndex((g) => days <= g.maxAgeDays);
       buckets[idx === -1 ? GROUPS.length - 1 : idx].items.push(s);
     }
+    // Newest first by the same clock the row displays — the server order only
+    // refreshes on a full list refetch, so a session that just finished would
+    // otherwise sit at its pre-work spot until then.
+    for (const b of buckets) b.items.sort((a, z) => rowTime(z) - rowTime(a));
     return buckets.filter((b) => b.items.length > 0);
   });
 
   const pinnedSessions = createMemo(() => filtered().filter((s) => pinned().has(s.id)));
+
+  // Every session with a turn in flight, above the pinned zone. Pinned rows
+  // stay out: a pin is already the user's own "keep this at the top", and
+  // duplicating a row across two zones reads as two rows. Among themselves
+  // they keep the server's newest-first order — the session whose prompt landed
+  // last is at the top, the ones started earlier hold their positions below it
+  // instead of shuffling every refresh.
+  const workingSessions = createMemo(
+    () => filtered().filter((s) => s.status === 'running' && !pinned().has(s.id)),
+  );
 
   const toggleTeam = (e: MouseEvent, id: string) => {
     e.stopPropagation();
@@ -406,7 +472,7 @@ function SessionSidebarInner() {
               hover — the actions appear beside it rather than replacing it,
               so the moment you were reading is not the moment it vanishes. */}
           <span class={`text-micro tabular-nums shrink-0 ${isActive() ? 'text-[color:var(--accent-ink)]' : 'text-[color:var(--text-label)]'}`}>
-            {formatTime(s.updatedAt)}
+            {formatTime(rowTime(s))}
           </span>
           <span class={`group-hover/row:flex items-center gap-0.5 shrink-0 ${isPinned() ? 'flex' : 'hidden'}`}>
             <button
@@ -661,6 +727,14 @@ function SessionSidebarInner() {
 
       {/* Session list */}
       <div class="flex-1 overflow-y-auto px-2 pt-0.5 pb-2">
+        <Show when={workingSessions().length > 0}>
+          <div class="mb-1">
+            <div class="px-2 pt-2 pb-1 text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
+              Working
+            </div>
+            <For each={workingSessions()}>{(s) => sessionItem(s)}</For>
+          </div>
+        </Show>
         <Show when={pinnedSessions().length > 0}>
           <div class="mb-1">
             <button

@@ -21,8 +21,11 @@ import (
 // nothing to PostHog. Nothing in the shipped binary assigns it.
 var PostHogAPIKey = "phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z"
 
-// PostHogAPIHost is the PostHog instance events and flag lookups go to.
-const PostHogAPIHost = "https://app.posthog.com"
+// PostHogAPIHost is the PostHog instance events and flag lookups go to. It is
+// the managed reverse proxy on ogcode.in rather than a posthog.com domain, so a
+// blocklist that sinks *.posthog.com on the user's network cannot silence
+// telemetry or the flag lookups (a failed /decide already fails safe to off).
+const PostHogAPIHost = "https://a.ogcode.in"
 
 // PostHogClient captures server-side analytics events to a PostHog project.
 // Events are sent via the /capture REST endpoint — no SDK dependency required.

@@ -456,6 +456,10 @@ var OpenModels = []CatalogModel{
 	// OpenRouter endpoint, Together and Ollama's cloud all serve 512K. The M2
 	// line is 204,800 first-party, 196,608 in the weights' config and on Groq.
 	{ID: "MiniMax-M3", Name: "MiniMax M3", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheReadPricePerM: 0.06, SupportsImages: true, ContextWindow: 524_288, Efforts: onOffEfforts, DefaultEffort: EffortOn},
+	// M3.1 Flash is what OGX's gateway serves as "ogx-minimax-m3.1-flash":
+	// low/medium/high reasoning, and no published output ceiling, so none is
+	// recorded. Prices are the gateway's billed rates, not MiniMax's list.
+	{ID: "MiniMax-M3.1-Flash", Aliases: []string{"ogx-minimax-m3.1-flash"}, Name: "MiniMax M3.1 Flash", InputPricePerM: 0.22, OutputPricePerM: 0.9, CacheReadPricePerM: 0.022, SupportsImages: true, ContextWindow: 1_000_000, Efforts: lowToHighEfforts},
 	{ID: "MiniMax-M2.7", Name: "MiniMax M2.7", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheWritePricePerM: 0.375, CacheReadPricePerM: 0.06, ContextWindow: 196_608},
 	{ID: "MiniMax-M2.7-highspeed", Name: "MiniMax M2.7 Highspeed", InputPricePerM: 0.6, OutputPricePerM: 2.4, CacheWritePricePerM: 0.375, CacheReadPricePerM: 0.06, ContextWindow: 196_608},
 	{ID: "MiniMax-M2.5", Name: "MiniMax M2.5", InputPricePerM: 0.3, OutputPricePerM: 1.2, CacheWritePricePerM: 0.375, CacheReadPricePerM: 0.03, ContextWindow: 196_608},
@@ -539,6 +543,14 @@ var OpenModels = []CatalogModel{
 	{ID: "microsoft/Phi-4-multimodal-instruct", Name: "Phi-4 Multimodal", InputPricePerM: 0.08, OutputPricePerM: 0.32, SupportsImages: true, ContextWindow: 131_072},
 	{ID: "microsoft/Phi-4-mini-reasoning", Aliases: []string{"phi4-mini-reasoning:3.8b", "phi4-mini-reasoning"}, Name: "Phi-4 Mini Reasoning", InputPricePerM: 0.075, OutputPricePerM: 0.3, ContextWindow: 128_000, MaxOutputTokens: 128_000},
 	{ID: "microsoft/Phi-4-reasoning-vision-15B", Name: "Phi-4 Reasoning Vision", SupportsImages: true, ContextWindow: 16_384},
+
+	// ── OGX gateway ─────────────────────────────────────────────────────────
+	// A model only the gateway serves; no vendor API lists it, so the catalogue
+	// is the only place its image support lives (its name, window and efforts
+	// come off the gateway listing). The prices are the gateway's metering
+	// rates, not a charge: the model is free to every account within its daily
+	// allowance, and the gateway publishes no output ceiling for it.
+	{ID: "OGX-Free", Aliases: []string{"ogx-free"}, Name: "OGX Free", InputPricePerM: 0.36, OutputPricePerM: 1.39, CacheReadPricePerM: 0.039, SupportsImages: true, ContextWindow: 1_048_576, Efforts: lowToHighEfforts},
 }
 
 // LegacyModels are models retired from their vendor's own API that other hosts

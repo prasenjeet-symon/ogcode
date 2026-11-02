@@ -67,6 +67,16 @@ func meteredByOwnListing(providerID string) bool {
 // provider (nothing to bill) from a metered one whose model has no known price.
 func BillsPerToken(providerID string) bool { return billsPerToken(providerID) }
 
+// freeModel reports whether providerID serves modelID free of charge to every
+// account, whatever the model would cost its vendor. The gateway's ogx-free is
+// metered against a daily allowance rather than a balance, so pricing it at a
+// rate would report spend the user was never charged. The catalogue lists the
+// same model as "OGX-Free" and the gateway serves it hyphenated, so the id is
+// compared case-insensitively — a listing may report either spelling.
+func freeModel(providerID, modelID string) bool {
+	return providerID == OGXProviderID && strings.EqualFold(modelID, "ogx-free")
+}
+
 // ListPrice is the model's first-party price from the catalogue, whatever served
 // it: what the same tokens would cost on the vendor's own API. It is the
 // yardstick for a flat plan or a local run, which bill nothing per token, and
@@ -103,13 +113,18 @@ func ListPrice(modelID string) (ModelPrice, bool) {
 // CacheWritePricePerM the user recorded (the gateway's published cache rate on
 // a self-metered plan, say) quotes instead of whatever stood for it before; 0
 // keeps today's fallback exactly. Nothing is billed on an unmetered provider
-// regardless — billsPerToken and the ":free" rule decide before any user price
-// is read.
+// regardless — billsPerToken, the ":free" rule and the gateway's free daily
+// model (freeModel) decide before any user price is read.
 func (r *Registry) PriceOn(providerID, modelID string) (ModelPrice, bool) {
 	if !billsPerToken(providerID) || modelID == "" {
 		return ModelPrice{}, false
 	}
 	if strings.HasSuffix(strings.ToLower(modelID), ":free") {
+		return ModelPrice{}, true
+	}
+	// Free by the gateway's own terms: zero, ahead of its published listing and
+	// of any user price, so nothing quotes a bill for a free daily allowance.
+	if freeModel(providerID, modelID) {
 		return ModelPrice{}, true
 	}
 	price, ok := r.listedPrice(providerID, modelID)

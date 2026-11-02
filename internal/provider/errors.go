@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,9 +34,65 @@ func (e *APIError) Error() string {
 }
 
 // IsTransient reports whether the status is worth retrying: 429 (rate limited),
-// 529 (Anthropic overloaded), or any 5xx.
+// 529 (Anthropic overloaded), or any 5xx. A spent free allowance arrives as a
+// 429 too, but is not transient: it refills with the UTC day, so retrying
+// inside the same day cannot get further and only burns the wait.
 func (e *APIError) IsTransient() bool {
+	if e.IsFreeAllowance() {
+		return false
+	}
 	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
+}
+
+// freeAllowanceBody is the wire shape of the gateway's free-allowance 429. Only
+// the fields the client reports are kept; anything else in the body is ignored.
+type freeAllowanceBody struct {
+	Free       bool    `json:"free"`
+	DailyUsed  float64 `json:"daily_used"`
+	DailyLimit float64 `json:"daily_limit"`
+	DailyReset int64   `json:"daily_reset"` // unix seconds, the next UTC midnight
+}
+
+// freeAllowancePhrase is the body text the gateway words the refusal with. It is
+// the fallback when the body does not parse as JSON — a proxy or a truncated
+// read can still hand back the sentence without the object around it.
+const freeAllowancePhrase = "free daily allowance exhausted"
+
+// IsFreeAllowance reports whether the error is the gateway refusing a model the
+// account gets free because that free daily allowance is spent. It is a 429,
+// but a different one from a plan budget: no window of minutes rolls it back,
+// and the fix is to wait for the UTC day rather than to retry.
+//
+// The body is matched structurally — a parsed "free": true — because "free"
+// alone appears in plenty of unrelated bodies. The phrase check is the fallback
+// for a body that does not parse.
+func (e *APIError) IsFreeAllowance() bool {
+	if e.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	var body freeAllowanceBody
+	if json.Unmarshal([]byte(e.Body), &body) == nil && body.Free {
+		return true
+	}
+	return strings.Contains(strings.ToLower(e.Body), freeAllowancePhrase)
+}
+
+// FreeAllowance returns the reported consumption of the free daily allowance:
+// how much the account used, the limit it used it against, and the unix second
+// the allowance refills at. ok is false when this is not a free-allowance error
+// or the body carries none of the figures.
+func (e *APIError) FreeAllowance() (used, limit float64, resetUnix int64, ok bool) {
+	if !e.IsFreeAllowance() {
+		return 0, 0, 0, false
+	}
+	var body freeAllowanceBody
+	if json.Unmarshal([]byte(e.Body), &body) != nil {
+		return 0, 0, 0, false
+	}
+	if body.DailyUsed <= 0 && body.DailyLimit <= 0 && body.DailyReset <= 0 {
+		return 0, 0, 0, false
+	}
+	return body.DailyUsed, body.DailyLimit, body.DailyReset, true
 }
 
 // IsContextLength reports whether the error is a context-window overflow. These

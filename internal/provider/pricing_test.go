@@ -119,6 +119,40 @@ func TestPriceOnFreeVariantIsFree(t *testing.T) {
 	}
 }
 
+// The gateway's ogx-free is served against a daily allowance, not the plan's
+// balance, so it quotes zero — ahead of the gateway's own published listing and
+// of any user price, or the usage screen would report spend nobody was charged.
+// The rule is that one model: the gateway's other models still quote.
+func TestPriceOnOGXFreeModelIsFree(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(windowProvider{id: "ogx", models: []ModelInfo{
+		{ID: "ogx-free", InputPricePerM: 3, OutputPricePerM: 15},
+		{ID: "ogx-deepseek-v4.1-flash", InputPricePerM: 0.5, OutputPricePerM: 2},
+	}})
+
+	if got, ok := reg.PriceOn("ogx", "ogx-free"); !ok || got != (ModelPrice{}) {
+		t.Errorf("free model = %+v, %v; want a zero price", got, ok)
+	}
+	// A user price cannot put a bill back on a model the gateway serves free.
+	reg.SetModelOverride("ogx-free", CustomModelInfo{ProviderID: "ogx", InputPricePerM: 3, OutputPricePerM: 15})
+	if got, ok := reg.PriceOn("ogx", "ogx-free"); !ok || got != (ModelPrice{}) {
+		t.Errorf("free model with a user price = %+v, %v; want a zero price", got, ok)
+	}
+	// The neighbouring gateway model is not swept up by the rule.
+	if got, ok := reg.PriceOn("ogx", "ogx-deepseek-v4.1-flash"); !ok || got != (ModelPrice{Input: 0.5, Output: 2}) {
+		t.Errorf("paid gateway model = %+v, %v; want the published 0.5/2 rate", got, ok)
+	}
+	// The catalogue spells the same model "OGX-Free": the rule follows the
+	// model across spellings, or the published vendor rate leaks through as
+	// spend the user never incurred.
+	reg.Register(windowProvider{id: "ogx", models: []ModelInfo{
+		{ID: "OGX-Free", InputPricePerM: 0.36, OutputPricePerM: 1.39},
+	}})
+	if got, ok := reg.PriceOn("ogx", "OGX-Free"); !ok || got != (ModelPrice{}) {
+		t.Errorf("free model, catalogue spelling = %+v, %v; want a zero price", got, ok)
+	}
+}
+
 func TestPriceOnUnknownModelQuotesNothing(t *testing.T) {
 	if got, ok := NewRegistry().PriceOn("openai", "vendor/nobody-prices-this"); ok {
 		t.Errorf("unknown model priced at %+v", got)

@@ -10,7 +10,14 @@ import posthog from 'posthog-js';
 
 // Hardcoded PostHog project credentials.
 const POSTHOG_API_KEY = 'phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z';
-const POSTHOG_API_HOST = 'https://app.posthog.com';
+// Ingest goes through the managed reverse proxy on ogcode.in, not
+// *.posthog.com directly, so a blocklist that sinks the posthog.com domains
+// does not silence the app's own analytics. The proxy forwards /decide,
+// /capture, /e, /s and /static/array.js to PostHog's US region.
+const POSTHOG_API_HOST = 'https://a.ogcode.in';
+// With a proxied api_host the SDK cannot derive the app's own address, so
+// dashboard, toolbar and session-replay links need the real host spelled out.
+const POSTHOG_UI_HOST = 'https://us.posthog.com';
 
 let initialised = false;
 
@@ -63,6 +70,7 @@ export async function initPostHog(installIdFromServer?: string): Promise<void> {
   try {
     posthog.init(POSTHOG_API_KEY, {
       api_host: POSTHOG_API_HOST,
+      ui_host: POSTHOG_UI_HOST,
       autocapture: false,
       capture_pageview: true,
       persistence: 'localStorage+cookie',

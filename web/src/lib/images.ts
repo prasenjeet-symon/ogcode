@@ -1,8 +1,8 @@
 // Attachment preparation for user-picked images.
 //
 // A photo straight off a phone is 4–10 MB and often ~4000px wide, and base64
-// inflates it by another third — one such image is already past the 4 MiB
-// request cap the OGX gateway enforces. The bytes are also persisted in
+// inflates it by another third — a handful of them fill the 20 MiB request
+// cap the OGX gateway enforces. The bytes are also persisted in
 // `part.data` and replayed on every later turn of the session, so the cost is
 // paid per request and per megabyte of database, not once. Resizing at attach
 // time therefore saves both bytes and tokens: vision billing follows pixel

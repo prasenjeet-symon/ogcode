@@ -173,9 +173,13 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 			registry.Register(p)
 		}
 	}
-	// A connected OG Lab subscription runs inference through its gateway. Only
-	// a link carrying a plan is registered — see session.OGXAccount.HasPlan.
-	if acct, e := session.GetOGXAccount(globalDatabase); e == nil && acct.HasPlan() {
+	// A connected OG Lab account runs inference through its gateway. Registered
+	// whenever the link exists, not only with a plan: the gateway serves
+	// ogx-free to every signed-in account. An empty model list is the only
+	// unusable state, and it is not known here — the catalogue is fetched
+	// asynchronously. ogx ranks last in ProviderPriority, so it never displaces
+	// a provider the user configured.
+	if acct, e := session.GetOGXAccount(globalDatabase); e == nil && acct != nil {
 		if p, e := provider.NewOGXProvider(acct.Token); e == nil {
 			registry.Register(p)
 		}

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-30T12:11:31.027901Z",
+  "generatedAt": "2026-11-02T15:23:59.854501Z",
   "models": [
     {
       "id": "claude-fable-5-1",
@@ -1988,6 +1988,27 @@
       "collection": "open"
     },
     {
+      "id": "MiniMax-M3.1-Flash",
+      "aliases": [
+        "ogx-minimax-m3.1-flash"
+      ],
+      "name": "MiniMax M3.1 Flash",
+      "activeByDefault": false,
+      "inputPricePerM": 0.22,
+      "outputPricePerM": 0.9,
+      "cacheReadPricePerM": 0.022,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "collection": "open"
+    },
+    {
       "id": "MiniMax-M2.7",
       "name": "MiniMax M2.7",
       "activeByDefault": false,
@@ -2906,6 +2927,27 @@
       "supportsImages": true,
       "contextWindow": 16384,
       "maxOutputTokens": 0,
+      "collection": "open"
+    },
+    {
+      "id": "OGX-Free",
+      "aliases": [
+        "ogx-free"
+      ],
+      "name": "OGX Free",
+      "activeByDefault": false,
+      "inputPricePerM": 0.36,
+      "outputPricePerM": 1.39,
+      "cacheReadPricePerM": 0.039,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 0,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
       "collection": "open"
     },
     {

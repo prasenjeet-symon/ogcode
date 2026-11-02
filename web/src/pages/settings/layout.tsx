@@ -3,6 +3,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { projectName } from '../../lib/paths';
+import { createSidebarWidth } from '../../lib/sidebar-width';
 import { SettingsShell, type ShellReport } from './ui';
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,11 @@ export default function SettingsLayout(props: RouteSectionProps) {
   // bar shows the page name instead. One threshold with a dead zone rather
   // than a continuous fade, so a slow scroll cannot leave both half-visible.
   const [collapsed, setCollapsed] = createSignal(false);
+  // The nav column keeps its own width and its own fold state, exactly as the
+  // session sidebar does. Width is stored per panel, so the two never fight
+  // over one remembered figure.
+  const [menuCollapsed, setMenuCollapsed] = createSignal(false);
+  const menu = createSidebarWidth({ key: 'ogcode-settings-nav-width' });
 
   let deskEl: HTMLDivElement | undefined;
   let searchEl: HTMLInputElement | undefined;
@@ -171,6 +177,51 @@ export default function SettingsLayout(props: RouteSectionProps) {
     setCollapsed(false);
     if (deskEl) deskEl.scrollTop = 0;
   });
+
+  // One nav row, shared by the desktop column and the phone strip. `compact`
+  // is the collapsed rail: icon only, with the name moved into the tooltip.
+  const navRow = (page: Page, compact = false) => {
+    const active = () => page.match(location.pathname);
+    return (
+      <button
+        type="button"
+        onClick={() => navigate(page.href)}
+        aria-current={active() ? 'page' : undefined}
+        title={compact ? page.label : undefined}
+        aria-label={compact ? page.label : undefined}
+        class={compact
+          ? `w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150
+             ${active()
+               ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]'
+               : 'text-[color:var(--text-label)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]'
+             }`
+          : `flex items-center gap-2 md:w-full h-8 px-2.5 md:px-2 rounded-md text-left shrink-0
+             transition-colors duration-150 whitespace-nowrap
+             ${active()
+               ? 'bg-[color:var(--bg-elevated)]/70 text-[color:var(--text-primary)] font-medium'
+               : 'text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
+             }`}
+      >
+        {/* The accent marks the page you are on and nothing else, so the eye
+            lands on it without a filled pill shouting. */}
+        <svg
+          class={`w-4 h-4 shrink-0 transition-colors duration-150
+            ${active() ? 'text-[color:var(--accent-ink)]' : 'text-[color:var(--text-muted)]'}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" d={page.icon} />
+        </svg>
+        <Show when={!compact}>
+          <span class="text-ui truncate flex-1">{page.label}</span>
+          <Show when={pageValue(page.id)}>
+            {(v) => (
+              <span class="text-micro tabular-nums text-[color:var(--text-muted)] shrink-0">{v()}</span>
+            )}
+          </Show>
+        </Show>
+      </button>
+    );
+  };
 
   return (
     <SettingsShell.Provider value={{ query, setQuery, report: setReport }}>
@@ -246,76 +297,121 @@ export default function SettingsLayout(props: RouteSectionProps) {
         </header>
 
         <div class="flex-1 min-h-0 flex flex-col md:flex-row">
-          {/* Navigation. Desktop keeps the 260px column; phones get a compact
-              horizontal tab strip pinned under the header, which reads faster
-              than a drawer for a four-item nav and leaves the full height to
-              the settings content. */}
+          {/* Navigation. Desktop is a resizable column that folds to an icon
+              rail — the same panel the session sidebar gives you, so both
+              sides of the app behave alike. Phones keep the compact
+              horizontal tab strip pinned under the header: a rail there would
+              cost more height than a seven-item nav is worth. */}
           <nav
-            class="md:w-[260px] md:shrink-0 md:flex md:flex-col md:py-2 md:border-r border-b md:border-b-0 border-[color:var(--border-subtle)]"
+            class="relative border-b md:border-b-0 md:border-r md:shrink-0 md:flex md:flex-col border-[color:var(--border-subtle)]"
             style={{ background: 'linear-gradient(var(--tint), var(--tint)) var(--bg-surface)' }}
             aria-label="Settings pages"
           >
-            {/* A hair of space between rows, so an active or hovered row reads as
-                its own shape rather than merging with its neighbour. */}
-            <div class="flex-1 px-2 py-1 md:py-0 flex md:flex-col gap-1 md:gap-px overflow-x-auto hide-scrollbar">
-              <For each={PAGES}>
-                {(page) => {
-                  const active = () => page.match(location.pathname);
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => navigate(page.href)}
-                      aria-current={active() ? 'page' : undefined}
-                      class={`flex items-center gap-2 md:w-full md:h-8 h-8 px-2.5 md:px-2 rounded-md text-left shrink-0
-                              transition-colors duration-150 whitespace-nowrap
-                        ${active()
-                          ? 'bg-[color:var(--bg-elevated)]/70 text-[color:var(--text-primary)] font-medium'
-                          : 'text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-hover)]/50'
-                        }`}
-                    >
-                      {/* The accent marks the page you are on and nothing else,
-                          so the eye lands on it without a filled pill shouting. */}
-                      <svg
-                        class={`w-4 h-4 shrink-0 transition-colors duration-150
-                          ${active() ? 'text-[color:var(--accent-ink)]' : 'text-[color:var(--text-muted)]'}`}
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" d={page.icon} />
-                      </svg>
-                      <span class="text-ui truncate flex-1">{page.label}</span>
-                      <Show when={pageValue(page.id)}>
-                        {(v) => (
-                          <span class="text-micro tabular-nums text-[color:var(--text-muted)] shrink-0">{v()}</span>
-                        )}
-                      </Show>
-                    </button>
-                  );
-                }}
-              </For>
+            {/* Phones: the tab strip. Always rendered and never collapsible,
+                so narrowing the window after a fold still leaves the nav. */}
+            <div class="md:hidden px-2 py-1 flex gap-1 overflow-x-auto hide-scrollbar">
+              <For each={PAGES}>{(page) => navRow(page)}</For>
             </div>
 
-            {/* Which project these settings belong to. At the foot, where a
-                status line belongs, rather than taking the top of the column
-                from the navigation. Hidden on phones, where the strip has no
-                foot and the workspace is named in General anyway. */}
-            <div
-              class="mt-2 pt-2 mx-2 border-t border-[color:var(--border-subtle)] hidden md:block"
-              title={server.directory() || 'No workspace open'}
-            >
-              <div class="flex items-center gap-1.5 px-2">
+            <Show when={!menuCollapsed()}>
+              <div
+                class="hidden md:flex md:flex-col flex-1 min-h-0 md:py-2"
+                style={{ width: `${menu.width()}px` }}
+              >
+                {/* The fold control sits where the session sidebar keeps its
+                    own — top right of the panel. */}
+                <div class="flex items-center justify-between pl-3 pr-2 pb-1">
+                  <span class="text-micro font-medium uppercase tracking-[0.07em] text-[color:var(--text-label)] select-none">
+                    Settings
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMenuCollapsed(true)}
+                    title="Collapse menu"
+                    aria-label="Collapse menu"
+                    class="icon-btn"
+                  >
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* A hair of space between rows, so an active or hovered row
+                    reads as its own shape rather than merging with its
+                    neighbour. */}
+                <div class="flex-1 min-h-0 px-2 flex flex-col gap-px overflow-y-auto hide-scrollbar">
+                  <For each={PAGES}>{(page) => navRow(page)}</For>
+                </div>
+
+                {/* Which project these settings belong to. At the foot, where a
+                    status line belongs, rather than taking the top of the
+                    column from the navigation. */}
+                <div
+                  class="mt-2 pt-2 mx-2 border-t border-[color:var(--border-subtle)]"
+                  title={server.directory() || 'No workspace open'}
+                >
+                  <div class="flex items-center gap-1.5 px-2">
+                    <span
+                      class="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ background: server.connected() ? 'var(--success)' : 'var(--text-muted)' }}
+                    />
+                    <span class="text-micro font-medium text-[color:var(--text-secondary)] truncate">
+                      {projectName(server.directory())}
+                    </span>
+                  </div>
+                  <div class="px-2 mt-px text-micro text-[color:var(--text-muted)] truncate">
+                    {server.connected() ? 'Connected' : 'Offline'}
+                    <Show when={server.branch()}>{` · ${server.branch()}`}</Show>
+                  </div>
+                </div>
+              </div>
+            </Show>
+
+            {/* Folded: the same 48px icon rail the session sidebar collapses to. */}
+            <Show when={menuCollapsed()}>
+              <div class="hidden md:flex md:flex-col flex-1 min-h-0 items-center md:py-2 gap-1 w-12">
+                <button
+                  type="button"
+                  onClick={() => setMenuCollapsed(false)}
+                  title="Expand menu"
+                  aria-label="Expand menu"
+                  class="icon-btn"
+                >
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                </button>
+                <For each={PAGES}>{(page) => navRow(page, true)}</For>
+                <div class="flex-1" />
                 <span
-                  class="w-1.5 h-1.5 rounded-full shrink-0"
+                  role="img"
+                  title={server.connected() ? 'Connected' : 'Offline'}
+                  aria-label={server.connected() ? 'Connected' : 'Offline'}
+                  class="w-1.5 h-1.5 rounded-full shrink-0 mb-1"
                   style={{ background: server.connected() ? 'var(--success)' : 'var(--text-muted)' }}
                 />
-                <span class="text-micro font-medium text-[color:var(--text-secondary)] truncate">
-                  {projectName(server.directory())}
-                </span>
               </div>
-              <div class="px-2 mt-px text-micro text-[color:var(--text-muted)] truncate">
-                {server.connected() ? 'Connected' : 'Offline'}
-                <Show when={server.branch()}>{` · ${server.branch()}`}</Show>
-              </div>
-            </div>
+            </Show>
+
+            {/* Drag grip: resizes the column from its right edge. It is a
+                focusable separator, so the panel is also resizable from the
+                keyboard. */}
+            <Show when={!menuCollapsed()}>
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize settings menu"
+                aria-valuenow={menu.width()}
+                aria-valuemin={menu.min}
+                aria-valuemax={menu.max}
+                tabindex="0"
+                onPointerDown={menu.start}
+                onKeyDown={menu.nudge}
+                title="Drag to resize"
+                class="absolute top-0 -right-[3px] bottom-0 w-[6px] cursor-col-resize z-10 hidden md:block hover:bg-[color:var(--accent)]/25 focus-visible:bg-[color:var(--accent)]/40 focus-visible:outline-none transition-colors"
+              />
+            </Show>
           </nav>
 
           {/* Desk */}

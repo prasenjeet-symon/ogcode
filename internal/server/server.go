@@ -1097,13 +1097,16 @@ func (s *Server) loadProviderMap() map[string]provider.Provider {
 			}
 		}
 	}
-	// OGX: a connected OG Lab subscription, whose gateway serves exactly the
-	// models the plan grants. Registered only when the link carries a plan — a
-	// planless link would register a provider that can serve nothing yet still
-	// outranks the other providers in ProviderPriority.
+	// OGX: a connected OG Lab account, whose gateway serves the models the plan
+	// grants plus ogx-free, the model every signed-in account is served plan or
+	// not. Registered whenever the link exists: a planless link is usable now,
+	// and an empty model list — the only unusable state — is not known here,
+	// because the catalogue is fetched asynchronously. Nothing is lost by
+	// registering early: ogx ranks last in ProviderPriority, so it never
+	// displaces a provider the user configured.
 	if acct, err := session.GetOGXAccount(s.globalDB); err != nil {
 		slog.Warn("failed to load ogx account", "err", err)
-	} else if acct.HasPlan() {
+	} else if acct != nil {
 		if p, err := provider.NewOGXProvider(acct.Token); err == nil {
 			providers[provider.OGXProviderID] = p
 			slog.Info("registered ogx provider", "plan", acct.Plan)

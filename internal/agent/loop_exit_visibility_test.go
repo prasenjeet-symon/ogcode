@@ -123,8 +123,9 @@ func (m finishScriptProvider) StreamChat(_ context.Context, _ provider.StreamReq
 
 // runFinishScript drives one full turn whose single model call ends with the
 // given finish reason, and returns the loop.done properties and the turn's
-// messages.
-func runFinishScript(t *testing.T, finish string) (map[string]string, []*session.MessageWithParts) {
+// messages. The optional prepare hooks run once the session exists, before the
+// turn starts.
+func runFinishScript(t *testing.T, finish string, prepare ...func(store *session.Store, sess *session.Session)) (map[string]string, []*session.MessageWithParts) {
 	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -170,6 +171,9 @@ func runFinishScript(t *testing.T, finish string) (map[string]string, []*session
 	}); err != nil {
 		t.Fatalf("create user part: %v", err)
 	}
+	for _, hook := range prepare {
+		hook(store, sess)
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- lr.RunLoop(context.Background(), sess.ID, "build", 0, 0) }()
@@ -187,6 +191,56 @@ func runFinishScript(t *testing.T, finish string) (map[string]string, []*session
 		t.Fatalf("get messages: %v", err)
 	}
 	return awaitLoopDone(t, events), msgs
+}
+
+// A tool part no turn finished must not outlive the loop that wrote it: the
+// client reads a live tool as a live loop, so a part left pending keeps a
+// "Running N tools" row under a finished answer and holds the composer in
+// mid-loop guidance mode. The exit defer closes them before loop.done, so a
+// client that refetches on that event already sees the terminal status.
+func TestRunLoopClosesToolPartsLeftNonTerminalAtExit(t *testing.T) {
+	_, msgs := runFinishScript(t, "stop", func(store *session.Store, sess *session.Session) {
+		step := &session.MessageInfo{
+			ID: session.NewMessageID(), SessionID: sess.ID,
+			Role: session.RoleAssistant, CreatedAt: session.Now(),
+		}
+		if err := store.CreateMessage(step); err != nil {
+			t.Fatalf("create stale assistant msg: %v", err)
+		}
+		data, _ := json.Marshal(session.ToolPartData{
+			Tool: "bash", CallID: "call_never_ran",
+			State: session.ToolState{Status: session.ToolPending, Input: json.RawMessage(`{"command":"sleep 60"}`)},
+		})
+		if err := store.CreatePart(&session.Part{
+			ID: session.NewPartID(), MessageID: step.ID, SessionID: sess.ID,
+			Type: session.PartTool, Data: data, CreatedAt: session.Now(), UpdatedAt: session.Now(),
+		}); err != nil {
+			t.Fatalf("create stale tool part: %v", err)
+		}
+	})
+
+	var stale *session.ToolPartData
+	for _, m := range msgs {
+		for _, p := range m.Parts {
+			if p.Type != session.PartTool {
+				continue
+			}
+			var d session.ToolPartData
+			if json.Unmarshal(p.Data, &d) == nil && d.CallID == "call_never_ran" {
+				stale = &d
+			}
+		}
+	}
+	if stale == nil {
+		t.Fatal("stale tool part missing from the transcript")
+	}
+	if stale.State.Status != session.ToolError {
+		t.Errorf("tool part status after loop exit = %q, want %q; a finished turn still reads as running",
+			stale.State.Status, session.ToolError)
+	}
+	if stale.State.Error == nil {
+		t.Error("tool part closed at exit without an error for the user to read")
+	}
 }
 
 // A clean finish must stay clean: no error key, so the client does not raise a

@@ -9,8 +9,9 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 )
 
-// OGXAccount is the stored link between this install and an OG Lab account
-// holding an OGX plan. The token is the credential the web side handed back
+// OGXAccount is the stored link between this install and an OG Lab account —
+// one holding an OGX plan, or one merely signed in, which the gateway serves
+// ogx-free. The token is the credential the web side handed back
 // through the connect flow; email and plan are display fields for the
 // settings screen. Kept in the global config DB — the plan follows the user,
 // not the project.
@@ -26,14 +27,13 @@ type OGXAccount struct {
 const OGXPlanNone = "none"
 
 // HasPlan reports whether the linked account holds a plan that grants model
-// access. A link without one is connected but unusable: the gateway would serve
-// it an empty model catalogue. Callers use this to decide whether to register
-// the OGX provider at all — registering a planless one would put it in
-// ProviderPriority ahead of the other providers while it can serve nothing, and
-// the user would land on a default that cannot answer.
+// access. It is a display and plan-tracking signal now, not a registration
+// gate: a planless link is still connected to a gateway that serves it
+// ogx-free, the one model every signed-in account gets, so the provider is
+// registered on the link alone. What a link can actually serve is the
+// catalogue, which is fetched, not inferred from this.
 //
-// A missing plan field is treated the same as "none": both mean no usable plan,
-// and being wrong in that direction merely leaves the other providers in place.
+// A missing plan field is treated the same as "none": both mean no plan.
 func (a *OGXAccount) HasPlan() bool {
 	if a == nil {
 		return false

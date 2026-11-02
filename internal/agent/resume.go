@@ -53,8 +53,8 @@ func (lr *LoopRunner) ReconcileSession(sessionID session.SessionID) (*session.Me
 	}
 	last := messages[idx]
 
-	// Collect every call id already answered anywhere in the window, rather than
-	// only in the messages listed after this turn.
+	// Collect the state of every call already answered anywhere in the window,
+	// rather than only in the messages listed after this turn.
 	//
 	// Ordering cannot carry the weight. Messages sort by their ULID, and the
 	// generator draws non-monotonic entropy, so two ids minted in the same
@@ -66,9 +66,26 @@ func (lr *LoopRunner) ReconcileSession(sessionID session.SessionID) (*session.Me
 	//
 	// A call id is unique to the call, so matching on the id needs no ordering
 	// at all: a result exists or it does not.
-	answered := map[string]bool{}
+	answered := answeredStates(messages)
+
+	// Close any assistant part still marked running or pending. When the call has
+	// an answer already written, this is not the dangling-call case below — the
+	// request is valid — so no model-facing repair is owed; the part just borrows
+	// the ending that answer records. What is broken either way is the part's own
+	// status, which every transcript read re-sends: a finished turn renders as
+	// still executing a tool, and a client that reads a live tool as a live loop
+	// keeps its composer in guidance mode on a session nothing is working on.
+	//
+	// The leak happens when the terminal write of the tool part fails while the
+	// paired result still goes out, and on any earlier step of a multi-step turn
+	// that leaks that way — the dangling-call path only ever looks at the tail
+	// turn, so a stale part further back would otherwise stay stale forever.
+	//
+	// A written result is proof the call is over, which is what makes the borrow
+	// safe whenever it runs: the loop writes the result only after the tool parts
+	// have been made terminal.
 	for _, m := range messages {
-		if m.Info.Role != session.RoleUser {
+		if m.Info.Role != session.RoleAssistant {
 			continue
 		}
 		for _, p := range m.Parts {
@@ -76,9 +93,25 @@ func (lr *LoopRunner) ReconcileSession(sessionID session.SessionID) (*session.Me
 				continue
 			}
 			var data session.ToolPartData
-			if json.Unmarshal(p.Data, &data) == nil && data.CallID != "" {
-				answered[data.CallID] = true
+			if json.Unmarshal(p.Data, &data) != nil || data.CallID == "" {
+				continue
 			}
+			if data.State.Status != session.ToolRunning && data.State.Status != session.ToolPending {
+				continue
+			}
+			data.State = settlingToolState(data.State, answered[data.CallID])
+			updated, _ := json.Marshal(data)
+			part := p
+			part.Data = updated
+			part.UpdatedAt = session.Now()
+			if err := lr.Store.UpdatePart(&part); err != nil {
+				slog.Error("reconcile: close stale tool part", "session", sessionID, "err", err)
+				continue
+			}
+			lr.Bus.Publish("message.part.updated", map[string]string{
+				"sessionId": string(sessionID),
+				"partId":    string(part.ID),
+			})
 		}
 	}
 
@@ -88,7 +121,10 @@ func (lr *LoopRunner) ReconcileSession(sessionID session.SessionID) (*session.Me
 			continue
 		}
 		var data session.ToolPartData
-		if json.Unmarshal(p.Data, &data) != nil || data.CallID == "" || answered[data.CallID] {
+		if json.Unmarshal(p.Data, &data) != nil || data.CallID == "" {
+			continue
+		}
+		if _, done := answered[data.CallID]; done {
 			continue
 		}
 		// The call never got an answer. Whether it also never ran is a separate
@@ -186,6 +222,124 @@ func closedToolState(state session.ToolState) session.ToolState {
 		Title:    state.Title,
 		Metadata: state.Metadata,
 		Time:     state.Time,
+	}
+}
+
+// answeredStates indexes the state of the result already written for a call, by
+// call id. A call id is unique to the call, so matching on it needs no ordering:
+// a result exists or it does not.
+func answeredStates(messages []*session.MessageWithParts) map[string]session.ToolState {
+	answered := map[string]session.ToolState{}
+	for _, m := range messages {
+		if m.Info.Role != session.RoleUser {
+			continue
+		}
+		for _, p := range m.Parts {
+			if p.Type != session.PartTool {
+				continue
+			}
+			var data session.ToolPartData
+			if json.Unmarshal(p.Data, &data) == nil && data.CallID != "" {
+				answered[data.CallID] = data.State
+			}
+		}
+	}
+	return answered
+}
+
+// settlingToolState is the state a non-terminal tool part is given once the call
+// it describes is over.
+//
+// A written result is the ending the call actually reached, and copying it is
+// what makes the repair true rather than merely terminal. Its own input is not
+// copied back: the part's input is what the provider is re-sent, and only the
+// part has it. When there is no result — the call never ran — the part holds a
+// non-terminal status the paired write copied, so it has no ending to lend, and
+// the call is closed the way a dangling one is: it did not finish, and the model
+// is told so.
+func settlingToolState(state, result session.ToolState) session.ToolState {
+	switch result.Status {
+	case session.ToolCompleted, session.ToolError, session.ToolDenied:
+		state.Status = result.Status
+		state.Output = result.Output
+		state.Error = result.Error
+		if result.Title != nil {
+			state.Title = result.Title
+		}
+		if len(result.Metadata) > 0 {
+			state.Metadata = result.Metadata
+		}
+		if result.Image != nil {
+			state.Image = result.Image
+		}
+		if result.Time.End > 0 {
+			state.Time.End = result.Time.End
+		}
+		return state
+	}
+	return closedToolState(state)
+}
+
+// closeNonTerminalToolParts makes every tool part in a session's tail terminal,
+// which is the state a finished turn is supposed to be in.
+//
+// The loop turns a part terminal before it pairs a result with it, so a part
+// still marked running or pending means the turn ended between writing the
+// assistant message and executing the call it carries — a step limit, an
+// abort, a panic. No model-facing repair is owed for that, because the turn is
+// over and the history only has to be valid again once a resume continues it,
+// which is ReconcileSession's job. What is owed is the client's view of the
+// turn: a running part is read as work in progress, so the finished answer
+// keeps a "Running N tools" row under it and the composer stays in mid-loop
+// guidance mode on a session nothing is working on.
+//
+// Called from the loop's exit defer, before loop.done is published, so a client
+// that refetches on that event already sees the terminal statuses.
+func (lr *LoopRunner) closeNonTerminalToolParts(sessionID session.SessionID) {
+	if lr.Store == nil {
+		return
+	}
+	messages, err := lr.Store.GetMessages(sessionID, "", resumeScanLimit)
+	if err != nil {
+		slog.Warn("close tool parts at loop exit", "session", sessionID, "err", err)
+		return
+	}
+	answered := answeredStates(messages)
+	for _, m := range messages {
+		if m.Info.Role != session.RoleAssistant {
+			continue
+		}
+		for _, p := range m.Parts {
+			if p.Type != session.PartTool {
+				continue
+			}
+			var data session.ToolPartData
+			if json.Unmarshal(p.Data, &data) != nil {
+				continue
+			}
+			if data.State.Status != session.ToolRunning && data.State.Status != session.ToolPending {
+				continue
+			}
+			data.State = settlingToolState(data.State, answered[data.CallID])
+			updated, merr := json.Marshal(data)
+			if merr != nil {
+				slog.Error("marshal closed tool part", "session", sessionID, "err", merr)
+				continue
+			}
+			part := p
+			part.Data = updated
+			part.UpdatedAt = session.Now()
+			if err := lr.Store.UpdatePart(&part); err != nil {
+				slog.Error("close tool part at loop exit", "session", sessionID, "err", err)
+				continue
+			}
+			if lr.Bus != nil {
+				lr.Bus.Publish("message.part.updated", map[string]string{
+					"sessionId": string(sessionID),
+					"partId":    string(part.ID),
+				})
+			}
+		}
 	}
 }
 

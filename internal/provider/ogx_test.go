@@ -9,15 +9,25 @@ import (
 )
 
 // ogxGateway stands in for OG Lab's gateway: GET /v1/models returns the model
-// list the plan grants, POST /v1/chat/completions records the request body.
-func ogxGateway(t *testing.T, models []string, chatBody *map[string]any) *httptest.Server {
+// list the plan grants, POST /v1/chat/completions records the request body. A
+// names map adds the human name the gateway reports for an id; without one the
+// listing carries an id alone, the way a silent endpoint answers.
+func ogxGateway(t *testing.T, models []string, chatBody *map[string]any, names ...map[string]string) *httptest.Server {
 	t.Helper()
+	var namesByID map[string]string
+	if len(names) > 0 {
+		namesByID = names[0]
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/models":
 			data := make([]map[string]any, 0, len(models))
 			for _, id := range models {
-				data = append(data, map[string]any{"id": id, "object": "model", "owned_by": "oglab"})
+				row := map[string]any{"id": id, "object": "model", "owned_by": "oglab"}
+				if name := namesByID[id]; name != "" {
+					row["name"] = name
+				}
+				data = append(data, row)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
 		case "/chat/completions":
@@ -136,27 +146,55 @@ func TestDynamicModelsFallBackToCatalogNames(t *testing.T) {
 	}
 }
 
-// TestOGXProviderShowsRawModelIDs pins the deliberate exception to the naming
-// fallback: the OGX gateway advertises house ids that ARE what the plan grants,
-// so unlike every other silent endpoint it shows the raw id as the name rather
-// than substituting a catalogue name.
-func TestOGXProviderShowsRawModelIDs(t *testing.T) {
-	srv := ogxGateway(t, []string{"ogx-deepseek-v4.1-flash", "ogx-glm-5.3-flash"}, nil)
-	t.Setenv("OGX_GATEWAY_URL", srv.URL)
+// TestOGXProviderUsesGatewayNamesWithRawIDFallback pins the naming of a plan's
+// models: a gateway that reports a human name has it shown, and one that
+// reports only an id keeps the raw id as the name — unlike every other
+// endpoint, which substitutes the catalogue's curated name.
+func TestOGXProviderUsesGatewayNamesWithRawIDFallback(t *testing.T) {
+	t.Run("gateway name wins", func(t *testing.T) {
+		srv := ogxGateway(t, []string{"ogx-deepseek-v4.1-flash", "ogx-glm-5.3-flash"}, nil, map[string]string{
+			"ogx-deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
+			"ogx-glm-5.3-flash":       "GLM-5.3 Flash",
+		})
+		t.Setenv("OGX_GATEWAY_URL", srv.URL)
 
-	p, err := NewOGXProvider("tok")
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	got := p.RefreshCatalog(context.Background())
-	if len(got) != 2 {
-		t.Fatalf("RefreshCatalog got %d models, want 2: %+v", len(got), got)
-	}
-	for _, m := range got {
-		if m.Name != m.ID {
-			t.Errorf("model %q name = %q, want the raw id", m.ID, m.Name)
+		p, err := NewOGXProvider("tok")
+		if err != nil {
+			t.Fatalf("new provider: %v", err)
 		}
-	}
+		got := p.RefreshCatalog(context.Background())
+		if len(got) != 2 {
+			t.Fatalf("RefreshCatalog got %d models, want 2: %+v", len(got), got)
+		}
+		want := map[string]string{
+			"ogx-deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
+			"ogx-glm-5.3-flash":       "GLM-5.3 Flash",
+		}
+		for _, m := range got {
+			if m.Name != want[m.ID] {
+				t.Errorf("model %q name = %q, want the gateway's %q", m.ID, m.Name, want[m.ID])
+			}
+		}
+	})
+
+	t.Run("no name falls back to the id", func(t *testing.T) {
+		srv := ogxGateway(t, []string{"ogx-deepseek-v4.1-flash", "ogx-glm-5.3-flash"}, nil)
+		t.Setenv("OGX_GATEWAY_URL", srv.URL)
+
+		p, err := NewOGXProvider("tok")
+		if err != nil {
+			t.Fatalf("new provider: %v", err)
+		}
+		got := p.RefreshCatalog(context.Background())
+		if len(got) != 2 {
+			t.Fatalf("RefreshCatalog got %d models, want 2: %+v", len(got), got)
+		}
+		for _, m := range got {
+			if m.Name != m.ID {
+				t.Errorf("model %q name = %q, want the raw id", m.ID, m.Name)
+			}
+		}
+	})
 }
 
 // TestOGXProviderEmptyCatalogueHasNoFallback is the deliberate difference from

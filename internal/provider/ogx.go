@@ -20,10 +20,10 @@ import (
 // Two things make it different from every other OpenAI-compatible endpoint:
 //
 //   - The gateway's /v1/models IS the plan. It returns exactly the models the
-//     account's plan grants, and an empty list when the plan grants none. So
-//     Models() has no static fallback: a catalogue that comes back empty means
-//     the plan carries nothing, and offering a fallback would present models
-//     the account cannot reach.
+//     account can call — the plan's own grants plus the free model every
+//     signed-in account gets — so Models() has no static fallback: a list that
+//     comes back empty means the gateway is serving nothing, and a fallback
+//     would present models the account cannot reach.
 //
 //   - The token is durable and per-install, and the gateway reads the
 //     prompt_cache_key field as the session identity for token spend, so every
@@ -34,13 +34,14 @@ import (
 //     vendor's catalogue price is a comparison yardstick, never the bill
 //     (see meteredByOwnListing in pricing.go).
 //
-// Registration is gated on the stored link carrying a plan (session.OGXAccount
-// .HasPlan). A planless link contributes no provider at all, which is what keeps
-// it from becoming the default. One residual case is left unguarded: a plan
-// whose catalogue fetches empty registers a provider that can serve nothing, and
-// ProviderPriority would place it ahead of every other provider. That only
-// happens for a plan with no granted models, which the settings screen surfaces
-// as an empty, explained list rather than a failure.
+// Registration follows the stored link, not a plan: any connected link
+// registers a provider (see loadProviderMap), because every one of them can call
+// the free model. session.OGXAccount.HasPlan therefore stays a display signal —
+// whether the link carries a paid plan — and no longer decides whether a
+// provider exists. ProviderPriority still puts ogx last, so a planless link
+// never shadows a provider the user configured; a link whose catalogue fetches
+// empty registers a provider that can serve nothing, which the settings screen
+// surfaces as an empty, explained list rather than a failure.
 const OGXProviderID = "ogx"
 
 // OGXAppID is the first-party identity ogcode presents to the gateway when it

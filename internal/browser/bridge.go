@@ -34,9 +34,9 @@ const (
 	tokenBytes    = 32
 
 	// maxResultFrameBytes bounds one inbound result frame. A screenshot reply
-	// is a base64 PNG — comfortably past coder/websocket's 32 KiB default —
-	// so the bridge must raise its own read limit. Matches the 4 MiB
-	// request-body budget used elsewhere in the product.
+	// is a base64 image — comfortably past coder/websocket's 32 KiB default —
+	// so the bridge must raise its own read limit. 4 MiB is several times the
+	// largest frame the extension sends (a 1024px JPEG is well under 1 MB).
 	maxResultFrameBytes = 4 << 20
 )
 
@@ -260,7 +260,8 @@ func (b *Bridge) Serve(ctx context.Context, conn *websocket.Conn) {
 	// base64 PNG, easily hundreds of kilobytes — and coder/websocket's default
 	// read limit is 32 KiB, which fails every one of them with
 	// "message too big: read limited at 32769 bytes" and kills the link. The
-	// cap matches the request-body budget (see ogxMaxRequestBytes).
+	// cap is sized to the extension's own replies, not to the request-body
+	// budget — the two are unrelated.
 	conn.SetReadLimit(maxResultFrameBytes)
 
 	for {

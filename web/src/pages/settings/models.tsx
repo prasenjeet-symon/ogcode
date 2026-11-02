@@ -43,7 +43,6 @@ import {
   type ProviderDef,
   type CompatiblePreset,
 } from '../../lib/providers';
-import { useFeatureFlag } from '../../lib/feature-flags';
 
 // ---------------------------------------------------------------------------
 // Models — one tab per provider.
@@ -76,13 +75,6 @@ const OGX_SLOT = 'ogx';
 /** The OGLAB dashboard. Plan state, billing and token usage live there. */
 const OGX_WEB_URL = 'https://oglab.ogcode.in';
 
-/**
- * PostHog flag gating the OGX tab while the plan feature is unreleased. The
- * flag has to exist in the ogcode PostHog project for the tab to show at all —
- * a missing flag, like an unreachable PostHog, reads as off.
- */
-const OGX_FLAG = 'ogx-tab';
-
 interface Slot {
   id: string;
   label: string;
@@ -97,7 +89,6 @@ export default function ModelsSettings() {
   const [configs, setConfigs] = createSignal<Record<string, ProviderConfig>>({});
   const [loadingConfigs, setLoadingConfigs] = createSignal(true);
   const [active, setActive] = createSignal('');
-  const ogxTab = useFeatureFlag(OGX_FLAG);
 
   createEffect(() => shell.report({ noun: 'settings' }));
 
@@ -138,13 +129,10 @@ export default function ModelsSettings() {
       // the one tab that is not a protocol, and the subscription is what a
       // fresh install with no keys reaches for first. readOnly: it has no
       // credential rows — its panel manages the OGLAB account link instead.
-      //
-      // Held behind a PostHog flag while the plan feature is unreleased, and
-      // off is the fail-safe: an install that cannot reach PostHog keeps the
-      // four protocols alone. The id counts as known either way — an install
-      // that already has plan models must not surface them as a generic
-      // provider tab once the flag is off.
-      if (ogxTab()) base.unshift({ id: OGX_SLOT, label: 'OGX', readOnly: true });
+      // Always shown: the plan is public, so no flag gates it, and the id
+      // counts as known below — an install that has plan models must not
+      // surface them as a generic provider tab.
+      base.unshift({ id: OGX_SLOT, label: 'OGX', readOnly: true });
       // Vendor tabs ride after the protocols, ahead of the catalogue
       // catch-all: they are first-class editors, not the read-only extras
       // below. Each id counts as known here so the extras loop does not
@@ -723,7 +711,7 @@ function OGXSection(props: {
         action={chip()}
         description={
           <>
-            OGX is the ogcode plan by OGLAB. Your plan, usage and billing are managed on{' '}
+            OGX is the ogcode plan by OGLAB. Your plan, free allowance, usage and billing are managed on{' '}
             <LinkAction href={OGX_WEB_URL}>your OGLAB dashboard</LinkAction>.
           </>
         }
@@ -754,8 +742,8 @@ function OGXSection(props: {
             <OGXMark class="mx-auto w-11 h-11" />
             <p class="mt-3.5 text-ui font-semibold text-[color:var(--text-primary)]">Connect your ogcode plan</p>
             <p class="mx-auto mt-1.5 max-w-[26rem] text-meta leading-[1.6] text-[color:var(--text-tertiary)]">
-              Two fast models and $2 of tokens every day, for one flat monthly price. Sign in with OGLAB in
-              your browser to link this install.
+              Three fast models and $2 of tokens every day for one flat monthly price. OGX Free needs no
+              plan at all. Sign in with OGLAB in your browser to link this install.
             </p>
             <div class="mt-4 flex justify-center">
               <Show when={!connecting()} fallback={waiting()}>
@@ -763,7 +751,7 @@ function OGXSection(props: {
               </Show>
             </div>
             <ul class="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-micro text-[color:var(--text-muted)]">
-              <For each={['No API keys to manage', 'Refills every day at 00:00 UTC', 'Cancel anytime']}>
+              <For each={['No API keys to manage', 'A free model, $5 of tokens every day', 'Refills at 00:00 UTC', 'Cancel anytime']}>
                 {(perk) => (
                   <li class="inline-flex items-center gap-1.5">
                     <svg class="w-3 h-3" style={{ color: 'var(--success)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
@@ -785,14 +773,15 @@ function OGXSection(props: {
             <OGXMark class="w-10 h-10" />
             <div class="min-w-0 flex-1 self-center">
               <p class="text-ui font-semibold text-[color:var(--text-primary)] leading-snug">
-                {{ active: 'OGX', noplan: 'No active plan', revoked: 'Connection expired' }[state() as 'active' | 'noplan' | 'revoked']}
+                {{ active: 'OGX', noplan: 'OGX Free', revoked: 'Connection expired' }[state() as 'active' | 'noplan' | 'revoked']}
               </p>
               <p class="mt-0.5 text-meta leading-[1.5] text-[color:var(--text-tertiary)] max-w-[34rem]">
                 {
                   {
-                    active: '$2 of tokens every day, refilled at 00:00 UTC. Usage and billing live on your OGLAB dashboard.',
+                    active:
+                      'Three fast models and $2 of tokens every day, refilled at 00:00 UTC. Usage and billing live on your OGLAB dashboard.',
                     noplan:
-                      'Subscribe to OGX on OGLAB for two fast models and $2 of tokens every day. This tab picks the plan up on its own — no need to reconnect.',
+                      'OGX Free works right now, with $5 of tokens every day. Subscribe on OGLAB for all three models and $2 of tokens every day, refilled at 00:00 UTC. This tab picks a plan up on its own.',
                     revoked: "OGLAB no longer accepts this install's link. Reconnect to keep using your plan.",
                   }[state() as 'active' | 'noplan' | 'revoked']
                 }
@@ -853,10 +842,12 @@ function OGXSection(props: {
             </span>
           </Row>
 
-          <Show when={state() === 'active'}>
+          {/* A planless link still serves the free model, so its list shows
+              too — only the label that says why it costs nothing changes. */}
+          <Show when={state() === 'active' || state() === 'noplan'}>
             <Row
               label="Models"
-              helper="Included with your plan. Untick any you don't want in the model picker."
+              helper={`${state() === 'noplan' ? 'Available without a plan' : 'Included with your plan'}. Untick any you don't want in the model picker.`}
               stacked
               hidden={modelsHidden()}
             >
@@ -874,7 +865,7 @@ function OGXSection(props: {
                 onAdd={async () => {}}
                 suggestedCollection=""
                 bulk={false}
-                included="Included"
+                included={state() === 'noplan' ? 'Free' : 'Included'}
               />
             </Row>
           </Show>

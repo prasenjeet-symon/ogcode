@@ -70,6 +70,7 @@ demo-recording/
 # once silently swallowed the tracked `plans/GIT_DIFF_PLAN.md`.
 /exponential_equations.tex
 /polynomial_equations.pdf
+/demo-pdfs/
 /GIT_DIFF_PLAN.md
 /MCP_IMPLEMENTATION_PLAN.md
 /MCP_OAUTH_PLAN.md

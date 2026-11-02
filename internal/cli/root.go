@@ -145,9 +145,13 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		p, _ := provider.NewProviderWithConfig("ollama", ollamaKey, ollamaBaseURL)
 		registry.Register(p)
 	}
-	// A connected OG Lab subscription, stored globally and registered only when
-	// the link carries a plan (see session.OGXAccount.HasPlan).
-	if acct, err := session.GetOGXAccount(globalDatabase); err == nil && acct.HasPlan() {
+	// A connected OG Lab account, stored globally and registered whenever the
+	// link exists: the gateway serves ogx-free to every signed-in account, plan
+	// or not, so a planless link is usable. An empty model list is the only
+	// unusable state and it is not known here — the catalogue is fetched
+	// asynchronously. ogx ranks last in ProviderPriority, so registering it
+	// early never displaces a provider the user configured.
+	if acct, err := session.GetOGXAccount(globalDatabase); err == nil && acct != nil {
 		if p, err := provider.NewOGXProvider(acct.Token); err == nil {
 			registry.Register(p)
 		}

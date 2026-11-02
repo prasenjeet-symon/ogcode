@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -38,6 +39,22 @@ func classifyInterruption(err error, step int) *session.Interruption {
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
 		switch {
+		case apiErr.IsFreeAllowance():
+			// Also a 429, but a different one: the free daily allowance is
+			// spent, and no minutes-long window brings it back — it refills
+			// with the UTC day. Carried as a rate limit because waiting is
+			// still the whole fix, only longer, and the reset time is exactly
+			// what RetryAfter means; the wording says which limit ran out so
+			// it reads as an allowance resetting, not a plan budget or a
+			// failed bill.
+			used, limit, reset, _ := apiErr.FreeAllowance()
+			return &session.Interruption{
+				Reason:     session.InterruptRateLimit,
+				Resumable:  true,
+				Detail:     freeAllowanceDetail(used, limit, reset),
+				RetryAfter: reset,
+				Step:       step,
+			}
 		case apiErr.StatusCode == http.StatusTooManyRequests:
 			return &session.Interruption{
 				Reason:     session.InterruptRateLimit,
@@ -69,12 +86,12 @@ func classifyInterruption(err error, step int) *session.Interruption {
 			}
 		case apiErr.IsMalformedBody():
 			// The gateway's terse 400 for a body it could not read: over its
-			// 4 MiB cap, or not valid JSON. The body would be identical on a
+			// cap, or not valid JSON. The body would be identical on a
 			// resume, so the fix is to change what is sent.
 			return &session.Interruption{
 				Reason:    session.InterruptFatal,
 				Resumable: false,
-				Detail:    "The gateway could not read the request body — it is over the 4 MiB limit or malformed. Retry with fewer or smaller attachments; resuming unchanged would send the same body.",
+				Detail:    fmt.Sprintf("The gateway could not read the request body — it is over the %d MiB limit or malformed. Retry with fewer or smaller attachments; resuming unchanged would send the same body.", provider.OGXBodyLimitMiB()),
 				Step:      step,
 			}
 		case apiErr.IsImageRejection():
@@ -107,7 +124,7 @@ func classifyInterruption(err error, step int) *session.Interruption {
 		return &session.Interruption{
 			Reason:    session.InterruptFatal,
 			Resumable: false,
-			Detail:    "The request body is over the gateway's 4 MiB limit. Remove or shrink image attachments and send again; resuming would send the same oversized body.",
+			Detail:    fmt.Sprintf("The request body is over the gateway's %d MiB limit and no image is left to drop. Start a new session or shorten the conversation; resuming would send the same oversized body.", provider.OGXBodyLimitMiB()),
 			Step:      step,
 		}
 	}
@@ -189,6 +206,24 @@ func rateLimitDetail(retryAfter time.Duration) string {
 	}
 	return "The provider's rate limit or session quota is exhausted, and it asked to be left alone for " +
 		retryAfter.Round(time.Second).String() + ". Resume after that."
+}
+
+// freeAllowanceDetail words the spent free daily allowance: how much of it was
+// used, and when the UTC day refills it. A figure the gateway did not publish
+// is left out of the sentence rather than printed as a zero the user never
+// spent.
+func freeAllowanceDetail(used, limit float64, resetUnix int64) string {
+	when := "It refills with the UTC day."
+	if resetUnix > 0 {
+		when = "It resets at " + time.Unix(resetUnix, 0).UTC().Format("15:04 UTC on Mon 2 Jan 2006") + "."
+	}
+	switch {
+	case limit > 0:
+		return fmt.Sprintf("Free daily allowance used up (%.2f of %.2f). %s", used, limit, when)
+	case used > 0:
+		return fmt.Sprintf("Free daily allowance used up (%.2f used). %s", used, when)
+	}
+	return "Free daily allowance used up. " + when
 }
 
 // crashedInterruption is the record for a turn found unfinished at startup. The

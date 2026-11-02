@@ -331,7 +331,19 @@ export const SessionProvider: ParentComponent = (props) => {
   // A memo, not a plain function: half a dozen views read it, and every one of
   // them re-ran the whole scan on each change to the transcript — every poll,
   // every page of history loaded — over every tool part held.
-  const liveTools = createMemo(() => messagesLiveTools(messagesRaw()));
+  //
+  // The session row's status is the authority on whether a loop exists at all:
+  // the server sets it to "running" when the loop starts and clears it when it
+  // exits, and nothing touches a tool part afterwards. So once it says anything
+  // but "running", a part still claiming to run is a write that never landed
+  // and must not hold the transcript's working indicator or the composer's
+  // guidance mode up. Absent status falls through to the transcript scan — a
+  // loop can be live for the moment before its event arrives.
+  const liveTools = createMemo(() => {
+    const status = activeSession()?.status;
+    if (status && status !== 'running') return [];
+    return messagesLiveTools(messagesRaw());
+  });
   const hasRunningTools = createMemo(() => liveTools().length > 0);
 
   // The loop ended abnormally and no message carries the reason. Sticky, not
@@ -1072,39 +1084,58 @@ export const SessionProvider: ParentComponent = (props) => {
     return false;
   }
 
-  // Check if any message in the list has a tool part that is still running or pending.
-  // If the last assistant has finished, stale tool statuses are ignored.
+  // Check if the transcript is still executing a tool.
   function messagesHaveRunningTools(msgs: MessageWithParts[]): boolean {
     return messagesLiveTools(msgs).length > 0;
   }
 
-  // The tool parts still running or pending, in transcript order. If the last
-  // assistant has finished, stale tool statuses are ignored.
+  // The tool parts still running or pending, in transcript order.
+  //
+  // Only the LAST assistant message can hold one. The loop is sequential: it
+  // writes the tool-result user message before asking the model for the next
+  // turn, so a call is only ever executing while it hangs off the assistant
+  // message at the tail. A non-terminal part further back is history — a turn
+  // whose terminal write never landed — and reporting it as live pins
+  // "Running N tools" under a finished turn and holds the composer in guidance
+  // mode on a session nothing is working on.
   function messagesLiveTools(msgs: MessageWithParts[]): ToolPartData[] {
-    // Only treat tools as stale when the loop was explicitly cancelled or errored.
-    // finish="stop" alongside pending tools means execution is still in progress.
-    let toolsAreStale = false;
+    let idx = -1;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].info.role === 'assistant') {
-        const finish = msgs[i].info.finish;
-        // A claimed turn (see isAgentLoopActive) has no loop behind it either,
-        // so its half-finished tools are stale for the same reason.
-        if (finish === 'error' || finish === 'aborted' || msgs[i].info.interrupted) {
-          toolsAreStale = true;
-        }
+        idx = i;
         break;
       }
     }
-    const live: ToolPartData[] = [];
-    if (toolsAreStale) return live;
+    if (idx < 0) return [];
+    const last = msgs[idx];
+    // Only treat tools as stale when the loop was explicitly cancelled or errored.
+    // finish="stop" alongside pending tools means execution is still in progress.
+    // A claimed turn (see isAgentLoopActive) has no loop behind it either, so its
+    // half-finished tools are stale for the same reason.
+    const finish = last.info.finish;
+    if (finish === 'error' || finish === 'aborted' || last.info.interrupted) return [];
+
+    // A call whose result message was already written has finished, whatever its
+    // own part still says. The loop writes the results only after every call in
+    // the step has ended, so a pairing is proof of completion — and it is the
+    // one piece of evidence that needs no restart to take effect.
+    const answered = new Set<string>();
     for (const msg of msgs) {
-      if (msg.parts) {
-        for (const part of msg.parts) {
-          if (part.type === 'tool') {
-            const data = toolData(part);
-            const status = data?.state?.status;
-            if (status === 'running' || status === 'pending') live.push(data!);
-          }
+      if (msg.info.role !== 'user') continue;
+      for (const part of msg.parts || []) {
+        if (part.type !== 'tool') continue;
+        const callId = toolData(part)?.callId;
+        if (callId) answered.add(callId);
+      }
+    }
+
+    const live: ToolPartData[] = [];
+    for (const part of last.parts || []) {
+      if (part.type === 'tool') {
+        const data = toolData(part);
+        const status = data?.state?.status;
+        if ((status === 'running' || status === 'pending') && !(data?.callId && answered.has(data.callId))) {
+          live.push(data!);
         }
       }
     }
@@ -1556,7 +1587,15 @@ export const SessionProvider: ParentComponent = (props) => {
     const updated = last.properties as Session | undefined;
     const id = updated?.id;
     if (!id) return;
-    setSessions((list) => list.map((s) => (s.id === id ? { ...s, ...updated } : s)));
+    // status is omitted from the payload when the server CLEARS it, so a spread
+    // alone keeps the stale "running" and the transcript stays in working mode
+    // — take it from the event, absent included.
+    setSessions((list) => list.map((s) => (s.id === id ? { ...s, ...updated, status: updated.status } : s)));
+    // The event carries the whole row, so patch the open session straight away
+    // as well: its status is what the transcript reads to decide whether
+    // anything is still running, and that must not wait on — or depend on —
+    // the refetch below.
+    setActiveSession((s) => (s && s.id === id ? { ...s, ...updated, status: updated.status } : s));
     if (activeSession()?.id !== id) return;
     if (sessionRowRefreshDebounce) clearTimeout(sessionRowRefreshDebounce);
     sessionRowRefreshDebounce = setTimeout(() => {

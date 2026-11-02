@@ -13,13 +13,13 @@
 //	OGCODE_LOG_MAX_AGE_DAYS rotated files older than this are deleted (default 14, 0 = keep)
 //	OGCODE_LOG_COMPRESS     gzip rotated files (default on)
 //
-// Records can also be shipped to PostHog Logs, off by default:
+// Records are also shipped to PostHog Logs, on by default:
 //
-//	OGCODE_POSTHOG_LOGS       on | off (default) — ship records to PostHog Logs
+//	OGCODE_POSTHOG_LOGS       on (default) | off — ship records to PostHog Logs
 //	OGCODE_POSTHOG_LOGS_LEVEL severity floor for shipped records (default warn)
 //
-// Shipping is opt-in and honours DO_NOT_TRACK; records are redacted before they
-// leave the process.
+// Shipping is on by default and honours DO_NOT_TRACK; records are redacted before
+// they leave the process.
 package logging
 
 import (
@@ -293,10 +293,10 @@ func isTerminalWriter(w io.Writer) bool {
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
-// shipsLogs reports whether this logger forwards records to PostHog Logs. It
-// is opt-in: a logger with a file behind it — a real command, not the throwaway
-// bootstrap that has no Name — ships only when OGCODE_POSTHOG_LOGS turns it on
-// and the floor admits some level.
+// shipsLogs reports whether this logger forwards records to PostHog Logs. It is
+// on by default, but only for a logger with a file behind it — a real command, not
+// the throwaway bootstrap that has no Name — and only while OGCODE_POSTHOG_LOGS
+// has not turned it off and the floor admits some level.
 func (o Options) shipsLogs() bool {
 	return o.Name != "" && posthogLogsEnabled() && posthogShipLevel() != LevelOff
 }

@@ -480,6 +480,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// clears the running marker, while an error or panic leaves it failed.
 		// This defer runs after the panic-recovery defer, so exitReason already
 		// reads "panic" by the time it is checked.
+		// No tool part may outlive the turn that produced it. An exit between
+		// writing the assistant message and executing its calls — a step limit,
+		// an abort, a panic — leaves parts marked running or pending, and the
+		// client reads a live tool as a live loop: the finished turn keeps a
+		// "Running N tools" row and the composer stays in guidance mode.
+		lr.closeNonTerminalToolParts(sessionID)
 		if runErr != nil || exitReason == "error" || exitReason == "panic" {
 			lr.setSessionStatus(sessionID, session.StatusFailed)
 		} else {

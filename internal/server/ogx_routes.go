@@ -38,8 +38,9 @@ import (
 //     connected=true and flips the tab to its active state.
 //
 // Model routing for the plan runs through OG Lab's gateway using this token:
-// the provider is registered from the stored link and serves exactly the models
-// the plan grants.
+// the provider is registered from the stored link alone and serves the models
+// the plan grants, plus ogx-free — the one model every signed-in account gets,
+// planless links included.
 
 // defaultOGXConnectURL is where the browser hand-off goes when the env var is
 // unset. OGX_CONNECT_URL overrides it (with a trailing ? or &, no space) so a
@@ -183,6 +184,25 @@ func ogxStatusBody(acct *session.OGXAccount) map[string]any {
 	}
 }
 
+// ogxFreeModelID is the gateway's id for the model every signed-in account is
+// served, plan or not ("OGX Free"). It belongs to no plan: the count of models
+// a plan grants leaves it out, so a planless link counts zero.
+const ogxFreeModelID = "ogx-free"
+
+// ogxPaidModels turns the gateway's model count into the number of models the
+// plan itself grants. ogx-free is not one of them, and because every signed-in
+// account is served it, it is present in every listing — the whole of a
+// planless one and one of a plan's. The count crosses CheckOGXPlan's boundary as
+// a number, so the free model is subtracted here, at the single place both the
+// writeback below and the status payload get their figure; an empty listing
+// stays at zero.
+func ogxPaidModels(models int) int {
+	if models <= 0 {
+		return 0
+	}
+	return models - 1
+}
+
 // ogxCheckTimeout bounds the live plan check. The settings tab runs it in the
 // background when it opens, so a slow gateway only delays the refresh.
 const ogxCheckTimeout = 10 * time.Second
@@ -194,10 +214,10 @@ const ogxCheckTimeout = 10 * time.Second
 // registry is reloaded, so the plan's models arrive — or leave — without the
 // disconnect-and-reconnect the tab used to ask for.
 //
-// The payload is the status plus "check": "ok" (with the model count),
-// "revoked" when the gateway no longer accepts the token, or "unreachable".
-// Only an "ok" answer changes anything: a gateway that cannot be asked says
-// nothing about the plan.
+// The payload is the status plus "check": "ok" (with the plan's model count,
+// ogx-free not included), "revoked" when the gateway no longer accepts the
+// token, or "unreachable". Only an "ok" answer changes anything: a gateway that
+// cannot be asked says nothing about the plan.
 func (s *Server) handleOGXRefresh(w http.ResponseWriter, r *http.Request) {
 	acct, err := session.GetOGXAccount(s.globalDB)
 	if err != nil {
@@ -225,16 +245,19 @@ func (s *Server) handleOGXRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The gateway's catalogue IS the plan. A link recorded without one that now
-	// lists models has been bought since; the plan id is recorded so the
-	// registration gate lets the provider in. One that lists nothing has lapsed
-	// or been cancelled, and is recorded as planless so the provider — which
-	// could serve nothing — stops outranking the others.
+	// The gateway's catalogue IS the plan, but ogx-free is served to every
+	// signed-in account, so a planless link never lists nothing: it lists the
+	// free model and no plan model. Only a model beyond the free one means a
+	// plan was bought since; the free model alone means none was, or that one
+	// has lapsed or been cancelled, and the link is recorded planless. The
+	// provider itself is registered on the link, so neither answer registers or
+	// drops anything — this only keeps the recorded plan true.
+	paid := ogxPaidModels(models)
 	plan := acct.Plan
 	switch {
-	case models > 0 && !acct.HasPlan():
+	case paid > 0 && !acct.HasPlan():
 		plan = provider.OGXProviderID
-	case models == 0 && acct.HasPlan():
+	case paid == 0 && acct.HasPlan():
 		plan = session.OGXPlanNone
 	}
 	if plan != acct.Plan {
@@ -248,7 +271,7 @@ func (s *Server) handleOGXRefresh(w http.ResponseWriter, r *http.Request) {
 
 	body := ogxStatusBody(acct)
 	body["check"] = "ok"
-	body["models"] = models
+	body["models"] = paid
 	writeJSON(w, http.StatusOK, body)
 }
 

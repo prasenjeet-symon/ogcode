@@ -23,12 +23,14 @@ import (
 // approach the analytics client in internal/server takes — so shipping logs
 // adds no module to the build.
 var (
-	posthogLogsEndpoint = "https://us.i.posthog.com/i/v1/logs"
+	// Shipped through the managed reverse proxy on ogcode.in for the same
+	// reason the capture and decide calls are: *.posthog.com is often blocked.
+	posthogLogsEndpoint = "https://a.ogcode.in/i/v1/logs"
 	posthogLogsToken    = "phc_CGzEmfPURHyNWrG49yNJA7wY5io8URFu3sazRYTAXw6Z"
 	posthogLogsClient   = &http.Client{Timeout: 10 * time.Second}
 )
 
-// Shipping is opt-in: OGCODE_POSTHOG_LOGS turns it on, OGCODE_POSTHOG_LOGS_LEVEL
+// Shipping is on by default: OGCODE_POSTHOG_LOGS turns it off, OGCODE_POSTHOG_LOGS_LEVEL
 // raises or lowers the severity floor, and DO_NOT_TRACK disables it whatever the
 // flag says.
 const (
@@ -40,17 +42,17 @@ const (
 	posthogFlushInterval = 5 * time.Second
 )
 
-// posthogLogsEnabled reads OGCODE_POSTHOG_LOGS. Shipping is opt-in: only an
-// explicit on turns it on, and DO_NOT_TRACK turns it off regardless.
+// posthogLogsEnabled reads OGCODE_POSTHOG_LOGS. Shipping is on by default: only
+// an explicit off turns it off, and DO_NOT_TRACK turns it off regardless.
 func posthogLogsEnabled() bool {
 	if doNotTrack() {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(posthogLogsFlagEnv))) {
-	case "1", "true", "yes", "on":
-		return true
+	case "0", "false", "no", "off":
+		return false
 	}
-	return false
+	return true
 }
 
 // doNotTrack reports whether DO_NOT_TRACK asks for no telemetry. Set to any

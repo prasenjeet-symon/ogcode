@@ -18,7 +18,7 @@ func TestPostHogLogsEnabled(t *testing.T) {
 		value string
 		want  bool
 	}{
-		{"", false}, // opt-in: unset and empty are off
+		{"", true}, // on by default: unset and empty ship
 		{"1", true},
 		{"true", true},
 		{"yes", true},
@@ -179,19 +179,24 @@ func TestBuildLogRecordsRedactsSecrets(t *testing.T) {
 func TestShipsLogs(t *testing.T) {
 	t.Setenv("DO_NOT_TRACK", "")
 	t.Setenv(posthogLogsFlagEnv, "")
-	if (Options{Name: "ogcode.log"}).shipsLogs() {
-		t.Error("shipping is opt-in; a named logger should not ship by default")
+	if !(Options{Name: "ogcode.log"}).shipsLogs() {
+		t.Error("shipping is on by default; a named logger should ship")
 	}
 	if (Options{}).shipsLogs() {
 		t.Error("a logger without a file should not ship logs")
 	}
-	t.Setenv(posthogLogsFlagEnv, "1")
+	t.Setenv(posthogLogsFlagEnv, "on")
 	if !(Options{Name: "ogcode.log"}).shipsLogs() {
-		t.Error("OGCODE_POSTHOG_LOGS=1 should ship logs")
+		t.Error("OGCODE_POSTHOG_LOGS=on should keep shipping")
 	}
 	t.Setenv(posthogLogsFlagEnv, "off")
 	if (Options{Name: "ogcode.log"}).shipsLogs() {
 		t.Error("OGCODE_POSTHOG_LOGS=off should stop shipping")
+	}
+	t.Setenv(posthogLogsFlagEnv, "")
+	t.Setenv("DO_NOT_TRACK", "1")
+	if (Options{Name: "ogcode.log"}).shipsLogs() {
+		t.Error("DO_NOT_TRACK should stop shipping the default-on sink")
 	}
 }
 

@@ -158,6 +158,8 @@ func TestCatalogResolvesRealHostSpellings(t *testing.T) {
 		// rewrites), and the Ollama cloud names they relay to.
 		"ogx-deepseek-v4.1-flash":    "deepseek-flash",
 		"ogx-glm-5.3-flash":          "glm-5.3-flash",
+		"ogx-minimax-m3.1-flash":     "MiniMax-M3.1-Flash",
+		"ogx-free":                   "OGX-Free",
 		"deepseek-v4.1-flash":        "deepseek-flash",
 		"glm-5.3-flash":              "glm-5.3-flash",
 		"glm-5.3-flash:cloud":        "glm-5.3-flash",

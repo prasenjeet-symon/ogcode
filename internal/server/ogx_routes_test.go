@@ -128,24 +128,56 @@ func TestOGXConnectFlow(t *testing.T) {
 	}
 }
 
-// TestOGXPlanlessLinkRegistersNoProvider pins the registration gate: the
-// gateway's catalogue IS the plan, so a link without one would register a
-// provider that can serve nothing yet still outranks the other providers.
-func TestOGXPlanlessLinkRegistersNoProvider(t *testing.T) {
-	s := ogxTestServer(t)
+// TestOGXPlanlessLinkRegistersProviderWithFreeModel pins the registration gate
+// the free tier put there: a link without a plan IS registered, because the
+// gateway serves every signed-in account ogx-free. That model belongs to no
+// plan, so the count the refresh reports — and the writeback that infers
+// whether a plan was bought — stays at zero for a link that has only it.
+func TestOGXPlanlessLinkRegistersProviderWithFreeModel(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		// A planless account is served the free model and nothing else.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]string{
+				{"id": "ogx-free", "object": "model", "owned_by": "oglab"},
+			},
+		})
+	}))
+	defer gateway.Close()
+	t.Setenv("OGX_GATEWAY_URL", gateway.URL+"/v1")
 
+	s := ogxTestServer(t)
 	state := ogxConnect(t, s).Query().Get("state")
 	rec := httptest.NewRecorder()
 	s.handleOGXCallback(rec, httptest.NewRequest(http.MethodGet,
-		"/api/ogx/callback?state="+url.QueryEscape(state)+"&token=ogx-tok-none&plan=none", nil))
+		"/api/ogx/callback?state="+url.QueryEscape(state)+"&token=ogx-tok-free&email=p%40oz.dev&plan=none", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("callback: status %d, body %s", rec.Code, rec.Body.String())
 	}
 	if st := ogxStatus(t, s); st["connected"] != true {
-		t.Fatalf("planless link should still be stored as connected: %v", st)
+		t.Fatalf("planless link should be stored as connected: %v", st)
 	}
-	if p := s.registry.Get(provider.OGXProviderID); p != nil {
-		t.Fatalf("planless link registered a provider: %v", p.ID())
+	// Registered on the link alone: the model list is not known synchronously,
+	// so an empty one cannot be the test.
+	if p := s.registry.Get(provider.OGXProviderID); p == nil {
+		t.Fatal("planless link registered no provider, but the gateway serves it the free model")
+	}
+
+	// The free model is not a plan model: the check finds no plan, the link
+	// stays planless, and the provider stays registered.
+	st := ogxRefresh(t, s)
+	if st["check"] != "ok" || st["models"] != float64(0) {
+		t.Fatalf("free-model-only link = %v, want an ok check counting no plan models", st)
+	}
+	if st["plan"] != "none" {
+		t.Fatalf("free model counted as a plan: %v", st)
+	}
+	if p := s.registry.Get(provider.OGXProviderID); p == nil {
+		t.Fatal("a free-only link dropped its provider after a check")
 	}
 }
 
@@ -229,17 +261,20 @@ func TestOGXRefreshFollowsTheGateway(t *testing.T) {
 		mu.Unlock()
 	}
 
-	// Connected before buying: stored planless, no provider.
+	// Connected before buying: stored planless, and registered all the same —
+	// the gateway serves a planless link the free model.
 	s := ogxTestServer(t)
 	state := ogxConnect(t, s).Query().Get("state")
 	s.handleOGXCallback(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet,
 		"/api/ogx/callback?state="+url.QueryEscape(state)+"&token=ogx-tok-later&email=p%40oz.dev&plan=none", nil))
-	if p := s.registry.Get(provider.OGXProviderID); p != nil {
-		t.Fatal("a planless link registered a provider")
+	if p := s.registry.Get(provider.OGXProviderID); p == nil {
+		t.Fatal("a planless link registered no provider")
 	}
 
-	// The plan is bought on the web side: a refresh finds it and registers it.
-	set([]string{"deepseek-v4.1-flash", "glm-5.3-flash"}, "")
+	// The plan is bought on the web side: a refresh finds it and records it.
+	// ogx-free is in every listing and is not one of the plan's models, so the
+	// count is the two bought ones.
+	set([]string{"ogx-free", "deepseek-v4.1-flash", "glm-5.3-flash"}, "")
 	st := ogxRefresh(t, s)
 	if st["check"] != "ok" || st["models"] != float64(2) || st["plan"] != provider.OGXProviderID {
 		t.Fatalf("after buying = %v, want an ok check that found the plan's 2 models", st)
@@ -248,13 +283,14 @@ func TestOGXRefreshFollowsTheGateway(t *testing.T) {
 		t.Fatal("refresh found a plan but did not register the provider")
 	}
 
-	// The plan lapses: the next refresh records it and drops the provider.
-	set(nil, "")
-	if st := ogxRefresh(t, s); st["check"] != "ok" || st["plan"] != "none" {
-		t.Fatalf("after lapsing = %v, want the link recorded planless", st)
+	// The plan lapses: the next refresh records it planless, but the provider
+	// stays — the free model is still served through it.
+	set([]string{"ogx-free"}, "")
+	if st := ogxRefresh(t, s); st["check"] != "ok" || st["plan"] != "none" || st["models"] != float64(0) {
+		t.Fatalf("after lapsing = %v, want the link recorded planless with no plan models", st)
 	}
-	if p := s.registry.Get(provider.OGXProviderID); p != nil {
-		t.Fatal("a lapsed plan's provider is still registered")
+	if p := s.registry.Get(provider.OGXProviderID); p == nil {
+		t.Fatal("a lapsed plan dropped the provider its free model is served through")
 	}
 
 	// A revoked token and an unreachable gateway say which, and change nothing.

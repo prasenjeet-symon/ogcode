@@ -7,10 +7,10 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 )
 
-// TestOGXAccountHasPlan pins the registration gate. The gateway's model
-// catalogue IS the plan, so a link without one must not be treated as usable:
-// it would register a provider that can serve nothing yet still outranks the
-// other providers.
+// TestOGXAccountHasPlan pins what a stored plan value means: "none" and a
+// missing one are a link without a plan. That link is still registered — the
+// gateway serves it the free model — so this is a plan-tracking signal, not a
+// registration gate.
 func TestOGXAccountHasPlan(t *testing.T) {
 	cases := []struct {
 		plan string
