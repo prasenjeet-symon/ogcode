@@ -1,5 +1,5 @@
 ---
-title: "We ditched worktrees: one folder, one rule"
+title: "Your coding agents don't need git worktrees"
 description: "When you let many AI agents work on one project, they can overwrite each other. The usual fix is giving everyone a separate copy of the project, then merging it all by hand. Ogcode skips that and uses one simple rule instead: never write over a change you haven't seen."
 pubDate: 2026-10-28
 tags: ["agents", "parallelism", "editing"]
