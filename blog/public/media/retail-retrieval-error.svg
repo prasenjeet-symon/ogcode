@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 510" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
+<title id="t">How far off retrieval was, question by question</title>
+<desc id="d">Ten rows showing the retrieval lane's answer divided by the true figure, on a log scale from exactly right to ten thousand times wrong. Total net sales came back 1,241 times too low, best month 304 times too low, top product 1,544 times too low, top 20 share 3.1 times too high, top customer 246 times too low, UK share 1.2 times too high, cancellation rate 117 times too low, busiest hour 425 times too low, rows with no customer ID 698 times too low. For best non-UK market nothing was found, because not one of the five windows held a non-UK row. The query lane matched all ten.</desc>
+<rect width="960" height="510" fill="#151414"/>
+<text x="24" y="32" fill="#fffbf5" font-size="15" font-weight="600" letter-spacing="0.4">How far off retrieval was, question by question</text>
+<text x="24" y="54" fill="#9a9390" font-size="12">the retrieval answer divided by the true figure &#183; log scale, so each step right is ten times further off</text>
+<text x="24" y="74" fill="#6b6462" font-size="11.5">same ten questions, same 100,000 rows &#183; the query lane landed on the true figure every time</text>
+
+<!-- decade grid -->
+<line x1="250" y1="98" x2="250" y2="436" stroke="#555" stroke-width="1"/>
+<line x1="410" y1="98" x2="410" y2="436" stroke="rgba(255,255,255,0.07)"/>
+<line x1="570" y1="98" x2="570" y2="436" stroke="rgba(255,255,255,0.07)"/>
+<line x1="730" y1="98" x2="730" y2="436" stroke="rgba(255,255,255,0.07)"/>
+<line x1="890" y1="98" x2="890" y2="436" stroke="rgba(255,255,255,0.07)"/>
+
+<text x="250" y="456" fill="#fffbf5" font-size="11" text-anchor="middle">exact</text>
+<text x="410" y="456" fill="#9a9390" font-size="11" text-anchor="middle">10x</text>
+<text x="570" y="456" fill="#9a9390" font-size="11" text-anchor="middle">100x</text>
+<text x="730" y="456" fill="#9a9390" font-size="11" text-anchor="middle">1,000x</text>
+<text x="890" y="456" fill="#9a9390" font-size="11" text-anchor="middle">10,000x</text>
+
+<!-- q1 total net sales -->
+<text x="24" y="122" fill="#fffbf5" font-size="12">Total net sales</text>
+<rect x="250" y="110" width="495.0" height="16" rx="2" fill="#ff7038"/>
+<text x="753.0" y="122" fill="#fffbf5" font-size="11.5">1,241x low</text>
+
+<!-- q2 best month -->
+<text x="24" y="156" fill="#fffbf5" font-size="12">Best month</text>
+<rect x="250" y="144" width="397.3" height="16" rx="2" fill="#ff7038"/>
+<text x="655.3" y="156" fill="#fffbf5" font-size="11.5">304x low</text>
+
+<!-- q3 top product -->
+<text x="24" y="190" fill="#fffbf5" font-size="12">Top product</text>
+<rect x="250" y="178" width="510.2" height="16" rx="2" fill="#ff7038"/>
+<text x="768.2" y="190" fill="#fffbf5" font-size="11.5">1,544x low</text>
+
+<!-- q4 top 20 share -->
+<text x="24" y="224" fill="#fffbf5" font-size="12">Top 20 share</text>
+<rect x="250" y="212" width="78.2" height="16" rx="2" fill="#9a9390"/>
+<text x="336.2" y="224" fill="#fffbf5" font-size="11.5">3.1x high</text>
+
+<!-- q5 top customer -->
+<text x="24" y="258" fill="#fffbf5" font-size="12">Top customer</text>
+<rect x="250" y="246" width="382.6" height="16" rx="2" fill="#ff7038"/>
+<text x="640.6" y="258" fill="#fffbf5" font-size="11.5">246x low</text>
+
+<!-- q6 uk share -->
+<text x="24" y="292" fill="#fffbf5" font-size="12">UK share</text>
+<rect x="250" y="280" width="11.5" height="16" rx="2" fill="#9a9390"/>
+<text x="269.5" y="292" fill="#fffbf5" font-size="11.5">1.2x high</text>
+
+<!-- q7 cancellation rate -->
+<text x="24" y="326" fill="#fffbf5" font-size="12">Cancellation rate</text>
+<rect x="250" y="314" width="330.9" height="16" rx="2" fill="#ff7038"/>
+<text x="588.9" y="326" fill="#fffbf5" font-size="11.5">117x low</text>
+
+<!-- q8 busiest hour -->
+<text x="24" y="360" fill="#fffbf5" font-size="12">Busiest hour</text>
+<rect x="250" y="348" width="420.5" height="16" rx="2" fill="#ff7038"/>
+<text x="678.5" y="360" fill="#fffbf5" font-size="11.5">425x low</text>
+
+<!-- q9 missing customer ids -->
+<text x="24" y="394" fill="#fffbf5" font-size="12">Rows with no customer ID</text>
+<rect x="250" y="382" width="455.0" height="16" rx="2" fill="#ff7038"/>
+<text x="713.0" y="394" fill="#fffbf5" font-size="11.5">698x low</text>
+
+<!-- q10 best non-uk market -->
+<text x="24" y="428" fill="#fffbf5" font-size="12">Best non-UK market</text>
+<text x="254" y="428" fill="#ef5b5b" font-size="11.5">nothing found &#183; no non-UK row in the five windows</text>
+
+<!-- legend -->
+<rect x="24" y="474" width="11" height="11" rx="2" fill="#ff7038"/>
+<text x="41" y="483" fill="#9a9390" font-size="11">answer too low</text>
+<rect x="150" y="474" width="11" height="11" rx="2" fill="#9a9390"/>
+<text x="167" y="483" fill="#9a9390" font-size="11">answer too high</text>
+<text x="24" y="500" fill="#9a9390" font-size="11">every true figure is an independent count of the same 100,000 rows &#183; 4,092 windows, BM25, top five</text>
+</svg>

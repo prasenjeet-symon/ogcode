@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
+<title id="t">Three harnesses, one question: tokens into the model</title>
+<desc id="d">Horizontal bars on a log scale from ten to ten million tokens per question. Dumping the sheet sends about 2,090,000 tokens, roughly ten times past a 200,000-token context window. A retrieval pipeline sends about 2,540 tokens. Ogcode sends 59 tokens on average, measured between 49 and 87 across ten questions. Retrieval therefore costs 43 times a query, and the dump costs 823 times retrieval and 35,000 times a query.</desc>
+<rect width="960" height="400" fill="#151414"/>
+<text x="24" y="32" fill="#fffbf5" font-size="15" font-weight="600" letter-spacing="0.4">Three harnesses, one question: tokens into the model</text>
+<text x="24" y="54" fill="#9a9390" font-size="12">the same 100,000-row cut of the retail workbook &#183; log scale, because the spread is 35,000 fold</text>
+<text x="24" y="74" fill="#6b6462" font-size="11.5">every bar is what a single question puts in front of the model</text>
+
+<!-- decade grid -->
+<line x1="150" y1="110" x2="150" y2="310" stroke="rgba(255,255,255,0.07)"/>
+<line x1="251.7" y1="110" x2="251.7" y2="310" stroke="rgba(255,255,255,0.07)"/>
+<line x1="353.3" y1="110" x2="353.3" y2="310" stroke="rgba(255,255,255,0.07)"/>
+<line x1="455" y1="110" x2="455" y2="310" stroke="rgba(255,255,255,0.07)"/>
+<line x1="556.7" y1="110" x2="556.7" y2="310" stroke="rgba(255,255,255,0.07)"/>
+<line x1="658.3" y1="110" x2="658.3" y2="310" stroke="rgba(255,255,255,0.07)"/>
+<line x1="760" y1="110" x2="760" y2="310" stroke="rgba(255,255,255,0.07)"/>
+
+<text x="150" y="330" fill="#9a9390" font-size="11" text-anchor="middle">10</text>
+<text x="251.7" y="330" fill="#9a9390" font-size="11" text-anchor="middle">100</text>
+<text x="353.3" y="330" fill="#9a9390" font-size="11" text-anchor="middle">1k</text>
+<text x="455" y="330" fill="#9a9390" font-size="11" text-anchor="middle">10k</text>
+<text x="556.7" y="330" fill="#9a9390" font-size="11" text-anchor="middle">100k</text>
+<text x="658.3" y="330" fill="#9a9390" font-size="11" text-anchor="middle">1M</text>
+<text x="760" y="330" fill="#9a9390" font-size="11" text-anchor="middle">10M</text>
+<text x="455" y="352" fill="#9a9390" font-size="11.5" text-anchor="middle">tokens per question &#183; log scale</text>
+
+<!-- a context window, for scale -->
+<line x1="587.2" y1="110" x2="587.2" y2="310" stroke="#6b6462" stroke-width="1" stroke-dasharray="4 4"/>
+<text x="587.2" y="306" fill="#6b6462" font-size="9.5" text-anchor="middle">200k window</text>
+
+<!-- row 1: dump -->
+<text x="24" y="146" fill="#fffbf5" font-size="12.5" font-weight="600">Dump the sheet</text>
+<text x="24" y="163" fill="#9a9390" font-size="10.5">all 100,000 rows</text>
+<rect x="150" y="133" width="540.9" height="34" rx="3" fill="#5c5856"/>
+<text x="700.9" y="154" fill="#fffbf5" font-size="13" font-weight="600">&#8776;2,090,000</text>
+<text x="800" y="142" fill="#9a9390" font-size="10.5">past every window,</text>
+<text x="800" y="157" fill="#9a9390" font-size="10.5">the model sees the cut</text>
+
+<!-- row 2: retrieval -->
+<text x="24" y="211" fill="#fffbf5" font-size="12.5" font-weight="600">Retrieval</text>
+<text x="24" y="228" fill="#9a9390" font-size="10.5">top 5 of 4,092</text>
+<rect x="150" y="198" width="244.5" height="34" rx="3" fill="#9a9390"/>
+<text x="404.5" y="219" fill="#fffbf5" font-size="13" font-weight="600">&#8776;2,540</text>
+<text x="800" y="207" fill="#9a9390" font-size="10.5">0.12% of the file,</text>
+<text x="800" y="222" fill="#9a9390" font-size="10.5">plus an embedding trip</text>
+
+<!-- row 3: ogcode -->
+<text x="24" y="276" fill="#ff7038" font-size="12.5" font-weight="600">Query the file</text>
+<text x="24" y="293" fill="#9a9390" font-size="10.5">profile, then SQL</text>
+<rect x="150" y="263" width="78.4" height="34" rx="3" fill="#ff7038"/>
+<text x="238.4" y="284" fill="#fffbf5" font-size="13" font-weight="600">59 avg</text>
+<text x="800" y="272" fill="#9a9390" font-size="10.5">measured 49 to 87,</text>
+<text x="800" y="287" fill="#9a9390" font-size="10.5">one SQL answer each</text>
+
+<text x="24" y="372" fill="#9a9390" font-size="11">retrieval costs 43x a query &#183; the dump costs 823x retrieval, 35,000x a query</text>
+<text x="24" y="390" fill="#6b6462" font-size="11">and no window holds the dump, so the model answers from whatever survived the cut.</text>
+</svg>

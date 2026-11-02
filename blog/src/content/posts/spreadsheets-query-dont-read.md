@@ -256,6 +256,14 @@ four, the same convention as the PDF post: estimates, trust the shape.
 | How it fails quietly | the blob is cut and the model answers from what survived | the retriever returns a thin slice, and a sum over a slice looks just like a sum | it does not, a wrong query returns a visibly wrong number |
 | Cost as questions pile up | the whole sheet rides every turn | flat, rebuilt from zero each time | flat, and a follow-up is one more line of SQL |
 
+![Horizontal bar chart on a log scale of the tokens one question puts in front of the model. Dumping the sheet sends about 2,090,000 tokens, roughly ten times past a 200,000-token context window. A retrieval pipeline sends about 2,540 tokens, and a SQL query against the file sends 59 tokens on average, between 49 and 87 across ten questions. Retrieval costs 43 times a query, and the dump costs 823 times retrieval and 35,000 times a query.](/blog/media/retail-three-way-cost.svg)
+
+Three bars, and the arithmetic between them is the whole argument: a query is 43
+times cheaper than retrieval per question, and the dump is 823 times dearer than
+retrieval and 35,000 times dearer than a query. The dump is also the only lane
+that overshoots a context window, so its price is not a bill anybody pays: it is
+the size of the sheet the model never gets to read.
+
 ## Ten questions, asked, answered, and measured
 
 The table above is arithmetic on a file size, and estimates are cheap. So we
@@ -311,6 +319,8 @@ That lane was wrong on all ten.
 - Missing customer IDs: 50 of 122 rows. True: 34,915 rows.
 - Best non-UK market: nothing. Not one of the five windows contained a
   non-UK row.
+
+![Horizontal bar chart, one row per question, of the retrieval lane's answer divided by the true figure on a log scale. Total net sales came back 1,241 times too low, best month 304 times too low, top product 1,544 times too low, top 20 share 3.1 times too high, top customer 246 times too low, UK share 1.2 times too high, cancellation rate 117 times too low, busiest hour 425 times too low, and rows with no customer ID 698 times too low. For best non-UK market nothing was found at all. The query lane matched all ten.](/blog/media/retail-retrieval-error.svg)
 
 None of those are careless errors, and that is the point. Every one has the
 same shape: retrieval returns a representative sample, and an aggregate over
