@@ -207,7 +207,7 @@ once in the background, split across twelve sessions, and never enters the
 working conversation at all. Amortized over every question this file will
 ever get asked, it is the cheapest line in the table.
 
-![Line chart on a log scale: cumulative PDF tokens entering the model across ten questions on the 1,151-page book. Dump climbs from 532,000 to about 5,300,000. RAG and Ogcode start tied at 1,500, then Ogcode flattens to roughly 12,000 by question ten while RAG reaches 15,000, with an occasional labels-only question pulling it lower.](/blog/media/pdfs-cumulative-ten-questions.svg)
+![Line chart on a log scale: cumulative PDF tokens entering the model across ten questions on the 1,151-page book. Dump climbs from 532,000 to about 5,300,000. RAG and Ogcode start tied at 1,500, then Ogcode flattens to roughly 12,000 by question ten while RAG reaches 15,000, with an occasional labels-only question pulling it lower.](/blog/media/pdfs-cumulative-ten-questions.svg?v=2)
 
 Speed is not close either. The catalog lives in SQLite, so pdf_index never
 opens the 44.7 MB file: a label lookup is a database read, effectively
@@ -218,7 +218,7 @@ a faster model. Five hundred thousand tokens of book slow down every answer
 in the session, on the models that can hold it at all, whether or not the
 question touches the book.
 
-![Bar chart: tokens of PDF entering the model per question, dump 532,000 versus RAG 1,500 versus Ogcode 900, on the 1,151-page test book](/blog/media/pdfs-tokens-per-question.svg)
+![Bar chart: tokens of PDF entering the model per question, dump 532,000 versus RAG 1,500 versus Ogcode 900, on the 1,151-page test book](/blog/media/pdfs-tokens-per-question.svg?v=2)
 
 The shape of the result is the point. When the file fits in your window, the
 argument is "fewer tokens"; at 1,151 pages it is "fewer tokens versus a file
