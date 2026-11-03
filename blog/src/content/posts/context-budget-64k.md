@@ -37,8 +37,10 @@ Four different kinds of study keep landing on the same answer, and none of them 
 
 Read that again. The middle of the pile scored worse than having nothing to read. Same model, same question, same facts. The only thing that moved was position.
 
-<figure>
-  <img src="/blog/media/ctx-position.svg" alt="Bar chart: how often a model answered correctly when the one useful document sat at the start of a twenty document stack, at the end, or in the middle. First scores 75.8 percent, last 63.2 percent, middle 53.8 percent, and handing over no documents at all scores 56.1 percent" width="960" height="372" loading="lazy">
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/ctx-position.svg" alt="Bar chart: how often a model answered correctly when the one useful document sat at the start of a twenty document stack, at the end, or in the middle. First scores 75.8 percent, last 63.2 percent, middle 53.8 percent, and handing over no documents at all scores 56.1 percent" width="960" height="372" loading="lazy">
+  </div>
   <figcaption>Same model, same question, one document moved. Getting the evidence into the middle of the pile scored worse than handing over nothing to read.</figcaption>
 </figure>
 
@@ -50,8 +52,10 @@ The most uncomfortable result comes from a team that gave a model perfect retrie
 
 **Where the slide starts.** Databricks ran more than two thousand evaluations across thirteen models and found the curve rises before it falls. Llama-3.1-405B peaked and started slipping after about 32,000 tokens. GPT-4-0125-preview peaked around 64,000. Chroma tested eighteen models, changing nothing but the length, and found quality slipping unevenly the whole way up, with no safe size anywhere.
 
-<figure>
-  <img src="/blog/media/ctx-cliff.svg" alt="Chart: where six long context studies find quality starts to slide, on a log scale from one thousand to one million tokens. Levy at three thousand, Du at thirty thousand, RULER at thirty two thousand, NoLiMa at thirty two thousand, Llama 3.1 405B at thirty two thousand, GPT 4 0125 at sixty four thousand. A shaded band runs from thirty two to sixty four thousand, where four of the six land. Two brackets under the axis mark one Ogcode step and one advertised window" width="960" height="470" loading="lazy">
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/ctx-cliff.svg" alt="Chart: where six long context studies find quality starts to slide, on a log scale from one thousand to one million tokens. Levy at three thousand, Du at thirty thousand, RULER at thirty two thousand, NoLiMa at thirty two thousand, Llama 3.1 405B at thirty two thousand, GPT 4 0125 at sixty four thousand. A shaded band runs from thirty two to sixty four thousand, where four of the six land. Two brackets under the axis mark one Ogcode step and one advertised window" width="960" height="470" loading="lazy">
+  </div>
   <figcaption>Six independent studies on one log scale. The shaded band is 32,000 to 64,000 tokens, where four of the six land. The two brackets underneath compare the size of one Ogcode step with the size of one advertised window.</figcaption>
 </figure>
 
@@ -69,8 +73,10 @@ Four costs arrive together. Only one of them shows up on your bill.
 
 That part is not a research claim, so we measured it. One question, one model, and only one thing changing: how much text came before the question, from about two thousand tokens up to almost a million.
 
-<figure>
-  <img src="/blog/media/ctx-speed.svg" alt="Two charts over request size, from one thousand to a million tokens. Above, seconds to the first token climbs as the input grows, from eight tenths of a second at two thousand tokens to seventy five seconds at nine hundred and seventy four thousand. Two shaded bands mark five to twenty thousand tokens, where a single step sits, and one hundred and twenty eight thousand to a million, where a request carrying the whole window sits. Below, tokens written per second stays broadly flat, between about two hundred and three hundred, until the largest request" width="960" height="560" loading="lazy">
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/ctx-speed.svg" alt="Two charts over request size, from one thousand to a million tokens. Above, seconds to the first token climbs as the input grows, from eight tenths of a second at two thousand tokens to seventy five seconds at nine hundred and seventy four thousand. Two shaded bands mark five to twenty thousand tokens, where a single step sits, and one hundred and twenty eight thousand to a million, where a request carrying the whole window sits. Below, tokens written per second stays broadly flat, between about two hundred and three hundred, until the largest request" width="960" height="560" loading="lazy">
+  </div>
   <figcaption>Measured in November 2026. One model, one question, twelve input sizes from two thousand tokens to nine hundred and seventy four thousand. Every size was sent as a fresh prompt so nothing was served from cache, streamed, with a short answer, and the median of three runs is shown. The bands are the comparison that matters: every step Ogcode sends lands in the left one, and a request that hands the model its whole window lands in the right one.</figcaption>
 </figure>
 

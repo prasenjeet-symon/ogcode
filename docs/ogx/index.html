@@ -703,6 +703,16 @@
     @media (max-width: 340px) {
       .footer-grid { grid-template-columns: minmax(0, 1fr); }
     }
+    /* On a phone the inline text links are the smallest target on the page:
+       grow the hit area past 24px without moving the line box (vertical
+       padding on an inline box paints outside the line height). */
+    @media (max-width: 640px) {
+      .link,
+      .footer-col a { padding-block: 4px; }
+      .hero-meth a,
+      .footer-legal a,
+      .motion-btn { padding-block: 5px; }
+    }
 
 
     /* ══ This page ══════════════════════════════════════════════
@@ -766,7 +776,7 @@
       .hero-stats li:nth-child(even) { border-left: 1px solid rgba(255,255,255,.3); }
       .hero-stats li:nth-child(n+3) { border-top: 1px solid rgba(255,255,255,.3); }
       .hero-stats b { font-size: 22px; }
-      .hero-meth { margin-top: 12px; font-size: 11.5px; }
+      .hero-meth { margin-top: 12px; font-size: 12.5px; }
     }
 
     /* small mono footnote under a section's numbers */

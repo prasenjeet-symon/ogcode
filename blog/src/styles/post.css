@@ -340,6 +340,40 @@
   text-align: center;
 }
 
+/* ══ Wide charts: pan, never shrink ══════════════════════════════
+   The three measured charts are drawn on a 960-unit canvas, so a phone
+   column scales the chart's own type down to four or five pixels. Below
+   the width where the reading column reaches its 720px cap the drawing
+   keeps the size it was drawn at inside a horizontal scroller: the
+   labels stay readable there and a swipe reaches the right-hand end.
+   Above it the chart scales exactly as it always has. */
+.bp-chart-pan {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-4) transparent;
+}
+.bp-chart-pan::-webkit-scrollbar { height: 6px; }
+.bp-chart-pan::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 6px; }
+.bp-chart-pan:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 3px; border-radius: var(--r-lg); }
+
+@media (max-width: 840px) {
+  .bp-chart-pan > img {
+    width: 960px;
+    max-width: none;
+    margin-inline: 0;
+  }
+  /* The cut edge is the only cue that more chart sits to the right. */
+  .bp-chart::before {
+    content: "swipe to see the whole chart →";
+    display: block;
+    margin-bottom: 9px;
+    font: 400 11px/1 var(--mono);
+    color: var(--dim);
+    text-align: right;
+  }
+}
+
 .bp-prose hr {
   height: 1px;
   margin-block: 2.6em;
@@ -433,6 +467,8 @@
   .bp-prose pre { padding: 16px; font-size: 13px; border-radius: 10px; }
   .bp-prose pre[data-language]::before { margin-top: -17px; margin-right: -3px; }
   .bp-prose blockquote { padding: 14px 18px; }
+  /* The single fallback link is shorter than a comfortable tap target. */
+  .bp-comments-fallback a.link { display: inline-block; padding-block: 4px; }
 }
 @media (max-width: 520px) {
   .bp-author { flex-direction: column; gap: 16px; }

@@ -795,19 +795,28 @@ main > *:not(.guides) { position: relative; z-index: 1; }
    Match the site's tokens. The bundle defaults to a light card; here
    it inherits the current theme and reads as part of the sidebar. */
 .ds-search .pagefind-ui { --pagefind-ui-scale: .78; --pagefind-ui-primary: var(--text); }
-.ds-search .pagefind-ui__form { margin: 0; }
+.ds-search .pagefind-ui__form { position: relative; margin: 0; }
 .ds-search .pagefind-ui__search-input {
-  width: 100%; height: 38px; padding: 0 12px;
+  width: 100%; height: 38px; padding: 0 58px 0 12px;
   border: 1px solid var(--line-2); border-radius: var(--r-md);
   background: var(--bg-2); color: var(--text); font-size: 14px;
   transition: border-color .2s, background .2s;
 }
 .ds-search .pagefind-ui__search-input::placeholder { color: var(--dim); }
 .ds-search .pagefind-ui__search-input:focus { outline: none; border-color: var(--brand-line); background: var(--bg); }
+/* The bundle ships these positions in pagefind-ui.css, which this site does
+   not load: lay the clear button inside the field and hide it while the
+   field is empty, instead of leaving it in flow as a stray label. Pin it to
+   the top: the results drawer is in flow inside this same form, so a centred
+   button would slide down into the results once a query runs. */
 .ds-search .pagefind-ui__search-clear {
-  padding: 0 8px; color: var(--dim); font: 500 12px/1 var(--mono);
-  background: none; border: 0;
+  position: absolute; top: 3px; right: 3px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; padding: 0 8px;
+  color: var(--dim); font: 500 12px/1 var(--mono);
+  background: none; border: 0; border-radius: var(--r-sm); cursor: pointer;
 }
+.ds-search .pagefind-ui__suppressed { opacity: 0; pointer-events: none; }
 .ds-search .pagefind-ui__drawer { background: transparent; }
 .ds-search .pagefind-ui__results-area { margin-top: 10px; }
 .ds-search .pagefind-ui__result { padding: 12px 0; border-top: 1px solid var(--line); }
@@ -832,6 +841,12 @@ main > *:not(.guides) { position: relative; z-index: 1; }
   .ds-frame { display: block; padding-top: calc(var(--nav-h) + 20px); }
   .ds-side { position: static; }
   .ds-side-in { max-height: none; overflow: visible; padding: 0; }
+  /* The sidebar heading and its full nav are repeated by the disclosure
+     below, so only the search box survives here. */
+  .ds-side-top, .ds-nav-desktop { display: none; }
+  .ds-search { margin-bottom: 20px; }
+  .ds-search .pagefind-ui__search-input { font-size: 16px; }
+  .ds-crumbs a { display: inline-flex; align-items: center; min-height: 24px; }
   .ds-mobile {
     border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2);
     padding: 4px 10px; margin-bottom: 24px;
@@ -859,7 +874,9 @@ main > *:not(.guides) { position: relative; z-index: 1; }
   .cta { padding: 72px 20px 124px; }
   .cta-sm { --glow: 100% 40%; padding: 64px 20px 76px; }
   .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px 24px; }
+  .footer-col a { display: inline-block; padding: 3px 0; }
   .footer-bottom { flex-direction: column; align-items: flex-start; margin-top: 56px; }
+  .footer-legal a { display: inline-block; padding: 4px 0; }
   .ds-prose { font-size: 16px; line-height: 1.68; }
   .ds-prose h2 { margin-top: 46px; padding-top: 26px; font-size: 23px; }
   .ds-prose h3 { margin-top: 34px; font-size: 18.5px; }
