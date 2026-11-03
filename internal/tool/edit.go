@@ -45,7 +45,7 @@ func (EditTool) Parameters() json.RawMessage {
 						"old_string": {"type": "string", "description": "Exact text to find, including indentation. Copy it from what a read of this file shows — leading spaces and tabs exactly as printed, no line-number prefix, no truncation marker — and never retype it from memory: an anchor rebuilt from recollection almost never carries the file's bytes. Must match EXACTLY ONE place in the file unless replace_all is true. When a block repeats — the same step in several CI jobs, the same line in several functions — extend it with neighbouring lines until only the intended occurrence matches. Write newlines as plain \\n even in a CRLF file: when every line of the file ends in CRLF, the tool matches and writes the file's own endings."},
 						"new_string": {"type": "string", "description": "Text to replace it with. Always send it, even when replacing with nothing: \"\" means delete old_string, and omitting the field is rejected rather than read as a deletion."},
 						"replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match. Use when the text genuinely should change everywhere, such as removing one repeated step from every job in a workflow. The result reports how many were replaced."},
-						"expected_count": {"type": "integer", "description": "Optional assertion: fail unless old_string matches exactly this many times. Worth setting alongside replace_all, where a miscounted anchor would otherwise rewrite more of the file than intended."}
+						"expected_count": {"type": "integer", "description": "Optional assertion: fail unless old_string matches exactly this many times. Must be a non-negative integer — 0 (the default) checks nothing. Worth setting alongside replace_all, where a miscounted anchor would otherwise rewrite more of the file than intended."}
 					},
 					"required": ["old_string", "new_string"]
 				}
@@ -287,6 +287,12 @@ func resolveHunk(h editHunk) (resolvedHunk, error) {
 	}
 	if h.NewString == nil {
 		return resolvedHunk{}, fmt.Errorf("new_string is missing — send it explicitly, using \"\" if deleting old_string is what you meant")
+	}
+	if h.ExpectedCount < 0 {
+		// The apply path only consults the value when it is > 0, so a
+		// negative one silently passed for "no assertion" — an argument the
+		// caller got wrong while believing an assertion was active.
+		return resolvedHunk{}, fmt.Errorf("expected_count %d is negative — it must be a non-negative integer asserting how many times old_string matches; omit it (or pass 0) for no assertion", h.ExpectedCount)
 	}
 	return resolvedHunk{
 		oldStr:        h.OldString,

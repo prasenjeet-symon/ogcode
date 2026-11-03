@@ -39,6 +39,9 @@ func (PdfIndexTool) Parameters() json.RawMessage {
 }
 
 func (t PdfIndexTool) Execute(_ context.Context, args json.RawMessage, tctx Context) (Result, error) {
+	if t.Store == nil {
+		return Result{Title: "PDF Index", Output: "the document index is not available in this environment"}, nil
+	}
 	var params struct {
 		Path string `json:"path"`
 	}

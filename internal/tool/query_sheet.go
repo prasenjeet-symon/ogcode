@@ -142,7 +142,7 @@ const (
 func (QuerySheetTool) ID() string { return "query_sheet" }
 
 func (QuerySheetTool) Description() string {
-	return "Run one read-only SQL query against a spreadsheet file (CSV, TSV, XLSX or XLSM). Every sheet becomes a SQLite table named after the sheet (a CSV is loaded as Sheet1), with column types inferred from the data. Use it for filtering, aggregating, counting or sampling structured data — far cheaper than reading a large file whole. The result lists each sheet's schema, then the query output as CSV, capped at 200 rows."
+	return "Run one read-only SQL query against a spreadsheet file (CSV, TSV, XLSX or XLSM). Every sheet becomes a SQLite table named after the sheet (a CSV is loaded as Sheet1), with column types inferred from the data. Use it for filtering, aggregating, counting or sampling structured data — far cheaper than reading a large file whole. The result lists each sheet's schema, then the query output as CSV, capped at 200 rows. At most the first 100,000 rows of a sheet are loaded into the tables (the result notes when rows past the cap stayed out), so an aggregate over a bigger sheet is an aggregate over its head."
 }
 
 func (QuerySheetTool) Parameters() json.RawMessage {
@@ -152,7 +152,7 @@ func (QuerySheetTool) Parameters() json.RawMessage {
 		"properties": {
 			"file": {
 				"type": "string",
-				"description": "Path to the spreadsheet file (absolute or relative to session directory)"
+				"description": "Path to the spreadsheet file (absolute or relative to session directory). Preferred spelling; 'path' is also accepted (the pdf_index/docx_index name)."
 			},
 			"sql": {
 				"type": "string",
@@ -289,6 +289,70 @@ func countSQLStatements(stripped string) int {
 		n++
 	}
 	return n
+}
+
+// maskSQLLiterals replaces the text inside single- and double-quoted literals
+// and backtick-quoted identifiers with a placeholder, keeping the quote
+// characters, so the write-token scan only sees keywords that stand unquoted.
+// Doubling escapes are spent exactly the way stripSQLComments spends them — an
+// escaped pair is consumed inside the literal, never ending it — and SQLite has
+// no backslash escape, so a quote always ends its literal and the masking with
+// it. An unbalanced quote masks to the end of the text, which can only widen
+// the blank area: the statement itself fails against the driver anyway.
+func maskSQLLiterals(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inSingle, inDouble, inBacktick := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inSingle:
+			switch {
+			case c == '\'' && i+1 < len(s) && s[i+1] == '\'':
+				b.WriteString("xx")
+				i++
+			case c == '\'':
+				inSingle = false
+				b.WriteByte(c)
+			default:
+				b.WriteByte('x')
+			}
+		case inDouble:
+			switch {
+			case c == '"' && i+1 < len(s) && s[i+1] == '"':
+				b.WriteString("xx")
+				i++
+			case c == '"':
+				inDouble = false
+				b.WriteByte(c)
+			default:
+				b.WriteByte('x')
+			}
+		case inBacktick:
+			switch {
+			case c == '`' && i+1 < len(s) && s[i+1] == '`':
+				b.WriteString("xx")
+				i++
+			case c == '`':
+				inBacktick = false
+				b.WriteByte(c)
+			default:
+				b.WriteByte('x')
+			}
+		case c == '\'':
+			inSingle = true
+			b.WriteByte(c)
+		case c == '"':
+			inDouble = true
+			b.WriteByte(c)
+		case c == '`':
+			inBacktick = true
+			b.WriteByte(c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // sheetRefusal renders a guard rejection the way other tools reject bad input:
@@ -703,10 +767,15 @@ func sheetQueryError(err error, timeout time.Duration) error {
 func (t QuerySheetTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var params struct {
 		File string `json:"file"`
+		Path string `json:"path"`
 		SQL  string `json:"sql"`
 	}
 	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse query_sheet args: %w", err)
+	}
+	// 'file' is the canonical spelling; 'path' is accepted for the sibling pdf_index/docx_index vocabulary — canonical wins when both arrive.
+	if params.File == "" {
+		params.File = params.Path
 	}
 	if params.File == "" {
 		return sheetRefusal("file is required")
@@ -721,7 +790,12 @@ func (t QuerySheetTool) Execute(ctx context.Context, args json.RawMessage, tctx 
 	if countSQLStatements(stripped) == 0 {
 		return sheetRefusal("sql rejected: the statement is empty — comments only, no query")
 	}
-	if token := findForbiddenSQL(stripped); token != "" {
+	// The scan runs on a copy whose string literals and quoted identifiers are
+	// blanked: `WHERE name = 'DELETE'` is a plain read, but the raw scan saw
+	// the keyword inside the literal and refused the statement. Every token
+	// that can execute a write stands unquoted at the statement level, so
+	// masking cannot hide a real write from the guard.
+	if token := findForbiddenSQL(maskSQLLiterals(stripped)); token != "" {
 		return sheetRefusal(fmt.Sprintf("sql rejected: %q is not allowed — query_sheet takes read-only SELECT queries only", token))
 	}
 	if n := countSQLStatements(stripped); n > 1 {

@@ -134,9 +134,15 @@ func lastGrantedTab(st browser.Status) *int64 {
 // it the bridge drives the last granted tab in the extension's inventory.
 const tabSchema = `"tab":{"type":"integer","description":"Optional tab id to act on, from browser_status or the latest snapshot. Defaults to the last granted tab in the extension's inventory; a browser_navigate with newTab set needs no tab."}`
 
-// browserParams builds a Parameters schema around the given properties.
-func browserParams(props string) json.RawMessage {
-	return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{%s}}`, props))
+// browserParams builds a Parameters schema around the given properties. The
+// variadic extras ride at the top level after properties: a required array for
+// the fields a handler refuses without, and an anyOf where the requirement is
+// either-or.
+func browserParams(props string, extra ...string) json.RawMessage {
+	if len(extra) == 0 {
+		return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{%s}}`, props))
+	}
+	return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{%s},%s}`, props, strings.Join(extra, ",")))
 }
 
 // BrowserStatusTool reports the takeover connection. It answers even when the
@@ -179,7 +185,7 @@ func (BrowserNavigateTool) Description() string {
 }
 
 func (BrowserNavigateTool) Parameters() json.RawMessage {
-	return browserParams(`"url":{"type":"string","description":"The URL to open in the granted tab."},"newTab":{"type":"boolean","description":"Open a brand-new tab for this URL instead of steering the granted one; the new tab is granted automatically and its id rides the result."},` + tabSchema)
+	return browserParams(`"url":{"type":"string","description":"The URL to open in the granted tab."},"newTab":{"type":"boolean","description":"Open a brand-new tab for this URL instead of steering the granted one; the new tab is granted automatically and its id rides the result."},`+tabSchema, `"required":["url"]`)
 }
 
 func (t BrowserNavigateTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -209,7 +215,7 @@ func (BrowserSnapshotTool) Description() string {
 func (BrowserSnapshotTool) Parameters() json.RawMessage {
 	return browserParams(tabSchema + `,` +
 		`"query":{"type":"string","description":"Optional filter the extension applies: only elements whose text or value contains this string are reported."},` +
-		`"limit":{"type":"integer","description":"Optional positive cap on how many elements the extension reports."}`)
+		`"limit":{"type":"integer","description":"Optional positive cap on how many elements the extension reports; absent keeps the snapshot's normal cap (300 elements). A non-positive value is ignored."}`)
 }
 
 func (t BrowserSnapshotTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -356,7 +362,7 @@ func (BrowserClickTool) Description() string {
 }
 
 func (BrowserClickTool) Parameters() json.RawMessage {
-	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"selector":{"type":"string","description":"CSS selector to click; takes precedence over ref when both are given."},` + tabSchema)
+	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"selector":{"type":"string","description":"CSS selector to click; takes precedence over ref when both are given."},`+tabSchema, `"anyOf":[{"required":["ref"]},{"required":["selector"]}]`)
 }
 
 func (t BrowserClickTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -391,7 +397,7 @@ func (BrowserTypeTool) Description() string {
 }
 
 func (BrowserTypeTool) Parameters() json.RawMessage {
-	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"text":{"type":"string","description":"The text to type."},"submit":{"type":"boolean","description":"Press Enter after typing (submits most forms)."},"clear":{"type":"boolean","description":"Currently ignored by the browser: typing always replaces the field's value."},` + tabSchema)
+	return browserParams(`"ref":{"type":"integer","description":"The element's ref number from the latest browser_snapshot."},"text":{"type":"string","description":"The text to type."},"submit":{"type":"boolean","description":"Press Enter after typing (submits most forms)."},"clear":{"type":"boolean","description":"Currently ignored by the browser: typing always replaces the field's value."},`+tabSchema, `"required":["ref"]`)
 }
 
 func (t BrowserTypeTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -425,7 +431,7 @@ func (BrowserKeyTool) Description() string {
 }
 
 func (BrowserKeyTool) Parameters() json.RawMessage {
-	return browserParams(`"key":{"type":"string","description":"The key to press, e.g. Enter, Tab, Escape."},` + tabSchema)
+	return browserParams(`"key":{"type":"string","description":"The key to press, e.g. Enter, Tab, Escape."},`+tabSchema, `"required":["key"]`)
 }
 
 func (t BrowserKeyTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -452,7 +458,7 @@ func (BrowserScrollTool) Description() string {
 }
 
 func (BrowserScrollTool) Parameters() json.RawMessage {
-	return browserParams(`"direction":{"type":"string","description":"up or down."},"amount":{"type":"integer","description":"Pixels to scroll; defaults to 600 px."},` + tabSchema)
+	return browserParams(`"direction":{"type":"string","description":"up or down."},"amount":{"type":"integer","description":"Pixels to scroll; defaults to 600 px, so an omitted or non-positive amount is the extension's 600 px default."},`+tabSchema, `"required":["direction"]`)
 }
 
 func (t BrowserScrollTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -475,7 +481,9 @@ func (t BrowserScrollTool) Execute(ctx context.Context, args json.RawMessage, tc
 	return browserBase{t.Disp}.run(ctx, "Browser scroll", browser.OpScroll, callArgs, in.Tab)
 }
 
-// BrowserScreenshotTool captures a PNG and hands it to the model as an image.
+// BrowserScreenshotTool captures the page and hands it to the model as an
+// image (the extension re-encodes the capture to JPEG; Go honors the format
+// the response reports, defaulting to PNG for older extensions).
 type BrowserScreenshotTool struct{ Disp BrowserDispatcher }
 
 func (BrowserScreenshotTool) ID() string { return "browser_screenshot" }

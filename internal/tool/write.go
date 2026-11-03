@@ -22,7 +22,7 @@ func (WriteTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File path to write to"},
-			"content": {"type": "string", "description": "Content to write"},
+			"content": {"type": "string", "description": "Content to write. Absent is refused (it would truncate the file); an explicit \"\" writes an empty file."},
 			"description": {"type": "string", "description": "A few lines: what this change does and why. Another agent working in this project will see this text if it has to re-read the file after your edit."}
 		},
 		"required": ["path", "content", "description"]
@@ -31,9 +31,12 @@ func (WriteTool) Parameters() json.RawMessage {
 
 func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var input struct {
-		Path        string `json:"path"`
-		Content     string `json:"content"`
-		Description string `json:"description"`
+		Path string `json:"path"`
+		// Content is a pointer so a field omitted from the call is told apart
+		// from an explicit "": an empty write is legitimate intent, an absent
+		// one is a bug that would truncate the file to empty.
+		Content     *string `json:"content"`
+		Description string  `json:"description"`
 	}
 	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
@@ -58,6 +61,16 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	if strings.TrimSpace(input.Path) == "" {
 		return Result{Title: "Path required", Output: "path is required — the write has no target. Resend the call with the file's path beside \"content\" and \"description\"."}, nil
 	}
+
+	// Content gets the same enforcement as the two above, but through the
+	// pointer: a schema-required field the model dropped used to decode to ""
+	// and truncate the target to empty. An explicit "" is still written —
+	// clearing a file is a real intent, and the pointer is what separates it
+	// from the dropped field.
+	if input.Content == nil {
+		return Result{Title: "Content required", Output: "content is required — the write has nothing to write, and the file would have been truncated to empty. An intentionally empty write passes \"\" as the content. Resend the call with \"content\" beside \"path\" and \"description\"."}, nil
+	}
+	content := *input.Content
 
 	path := input.Path
 	if !filepath.IsAbs(path) {
@@ -108,7 +121,7 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 		created = false
 		if existing, err := os.ReadFile(path); err == nil {
 			prior = existing
-			if len(existing) <= maxDiffBytes && len(input.Content) <= maxDiffBytes {
+			if len(existing) <= maxDiffBytes && len(content) <= maxDiffBytes {
 				oldContent = string(existing)
 			} else {
 				diffOmitted = true
@@ -119,7 +132,7 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 			diffOmitted = true
 		}
 	case os.IsNotExist(statErr):
-		if len(input.Content) > maxDiffBytes {
+		if len(content) > maxDiffBytes {
 			diffOmitted = true
 		}
 	default:
@@ -133,7 +146,7 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 
 	// Atomic: a failure here leaves the previous file intact rather than a
 	// truncated one. See writeFileAtomic.
-	if err := writeFileAtomic(path, []byte(input.Content)); err != nil {
+	if err := writeFileAtomic(path, []byte(content)); err != nil {
 		return Result{}, fmt.Errorf("write file: %w", err)
 	}
 
@@ -143,7 +156,7 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	// of a new file is this call's — but an unreadable existing file has no
 	// baseline at all, and a diff invented from empty would be a lie.
 	if log != nil {
-		diff, truncated := filechange.DiffLines(string(prior), input.Content)
+		diff, truncated := filechange.DiffLines(string(prior), content)
 		if !created && prior == nil {
 			diff, truncated = "", true
 		}
@@ -168,7 +181,7 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	// — a truncated write or a body assembled from two fragments produces a file
 	// that saves without complaint. prior is nil for a file that did not exist,
 	// which is the right baseline: in a new file every error is this call's.
-	note, check := syntaxNote(path, input.Path, prior, []byte(input.Content))
+	note, check := syntaxNote(path, input.Path, prior, []byte(content))
 
 	verb := "Wrote"
 	if created {
@@ -176,7 +189,7 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	}
 	return applySyntaxNote(Result{
 		Title:    filepath.Base(path),
-		Output:   fmt.Sprintf("%s %d bytes to %s", verb, len(input.Content), path),
+		Output:   fmt.Sprintf("%s %d bytes to %s", verb, len(content), path),
 		Metadata: metadata,
 	}, note, check), nil
 }

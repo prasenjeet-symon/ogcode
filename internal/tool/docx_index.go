@@ -40,6 +40,9 @@ func (DocxIndexTool) Parameters() json.RawMessage {
 }
 
 func (t DocxIndexTool) Execute(_ context.Context, args json.RawMessage, tctx Context) (Result, error) {
+	if t.Store == nil {
+		return Result{Title: "DOCX Index", Output: "the document index is not available in this environment"}, nil
+	}
 	var params struct {
 		Path string `json:"path"`
 	}

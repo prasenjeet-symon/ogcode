@@ -11,13 +11,15 @@ import (
 
 type GlobTool struct{}
 
-func (GlobTool) ID() string          { return "glob" }
-func (GlobTool) Description() string { return "Find files matching a glob pattern" }
+func (GlobTool) ID() string { return "glob" }
+func (GlobTool) Description() string {
+	return "Find files matching a glob pattern. ** walks the directory tree, but the part that follows it is matched against file base names only — \"**/*.go\" matches at any depth while \"dir/**/*.go\" matches nothing: a ** walk has no per-directory filtering, so scope a simple pattern like \"pkg/*.go\" to one level instead. A malformed pattern is an error, not a silent empty search. The ** walk skips hidden (dot-prefixed) files and dirs, node_modules and vendor; a simple pattern (no **) is matched against directory entries and matches hidden files too. Relative patterns resolve against the session dir and may traverse outside it with \"..\"."
+}
 func (GlobTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"pattern": {"type": "string", "description": "Glob pattern to match (e.g. **/*.go)"}
+			"pattern": {"type": "string", "description": "Glob pattern to match (e.g. **/*.go). ** walks the tree; the part after it matches file base names only, not path segments. The ** walk skips hidden (dot-prefixed) files and hidden/node_modules/vendor dirs — a simple pattern (no **) matches hidden files too. A malformed pattern is an error, not an empty result. A relative pattern is resolved against the session dir and may traverse outside it with \"..\"."}
 		},
 		"required": ["pattern"]
 	}`)
@@ -39,7 +41,7 @@ func (GlobTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		// Split pattern: "**/*.go" -> walk all, match suffix "*.go"
 		suffix := strings.TrimPrefix(pattern, "**/")
 		root := filepath.Clean(tctx.SessionDir)
-		filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return nil
 			}
@@ -62,7 +64,15 @@ func (GlobTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 			if strings.HasPrefix(info.Name(), ".") {
 				return nil
 			}
-			matched, _ := filepath.Match(suffix, info.Name())
+			// A malformed pattern (an unclosed "[" class) must abort the
+			// walk rather than silently match nothing: with the error
+			// discarded every filename was "not matched" and the call came
+			// back "No files found" — an empty result that read as an
+			// honest search of a pattern the tool never understood.
+			matched, err := filepath.Match(suffix, info.Name())
+			if err != nil {
+				return fmt.Errorf("glob: bad pattern %q: %w", suffix, err)
+			}
 			if matched {
 				rel, _ := filepath.Rel(root, path)
 				// Normalize to forward slashes so output is identical on every
@@ -71,6 +81,9 @@ func (GlobTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 			}
 			return nil
 		})
+		if walkErr != nil {
+			return Result{}, walkErr
+		}
 	} else {
 		// Simple pattern: use filepath.Glob
 		absMatches, err := filepath.Glob(filepath.Join(tctx.SessionDir, pattern))

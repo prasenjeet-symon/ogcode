@@ -98,6 +98,8 @@ func (s *Server) routes() http.Handler {
 		r.Get("/pricing", s.handleGetPricing)
 		// Spend across every project and model, from the global ledger.
 		r.Get("/usage", s.handleUsageSummary)
+		// Per-day activity series for the heatmap: sessions and tokens by day.
+		r.Get("/activity", s.handleActivity)
 
 		r.Get("/resources", s.handleResources)
 		r.Get("/scrcpy/status", s.handleScrcpyStatus)

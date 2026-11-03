@@ -15,7 +15,7 @@ type GrepTool struct{}
 
 func (GrepTool) ID() string { return "grep" }
 func (GrepTool) Description() string {
-	return "Search file contents for a pattern; alternate patterns (a|b|c) to search several in one call"
+	return "Search file contents for a pattern; alternate patterns (a|b|c) to search several in one call. Hidden (dot-prefixed) dirs and node_modules/vendor dirs are skipped — the search root itself is always searched, and hidden FILES are still searched."
 }
 func (GrepTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -23,7 +23,7 @@ func (GrepTool) Parameters() json.RawMessage {
 		"properties": {
 			"pattern": {"type": "string", "description": "Regex pattern to search for. Search several at once by alternating them: \"foo|bar|baz\". A capped result names itself — narrow the pattern then."},
 			"path": {"type": "string", "description": "Directory or file to search in"},
-			"include": {"type": "string", "description": "File glob to include (e.g. *.go)"}
+			"include": {"type": "string", "description": "File glob to include (e.g. *.go), matched against file base names"}
 		},
 		"required": ["pattern"]
 	}`)
@@ -67,7 +67,7 @@ func (GrepTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 
 	var results []string
 	truncated := false
-	filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -113,8 +113,22 @@ func (GrepTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 				results = append(results, fmt.Sprintf("%s:%d: %s", rel, lineNum, scanner.Text()))
 			}
 		}
+		// A scan error (bufio's 64KB token cap on a long line) stopped the
+		// scan partway through the file: the matches before the break are
+		// real but the rest was never looked at, so reporting plain
+		// "No matches found" or the pre-break list only would read as an
+		// honest search of a file it could not finish. Refuse the call and
+		// say which file was cut short and why.
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("%s was scanned only partway — %v; any line longer than the 64KB scan buffer ends it, so matches past that line went unread", rel, err)
+		}
 		return nil
 	})
+	if walkErr != nil {
+		// The walk callback returns only these scan failures; the per-file
+		// os errors it may also see are already swallowed above.
+		return Result{}, walkErr
+	}
 
 	if len(results) == 0 {
 		return Result{

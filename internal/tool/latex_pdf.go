@@ -21,7 +21,7 @@ type LatexToPdfTool struct{}
 func (LatexToPdfTool) ID() string { return "latex_to_pdf" }
 
 func (LatexToPdfTool) Description() string {
-	return "Compile LaTeX source code to PDF. Returns the path to the generated PDF file. Requires a TeX distribution (pdflatex) installed on the system. Use this to render full LaTeX documents (reports, papers, resumes, etc.) to PDF. The LaTeX source should be a complete document with \\documentclass and \\begin{document}...\\end{document}."
+	return "Compile LaTeX source code to PDF. Returns the path to the generated PDF file. Requires a TeX distribution (pdflatex) installed on the system. Use this to render full LaTeX documents (reports, papers, resumes, etc.) to PDF. The LaTeX source should be a complete document with \\documentclass and \\begin{document}...\\end{document}. For vision-capable models the rendered first page is attached as an image."
 }
 
 func (LatexToPdfTool) Parameters() json.RawMessage {
@@ -35,27 +35,40 @@ func (LatexToPdfTool) Parameters() json.RawMessage {
 			},
 			"filename": {
 				"type": "string",
-				"description": "Filename for the output PDF (.pdf appended if missing; default: output.pdf)"
+				"description": "Filename for the output PDF (.pdf appended if missing; default: output.pdf). Must be a plain name inside the session directory — absolute paths and \"../\" are refused"
 			}
 		}
 	}`)
 }
 
-// pdflatexAvailability caches whether pdflatex was found on the system PATH.
-var pdflatexAvailability struct {
-	checked bool
-	found   bool
+// pdflatexAvailable checks whether pdflatex is available on the system PATH.
+// There is no cache across calls: an exec.LookPath per invocation is cheap,
+// and a cached lookup made a TeX install — or removal — mid-session invisible
+// until the process restarted.
+func pdflatexAvailable() bool {
+	_, err := exec.LookPath("pdflatex")
+	return err == nil
 }
 
-// pdflatexAvailable checks whether pdflatex is available on the system PATH.
-func pdflatexAvailable() bool {
-	if pdflatexAvailability.checked {
-		return pdflatexAvailability.found
+// latexPDFPath resolves the caller's filename against the session directory
+// and refuses anything that would land outside it. The default and the
+// ".pdf"-suffix append run here too, so the traversal guard sees the name the
+// write will actually use. That guard is resolveSubdirPrefix — the same
+// boundary the project index draws where its untrusted string enters
+// (filepath.Join cleans its result, so "../evil" must be caught after the
+// clean, not before) — plus the two shapes that check cannot catch alone: an
+// absolute filename, which Join would silently fold into the session
+// directory, and a name that is whitespace once trimmed.
+func latexPDFPath(sessionDir, filename string) (string, bool) {
+	if filename == "" {
+		filename = "output.pdf"
+	} else if strings.TrimSpace(filename) == "" || filepath.IsAbs(filename) {
+		return "", false
 	}
-	_, err := exec.LookPath("pdflatex")
-	pdflatexAvailability.checked = true
-	pdflatexAvailability.found = err == nil
-	return pdflatexAvailability.found
+	if !strings.HasSuffix(strings.ToLower(filename), ".pdf") {
+		filename += ".pdf"
+	}
+	return resolveSubdirPrefix(sessionDir, filename)
 }
 
 func (LatexToPdfTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -68,6 +81,17 @@ func (LatexToPdfTool) Execute(ctx context.Context, args json.RawMessage, tctx Co
 	}
 	if params.Source == "" {
 		return Result{Title: "LaTeX to PDF", Output: "source is required"}, nil
+	}
+
+	// Validate the output name before anything runs: refusing a write outside
+	// the session directory costs nothing and must not wait for a successful
+	// compile first.
+	outputPath, ok := latexPDFPath(tctx.SessionDir, params.Filename)
+	if !ok {
+		return Result{
+			Title:  "LaTeX to PDF — filename not allowed",
+			Output: fmt.Sprintf("filename %q is not allowed: name a plain output file inside the session directory (for example %q). A filename that climbs out of it with \"../\", or an absolute path, would write outside the directory the tool is scoped to.", params.Filename, "report.pdf"),
+		}, nil
 	}
 
 	if !pdflatexAvailable() {
@@ -149,9 +173,9 @@ func (LatexToPdfTool) Execute(ctx context.Context, args json.RawMessage, tctx Co
 		}, nil
 	}
 
-	// Copy the PDF to the session directory
+	// Copy the PDF to the session directory. outputPath was already validated
+	// and joined by latexPDFPath, before the compile ran.
 	outputDir := tctx.SessionDir
-	outputPath := filepath.Join(outputDir, filename)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create output dir: %w", err)
 	}
@@ -165,7 +189,7 @@ func (LatexToPdfTool) Execute(ctx context.Context, args json.RawMessage, tctx Co
 	}
 
 	result := Result{
-		Title: fmt.Sprintf("LaTeX to PDF — %s (%s)", filename, formatFileSize(pdfInfo.Size())),
+		Title: fmt.Sprintf("LaTeX to PDF — %s (%s)", filepath.Base(outputPath), formatFileSize(pdfInfo.Size())),
 		Output: fmt.Sprintf("PDF generated successfully: %s (%s)\n\nYou can open this file to view the rendered LaTeX document.",
 			outputPath, formatFileSize(pdfInfo.Size())),
 	}

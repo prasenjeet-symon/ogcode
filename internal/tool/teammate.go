@@ -82,7 +82,7 @@ func (TeammateTool) Parameters() json.RawMessage {
 			"op": {
 				"type": "string",
 				"enum": ["spawn", "wait", "stop", "status"],
-				"description": "The operation — spawn starts a teammate from name + prompt, wait blocks for spawned teammates to finish, stop cancels one by handle, status peeks at one by handle. Required."
+				"description": "The operation — spawn starts a teammate from name + prompt, wait blocks for spawned teammates to finish, stop cancels one by handle, status peeks at one by handle. Required; a call carrying only a prompt is treated as a spawn."
 			},
 			"name": {
 				"type": "string",
@@ -90,7 +90,7 @@ func (TeammateTool) Parameters() json.RawMessage {
 			},
 			"prompt": {
 				"type": "string",
-				"description": "spawn: the complete, standalone task. The teammate does not see this conversation, so include the files, the goal and what to report back."
+				"description": "spawn: the complete, standalone task, required for that op. The teammate does not see this conversation, so include the files, the goal and what to report back."
 			},
 			"handles": {
 				"type": "array",
@@ -99,14 +99,19 @@ func (TeammateTool) Parameters() json.RawMessage {
 			},
 			"handle": {
 				"type": "string",
-				"description": "stop/status: the teammate's handle."
+				"description": "stop/status: the teammate's handle, required for those ops."
 			},
 			"timeout": {
 				"type": "integer",
 				"description": "wait: seconds to wait, at most 120. Defaults to 60."
 			}
 		},
-		"required": ["op"]
+		"required": ["op"],
+		"anyOf": [
+			{"properties": {"op": {"enum": ["spawn"]}}, "required": ["op", "prompt"]},
+			{"properties": {"op": {"enum": ["stop", "status"]}}, "required": ["op", "handle"]},
+			{"properties": {"op": {"enum": ["wait"]}}, "required": ["op"]}
+		]
 	}`)
 }
 

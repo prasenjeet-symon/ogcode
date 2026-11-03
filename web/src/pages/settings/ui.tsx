@@ -103,7 +103,7 @@ export function Group(props: {
       {/* The grouped list. Rounded and filled a half-step above the page, with
           no border and no shadow — the shape reads as a group without becoming
           the floating card this screen deliberately moved away from. */}
-      <div class="rounded-[10px] bg-[color:var(--bg-elevated)]/40 overflow-hidden">
+      <div class="rounded-[7px] bg-[color:var(--bg-elevated)]/40 overflow-hidden">
         {props.children}
       </div>
 
@@ -165,7 +165,7 @@ export function Row(props: {
     >
       <Show when={props.icon}>
         <span
-          class="w-[26px] h-[26px] mt-2 mr-3 shrink-0 rounded-[7px] flex items-center justify-center
+          class="w-[26px] h-[26px] mt-2 mr-3 shrink-0 rounded-[5px] flex items-center justify-center
                  bg-[color:var(--accent)] text-[color:var(--on-primary)]"
         >
           <svg class="w-[15px] h-[15px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

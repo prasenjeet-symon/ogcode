@@ -42,6 +42,48 @@ func TestSubmitDocIndex_LabelCeilingMatchesSchema(t *testing.T) {
 	}
 }
 
+// The submit_doc_index tool's canonical parameter is doc_path, but the
+// pdf_index and docx_index siblings take `path`, and models drift between the
+// two spellings. The tool must accept the sibling spelling as a fallback — the
+// canonical name preferred when both arrive, and doc_path-only callers
+// unchanged.
+func TestSubmitDocIndex_AcceptsSiblingPathSpelling(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	store := docindex.NewStore(database)
+	tool := NewSubmitDocIndexTool(store)
+
+	// A path-only call — the sibling spelling — must land the labels.
+	args, _ := json.Marshal(map[string]any{
+		"path":  "/proj/b.go",
+		"pages": []map[string]any{{"page_num": 1, "labels": []string{"auth"}}},
+	})
+	if _, err := tool.Execute(context.Background(), args, Context{}); err != nil {
+		t.Fatalf("path-only execute: %v", err)
+	}
+	if entries, err := store.GetByDoc("/proj/b.go"); err != nil || len(entries) != 1 {
+		t.Fatalf("path-only call not stored: entries=%d err=%v", len(entries), err)
+	}
+
+	// When both spellings arrive the canonical doc_path wins.
+	args, _ = json.Marshal(map[string]any{
+		"doc_path": "/proj/c.go",
+		"path":     "/proj/b.go",
+		"pages":    []map[string]any{{"page_num": 1, "labels": []string{"auth"}}},
+	})
+	if _, err := tool.Execute(context.Background(), args, Context{}); err != nil {
+		t.Fatalf("both-spellings execute: %v", err)
+	}
+	if entries, err := store.GetByDoc("/proj/c.go"); err != nil || len(entries) != 1 {
+		t.Fatalf("canonical doc_path not preferred: entries under c.go=%d err=%v", len(entries), err)
+	}
+	if entries, err := store.GetByDoc("/proj/b.go"); err != nil || len(entries) != 1 {
+		t.Fatalf("the both-spellings call must not have touched b.go's row: entries=%d err=%v", len(entries), err)
+	}
+}
+
 // Every label handed to the tool is stored — the tool is not a second, quieter
 // cap beneath the schema's. A model that supplies labels up to the ceiling must
 // find all of them on the row.

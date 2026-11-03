@@ -175,6 +175,14 @@ func (t AskUserTool) Execute(ctx context.Context, args json.RawMessage, tctx Con
 func validateBranching(qs []question.Question) string {
 	seen := map[string]bool{}
 	for i, q := range qs {
+		// Answers are keyed by id, so a duplicate id maps two screens onto
+		// one answer: whichever came later silently overwrites the earlier
+		// one. Checked first, and regardless of showWhen conditionality —
+		// a skipped screen still carries an id, and the map does not know
+		// which screens were actually shown.
+		if q.ID != "" && seen[q.ID] {
+			return fmt.Sprintf("question %d repeats the id %q — ids must be unique across the batch, since answers are keyed by id and a duplicate would overwrite the earlier answer", i+1, q.ID)
+		}
 		if q.ShowWhen == nil {
 			if q.ID != "" {
 				seen[q.ID] = true

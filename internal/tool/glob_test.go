@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+func TestGlobTool_BadPatternIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "main.go"), "package main\n")
+
+	tool := GlobTool{}
+	args, _ := json.Marshal(map[string]string{"pattern": "**/[.go"})
+	_, err := tool.Execute(context.Background(), args, Context{SessionDir: dir})
+	if err == nil {
+		t.Fatal("a malformed pattern should error, not silently return no matches")
+	}
+	if !strings.Contains(err.Error(), "bad pattern") || !strings.Contains(err.Error(), "[.go") {
+		t.Errorf("error should name the bad pattern, got: %v", err)
+	}
+}
+
 func TestGlobTool_HiddenAndVendorDirsSkipped(t *testing.T) {
 	dir := t.TempDir()
 	// Visible source file (should match)

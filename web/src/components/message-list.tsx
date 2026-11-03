@@ -6,6 +6,7 @@ import { SavedScroll } from '../lib/scroll-memory';
 import JumpToLatest from './jump-to-latest';
 import LoadingOlder from './loading-older';
 import Logo from './logo';
+import { ActivityHeatmap } from './activity-heatmap';
 
 function isToolResultMessage(msg: any): boolean {
   if (msg.info.role !== 'user') return false;
@@ -741,6 +742,9 @@ export default function MessageList() {
               </div>
               <p class="text-ui font-medium text-[color:var(--text-primary)] mb-1">Ready when you are</p>
               <p class="text-meta text-[color:var(--text-tertiary)]">Describe a task, ask a question, or paste an error.</p>
+              <div class="w-full max-w-[640px] mt-8">
+                <ActivityHeatmap compact />
+              </div>
             </div>
           </Show>
 

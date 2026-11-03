@@ -274,7 +274,7 @@ export default function SettingsLayout(props: RouteSectionProps) {
                 placeholder={`Search ${report().noun}`}
                 aria-label={`Search ${report().noun}`}
                 spellcheck={false}
-                class="w-full h-8 pl-8 pr-8 rounded-[10px] bg-[color:var(--bg-elevated)]
+                class="w-full h-8 pl-8 pr-8 rounded-[7px] bg-[color:var(--bg-elevated)]
                        border border-transparent text-meta text-[color:var(--text-primary)]
                        placeholder:text-[color:var(--text-muted)] focus:outline-none
                        focus:border-[color:var(--accent)] transition-colors"

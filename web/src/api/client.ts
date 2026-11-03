@@ -744,6 +744,20 @@ export interface UsageSummary {
   totals: UsageTotals;
 }
 
+export interface ActivityDay {
+  /** YYYY-MM-DD in the server's local time. */
+  day: string;
+  sessions: number;
+  tokens: number;
+}
+
+export interface ActivitySummary {
+  from: number;
+  to: number;
+  /** One row per day that saw activity, ascending; a missing day counts as zero. */
+  days: ActivityDay[];
+}
+
 /** One session's spend, each step priced at the model that answered it. */
 export function getSessionUsage(sessionId: string): Promise<SessionUsage> {
   return fetchAPI(`/session/${sessionId}/usage`);
@@ -801,6 +815,17 @@ export function getUsageSummary(from = 0, project = ''): Promise<UsageSummary> {
   if (project) q.set('project', project);
   const qs = q.toString();
   return fetchAPI(`/usage${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * Sessions active and tokens spent per day between `from` and `to` (unix ms),
+ * for this workspace alone.
+ */
+export function getActivity(from: number, to?: number): Promise<ActivitySummary> {
+  const q = new URLSearchParams();
+  q.set('from', String(from));
+  if (to !== undefined) q.set('to', String(to));
+  return fetchAPI(`/activity?${q.toString()}`);
 }
 
 // Path API

@@ -54,7 +54,7 @@ export default function ModelSwitchPopup() {
                      backdrop-blur-xl border border-[color:var(--border-strong)]
                      shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_20px_var(--glow)]
                      min-w-[220px]"
-              style={{ 'background-color': 'rgba(27, 27, 31, 0.82)' }}
+              style={{ 'background-color': 'color-mix(in srgb, var(--bg-elevated) 88%, transparent)' }}
             >
               {/* Slot number badge */}
               <Show when={slot()}>
@@ -71,14 +71,14 @@ export default function ModelSwitchPopup() {
               {/* Provider color dot */}
               <span
                 class={`w-2 h-2 rounded-full shrink-0 ${
-                  modelInfo() ? groupDot(modelGroup(modelInfo()!)) : 'bg-zinc-500'
+                  modelInfo() ? groupDot(modelGroup(modelInfo()!)) : 'bg-[color:var(--text-tertiary)]'
                 }`}
               />
               {/* Model name */}
-              <span class="text-[13.5px] font-medium text-zinc-100 truncate max-w-[280px]">
+              <span class="text-[13.5px] font-medium text-[color:var(--text-primary)] truncate max-w-[280px]">
                 {modelInfo()?.name || popup()?.modelId || 'Unknown model'}
               </span>
-              <span class="text-[10.5px] text-zinc-500 uppercase tracking-wider font-mono shrink-0 ml-auto">
+              <span class="text-[10.5px] text-[color:var(--text-tertiary)] uppercase tracking-wider font-mono shrink-0 ml-auto">
                 active
               </span>
             </div>

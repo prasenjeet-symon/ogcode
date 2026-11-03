@@ -483,40 +483,56 @@ func TestReadTool_NegativeWindowArgsAreRefused(t *testing.T) {
 	}
 }
 
-// An explicitly given end_line must name a real line. A value <= 0 once
-// slipped past the inverted-range check and read as "to the end of the file"
-// — silent, and the opposite of what the caller sent. Each value is now
-// refused, in the single-file form and inside a files entry; an omitted
-// end_line still runs to the end of the file (TestReadTool_RangeWithoutEndLine).
-func TestReadTool_ExplicitEndLineZeroOrNegativeIsRefused(t *testing.T) {
+// An end_line ≤ 0 is read the way an omitted one is: to the end of the file.
+// It once slipped past the inverted-range check and read that way silently;
+// the first fix refused it — but start_line ≤ 0 clamps and the window engine
+// treats any non-positive end as open, so refusal was the one value with no
+// effect but an error, made here instead at read time. Each value is checked
+// in the single-file form and inside a files entry; an omitted end_line also
+// runs to the end of the file (TestReadTool_RangeWithoutEndLine).
+func TestReadTool_EndLineNonPositiveReadsToEOF(t *testing.T) {
 	dir := t.TempDir()
 	writeNumberedLines(t, filepath.Join(dir, "f.txt"), 20)
 
-	cases := map[string]string{
-		"end_line zero":     `{"path":"f.txt","ranges":[{"start_line":2,"end_line":0}]}`,
-		"end_line negative": `{"path":"f.txt","ranges":[{"start_line":2,"end_line":-1}]}`,
-		"end_line only":     `{"path":"f.txt","ranges":[{"end_line":-3}]}`,
+	// end_line 2 names a real line and still stops there; 0, -1 and -3 all
+	// read to EOF.
+	res, err := ReadTool{}.Execute(context.Background(), json.RawMessage(`{"path":"f.txt","ranges":[{"start_line":2,"end_line":2}]}`), Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("read: %v", err)
 	}
-	for name, args := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, err := ReadTool{}.Execute(context.Background(), json.RawMessage(args), Context{SessionDir: dir})
-			if err == nil {
-				t.Fatal("a non-positive end_line was accepted")
-			}
-			if !strings.Contains(err.Error(), "end_line") {
-				t.Errorf("error should name end_line, got: %v", err)
-			}
-		})
+	if !strings.Contains(res.Output, "f.txt:2-2") {
+		t.Errorf("a positive end_line should still stop there, got:\n%s", res.Output)
 	}
 
-	// The same refusal inside a files entry.
-	entry := `{"files":[{"path":"f.txt","ranges":[{"start_line":1,"end_line":-2}]}]}`
-	_, err := ReadTool{}.Execute(context.Background(), json.RawMessage(entry), Context{SessionDir: dir})
-	if err == nil {
-		t.Fatal("a files entry accepted a non-positive end_line")
+	for _, args := range []string{
+		`{"path":"f.txt","ranges":[{"start_line":2,"end_line":0}]}`,
+		`{"path":"f.txt","ranges":[{"start_line":2,"end_line":-1}]}`,
+	} {
+		res, err := ReadTool{}.Execute(context.Background(), json.RawMessage(args), Context{SessionDir: dir})
+		if err != nil {
+			t.Fatalf("%s: execute: %v", args, err)
+		}
+		if !strings.Contains(res.Output, "f.txt:2-20") {
+			t.Errorf("%s: a non-positive end_line should read to EOF, got:\n%s", args, res.Output)
+		}
 	}
-	if !strings.Contains(err.Error(), "end_line") {
-		t.Errorf("error should name end_line, got: %v", err)
+
+	// start_line omitted (clamps to 1) with a non-positive end_line.
+	res, err = ReadTool{}.Execute(context.Background(), json.RawMessage(`{"path":"f.txt","ranges":[{"end_line":-3}]}`), Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("end_line only: execute: %v", err)
+	}
+	if !strings.Contains(res.Output, "f.txt:1-20") {
+		t.Errorf("an end_line-only range with a non-positive end_line should read from 1 to EOF, got:\n%s", res.Output)
+	}
+
+	// The same reading inside a files entry.
+	res, err = ReadTool{}.Execute(context.Background(), json.RawMessage(`{"files":[{"path":"f.txt","ranges":[{"start_line":1,"end_line":-2}]}]}`), Context{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("files entry: %v", err)
+	}
+	if !strings.Contains(res.Output, "f.txt:1-20") {
+		t.Errorf("a files entry with a non-positive end_line should read to EOF, got:\n%s", res.Output)
 	}
 }
 

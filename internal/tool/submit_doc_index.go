@@ -39,7 +39,8 @@ the labels for each page — every distinct topic the content supports, up to %d
 per page. Include ALL pages — do not skip any.
 
 Parameters:
-- doc_path: absolute path to the document being indexed
+- doc_path: absolute path to the document being indexed (the pdf_index/
+  docx_index 'path' spelling is also accepted)
 - pages: array of {page_num, labels} objects covering every page`, MaxLabelsPerPage)
 }
 
@@ -52,7 +53,7 @@ func (SubmitDocIndexTool) Parameters() json.RawMessage {
 		"properties": {
 			"doc_path": {
 				"type": "string",
-				"description": "Absolute path to the document being indexed"
+				"description": "Absolute path to the document being indexed. This canonical name is preferred; the sibling index tools' 'path' spelling is also accepted when it is the only path given."
 			},
 			"pages": {
 				"type": "array",
@@ -81,6 +82,7 @@ func (SubmitDocIndexTool) Parameters() json.RawMessage {
 func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ Context) (Result, error) {
 	var params struct {
 		DocPath string `json:"doc_path"`
+		Path    string `json:"path"`
 		Pages   []struct {
 			PageNum int      `json:"page_num"`
 			Labels  []string `json:"labels"`
@@ -88,6 +90,13 @@ func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ C
 	}
 	if err := DecodeArgs(args, &params); err != nil {
 		return Result{}, fmt.Errorf("parse submit_doc_index args: %w", err)
+	}
+	// Parameter-name drift across the indexed-document tools: this tool's
+	// canonical name is doc_path, but the pdf_index and docx_index siblings take
+	// `path`. Accept the sibling spelling as a fallback — the canonical name
+	// preferred when both arrive, and existing callers unchanged.
+	if params.DocPath == "" {
+		params.DocPath = params.Path
 	}
 	if params.DocPath == "" {
 		return Result{Title: "Submit Doc Index", Output: "doc_path is required"}, nil

@@ -67,7 +67,7 @@ func NewMemoryMapTool(store *memfile.Store) MemoryMapTool {
 func (t MemoryMapTool) ID() string { return "memory_map" }
 
 func (t MemoryMapTool) Description() string {
-	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. In project scope, every conversation (session) is shown as a SINGLE line: its tag ending in \"/\", the number of turns inside it, and a sample of topic labels drawn from across all its turns; call again with subdir set to a tag (e.g. \"ses01M269J\") to list that conversation's summaries one line each, with file name and topic labels. In session scope (this conversation's own recall), the map renders this conversation's turns flat, one line each, with no tags, and a subdir naming any other conversation is refused. Use this to find which conversation (project scope) or turn (session scope) holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) pulls just that section."
+	return "Return one level of a labeled map of this project's persistent memory — markdown summaries of past turns. Only turns that already have a written summary appear; the index has no backfill, so sessions summarised before this tracking shipped are absent. In project scope, every conversation (session) is shown as a SINGLE line: its tag ending in \"/\", the number of turns inside it, and a sample of topic labels drawn from across all its turns; call again with subdir set to a tag (e.g. \"ses01M269J\") to list that conversation's summaries one line each, with file name and topic labels. In session scope (this conversation's own recall), the map renders this conversation's turns flat, one line each, with no tags, and a subdir naming any other conversation is refused. Use this to find which conversation (project scope) or turn (session scope) holds the answer to a recall question before reading anything; file_map gives a summary's heading outline with line ranges, and read(path, ranges=[{\"start_line\": N, \"end_line\": M}]) pulls just that section."
 }
 
 func (t MemoryMapTool) Parameters() json.RawMessage {
@@ -86,8 +86,10 @@ func (t MemoryMapTool) Execute(ctx context.Context, args json.RawMessage, tctx C
 	var params struct {
 		Subdir string `json:"subdir"`
 	}
-	if args != nil {
-		_ = DecodeArgs(args, &params)
+	if len(args) > 0 {
+		if err := DecodeArgs(args, &params); err != nil {
+			return Result{Title: "Memory Map", Output: fmt.Sprintf("invalid args for memory_map: %v", err)}, nil
+		}
 	}
 
 	if t.Store == nil {

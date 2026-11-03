@@ -245,7 +245,7 @@ function Section(props: { title: string; action?: JSX.Element; children: JSX.Ele
         <div class="flex-1" />
         <Show when={props.action}>{props.action}</Show>
       </div>
-      <div class="rounded-[10px] bg-[color:var(--bg-elevated)]/40 overflow-hidden">{props.children}</div>
+      <div class="rounded-[7px] bg-[color:var(--bg-elevated)]/40 overflow-hidden">{props.children}</div>
     </section>
   );
 }
@@ -567,7 +567,7 @@ function DailySpend(props: { summary: UsageSummary; range: RangeId }) {
                       >
                         <Show when={p.covered > 0}>
                           <span
-                            class="block w-full rounded-t-[4px]"
+                            class="block w-full rounded-t-[3px]"
                             style={{ height: `${covered()}%`, background: COVERED, 'min-height': '2px' }}
                           />
                         </Show>
@@ -578,7 +578,7 @@ function DailySpend(props: { summary: UsageSummary; range: RangeId }) {
                         <Show when={p.billed > 0}>
                           <span
                             class="block w-full"
-                            classList={{ 'rounded-t-[4px]': p.covered === 0 }}
+                            classList={{ 'rounded-t-[3px]': p.covered === 0 }}
                             style={{ height: `${billed()}%`, background: BILLED, 'min-height': '2px' }}
                           />
                         </Show>

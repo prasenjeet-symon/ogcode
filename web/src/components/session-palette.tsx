@@ -316,7 +316,7 @@ export default function SessionPalette() {
       {/* Palette — slides down from the top with the same spring bounce */}
       <div
         class="fixed left-1/2 top-[18vh] z-[201] w-[min(620px,92vw)] -translate-x-1/2
-               rounded-[14px] border overflow-hidden animate-pop-in"
+               rounded-[9px] border overflow-hidden animate-pop-in"
         style={{
           background: 'var(--bg-overlay)',
           'border-color': 'var(--border-default)',

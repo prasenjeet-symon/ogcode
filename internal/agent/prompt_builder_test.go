@@ -485,18 +485,20 @@ func TestParallelToolCallsPrompt_NamesTheMultiFileRead(t *testing.T) {
 // first applies, and an overlapping anchor fails cleanly ("old_string not
 // found") instead of corrupting the file. So batching disjoint edits to one
 // file is safe and the prompt must say so — the old blanket prohibition was
-// stricter than the runtime and cost a round trip for nothing. The prompt still
-// has to describe what actually breaks: write-vs-edit on one file, whose order
-// is unspecified, and the clean-failure message the model should re-issue from.
+// stricter than the runtime and cost a round trip for nothing. The prompt must
+// also not overstate it: same-file mutations — write-vs-edit included — run in
+// the order the model wrote them, so the pairing is advice about wasted work,
+// never stated as forbidden, and the clean-failure message is still what the
+// model re-issues from.
 func TestParallelToolCallsPrompt_SameFileEditGuidance(t *testing.T) {
 	prompt := parallelToolCallsPrompt(true, true)
 
 	for _, want := range []string{
-		"serializes mutations to the same path",    // the runtime contract the permission rests on
-		"old_string not found",                     // the clean-failure message and how to recover
-		"Never batch a \"write\" with an \"edit\"", // the one combination still forbidden
-		"copied from the file, not composed",       // anchors carry the file's bytes, not a retyped recollection
-		"copy the anchor from the fresh window",    // the recovery on a not-found is another read, not a resend
+		"serializes mutations to the same path",       // the runtime contract the permission rests on
+		"old_string not found",                        // the clean-failure message and how to recover
+		"Avoid batching a \"write\" with an \"edit\"", // advice now: the pairing wastes a change, it is not forbidden
+		"copied from the file, not composed",          // anchors carry the file's bytes, not a retyped recollection
+		"copy the anchor from the fresh window",       // the recovery on a not-found is another read, not a resend
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q", want)
@@ -504,6 +506,38 @@ func TestParallelToolCallsPrompt_SameFileEditGuidance(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "old_string") {
 		t.Error("prompt does not say what anchors the same-file edits")
+	}
+
+	// The pairing is advice, not a rule: the old "Never batch" phrasing must
+	// stay gone, and the runtime contract the advice leans on — written order —
+	// must stay present.
+	if strings.Contains(prompt, "Never batch a \"write\" with an \"edit\"") {
+		t.Error("prompt still states the write-vs-edit pairing as a prohibition")
+	}
+	if !strings.Contains(prompt, "order you wrote them") {
+		t.Error("prompt lost the written-order contract the write-vs-edit advice rests on")
+	}
+}
+
+// The shell-ordering half is not a writer's advice: bash is the one call the
+// runtime cannot order at all, and NoteAgent holds bash with no write or edit.
+// So the paragraph rides its own gate — on for bash holders and writers alike,
+// off for the agents with neither — and it never drags the edit half along.
+func TestParallelToolCallsPrompt_ShellBlockFollowsTheBashGate(t *testing.T) {
+	note := parallelToolCallsPrompt(false, true, true)
+	if !strings.Contains(note, "The shell is the one thing the runtime cannot order") {
+		t.Error("bash-holding read-only prompt lost the shell-ordering guidance")
+	}
+	for _, unwanted := range []string{"old_string", "check_syntax"} {
+		if strings.Contains(note, unwanted) {
+			t.Errorf("bash-holding read-only prompt names %q, which NoteAgent cannot use", unwanted)
+		}
+	}
+	if !strings.Contains(parallelToolCallsPrompt(true, true), "The shell is the one thing the runtime cannot order") {
+		t.Error("writer prompt lost the shell-ordering guidance")
+	}
+	if strings.Contains(parallelToolCallsPrompt(false, true), "The shell is the one thing") {
+		t.Error("agent without bash got the shell-ordering guidance")
 	}
 }
 
@@ -1087,7 +1121,7 @@ func TestCodingAgentHardRules_PointAtTheEditContract(t *testing.T) {
 		hard := a.System[strings.Index(a.System, "## Hard rules"):]
 		for _, want := range []string{
 			`"edits" array`,
-			"The full contract, including the one forbidden pair, is in **Parallel tool calls**",
+			"The full contract, including the write-vs-edit advice, is in **Parallel tool calls**",
 		} {
 			if !strings.Contains(hard, want) {
 				t.Errorf("%s: Hard rules missing %q", a.Name, want)
@@ -1095,7 +1129,7 @@ func TestCodingAgentHardRules_PointAtTheEditContract(t *testing.T) {
 		}
 	}
 	for _, a := range []Agent{NoteAgent, SubagentAgent} {
-		if strings.Contains(a.System, "The full contract, including the one forbidden pair") {
+		if strings.Contains(a.System, "The full contract, including the write-vs-edit advice") {
 			t.Errorf("%s: cannot edit, so the rule is noise in its prompt", a.Name)
 		}
 	}
@@ -1400,6 +1434,17 @@ func TestAskUserPrompt_LeadsWithTheRuleAndKeepsTheBoundary(t *testing.T) {
 		if !strings.Contains(p, want) {
 			t.Errorf("askUserPrompt is missing %q", want)
 		}
+	}
+
+	// The schema is the contract: options run 2-6 (internal/tool/ask_user.go,
+	// minItems 2 / maxItems 6) and one call batches at most 5 questions
+	// (maxItems 5). The guidance has to quote both, not a range the parameters
+	// no longer hold.
+	if !strings.Contains(p, "2-6") {
+		t.Error("askUserPrompt still advertises 2-4 options; the schema allows 2-6")
+	}
+	if !strings.Contains(p, "at most 5 questions") {
+		t.Error("askUserPrompt does not state the 5-question batch cap")
 	}
 
 	// The rule must come before the boundary, and the old prohibition text must

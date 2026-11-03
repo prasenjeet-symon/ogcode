@@ -33,7 +33,7 @@ export default function DesktopNotificationBanner() {
   return (
     <Show when={visible()}>
       <div
-        class="fixed left-1/2 z-[150] top-4 -translate-x-1/2 flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-[10px] border max-w-[92vw]"
+        class="fixed left-1/2 z-[150] top-4 -translate-x-1/2 flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-[7px] border max-w-[92vw]"
         style={{ background: 'var(--bg-overlay)', 'border-color': 'color-mix(in srgb, var(--accent) 30%, transparent)', 'box-shadow': 'var(--shadow-lg)' }}
       >
         <span class="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)' }}>

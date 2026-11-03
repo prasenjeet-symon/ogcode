@@ -17,7 +17,7 @@ type WebSearchTool struct {
 
 func (WebSearchTool) ID() string { return "web_search" }
 func (WebSearchTool) Description() string {
-	return "Search the web for information. Returns titles, URLs, and snippets for the top results. Call multiple times in parallel for different sub-queries."
+	return "Search the web for information. Returns titles, URLs, and snippets for the top results, with a Provider line naming the search backend that actually served them (a fallback chain may pick a different one than the configured default). Call multiple times in parallel for different sub-queries."
 }
 func (WebSearchTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{

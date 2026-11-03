@@ -89,7 +89,7 @@ func TestHardRulesStateAtomicEditsOnce(t *testing.T) {
 			t.Errorf("%s: states the atomic-edit rule %d times, want once", a.Name, n)
 		}
 		hard := a.System[strings.Index(a.System, "## Hard rules"):]
-		if !strings.Contains(hard, "The full contract, including the one forbidden pair, is in **Parallel tool calls**") {
+		if !strings.Contains(hard, "The full contract, including the write-vs-edit advice, is in **Parallel tool calls**") {
 			t.Errorf("%s: Hard rules does not point at the full edit contract", a.Name)
 		}
 		if strings.Contains(hard, `Never batch a "write" with an "edit"`) {

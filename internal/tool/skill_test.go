@@ -177,10 +177,12 @@ func TestSkillTool_SkillWithoutRequirementsLoads(t *testing.T) {
 	}
 }
 
-// A bare call still lists the skills for an agent with no matcher and no
-// <available_skills> block — the one case that has no other way to learn the
-// names. A session that runs the matcher is refused it, tested below.
-func TestSkillTool_ListsSkillsWhenCalledWithoutAName(t *testing.T) {
+// A bare call is refused in every session: the matcher names the skills fitted
+// to a stated plan's steps, the user names the rest, and a listing spends
+// context leaking names the tool's own contract says the agent never needs.
+// (The bare call used to fall back to the full menu in sessions without a
+// matcher, contradicting the description and the update_intent guidance.)
+func TestSkillTool_RefusesACallWithoutAName(t *testing.T) {
 	project := skillProject(t, map[string]string{
 		"git-release": "---\nname: git-release\ndescription: tag a release\n---\nbody\n",
 		"excel":       "---\nname: excel\ndescription: read spreadsheets\n---\nbody\n",
@@ -189,16 +191,13 @@ func TestSkillTool_ListsSkillsWhenCalledWithoutAName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	for _, want := range []string{"git-release — tag a release", "excel — read spreadsheets"} {
-		if !strings.Contains(res.Output, want) {
-			t.Errorf("listing is missing %q:\n%s", want, res.Output)
-		}
+	if !strings.Contains(res.Output, "name of the skill to load") {
+		t.Errorf("a bare call must be refused with the name requirement:\n%s", res.Output)
 	}
-
-	// A truly empty listing cannot be reached through Execute: the loader
-	// always includes the embedded skills. Pin the pure function instead.
-	if got := renderSkillList(skill.NewRegistry(skill.Rules{})); got != "No skills are available in this project." {
-		t.Errorf("an empty registry did not say so: %q", got)
+	for _, leaked := range []string{"git-release", "excel", "tag a release", "read spreadsheets"} {
+		if strings.Contains(res.Output, leaked) {
+			t.Errorf("the bare-call refusal leaked the skill set (%q):\n%s", leaked, res.Output)
+		}
 	}
 }
 

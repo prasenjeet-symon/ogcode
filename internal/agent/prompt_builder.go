@@ -15,7 +15,7 @@ import (
 
 // projectIndexPrompt returns the mandatory project index instructions section,
 // scoped to the given agent role. The workflow tail is tailored to whether the
-// agent can make changes (build) or is read-only (plan, note). Agents that have
+// agent can make changes (build) or is read-only (note, subagent). Agents that have
 // the codebase_map tool must use it before any file exploration.
 //
 // The codebase_map paragraph has to teach the descent, not just name the tool.
@@ -166,8 +166,8 @@ The "start_line" and "end_line" keys of a range are inclusive and use exactly th
 // switched on in place), so this cannot flip mid-session.
 //
 // The wording is per-role because what the agents want from the web differs —
-// a build agent is unblocking itself mid-change, a planner is validating a
-// library choice before committing a plan to it.
+// a build agent is unblocking itself mid-change, a note agent is weighing a
+// claim before it lands in the note.
 func deepSearchPrompt(role string) string {
 	switch role {
 	case "note":
@@ -911,7 +911,18 @@ You cannot run commands or change files, so the risk here is a corrupted answer:
 // SearchAgent explores the web: its toolset is web_search, fetch_page, read and
 // grep, so those two bullets named calls it will never be offered. It gets the
 // same principle worked through its own tools instead.
-func parallelToolCallsPrompt(canWriteFiles, codeFacing bool) string {
+//
+// The shell-ordering paragraph rides a third gate. It is not a writer's advice:
+// bash is the one call the runtime cannot order at all, so the paragraph has to
+// reach the agents that only run the shell (NoteAgent holds bash with no write
+// or edit) as well as the ones that write. It is variadic so the existing calls
+// keep their shape: omitted, it follows canWriteFiles, because every
+// write-holding agent in this package also holds bash.
+func parallelToolCallsPrompt(canWriteFiles, codeFacing bool, hasShell ...bool) string {
+	shell := canWriteFiles
+	if len(hasShell) > 0 {
+		shell = hasShell[0]
+	}
 	prompt := `## Parallel tool calls
 
 **Batching is the default; a sequential call is one you should be able to justify.** Every response block is a full round trip (your output, the model call, the wait) and re-sends the conversation so far — ten files read one-per-block cost ten round trips for one block's work.
@@ -956,13 +967,17 @@ Batch aggressively:
 
 **Calls on the same file run in the order you write them; calls on different files run at the same time.** A "read", "file_map" or "check_syntax" written after an "edit" of that file sees the edit, so changing a file and checking it can share one block, and edits to different files batch freely.
 
-**Several changes to one file belong in one "edit" call.** Every change goes in its "edits" array — a single change is an array of one, and the tool takes no other form. They apply in order against each other's results, and all-or-nothing — if any anchor is missing or ambiguous, nothing is written and the error names which entry failed. That is one round trip and cannot half-apply a refactor. Separate same-file "edit" calls in one block remain safe — the runtime serializes mutations to the same path, in the order you wrote them, so each re-reads after the last applied — but they commit independently, and an anchor an earlier one changed fails cleanly — "old_string not found" when it was consumed, or an ambiguity error if its replacement duplicated it — so re-issue that one after seeing the result. **Never batch a "write" with an "edit" to the same file** — the edit would anchor on content the write replaces, which you have not seen.
+**Several changes to one file belong in one "edit" call.** Every change goes in its "edits" array — a single change is an array of one, and the tool takes no other form. They apply in order against each other's results, and all-or-nothing — if any anchor is missing or ambiguous, nothing is written and the error names which entry failed. That is one round trip and cannot half-apply a refactor. Separate same-file "edit" calls in one block remain safe — the runtime serializes mutations to the same path, in the order you wrote them, so each re-reads after the last applied — but they commit independently, and an anchor an earlier one changed fails cleanly — "old_string not found" when it was consumed, or an ambiguity error if its replacement duplicated it — so re-issue that one after seeing the result. **Avoid batching a "write" with an "edit" on the same file.** Nothing forbids it — the runtime runs same-file calls in the order you wrote them — but the pairing is almost always a wasted change: a "write" followed by an "edit" can be one "write" carrying the change instead, an "edit" followed by a "write" throws the edit away, and "old_string" anchors taken before the write stop matching the written text. Give the pairing a block of its own only when you truly want both.
 
 **"old_string" is copied from the file, not composed.** Take it from the read you are working from — leading spaces and tabs exactly as printed, no line-number prefix, no truncation marker — and extend it with neighbouring lines rather than guessing at what sits beyond the window. When an edit fails with "old_string not found", re-read the region and copy the anchor from the fresh window; the same text rebuilt from memory and resent is the next failure, not the fix.
 
-**The shell is the one thing the runtime cannot order.** It cannot tell which files a "bash" command touches, so a command that changes files — a formatter, a code generator, a "git checkout" — runs alongside everything else in its block. Give such a command a block of its own, and read, edit or check what it changed in the next. Commands that depend on each other — install then test, add then commit — belong in one command joined with "&&", not in parallel calls.
-
 "write" and "edit" already report syntax errors in what they change, so "check_syntax" is only for files changed another way (a shell command, a formatter, a generator) or to confirm a fix.`
+	}
+
+	if shell {
+		prompt += `
+
+**The shell is the one thing the runtime cannot order.** It cannot tell which files a "bash" command touches, so a command that changes files — a formatter, a code generator, a "git checkout" — runs alongside everything else in its block. Give such a command a block of its own, and read, edit or check what it changed in the next. Commands that depend on each other — install then test, add then commit — belong in one command joined with "&&", not in parallel calls.`
 	}
 
 	return prompt
@@ -1235,11 +1250,11 @@ Whatever you need to ask the user, ask it with "ask_user" rather than in prose: 
 
 The one limit: **if you can find it out yourself, find it out.** The source code, a file, the web, a command — all of that is yours to read, search and run, and a question there is a round trip spent on something already answered. Ask only what a person's answer is genuinely needed for.
 
-Ask everything you need in **one call**. The batch is shown as a short set of screens in a single dialog, so a second call is a second interruption.
+Ask everything you need in **one call**. The batch is shown as a short set of screens in a single dialog, so a second call is a second interruption, and one call carries at most 5 questions.
 
 - **Header**: a short title for the screen (2-5 words).
 - **Question**: one clear sentence — state what you are asking and why it matters.
-- **Options**: 2-4 concrete answers you propose, best first, each with a one-line description. Mark "multiSelect" only when several could apply at once; otherwise it is pick-one.
+- **Options**: 2-6 concrete answers you propose, best first, each with a one-line description. Mark "multiSelect" only when several could apply at once; otherwise it is pick-one.
 - **Freeform**: the user can always type an answer of their own, so your options need not be exhaustive — a good set of suggestions is faster to answer than an open field, and never a constraint.
 
 **When one screen depends on an earlier answer, say so in the batch.** Give the earlier question an "id", then set "showWhen" on the later one ({"question": "<id>", "options": ["<label>"]} — add "not": true to show it when none of those labels was picked, or omit "options" to match any answer at all). The dialog evaluates this as the user answers, so they only ever see the branch that applies, and the tool result tells you which screens were shown and which were skipped for not matching. Branch only on an earlier question; do not expect the user to answer a screen whose branch did not apply.

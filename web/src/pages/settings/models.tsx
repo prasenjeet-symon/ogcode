@@ -724,7 +724,7 @@ function OGXSection(props: {
 
         <Show when={state() === 'loading' && !error()}>
           <div data-setting class="flex items-center gap-3 px-4 py-4">
-            <span class="w-10 h-10 rounded-[10px] bg-[color:var(--bg-hover)] animate-pulse" />
+            <span class="w-10 h-10 rounded-[7px] bg-[color:var(--bg-hover)] animate-pulse" />
             <span class="flex-1 space-y-2">
               <span class="block h-3 w-24 rounded bg-[color:var(--bg-hover)] animate-pulse" />
               <span class="block h-2.5 w-56 max-w-full rounded bg-[color:var(--bg-hover)] animate-pulse" />
@@ -1561,7 +1561,7 @@ function ModelItem(props: {
         aria-checked={props.model.enabled}
         aria-label={`${props.model.enabled ? 'Disable' : 'Enable'} ${props.model.name}`}
         onClick={props.onToggle}
-        class={`w-[15px] h-[15px] shrink-0 rounded-[4px] border flex items-center justify-center transition-colors
+        class={`w-[15px] h-[15px] shrink-0 rounded-[3px] border flex items-center justify-center transition-colors
           ${props.model.enabled
             ? 'bg-[color:var(--accent)] border-[color:var(--accent)] text-[color:var(--on-primary)]'
             : 'bg-[color:var(--bg-elevated)] border-[color:var(--border-strong)] text-transparent hover:border-[color:var(--text-tertiary)]'

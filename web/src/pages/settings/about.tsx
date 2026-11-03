@@ -155,12 +155,12 @@ function CommunityCard(props: { entry: (typeof COMMUNITY)[number]; hidden: boole
       rel="noreferrer noopener"
       data-setting
       hidden={props.hidden}
-      class="group flex flex-col rounded-[10px] border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)]/40 p-4
+      class="group flex flex-col rounded-[7px] border border-[color:var(--border-subtle)] bg-[color:var(--bg-elevated)]/40 p-4
         transition-colors hover:border-[color:var(--border-default)] hover:bg-[color:var(--bg-elevated)]/70"
     >
       <div class="flex items-center gap-3">
         <span
-          class="shrink-0 flex h-[32px] w-[32px] items-center justify-center rounded-[8px] text-white"
+          class="shrink-0 flex h-[32px] w-[32px] items-center justify-center rounded-[5px] text-white"
           style={{ background: props.entry.color }}
         >
           <span class="block h-[18px] w-[18px]">
@@ -238,8 +238,8 @@ export default function AboutSettings() {
           does before it gets to the details. */}
       <div class="pb-2 pt-2 text-center">
         <div class="relative inline-flex mb-3">
-          <div class="absolute inset-0 rounded-[6px] bg-[color:var(--accent)] blur-xl opacity-25" />
-          <div class="relative w-12 h-12 rounded-[6px] bg-[color:var(--accent)] flex items-center justify-center">
+          <div class="absolute inset-0 rounded-[4px] bg-[color:var(--accent)] blur-xl opacity-25" />
+          <div class="relative w-12 h-12 rounded-[4px] bg-[color:var(--accent)] flex items-center justify-center">
             <Logo class="w-6 h-6 text-[color:var(--on-primary)]" />
           </div>
         </div>

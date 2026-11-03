@@ -16,7 +16,7 @@ type FetchPageTool struct {
 
 func (FetchPageTool) ID() string { return "fetch_page" }
 func (FetchPageTool) Description() string {
-	return "Fetch a URL and return its readable text content. Call multiple times in parallel for different URLs."
+	return "Fetch a URL and return its readable text content with a Provider line naming the search backend that served it; long pages are truncated at 14,000 characters and the result says so. Call multiple times in parallel for different URLs."
 }
 func (FetchPageTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{

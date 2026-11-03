@@ -367,7 +367,7 @@ export default function PromptInput() {
     <div class="shrink-0 bg-gradient-to-t from-[color:var(--bg-base)] via-[color:var(--bg-base)] to-transparent pt-3 composer-safe">
       <form onSubmit={handleSubmit} class="chat-col px-4 md:px-8 pb-3">
         <div
-          class="composer relative rounded-[1.25rem] border bg-[color:var(--bg-surface)] transition-[border-color,box-shadow] duration-200"
+          class="composer relative rounded-[13px] border bg-[color:var(--bg-surface)] transition-[border-color,box-shadow] duration-200"
           classList={{ 'is-focused': focused(), 'is-dragging': dragging() }}
           onDragEnter={handleDragEnter}
           onDragOver={handleDragOver}
@@ -419,7 +419,7 @@ export default function PromptInput() {
           </Show>
           {/* Drop target overlay — only while a file is actually over the box */}
           <Show when={dragging()}>
-            <div class="absolute inset-0 z-10 rounded-[1.25rem] flex items-center justify-center gap-2
+            <div class="absolute inset-0 z-10 rounded-[13px] flex items-center justify-center gap-2
                         pointer-events-none animate-fade-in
                         border-2 border-dashed border-[color:var(--accent)]
                         bg-[color:var(--bg-surface)]/92 text-[color:var(--accent-ink)] text-ui font-medium">

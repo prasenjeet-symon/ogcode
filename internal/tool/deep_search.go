@@ -87,7 +87,7 @@ func DeepSearchRecord(res Result) (query string, cached, ok bool) {
 
 func (DeepSearchTool) ID() string { return "deep_search" }
 func (DeepSearchTool) Description() string {
-	return "Delegate a research query to the deep-search pipeline. A single web search of the query verbatim is run, results pooled and ranked, the top pages fetched in parallel, and a synthesised answer with a sources list returned. Use for any question requiring current web information. While the answer cache is enabled, repeating an identical query with the same context returns the stored answer immediately instead of running the pipeline again, so re-asking a question this conversation already researched is cheap and fast; the answer says when it was served from cache and how to research it again."
+	return "Delegate a research query to the deep-search pipeline. A single web search of the query verbatim is run, results pooled and ranked, the top pages fetched in parallel, and a synthesised answer with a sources list returned. Use for any question requiring current web information. While the answer cache is enabled, repeating an identical query with the same context, model, and provider (keyed on the UTC date) returns the stored answer immediately instead of running the pipeline again, so re-asking a question this conversation already researched is cheap and fast; the answer says when it was served from cache and how to research it again."
 }
 func (DeepSearchTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -156,8 +156,8 @@ func (t DeepSearchTool) Execute(ctx context.Context, args json.RawMessage, tctx 
 
 	// Bound the search session with its own timeout so it doesn't inherit an
 	// unbounded context from the parent loop. A well-structured search completes
-	// in ~2 tool-call rounds (~30-60s for LLM + ~5s for search/fetch), so 90s
-	// is generous.
+	// in ~2 tool-call rounds (~30-60s for LLM + ~5s for search/fetch). Slow
+	// models or queued bridge requests can push past that, so 180s is generous.
 	searchCtx, cancel := context.WithTimeout(ctx, deepSearchTimeout)
 	defer cancel()
 

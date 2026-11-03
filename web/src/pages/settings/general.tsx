@@ -223,7 +223,7 @@ function ThemeGroup(props: { hide: Hide }) {
         <div
           role="radiogroup"
           aria-label="Theme mode"
-          class="inline-flex items-center gap-0.5 rounded-[8px] border border-[color:var(--border-default)] p-0.5"
+          class="inline-flex items-center gap-0.5 rounded-[5px] border border-[color:var(--border-default)] p-0.5"
         >
           <For each={MODES}>
             {(m) => {
@@ -234,7 +234,7 @@ function ThemeGroup(props: { hide: Hide }) {
                   role="radio"
                   aria-checked={active()}
                   onClick={() => selectMode(m.value)}
-                  class="inline-flex items-center gap-1.5 rounded-[6px] px-2.5 py-1.5 text-meta font-medium transition-colors"
+                  class="inline-flex items-center gap-1.5 rounded-[4px] px-2.5 py-1.5 text-meta font-medium transition-colors"
                   style={{
                     background: active() ? 'var(--accent)' : 'transparent',
                     color: active() ? 'var(--on-primary)' : 'var(--text-secondary)',

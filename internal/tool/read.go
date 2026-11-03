@@ -15,9 +15,9 @@ type ReadTool struct{}
 
 // readRange is one window of a multi-range read. Its field names match the
 // single-window parameters, so a range printed by file_map copies across
-// unchanged. EndLine is a pointer so an explicitly given value stays distinct
-// from an omitted one — an explicit end_line must name a real line, while an
-// omitted one runs to the end of the file.
+// unchanged. EndLine is a pointer so an omitted value stays distinct from an
+// explicit one — an omitted (or non-positive) end_line runs to the end of the
+// file, while a positive one must name a real line.
 type readRange struct {
 	StartLine int  `json:"start_line"`
 	EndLine   *int `json:"end_line"`
@@ -86,7 +86,7 @@ const rangedReadTrailer = `Need more of this file? Ask for every window at once 
 
 func (ReadTool) ID() string { return "read" }
 func (ReadTool) Description() string {
-	return "Read file contents or list directory contents. One file reads with path, optionally with ranges/offset/limit. Two or more files read together in ONE call with files=[{\"path\": ..., \"ranges\": [...]}, ...] — the shape a grep or file_map fan-out leaves you with, and never one call per file. Each line comes back as its line number, a '|', then the line exactly as it is in the file — so everything after the FIRST '|' is literal content, including its leading tabs or spaces, and that is what an edit anchor must copy. To read part of a file, pass ranges: a list of {start_line, end_line} objects, 1-based and inclusive, taking the ranges printed by file_map or the line numbers grep printed directly. One entry reads one region; several read every grep hit or file_map entry you need in one call, returned in the order given under a file:start-end heading with the same numbering. A single region is just ranges with one entry — there is no separate start_line/end_line form. ranges carries its own windows and cannot be combined with offset or limit. Each files entry takes the single-file form — {path, ranges} or {path} alone for a whole file or a directory listing — and every file comes back in the order given under a '== path ==' heading. path and files are exclusive, and a files entry carries its own windows instead of a top-level ranges/offset/limit. A file that fails inside files does not discard the others — its section names the error. IMPORTANT: reading a file longer than 200 lines with no window at all — no ranges, no offset, no limit — returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with a single range covering it, e.g. ranges=[{\"start_line\":1,\"end_line\":1234}]. Use offset/limit to page through a file once you know its shape: a bare offset is a placed window that pages raw content past the map, and a bare limit is honoured on its own at any size. The interception needs a file the mapper recognizes — long prose, data or config carries no symbols, so a bare whole-file read of one falls through to a plain read with no map and no notice."
+	return "Read file contents or list directory contents. One file reads with path, optionally with ranges/offset/limit. Two or more files read together in ONE call with files=[{\"path\": ..., \"ranges\": [...]}, ...] — the shape a grep or file_map fan-out leaves you with, and never one call per file. Each line comes back as its line number, a '|', then the line exactly as it is in the file — so everything after the FIRST '|' is literal content, including its leading tabs or spaces, and that is what an edit anchor must copy. To read part of a file, pass ranges: a list of {start_line, end_line} objects, 1-based and inclusive, taking the ranges printed by file_map or the line numbers grep printed directly. One entry reads one region; several read every grep hit or file_map entry you need in one call, returned in the order given under a file:start-end heading with the same numbering. A single region is just ranges with one entry — there is no separate start_line/end_line form. ranges carries its own windows and cannot be combined with offset or limit. Each files entry takes the single-file form — {path, ranges} or {path} alone for a whole file or a directory listing — and every file comes back in the order given under a '== path ==' heading. path and files are exclusive, and a files entry carries its own windows instead of a top-level ranges/offset/limit. A file that fails inside files does not discard the others — its section names the error. A binary file is flagged as such with a pointer to the right tool, never read as garbage lines. IMPORTANT: reading a file longer than 200 lines with no window at all — no ranges, no offset, no limit — returns that file's map instead of its contents, so map first and read the range you need. If you truly need an entire long file, say so explicitly with a single range covering it, e.g. ranges=[{\"start_line\":1,\"end_line\":1234}]. Use offset/limit to page through a file once you know its shape: a bare offset is a placed window that pages raw content past the map, and a bare limit is honoured on its own at any size. The interception needs a file the mapper recognizes — long prose, data or config carries no symbols, so a bare whole-file read of one falls through to a plain read with no map and no notice."
 }
 func (ReadTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -108,7 +108,7 @@ func (ReadTool) Parameters() json.RawMessage {
 								"type": "object",
 								"properties": {
 									"start_line": {"type": "integer", "description": "First line of this window, 1-based and inclusive. Defaults to 1 when only end_line is given."},
-									"end_line": {"type": "integer", "description": "Last line of this window, 1-based and inclusive. If omitted, reads to the end of the file."}
+									"end_line": {"type": "integer", "description": "Last line of this window, 1-based and inclusive. If omitted (or ≤ 0), reads to the end of the file."}
 								}
 							}
 						},
@@ -125,7 +125,7 @@ func (ReadTool) Parameters() json.RawMessage {
 					"type": "object",
 					"properties": {
 						"start_line": {"type": "integer", "description": "First line of this window, 1-based and inclusive. Defaults to 1 when only end_line is given."},
-						"end_line": {"type": "integer", "description": "Last line of this window, 1-based and inclusive. If omitted, reads to the end of the file."}
+						"end_line": {"type": "integer", "description": "Last line of this window, 1-based and inclusive. If omitted (or ≤ 0), reads to the end of the file."}
 					}
 				}
 			},
@@ -274,12 +274,13 @@ func validateReadWindows(ranges []readRange, offset, limit int, prefix string) e
 		if start <= 0 {
 			start = 1
 		}
-		// An explicitly given end_line must name a real line: a value <= 0
-		// once slipped past the inverted check below and read as "to the end
-		// of the file" — a different read than the caller asked for. An
-		// omitted one (nil) still runs to the end.
+		// An end_line ≤ 0 is read the way an omitted one is: to the end of
+		// the file. start_line clamps the same way, and the window engine
+		// below (renderRanges) already treats any non-positive end as open —
+		// so until now refusal was the ONLY effect the value could have, the
+		// inconsistent half of an otherwise silently-normalising pair.
 		if r.EndLine != nil && *r.EndLine <= 0 {
-			return fmt.Errorf("%sranges[%d]: end_line %d is not a line number — end_line is 1-based and inclusive; omit it to read to the end of the file", prefix, i, *r.EndLine)
+			r.EndLine = nil
 		}
 		if r.EndLine != nil && *r.EndLine < start {
 			return fmt.Errorf("%sranges[%d]: end_line %d is before start_line %d — the range is inverted and reads nothing; send it with start_line ≤ end_line", prefix, i, *r.EndLine, start)

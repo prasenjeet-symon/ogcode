@@ -74,7 +74,7 @@ func (TaskTool) Parameters() json.RawMessage {
 		"properties": {
 			"description": {
 				"type": "string",
-				"description": "A short (3-6 word) label for the investigation, e.g. \"trace auth middleware\""
+				"description": "Optional. A short (3-6 word) label for the investigation, e.g. \"trace auth middleware\". Defaults to \"task\"."
 			},
 			"prompt": {
 				"type": "string",
@@ -85,7 +85,7 @@ func (TaskTool) Parameters() json.RawMessage {
 				"description": "Run it as a background child instead of blocking: this call returns its handle at once, you keep working, and the child's answer arrives later as a completion report. Default false (synchronous, blocking)."
 			}
 		},
-		"required": ["description", "prompt"]
+		"required": ["prompt"]
 	}`)
 }
 

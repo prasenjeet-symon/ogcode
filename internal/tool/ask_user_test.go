@@ -95,6 +95,44 @@ func TestAskUserTool_RefusesUnresolvableBranching(t *testing.T) {
 	}
 }
 
+// Answers are keyed by id, so two questions sharing one id would overwrite the
+// earlier answer — the user's reply would reach the model attributed to the
+// wrong screen. Refused before the batch goes on screen, conditionality
+// regardless: a skipped screen still carries its id.
+func TestAskUserTool_RefusesDuplicateIds(t *testing.T) {
+	cases := []struct {
+		name string
+		qs   []question.Question
+	}{
+		{"plain duplicates", []question.Question{
+			{ID: "store", Question: "first?"},
+			{ID: "store", Question: "second?"},
+		}},
+		{"duplicate with one branched", []question.Question{
+			{ID: "store", Question: "first?"},
+			{ID: "depth", Question: "second?", ShowWhen: &question.Condition{Question: "store", Options: []string{"x"}}},
+			{ID: "store", Question: "third?"},
+		}},
+	}
+	for _, tc := range cases {
+		called := false
+		tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+			called = true
+			return question.Reply{}, nil
+		}}
+		res, err := tool.Execute(context.Background(), askUserArgs(t, tc.qs...), Context{})
+		if err != nil {
+			t.Fatalf("%s: Execute returned error: %v", tc.name, err)
+		}
+		if called {
+			t.Errorf("%s: Ask was called with a batch that has duplicate ids", tc.name)
+		}
+		if !strings.Contains(res.Output, "repeats the id") {
+			t.Errorf("%s: refusal should name the duplicate id, got: %q", tc.name, res.Output)
+		}
+	}
+}
+
 func TestAskUserTool_ReturnsTheAnswers(t *testing.T) {
 	var gotQuestions []question.Question
 	var gotSession string

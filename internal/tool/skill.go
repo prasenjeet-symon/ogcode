@@ -19,10 +19,9 @@ const maxSkillFiles = 10
 // A skill's instructions can run to thousands of tokens and the prompt is
 // re-sent on every step of every turn, so bodies stay on disk and the agent pulls
 // the one it needs. A session that runs the intent matcher never needs a menu:
-// stating a plan names the skills fitted to its steps, and the listing is refused
-// there so a turn cannot spend context on every skill it will not use. An agent
-// with no matcher (and no <available_skills> block) can still get the menu from a
-// bare call.
+// stating a plan names the skills fitted to its steps, and the matcher — or the
+// user — supplies every other name, so a bare call is refused in every session
+// rather than answered with a listing.
 type SkillTool struct {
 	Loader *skill.Loader
 }
@@ -32,7 +31,7 @@ func NewSkillTool(l *skill.Loader) SkillTool { return SkillTool{Loader: l} }
 func (SkillTool) ID() string { return "skill" }
 
 func (SkillTool) Description() string {
-	return "Load one skill's full instructions into your context — the skill's body and the paths of any files it ships with — before doing the work that skill describes. Call it with the name of the skill you need: one of the skills listed for you, or one the user names. Do not call it with no name to ask for the full list."
+	return "Load one skill's full instructions into your context — the skill's body and the paths of any files it ships with — before doing the work that skill describes. Call it with the name of the skill you need: one the intent matcher named for a stated plan's step, or one the user names; there is no full listing to ask for. Do not call it with no name."
 }
 
 func (SkillTool) Parameters() json.RawMessage {
@@ -61,19 +60,15 @@ func (t SkillTool) Execute(ctx context.Context, args json.RawMessage, tctx Conte
 
 	reg := t.Loader.Load(tctx.SessionDir)
 	if name == "" {
-		// The matcher is the discovery path in an interactive session: it names
-		// the skills fitted to the plan's steps. A full listing would spend
-		// context on every skill the turn will not use, so the build agent is
-		// refused it rather than invited to it.
-		if tctx.IntentMatcher {
-			return Result{
-				Title:  "Skills",
-				Output: "Skills are not listed here. State your plan with update_intent and the matcher names the skills that fit your steps — load one of those by name. Load a skill directly only when the user named it themselves.",
-			}, nil
-		}
-		// A bare call stays the fallback for an agent with no matcher and no
-		// <available_skills> block, which has no other way to learn the names.
-		return Result{Title: "Skills", Output: renderSkillList(reg)}, nil
+		// The tool's own contract — its description, and the update_intent
+		// guidance in the prompt — forbids a bare call. The matcher is the
+		// discovery path and the user names any skill they want, so the listing
+		// this used to fall back to (for sessions without a matcher) leaked
+		// names the contract says no agent needs.
+		return Result{
+			Title:  "Skill",
+			Output: "Call skill with the name of the skill to load — never with no name. The update_intent matcher names the skills fitted to a stated plan's steps, and the user can name one; if you believe a skill exists but lack its name, ask the user. There is no full listing to ask for.",
+		}, nil
 	}
 	s, ok := reg.Get(name)
 	if !ok {
@@ -178,27 +173,6 @@ func renderSkill(s skill.Skill) string {
 	}
 	b.WriteString("</skill_files>\n</skill_content>")
 	return b.String()
-}
-
-// renderSkillList is the answer to a bare call: the menu of skills the agent
-// could load. Descriptions are collapsed onto one line each so a multi-line
-// frontmatter value cannot turn the list into prose the model misreads.
-func renderSkillList(reg *skill.Registry) string {
-	visible := reg.Visible()
-	if len(visible) == 0 {
-		return "No skills are available in this project."
-	}
-	var b strings.Builder
-	b.WriteString("Skills available in this project. Call this tool again with a name to load one.\n")
-	for _, s := range visible {
-		desc := strings.Join(strings.Fields(s.Description), " ")
-		if desc == "" {
-			b.WriteString("- " + s.Name + "\n")
-			continue
-		}
-		b.WriteString("- " + s.Name + " — " + desc + "\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 // availableList names the skills the agent could have meant.

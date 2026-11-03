@@ -42,7 +42,7 @@ func NewProjectIndexTool(store *docindex.Store) ProjectIndexTool {
 func (ProjectIndexTool) ID() string { return "codebase_map" }
 
 func (ProjectIndexTool) Description() string {
-	return fmt.Sprintf("Return one level of a labeled map of indexed files — text, code, PDF, and DOCX documents. Every folder is shown as a SINGLE line: how many files it holds, the subfolders directly inside it, and a sample of topic labels drawn from across the whole folder; files sitting directly at that level are listed individually with their own labels. Labels are separated by semicolons. To look inside a folder, call again with subdir set to its path from the project root (e.g. \"internal/tool\") — each call shows one level, and you can jump straight to a subfolder a folder line names. For PDFs and DOCX files a subset of labels (up to %d) is aggregated across pages (no per-page breakdown). Use this to find which area is relevant to a topic before reading anything; use pdf_index for per-page labels of a specific PDF, or docx_index for a DOCX.", docLabelCap)
+	return fmt.Sprintf("Return one level of a labeled map of indexed files — text, code, PDF, DOCX, and spreadsheet documents (.xlsx/.xlsm/.csv/.tsv files, indexed like the PDF and DOCX leaves: one entry per sheet, labeled from the sheet's column profile). Every folder is shown as a SINGLE line: how many files it holds, the subfolders directly inside it, and a sample of topic labels drawn from across the whole folder; files sitting directly at that level are listed individually with their own labels. Labels are separated by semicolons. To look inside a folder, call again with subdir set to its path from the project root (e.g. \"internal/tool\") — each call shows one level, and you can jump straight to a subfolder a folder line names. For PDFs and DOCX files a subset of labels (up to %d) is aggregated across pages (no per-page breakdown), and the same page-based view covers spreadsheet sheets. Use this to find which area is relevant to a topic before reading anything; use pdf_index for per-page labels of a specific PDF, docx_index for a DOCX, and query_sheet to probe a workbook's sheets by SQL.", docLabelCap)
 }
 
 func (ProjectIndexTool) Parameters() json.RawMessage {
@@ -132,11 +132,16 @@ func resolveSubdirPrefix(sessionDir, subdir string) (string, bool) {
 }
 
 func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx Context) (Result, error) {
+	if t.Store == nil {
+		return Result{Title: "Project Index", Output: "the document index is not available in this environment"}, nil
+	}
 	var params struct {
 		Subdir string `json:"subdir"`
 	}
-	if args != nil {
-		_ = DecodeArgs(args, &params)
+	if len(args) > 0 {
+		if err := DecodeArgs(args, &params); err != nil {
+			return Result{Title: "Project Index", Output: fmt.Sprintf("invalid args for project_index: %v", err)}, nil
+		}
 	}
 
 	prefix := tctx.SessionDir

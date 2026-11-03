@@ -1,6 +1,6 @@
 import { For, Show, createSignal } from 'solid-js';
 import type { ModelInfo, CustomModelMeta } from '../../api/client';
-import DialogShell, { DialogHeader } from '../../components/dialog-shell';
+import DialogShell, { DialogBody, DialogFooter, DialogHeader } from '../../components/dialog-shell';
 import { fieldClass } from './ui';
 
 /**
@@ -200,7 +200,7 @@ export default function ModelMetaDialog(props: {
       labelledBy={`${uid}-title`}
       describedBy={`${uid}-desc`}
       onClose={props.onClose}
-      class="sm:max-w-[560px]"
+      class="sm:max-w-[620px]"
       initialFocus={() => firstField ?? null}
       onKeyDown={onKey}
     >
@@ -223,7 +223,7 @@ export default function ModelMetaDialog(props: {
       />
 
       {/* ---- Fields ---- */}
-      <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+      <DialogBody>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3.5">
           <For each={FIELDS}>
             {(f, i) => (
@@ -263,33 +263,24 @@ export default function ModelMetaDialog(props: {
             <span class="text-micro text-[color:var(--text-muted)]">(already on)</span>
           </Show>
         </label>
-      </div>
+      </DialogBody>
 
       {/* ---- Footer ---- */}
-      <div class="shrink-0 px-5 py-3 border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-base)]/40 flex items-center justify-between gap-3">
-        <p class="text-micro text-[color:var(--text-muted)] leading-snug min-w-0">
+      <DialogFooter
+        hint={
           <Show when={error()} fallback="Blank keeps the greyed figure.">
-            <span style={{ color: 'var(--danger)' }}>{error()}</span>
+            <span>{error()}</span>
           </Show>
-        </p>
-        <div class="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={props.onClose}
-            class="h-8 px-3 rounded-lg text-meta text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)] transition"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={busy()}
-            class="h-8 px-3.5 rounded-lg text-meta font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:bg-[color:var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition shadow-[var(--shadow-sm)]"
-          >
-            {busy() ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </div>
+        }
+        tone={error() ? 'danger' : 'muted'}
+      >
+        <button type="button" onClick={props.onClose} class="dlg-btn">
+          Cancel
+        </button>
+        <button type="button" onClick={save} disabled={busy()} class="dlg-btn dlg-btn-primary">
+          {busy() ? 'Saving…' : 'Save'}
+        </button>
+      </DialogFooter>
     </DialogShell>
   );
 }

@@ -107,6 +107,32 @@ func TestGrepTool_CappedResultStillSucceedsAndSaysNarrowIt(t *testing.T) {
 	}
 }
 
+// A line longer than bufio's 64KB token cap stops the scanner mid-file. The
+// matches before the break are real but the rest was never looked at, so the
+// call must refuse and name the file instead of coming back as a clean search
+// that quietly stopped halfway through it.
+func TestGrepTool_LineTooLongRefusesNamingTheFile(t *testing.T) {
+	dir := t.TempDir()
+	var sb strings.Builder
+	sb.WriteString("HIT before the long line\n")
+	sb.WriteString(strings.Repeat("x", 128*1024)) // one 128KB line, no newline
+	sb.WriteString("\nHIT after the long line\n")
+	mustWriteFile(t, filepath.Join(dir, "long.txt"), sb.String())
+
+	tool := GrepTool{}
+	args, _ := json.Marshal(map[string]string{"pattern": "HIT"})
+	_, err := tool.Execute(context.Background(), args, Context{SessionDir: dir})
+	if err == nil {
+		t.Fatal("a file with a >64KB line was scanned without complaint")
+	}
+	if !strings.Contains(err.Error(), "long.txt") {
+		t.Errorf("the error should name the file cut short, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "64KB") {
+		t.Errorf("the error should say why the scan stopped, got: %v", err)
+	}
+}
+
 func TestGrepTool_SearchExplicitHiddenDir(t *testing.T) {
 	// Pointing the tool explicitly at a hidden dir should still search it
 	// (root is never pruned).

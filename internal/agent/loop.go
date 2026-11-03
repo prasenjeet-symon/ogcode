@@ -4735,7 +4735,7 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		// MEMORY.md section: role-aware instructions based on whether the agent
 		// can write files, and on whether a <memory-md> block was actually
 		// prepended above. BuildAgent gets full read/write maintenance
-		// instructions; read-only agents (Plan, Note) get read-only guidance.
+		// instructions; read-only agents (Note, Subagent) get read-only guidance.
 		// The absent-file case (including the nudge to create one) is handled
 		// inside memoryMDPrompt so the section never points at a tag that the
 		// prompt does not contain.
@@ -4812,7 +4812,7 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 	}
 
 	// Advertise recall only to agents that hold the memory_recall tool (Build,
-	// Task, Plan). memoryEnabled here means turn-memory is active for this run.
+	// Subagent). memoryEnabled here means turn-memory is active for this run.
 	if memoryEnabled && a.HasTool("memory_recall") {
 		prompt += `
 

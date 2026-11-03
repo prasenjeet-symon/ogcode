@@ -25,7 +25,7 @@ func (BashTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"command": {"type": "string", "description": "The shell command to execute"},
-			"timeout": {"type": "integer", "description": "Timeout in seconds (default 120)"}
+			"timeout": {"type": "integer", "description": "Timeout in seconds (default 120; an explicit 0 or negative value runs without a timeout)"}
 		},
 		"required": ["command"]
 	}`)
@@ -34,7 +34,11 @@ func (BashTool) Parameters() json.RawMessage {
 func (BashTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var input struct {
 		Command string `json:"command"`
-		Timeout int    `json:"timeout"`
+		// A pointer so an absent timeout keeps the documented 120s default
+		// while an explicitly given 0 or negative means "no deadline": as a
+		// plain int both arrive as 0 and the two readings could not be told
+		// apart.
+		Timeout *int `json:"timeout"`
 	}
 	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
@@ -51,12 +55,23 @@ func (BashTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		}, nil
 	}
 
-	timeout := time.Duration(input.Timeout) * time.Second
-	if timeout == 0 {
-		timeout = 120 * time.Second
+	timeout := 120 * time.Second
+	if input.Timeout != nil {
+		if *input.Timeout <= 0 {
+			// An explicit 0 or negative runs without a deadline. Passing the
+			// raw value into context.WithTimeout expired the context before
+			// the command even started, so the caller saw an instant fake
+			// "[command timed out]" for a command that never ran.
+			timeout = 0
+		} else {
+			timeout = time.Duration(*input.Timeout) * time.Second
+		}
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	cmdCtx, cancel := context.WithCancel(ctx)
+	if timeout > 0 {
+		cmdCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
 	defer cancel()
 
 	// Use the OS-native shell so the tool works on every platform. On Windows

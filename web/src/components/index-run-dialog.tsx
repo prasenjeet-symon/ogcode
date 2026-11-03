@@ -4,7 +4,7 @@ import { useDocIndex } from '../context/docindex';
 import { getIndexPlan, type ModelInfo } from '../api/client';
 import { modelGroup } from '../lib/providers';
 import { groupLabel, groupDot } from './model-selector';
-import DialogShell, { DialogHeader } from './dialog-shell';
+import DialogShell, { DialogFooter, DialogHeader } from './dialog-shell';
 import { revealWithin } from '../lib/reveal';
 
 /**
@@ -199,7 +199,7 @@ export default function IndexRunDialog(props: {
       labelledBy="idx-run-title"
       describedBy="idx-run-desc"
       onClose={props.onClose}
-      class="sm:max-w-[500px]"
+      class="sm:max-w-[560px]"
       initialFocus={() => list?.querySelector<HTMLElement>('[aria-checked="true"]') ?? filterInput ?? null}
       onKeyDown={onKeyDown}
       returnFocus={props.returnFocus}
@@ -227,7 +227,7 @@ export default function IndexRunDialog(props: {
       />
 
       {/* ---- What this run will do ---- */}
-      <div class="shrink-0 px-5 py-4 border-b border-[color:var(--border-subtle)]">
+      <div class="shrink-0 px-6 py-5 border-b border-[color:var(--border-subtle)]">
         <Show when={!plan.loading} fallback={
           <div class="flex flex-col gap-3" aria-busy="true" aria-label="Scanning the workspace">
             <div class="flex items-center justify-between">
@@ -321,7 +321,7 @@ export default function IndexRunDialog(props: {
 
       {/* ---- Model ---- */}
       <div class="flex-1 min-h-0 flex flex-col">
-        <div class="shrink-0 px-5 pt-3 pb-2 flex items-center gap-2">
+        <div class="shrink-0 px-6 pt-4 pb-2 flex items-center gap-2">
           <h3 id="idx-run-model" class="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[color:var(--text-muted)]">Model</h3>
           <div class="flex-1" />
           <span class="text-[0.625rem] text-[color:var(--text-muted)] font-mono">in / out per 1M tokens</span>
@@ -377,38 +377,31 @@ export default function IndexRunDialog(props: {
       </div>
 
       {/* ---- Footer ---- */}
-      <div class="shrink-0 px-5 py-3 border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-base)]/40 flex items-center justify-between gap-3">
-        <p class="text-micro text-[color:var(--text-muted)] leading-snug min-w-0 truncate">
-          <Show when={selected()} fallback="Runs in the background — you can keep working.">
-            {(m) => <>With <span class="text-[color:var(--text-secondary)]">{m().name}</span> · runs in the background</>}
+      <DialogFooter hint={
+        <Show when={selected()} fallback="Runs in the background — you can keep working.">
+          {(m) => <>With <span class="text-[color:var(--text-secondary)]">{m().name}</span> · runs in the background</>}
+        </Show>
+      }>
+        <button type="button" onClick={props.onClose} class="dlg-btn">
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!canRun()}
+          title={isNoop() ? 'Nothing new to index' : undefined}
+          class="dlg-btn dlg-btn-primary"
+        >
+          <Show when={isNoop()} fallback={
+            !plan() || plan.loading
+              ? (props.rebuild ? 'Rebuild' : 'Index')
+              : (props.rebuild ? `Rebuild ${workCount().toLocaleString()}` : `Index ${workCount().toLocaleString()}`)
+          }>
+            Up to date
           </Show>
-        </p>
-        <div class="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={props.onClose}
-            class="h-8 px-3 rounded-lg text-meta text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)] transition"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={confirm}
-            disabled={!canRun()}
-            title={isNoop() ? 'Nothing new to index' : undefined}
-            class="h-8 pl-3 pr-2 rounded-lg text-meta font-medium bg-[color:var(--accent)] text-[color:var(--on-primary)] hover:bg-[color:var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2 shadow-[var(--shadow-sm)]"
-          >
-            <Show when={isNoop()} fallback={
-              !plan() || plan.loading
-                ? (props.rebuild ? 'Rebuild' : 'Index')
-                : (props.rebuild ? `Rebuild ${workCount().toLocaleString()}` : `Index ${workCount().toLocaleString()}`)
-            }>
-              Up to date
-            </Show>
-            <span class="hidden sm:inline-flex items-center justify-center h-4 min-w-4 px-1 rounded text-[0.625rem] font-mono bg-black/15" aria-hidden="true">↵</span>
-          </button>
-        </div>
-      </div>
+          <span class="hidden sm:inline-flex items-center justify-center h-4 min-w-4 px-1 rounded text-[0.625rem] font-mono bg-black/15" aria-hidden="true">↵</span>
+        </button>
+      </DialogFooter>
     </DialogShell>
   );
 }

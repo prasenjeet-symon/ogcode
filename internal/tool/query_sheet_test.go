@@ -95,6 +95,47 @@ func sheetToolFor(profiles []SheetProfile) *QuerySheetTool {
 	}}
 }
 
+// TestQuerySheetAcceptsSiblingPathSpelling pins the sibling-arg fallback: a
+// call carrying only 'path' (the pdf_index/docx_index spelling) runs, and the
+// canonical 'file' wins when both spellings arrive.
+func TestQuerySheetAcceptsSiblingPathSpelling(t *testing.T) {
+	file := sheetFixtureFile(t, "people.csv")
+	qt := sheetToolFor(sheetFixtureProfiles())
+
+	pathOnly, err := json.Marshal(struct {
+		Path string `json:"path"`
+		SQL  string `json:"sql"`
+	}{Path: file, SQL: "SELECT * FROM Sheet1 ORDER BY id"})
+	if err != nil {
+		t.Fatalf("marshal path-only args: %v", err)
+	}
+	res, err := qt.Execute(context.Background(), pathOnly, Context{SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("path-only execute: %v", err)
+	}
+	canonicalRes, err := runQuerySheet(t, qt, file, "SELECT * FROM Sheet1 ORDER BY id")
+	if err != nil {
+		t.Fatalf("canonical execute: %v", err)
+	}
+	if res.Output != canonicalRes.Output {
+		t.Errorf("path-only output diverges from the canonical call:\npath-only:\n%s\ncanonical:\n%s", res.Output, canonicalRes.Output)
+	}
+
+	// Both spellings present: the canonical 'file' must win, so the call
+	// resolves to the real fixture even though 'path' names a missing file.
+	both, err := json.Marshal(struct {
+		File string `json:"file"`
+		Path string `json:"path"`
+		SQL  string `json:"sql"`
+	}{File: file, Path: filepath.Join(t.TempDir(), "missing.csv"), SQL: "SELECT * FROM Sheet1 ORDER BY id"})
+	if err != nil {
+		t.Fatalf("marshal both args: %v", err)
+	}
+	if _, err := qt.Execute(context.Background(), both, Context{SessionDir: t.TempDir()}); err != nil {
+		t.Fatalf("canonical should win over sibling when both given: %v", err)
+	}
+}
+
 func TestQuerySheetSchemaAndRows(t *testing.T) {
 	file := sheetFixtureFile(t, "people.csv")
 	res, err := runQuerySheet(t, sheetToolFor(sheetFixtureProfiles()), file, "SELECT * FROM Sheet1 ORDER BY id")
@@ -243,6 +284,59 @@ func TestStripSQLCommentsAndStatementCount(t *testing.T) {
 	}
 	if s := stripSQLComments("SELECT 'don''t -- stop' FROM t"); strings.Contains(s, "FROM") && !strings.Contains(s, "don''t -- stop") {
 		t.Errorf("quoted literal must survive comment stripping: %q", s)
+	}
+}
+
+// A keyword inside a quoted literal is data, not a statement verb: the guard
+// masks the literal text before its token scan, so this must flow through to
+// the query.
+func TestQuerySheetAllowsKeywordInsideAStringLiteral(t *testing.T) {
+	file := sheetFixtureFile(t, "literal.csv")
+	res, err := runQuerySheet(t, sheetToolFor(sheetFixtureProfiles()), file, "SELECT count(*) FROM Sheet1 WHERE name = 'DELETE'")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if strings.Contains(res.Output, "not allowed") {
+		t.Errorf("a keyword inside a quoted literal must not be refused:\n%s", res.Output)
+	}
+	if !strings.HasSuffix(res.Output, "rows: 1 · cols: 1") {
+		t.Errorf("expected the count query to run, got:\n%s", res.Output)
+	}
+}
+
+// Masking is scoped to quoted regions: the same keyword standing unquoted is
+// still refused, a doubled ” escape stays inside its literal, and backtick
+// identifiers are masked like the other quote pairs.
+func TestMaskSQLLiterals(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"single-quoted keyword", "SELECT 'DELETE' FROM t", "SELECT 'xxxxxx' FROM t"},
+		{"doubled-escape inside literal", "SELECT 'don''t' FROM t", "SELECT 'xxxxxx' FROM t"},
+		{"double-quoted literal", "SELECT \"DELETE\" FROM t", "SELECT \"xxxxxx\" FROM t"},
+		{"backtick identifier", "SELECT `delete` FROM t", "SELECT `xxxxxx` FROM t"},
+		{"unquoted keyword survives", "DELETE FROM t WHERE a = 'x'", "DELETE FROM t WHERE a = 'x'"},
+	}
+	for _, tc := range cases {
+		if got := maskSQLLiterals(tc.in); got != tc.want {
+			t.Errorf("%s: maskSQLLiterals(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+// Masking only ever blanks quoted regions, so a write whose keyword stands
+// unquoted is caught exactly as before — even when its WHERE value quotes
+// another keyword.
+func TestQuerySheetStillRefusesUnquotedWrite(t *testing.T) {
+	file := sheetFixtureFile(t, "writecheck.csv")
+	res, err := runQuerySheet(t, sheetToolFor(sheetFixtureProfiles()), file, "DELETE FROM Sheet1 WHERE name = 'SELECT'")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(res.Output, "DELETE") || !strings.Contains(res.Output, "not allowed") {
+		t.Errorf("an unquoted DELETE must still be refused, got:\n%s", res.Output)
 	}
 }
 

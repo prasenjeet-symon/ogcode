@@ -232,7 +232,7 @@ export default function AgentsPage() {
         >
           <DrawerToggle drawer="sessions" label="Open navigation" />
           <div class="flex items-center gap-2 min-w-0 flex-1">
-            <span class="w-5 h-5 rounded-[6px] flex items-center justify-center shrink-0 bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)] shadow-[inset_0_0_0_1px_var(--accent-ring)]">
+            <span class="w-5 h-5 rounded-[4px] flex items-center justify-center shrink-0 bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)] shadow-[inset_0_0_0_1px_var(--accent-ring)]">
               <BoardIcon class="w-3 h-3" />
             </span>
             <h1 class="text-ui font-semibold text-[color:var(--text-primary)] truncate">Agents</h1>

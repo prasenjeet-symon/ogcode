@@ -1,5 +1,5 @@
 import { onMount } from 'solid-js';
-import DialogShell, { DialogHeader } from './dialog-shell';
+import DialogShell, { DialogFooter, DialogHeader } from './dialog-shell';
 
 /**
  * A diagram is often rendered at whatever width the chat column happens to be,
@@ -64,6 +64,11 @@ export default function DiagramZoomDialog(props: {
       <div class="diagram-zoom-body">
         <div ref={body} class="diagram-zoom-host" />
       </div>
+      <DialogFooter hint="Scroll to inspect the whole diagram.">
+        <button type="button" onClick={props.onClose} class="dlg-btn">
+          Close
+        </button>
+      </DialogFooter>
     </DialogShell>
   );
 }

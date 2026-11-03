@@ -1,0 +1,234 @@
+/* activity-heatmap.css — the contribution grid's geometry and tints.
+   Every colour is a theme variable, so light and dark both read; the four
+   active levels are accent tints mixed with the surface behind them, never a
+   fixed hex. Cell size lives in --ah-cell/--ah-gap so the compact card can
+   shrink the whole grid without any rule being restated. */
+
+.ah-card {
+  --ah-cell: 11px;
+  --ah-gap: 3px;
+  --ah-step: calc(var(--ah-cell) + var(--ah-gap));
+  width: 100%;
+  padding: 15px 18px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.ah-card.is-compact {
+  --ah-cell: 8px;
+  --ah-gap: 2px;
+  padding: 12px 14px 9px;
+}
+
+/* ── Header: metric tabs left, the year's total right ─────────────── */
+.ah-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.ah-tabs {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.ah-tab {
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 2px 9px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--spring-sm), color var(--spring-sm), border-color var(--spring-sm);
+}
+
+.ah-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.ah-tab.is-active {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+}
+
+.ah-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ah-summary {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ah-card.is-compact .ah-tab {
+  font-size: 11.5px;
+  padding: 1px 8px;
+}
+
+.ah-card.is-compact .ah-summary {
+  font-size: 11px;
+}
+
+/* ── Grid ─────────────────────────────────────────────────────────── */
+.ah-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Weekday gutter: seven rows the height of a cell, so Mon/Wed/Fri sit on
+   their own rows. The grid starts flush against the tabs; the month labels
+   ride BELOW it, so nothing pads the top here. */
+.ah-weekdays {
+  display: grid;
+  grid-template-rows: repeat(7, var(--ah-cell));
+  gap: var(--ah-gap);
+  flex: none;
+}
+
+.ah-weekday {
+  font-size: 9.5px;
+  line-height: var(--ah-cell);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Horizontal scrolling is the narrow-screen fallback. No vertical padding: the
+   month row below the grid already gives the below-cell tooltips their room,
+   and padding here would have to be cancelled with a negative margin, which
+   lifts the box over the header where it swallows clicks meant for the tabs. */
+.ah-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+/* Month labels ride under the grid, centred on their month's columns. */
+.ah-months {
+  display: grid;
+  grid-template-columns: repeat(53, var(--ah-cell));
+  gap: var(--ah-gap);
+  height: 15px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.ah-month {
+  grid-row: 1;
+  line-height: 15px;
+}
+
+/* A label landing on the final columns would overflow the scroll box and get
+   clipped, so it hangs left of its column instead. */
+.ah-month.is-end {
+  justify-self: end;
+}
+
+.ah-grid {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, var(--ah-cell));
+  grid-template-columns: repeat(53, var(--ah-cell));
+  gap: var(--ah-gap);
+}
+
+.ah-cell,
+.ah-swatch {
+  border-radius: 2px;
+  background: var(--bg-hover);
+}
+
+.ah-cell {
+  cursor: default;
+  transition: outline-color var(--spring-sm);
+}
+
+.ah-cell:hover {
+  outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.ah-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Days still ahead in the current week: blank, so "the year so far" reads
+   honestly rather than as a run of quiet days. */
+.ah-cell.is-future {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.ah-cell.l1,
+.ah-swatch.l1 {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.ah-cell.l2,
+.ah-swatch.l2 {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.ah-cell.l3,
+.ah-swatch.l3 {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.ah-cell.l4,
+.ah-swatch.l4 {
+  background: var(--accent);
+}
+
+/* ── Tooltip ──────────────────────────────────────────────────────── */
+.ah-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+}
+
+/* ── Legend ───────────────────────────────────────────────────────── */
+.ah-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
+.ah-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ah-legend-text {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ah-swatch {
+  width: var(--ah-cell);
+  height: var(--ah-cell);
+}

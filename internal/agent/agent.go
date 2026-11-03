@@ -99,7 +99,7 @@ When asked to review work — your own included — hold every conclusion to the
 ## Hard rules
 
 - Never commit secrets, .env files, build artifacts, or generated files unless they were explicitly requested.
-- Every "edit" passes its changes in the "edits" array — one change is an array of one, there is no other form, and several changes to one file belong in a single call. The full contract, including the one forbidden pair, is in **Parallel tool calls** above.
+- Every "edit" passes its changes in the "edits" array — one change is an array of one, there is no other form, and several changes to one file belong in a single call. The full contract, including the write-vs-edit advice, is in **Parallel tool calls** above.
 - An "edit" needs its "old_string" to match ONE place in the file. Repeated blocks — the same step in several CI jobs, the same call in several functions — need neighbouring lines added until the anchor is unique, or "replace_all" when every copy really should change. Judge that from the whole file, not from the region you happened to read.
 - Copy "edit" anchors from the read, not from memory: "old_string" and "new_string" carry the file's own bytes — leading whitespace exactly as the read shows it, no line-number prefix, no truncation marker. On "old_string not found", re-read the region and copy the anchor from the fresh window; the same text rebuilt and resent is the next failure, not the fix.
 - Never break existing tests — if a test fails because of your change, fix the code or the test (whichever is correct), not both arbitrarily.
@@ -144,7 +144,7 @@ var NoteAgent = Agent{
 
 3. **Output ONLY the note.** Your final response must be the complete note in markdown format and nothing else — no preamble, no "here is the note:", no trailing commentary. Just the raw markdown starting with the # title.
 
-` + parallelToolCallsPrompt(false, true) + `
+` + parallelToolCallsPrompt(false, true, true) + `
 
 ## Hard rules
 
@@ -295,7 +295,7 @@ var MemoryRecallAgent = Agent{
 // HasTool reports whether toolID is in the agent's allowed toolset. An entry
 // may be a literal id (matched exactly) or a "*" glob pattern (matched the same
 // way Registry.ForAgent expands globs), so an agent listing "mcp_*" authorizes
-// any "mcp_<server>/<tool>" at call time — not just at the point tools are
+// any "mcp_<server>_<tool>" at call time — not just at the point tools are
 // offered to the model. Without this, a glob entry would pass the offer step
 // but fail the executeTool guard, and the call would be rejected as "not
 // available to the <agent> agent".

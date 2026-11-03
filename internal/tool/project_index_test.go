@@ -11,6 +11,18 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
 )
 
+// A nil document-index Store must refuse with a Result, not panic in
+// ListTextFiles — environments without an index hit this path.
+func TestProjectIndex_NilStoreRefusesWithoutPanicking(t *testing.T) {
+	res, err := NewProjectIndexTool(nil).Execute(context.Background(), nil, Context{SessionDir: "/proj"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(res.Output, "the document index is not available in this environment") {
+		t.Errorf("nil-Store refusal does not carry the preflight wording: %q", res.Output)
+	}
+}
+
 func textEntry(path string, labels ...string) *docindex.PageEntry {
 	return &docindex.PageEntry{DocPath: path, PageNum: 1, Labels: labels}
 }

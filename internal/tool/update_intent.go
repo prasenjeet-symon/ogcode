@@ -56,7 +56,7 @@ func (UpdateIntentTool) Parameters() json.RawMessage {
 					"required": ["step", "status"],
 					"properties": {
 						"step": {"type": "string", "description": "One step, a few words."},
-						"status": {"type": "string", "enum": ["pending", "active", "done", "dropped"], "description": "Where the step actually is. pending: not started. active: doing it now. done: finished. dropped: no longer needed. Move it as the work moves — a list re-sent with its statuses unchanged updates nothing."},
+						"status": {"type": "string", "enum": ["pending", "active", "done", "dropped"], "description": "Where the step actually is. pending: not started. active: doing it now. done: finished. dropped: no longer needed. Move it as the work moves — a list re-sent with its statuses unchanged updates nothing. Synonymous spellings are accepted and folded onto these four (todo, queued, open, planned, next → pending; started, current, working, running, in-progress → active; complete, completed, finished, closed, resolved → done; canceled, cancelled, skipped, abandoned, removed → dropped), but an unknown word fails the call."},
 						"description": {"type": "string", "description": "Optional. One or two sentences on what this step actually involves — the file types, the library, the command. Never shown to the user: a matcher reads it to suggest the skills and MCP tools that could do the step, so name the concrete things it touches."}
 					}
 				}

@@ -7,6 +7,7 @@ import { DrawerToggle } from '../components/sidebar-shell';
 import ModelSelector from '../components/model-selector';
 import EffortSelector from '../components/effort-selector';
 import Logo from '../components/logo';
+import { ActivityHeatmap } from '../components/activity-heatmap';
 import { getVersion } from '../api/client';
 import { projectName } from '../lib/paths';
 
@@ -16,60 +17,6 @@ const SUGGESTIONS: string[] = [
   'Write tests for a module',
   'Refactor for clarity',
 ];
-
-// ── Value pillars ──────────────────────────────────────────────
-// Each pillar ties the SpaceX-of-coding-agents narrative to a
-// concrete technical differentiator from the README.
-const PILLARS = [
-  {
-    icon: 'memory',
-    title: 'Agentic Loop Memory',
-    desc: 'A persistent knowledge graph recalls only the facts relevant to each turn — never replaying the whole transcript.',
-    stat: '70%+',
-    statLabel: 'tokens saved on long sessions',
-  },
-  {
-    icon: 'accuracy',
-    title: 'Sharper Accuracy',
-    desc: 'A short, on-point context window lets the model focus — so it produces more correct results per turn, not fewer.',
-    stat: '↑',
-    statLabel: 'accuracy vs naive replay',
-  },
-  {
-    icon: 'infinity',
-    title: 'Near-Infinite Context',
-    desc: 'The per-turn prompt stays flat no matter how long the session runs. Chat for days — on any model.',
-    stat: '∞',
-    statLabel: 'no hard context limit',
-  },
-] as const;
-
-
-function PillarIcon(props: { name: string }) {
-  const common = 'w-5 h-5';
-  switch (props.name) {
-    case 'memory':
-      return (
-        <svg class={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 2a10 10 0 100 20 10 10 0 000-20zM12 6v6l4 2" />
-        </svg>
-      );
-    case 'accuracy':
-      return (
-        <svg class={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5L12 3z" />
-        </svg>
-      );
-    case 'infinity':
-      return (
-        <svg class={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6.5 8a4 4 0 100 8c2.2 0 3.5-1.8 5.5-4s3.3-4 5.5-4a4 4 0 110 8c-2.2 0-3.5-1.8-5.5-4S8.7 8 6.5 8z" />
-        </svg>
-      );
-    default:
-      return null;
-  }
-}
 
 export default function Home() {
   return <HomeContent />;
@@ -154,7 +101,7 @@ function HomeContent() {
         {/* Dot grid texture */}
         <div class="pointer-events-none absolute inset-0 bg-grid opacity-40" />
 
-        <div class="relative flex-1 overflow-y-auto">
+        <div class="relative flex flex-1 flex-col overflow-y-auto">
           {/* ── Nav bar ─────────────────────────────────────────── */}
           <header class="sticky top-0 z-20 flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4
                           backdrop-blur-md bg-[color:var(--bg-base)]/70 border-b border-[color:var(--border-subtle)]"
@@ -185,22 +132,51 @@ function HomeContent() {
             </div>
           </header>
 
-          {/* ── Hero ───────────────────────────────────────────── */}
-          <section class="relative flex flex-col items-center pt-14 sm:pt-24 pb-10 px-4 sm:px-6">
-            {/* Headline */}
-            <h1 class="text-center text-[32px] sm:text-[42px] md:text-[54px] font-bold tracking-tight text-zinc-50 leading-[1.05]
-                       animate-fade-in-up max-w-3xl" style={{ 'animation-delay': '40ms' }}>
-              Good to see you in
-              <span class="block mt-1 bg-gradient-to-r from-[color:var(--accent)] via-[#ffb38a] to-[color:var(--accent)]
-                           bg-clip-text text-transparent">
-                {server.directory() ? projectName(server.directory()) : 'ogcode'}
-              </span>
-            </h1>
-          </section>
+          {/* ── Hero + activity, centred in the viewport ────────── */}
+          <div class="relative flex flex-1 flex-col justify-center px-4 py-10 sm:px-6 sm:py-14">
+            <section class="relative flex flex-col items-center text-center">
+              <h1 class="animate-fade-in-up max-w-3xl text-[20px] sm:text-[26px] font-semibold tracking-tight
+                         leading-snug text-[color:var(--text-secondary)]"
+                  style={{ 'animation-delay': '40ms' }}>
+                Hey OG coder, welcome to{' '}
+                <span class="bg-gradient-to-r from-[color:var(--accent)] via-[#ffb38a] to-[color:var(--accent)]
+                             bg-clip-text text-transparent">
+                  {server.directory() ? projectName(server.directory()) : 'ogcode'}
+                </span>
+              </h1>
+            </section>
+
+            <section class="relative mt-7 flex flex-col items-center">
+              <div class="w-full max-w-[840px] animate-fade-in-up" style={{ 'animation-delay': '80ms' }}>
+                <ActivityHeatmap />
+              </div>
+            </section>
+          </div>
 
           {/* ── Prompt input ────────────────────────────────────── */}
-          <section class="relative flex flex-col items-center px-4 sm:px-6 pb-2">
-            <form onSubmit={handleSubmit} class="w-full max-w-2xl animate-fade-in-up" style={{ 'animation-delay': '120ms' }}>
+          <section class="relative flex flex-col items-center px-4 sm:px-6 pb-8">
+            {/* Suggestion chips sit above the composer, so the input keeps the bottom edge. */}
+            <div class="mb-4 flex flex-wrap items-center justify-center gap-2 animate-fade-in-up" style={{ 'animation-delay': '120ms' }}>
+              <For each={SUGGESTIONS}>
+                {(s) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setText(s);
+                      textareaRef?.focus();
+                    }}
+                    class="h-8 px-3 rounded-full border border-[color:var(--border-subtle)]
+                           bg-[color:var(--bg-surface)]/60 hover:border-[color:var(--accent)]/40
+                           hover:bg-[color:var(--accent-soft)] text-[12px] text-zinc-400 hover:text-[color:var(--accent-ink)]
+                           transition-all var(--spring-sm) hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    {s}
+                  </button>
+                )}
+              </For>
+            </div>
+
+            <form onSubmit={handleSubmit} class="w-full max-w-2xl animate-fade-in-up" style={{ 'animation-delay': '160ms' }}>
               <div class="rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]
                           shadow-lg shadow-black/30 transition-all var(--spring-md) focus-within:border-[color:var(--accent)]/50
                           focus-within:shadow-[color:var(--accent)]/5 focus-within:shadow-2xl">
@@ -247,29 +223,8 @@ function HomeContent() {
               </div>
             </form>
 
-            {/* Suggestion chips */}
-            <div class="mt-5 flex flex-wrap items-center justify-center gap-2 animate-fade-in-up" style={{ 'animation-delay': '160ms' }}>
-              <For each={SUGGESTIONS}>
-                {(s) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setText(s);
-                      textareaRef?.focus();
-                    }}
-                    class="h-8 px-3 rounded-full border border-[color:var(--border-subtle)]
-                           bg-[color:var(--bg-surface)]/60 hover:border-[color:var(--accent)]/40
-                           hover:bg-[color:var(--accent-soft)] text-[12px] text-zinc-400 hover:text-[color:var(--accent-ink)]
-                           transition-all var(--spring-sm) hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    {s}
-                  </button>
-                )}
-              </For>
-            </div>
-
-            {/* Keyboard hint + workspace path. Hint keys are desktop-only. */}
-            <div class="mt-5 flex items-center justify-center gap-3 text-[10.5px] text-zinc-600 composer-hints">
+            {/* Keyboard hint. Hint keys are desktop-only. */}
+            <div class="mt-3 flex items-center justify-center gap-3 text-[10.5px] text-zinc-600 composer-hints">
               <span class="flex items-center gap-1">
                 <kbd class="px-1 py-[1px] rounded border border-[color:var(--border-default)] bg-[color:var(--bg-elevated)] font-mono text-[9.5px]">↵</kbd>
                 send
@@ -280,65 +235,7 @@ function HomeContent() {
                 newline
               </span>
             </div>
-            <Show when={server.directory()}>
-              <div class="mt-3 flex items-center justify-center max-w-full px-4">
-                <span class="font-mono text-[10.5px] text-zinc-600 truncate max-w-[280px]">
-                  {server.directory()}
-                </span>
-              </div>
-            </Show>
           </section>
-
-          {/* ── Value pillars ───────────────────────────────────── */}
-          <section class="relative px-6 pt-16 pb-12 max-w-4xl mx-auto w-full">
-            <div class="text-center mb-8 animate-fade-in-up" style={{ 'animation-delay': '200ms' }}>
-              <h2 class="text-[13px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Powered by Agentic Loop Memory
-              </h2>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 anim-stagger">
-              <For each={PILLARS}>
-                {(p) => (
-                  <div class="group relative rounded-2xl border border-[color:var(--border-default)]
-                              bg-[color:var(--bg-surface)]/50 p-5 transition-all var(--spring-md)
-                              hover:border-[color:var(--accent)]/30 hover:bg-[color:var(--bg-surface)]">
-                    <div class="absolute top-5 right-5 text-right">
-                      <div class="text-[28px] font-bold leading-none bg-gradient-to-br from-[color:var(--accent)] to-[#ffb38a] bg-clip-text text-transparent">
-                        {p.stat}
-                      </div>
-                      <div class="text-[9.5px] text-zinc-600 mt-1 max-w-[90px] leading-tight">{p.statLabel}</div>
-                    </div>
-                    <div class="w-9 h-9 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/15
-                                flex items-center justify-center text-[color:var(--accent-ink)] mb-4
-                                group-hover:scale-110 transition-transform var(--spring-md)">
-                      <PillarIcon name={p.icon} />
-                    </div>
-                    <h3 class="text-[14px] font-semibold text-zinc-100 mb-1.5">{p.title}</h3>
-                    <p class="text-[12px] text-zinc-500 leading-relaxed pr-16">{p.desc}</p>
-                  </div>
-                )}
-              </For>
-            </div>
-          </section>
-
-          {/* ── Footer ──────────────────────────────────────────── */}
-          <footer class="relative px-6 pb-8 pt-2 flex flex-col items-center gap-3">
-            <div class="flex items-center gap-5 text-[11px] text-zinc-600">
-              <a href="https://github.com/prasenjeet-symon/ogcode" target="_blank" rel="noopener"
-                 class="hover:text-zinc-300 transition-colors var(--spring-sm) flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 .5A11.5 11.5 0 00.5 12a11.5 11.5 0 007.86 10.94c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.3-5.24-1.28-5.24-5.67 0-1.25.45-2.27 1.18-3.07-.12-.3-.51-1.46.11-3.05 0 0 .96-.3 3.15 1.17a10.9 10.9 0 015.74 0c2.19-1.47 3.15-1.17 3.15-1.17.62 1.59.23 2.75.11 3.05.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.37-5.25 5.66.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12 11.5 11.5 0 0012 .5z" />
-                </svg>
-                GitHub
-              </a>
-              <span class="text-zinc-700">·</span>
-              <a href="https://github.com/prasenjeet-symon/ogcode/blob/main/LICENSE" target="_blank" rel="noopener"
-                 class="font-mono hover:text-zinc-300 transition-colors var(--spring-sm)">AGPL-3.0</a>
-            </div>
-            <div class="text-[10px] text-zinc-700">
-              Single binary · Self-hosted · Your code never leaves your machine
-            </div>
-          </footer>
         </div>
       </main>
     </div>

@@ -85,7 +85,7 @@ func (ScheduleTool) Parameters() json.RawMessage {
 			},
 			"fireAt": {
 				"type": "string",
-				"description": "create: the absolute RFC3339 time the reminder fires, e.g. 2026-10-24T15:04:05Z. Exactly one of delaySeconds or fireAt is required."
+				"description": "create: the absolute RFC3339 time the reminder fires, e.g. 2026-10-24T15:04:05Z. Must be in the future. Exactly one of delaySeconds or fireAt is required."
 			},
 			"note": {
 				"type": "string",

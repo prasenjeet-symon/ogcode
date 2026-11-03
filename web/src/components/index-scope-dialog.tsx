@@ -2,7 +2,7 @@ import { createSignal, createResource, createMemo, onMount, onCleanup, Show, For
 import { useServer } from '../context/server';
 import { useDocIndex } from '../context/docindex';
 import { getGitignoreInfo, type ExcludeEntry } from '../api/client';
-import DialogShell, { DialogHeader } from './dialog-shell';
+import DialogShell, { DialogBody, DialogFooter, DialogHeader, DialogTabs, DialogTab } from './dialog-shell';
 
 /**
  * The scope panel explains what the index reads, and it leads with .gitignore
@@ -193,7 +193,7 @@ export default function IndexScopeDialog(props: {
       labelledBy="idx-scope-title"
       describedBy="idx-scope-desc"
       onClose={props.onClose}
-      class="sm:max-w-[740px]"
+      class="sm:max-w-[800px]"
       returnFocus={props.returnFocus}
     >
       <DialogHeader
@@ -208,28 +208,22 @@ export default function IndexScopeDialog(props: {
           </svg>
         }
       >
-        <div class="mt-3.5 seg" role="tablist" aria-label="Scope source">
-          <button type="button" role="tab" class="seg-btn" aria-selected={tab() === 'gitignore'} onClick={() => setTab('gitignore')}>
+        <DialogTabs label="Scope source">
+          <DialogTab selected={tab() === 'gitignore'} onClick={() => setTab('gitignore')} count={info()?.exists ? `${ruleCount()}${info()?.truncated ? '+' : ''}` : undefined}>
             <span class="font-mono">.gitignore</span>
-            <Show when={info()?.exists}>
-              <span class="seg-count">{ruleCount()}{info()?.truncated ? '+' : ''}</span>
-            </Show>
-          </button>
-          <button type="button" role="tab" class="seg-btn" aria-selected={tab() === 'patterns'} onClick={() => setTab('patterns')}>
+          </DialogTab>
+          <DialogTab selected={tab() === 'patterns'} onClick={() => setTab('patterns')} count={docIndex.excludes().length}>
             Extra patterns
-            <Show when={docIndex.excludes().length > 0}>
-              <span class="seg-count">{docIndex.excludes().length}</span>
-            </Show>
-          </button>
-        </div>
+          </DialogTab>
+        </DialogTabs>
       </DialogHeader>
 
       {/* ---- Body ---- */}
-      <div class="flex-1 min-h-0 overflow-y-auto">
+      <DialogBody flush>
 
         {/* ============ .gitignore ============ */}
         <Show when={tab() === 'gitignore'}>
-          <div class="px-5 py-4 flex flex-col gap-5">
+          <div class="px-6 py-5 flex flex-col gap-5">
             <Show when={!info.loading} fallback={
               <div class="rounded-xl border border-[color:var(--border-subtle)] overflow-hidden" aria-busy="true">
                 <div class="h-11 px-3 flex items-center gap-2.5 border-b border-[color:var(--border-subtle)]">
@@ -446,7 +440,7 @@ export default function IndexScopeDialog(props: {
 
         {/* ============ Extra patterns ============ */}
         <Show when={tab() === 'patterns'}>
-          <div class="px-5 py-4 flex flex-col gap-4">
+          <div class="px-6 py-5 flex flex-col gap-4">
             <p class="text-meta text-[color:var(--text-tertiary)] leading-relaxed">
               For files git tracks but the index shouldn't carry — a committed fixture, a vendored bundle.
               Each pattern is matched against a <span class="text-[color:var(--text-secondary)]">single file or folder name</span>, anywhere
@@ -522,34 +516,18 @@ export default function IndexScopeDialog(props: {
             </section>
           </div>
         </Show>
-      </div>
+      </DialogBody>
 
       {/* ---- Footer ---- */}
-      <div class="shrink-0 px-5 py-3 border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-base)]/40 flex items-center justify-between gap-3">
-        <p class="text-micro text-[color:var(--text-muted)] leading-snug min-w-0 truncate">
-          Changes apply on the next index run.
-        </p>
-        <div class="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={props.onClose}
-            class="h-8 px-3 rounded-lg text-meta text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-[color:var(--bg-elevated)] transition"
-          >
-            Close
-          </button>
-          <button
-            type="button"
-            onClick={props.onRebuild}
-            disabled={docIndex.building()}
-            class="h-8 px-3 rounded-lg text-meta font-medium bg-[color:var(--bg-elevated)] border border-[color:var(--border-default)] text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)] hover:bg-[color:var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-            </svg>
-            Rebuild index…
-          </button>
-        </div>
-      </div>
+      <DialogFooter hint="Changes apply on the next index run.">
+        <button type="button" onClick={props.onClose} class="dlg-btn">Close</button>
+        <button type="button" onClick={props.onRebuild} disabled={docIndex.building()} class="dlg-btn dlg-btn-secondary">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          Rebuild index…
+        </button>
+      </DialogFooter>
     </DialogShell>
   );
 }
