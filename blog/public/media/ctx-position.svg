@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 372" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
+<title id="t">Bar chart of accuracy by the position of the one useful document</title>
+<desc id="d">Moving the single document that holds the answer from the top of a pile of twenty to the middle took accuracy from 75.8% to 53.8%. Handing the model no documents at all scored 56.1%, shown as a dashed line: the middle of the pile is worse than nothing.</desc>
+<rect width="960" height="100%" fill="#151414"/>
+<text x="40.0" y="36.0" fill="#fffbf5" font-size="15" font-weight="600" letter-spacing="0.3">Accuracy on the same question, with one document moved</text>
+<text x="40.0" y="58.0" fill="#9a9390" font-size="12">20 documents, exactly one holds the answer · Liu et al., TACL 2024</text>
+<line x1="110" y1="300.0" x2="900" y2="300.0" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="304.0" fill="#6b6462" font-size="11" text-anchor="end">45%</text>
+<line x1="110" y1="271.4" x2="900" y2="271.4" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="275.4" fill="#6b6462" font-size="11" text-anchor="end">50%</text>
+<line x1="110" y1="242.9" x2="900" y2="242.9" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="246.9" fill="#6b6462" font-size="11" text-anchor="end">55%</text>
+<line x1="110" y1="214.3" x2="900" y2="214.3" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="218.3" fill="#6b6462" font-size="11" text-anchor="end">60%</text>
+<line x1="110" y1="185.7" x2="900" y2="185.7" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="189.7" fill="#6b6462" font-size="11" text-anchor="end">65%</text>
+<line x1="110" y1="157.1" x2="900" y2="157.1" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="161.1" fill="#6b6462" font-size="11" text-anchor="end">70%</text>
+<line x1="110" y1="128.6" x2="900" y2="128.6" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="132.6" fill="#6b6462" font-size="11" text-anchor="end">75%</text>
+<line x1="110" y1="100.0" x2="900" y2="100.0" stroke="#2a2725" stroke-width="1"/>
+<text x="98.0" y="104.0" fill="#6b6462" font-size="11" text-anchor="end">80%</text>
+<line x1="110" y1="300" x2="900" y2="300" stroke="#6b6462" stroke-width="1"/>
+<line x1="110" y1="236.6" x2="900" y2="236.6" stroke="#fffbf5" stroke-width="1" stroke-dasharray="5 5" opacity="0.45"/>
+<rect x="149.8" y="124.0" width="118" height="176.0" rx="3" fill="#ff5e1f"/>
+<text x="208.8" y="114.0" fill="#fffbf5" font-size="15" font-weight="600" text-anchor="middle">75.8%</text>
+<text x="208.8" y="324.0" fill="#9a9390" font-size="12.5" text-anchor="middle">First</text>
+<rect x="347.2" y="249.7" width="118" height="50.3" rx="3" fill="#ff7038"/>
+<text x="406.2" y="239.7" fill="#fffbf5" font-size="15" font-weight="600" text-anchor="middle">53.8%</text>
+<text x="406.2" y="324.0" fill="#9a9390" font-size="12.5" text-anchor="middle">Middle</text>
+<rect x="544.8" y="196.0" width="118" height="104.0" rx="3" fill="#ff7038"/>
+<text x="603.8" y="186.0" fill="#fffbf5" font-size="15" font-weight="600" text-anchor="middle">63.2%</text>
+<text x="603.8" y="324.0" fill="#9a9390" font-size="12.5" text-anchor="middle">Last</text>
+<rect x="742.2" y="236.6" width="118" height="63.4" rx="3" fill="#6b6462"/>
+<text x="801.2" y="226.6" fill="#fffbf5" font-size="15" font-weight="600" text-anchor="middle">56.1%</text>
+<text x="801.2" y="324.0" fill="#6b6462" font-size="12.5" text-anchor="middle">No documents</text>
+<text x="40.0" y="352.0" fill="#6b6462" font-size="10.5">dashed line = the same model with no documents at all</text>
+</svg>

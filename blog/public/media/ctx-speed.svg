@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="t d">
+<title id="t">Chart of the wait before the first word, and the writing rate, against request size</title>
+<desc id="d">One question, asked with growing amounts of text in front of it, on one model, from about 2,000 to about 974,000 tokens. Seconds to the first token climbs from 0.8 to 75 as the input grows. The writing rate stays broadly flat, between about 200 and 300 tokens a second, until the largest request. Two shaded bands mark the two decisions: a step of 5,000 to 20,000 tokens costs one to two seconds before the first token, and a request carrying a 128,000 to 1,000,000 token window costs six and a half to seventy five seconds.</desc>
+<rect width="960" height="100%" fill="#151414"/>
+<text x="40.0" y="36.0" fill="#fffbf5" font-size="15" font-weight="600" letter-spacing="0.3">The same question, asked with more text in front of it</text>
+<text x="40.0" y="58.0" fill="#9a9390" font-size="12">Measured November 2026 · one model, one question · a fresh prompt every run, so nothing is served from cache</text>
+<rect x="118" y="76" width="20" height="11" fill="#ff5e1f" opacity="0.16" stroke="#ff5e1f" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="146.0" y="86.0" fill="#9a9390" font-size="12">5K–20K: one Ogcode step</text>
+<rect x="118" y="94" width="20" height="11" fill="#fffbf5" opacity="0.09" stroke="#6b6462" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="146.0" y="104.0" fill="#9a9390" font-size="12">128K–1M: one request carrying the whole window</text>
+<text x="118.0" y="136.0" fill="#fffbf5" font-size="15" font-weight="600">Seconds to the first token</text>
+<text x="118.0" y="154.0" fill="#9a9390" font-size="12">the wait follows the size of the request, not the difficulty of the question</text>
+<rect x="296.6" y="168" width="153.8" height="160" fill="#ff5e1f" opacity="0.13"/>
+<rect x="656.4" y="168" width="228.1" height="160" fill="#fffbf5" opacity="0.055"/>
+<line x1="296.6" y1="168" x2="296.6" y2="328" stroke="#ff5e1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="450.4" y1="168" x2="450.4" y2="328" stroke="#ff5e1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="656.4" y1="168" x2="656.4" y2="328" stroke="#6b6462" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="884.5" y1="168" x2="884.5" y2="328" stroke="#6b6462" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="118" y1="307.1" x2="900" y2="307.1" stroke="#2a2725" stroke-width="1"/>
+<text x="108.0" y="311.1" fill="#6b6462" font-size="11.5" text-anchor="end">1 s</text>
+<line x1="118" y1="237.5" x2="900" y2="237.5" stroke="#2a2725" stroke-width="1"/>
+<text x="108.0" y="241.5" fill="#6b6462" font-size="11.5" text-anchor="end">10 s</text>
+<line x1="118" y1="168.0" x2="900" y2="168.0" stroke="#2a2725" stroke-width="1"/>
+<text x="108.0" y="172.0" fill="#6b6462" font-size="11.5" text-anchor="end">100 s</text>
+<line x1="118" y1="328" x2="900" y2="328" stroke="#6b6462" stroke-width="1"/>
+<line x1="118.0" y1="328" x2="118.0" y2="333" stroke="#6b6462" stroke-width="1"/>
+<text x="118.0" y="346.0" fill="#6b6462" font-size="11.5" text-anchor="middle">1K</text>
+<line x1="373.5" y1="328" x2="373.5" y2="333" stroke="#6b6462" stroke-width="1"/>
+<text x="373.5" y="346.0" fill="#6b6462" font-size="11.5" text-anchor="middle">10K</text>
+<line x1="629.0" y1="328" x2="629.0" y2="333" stroke="#6b6462" stroke-width="1"/>
+<text x="629.0" y="346.0" fill="#6b6462" font-size="11.5" text-anchor="middle">100K</text>
+<line x1="884.5" y1="328" x2="884.5" y2="333" stroke="#6b6462" stroke-width="1"/>
+<text x="884.5" y="346.0" fill="#6b6462" font-size="11.5" text-anchor="middle">1M</text>
+<polyline points="199.4,312.5 276.7,307.6 353.0,295.4 425.6,284.0 502.6,268.3 577.0,261.5 653.6,250.4 730.5,232.1 774.1,220.7 809.1,203.1 842.1,198.0 881.6,176.7" fill="none" stroke="#ff5e1f" stroke-width="2.6"/>
+<circle cx="199.4" cy="312.5" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="276.7" cy="307.6" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="353.0" cy="295.4" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="425.6" cy="284.0" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="502.6" cy="268.3" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="577.0" cy="261.5" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="653.6" cy="250.4" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="730.5" cy="232.1" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="774.1" cy="220.7" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="809.1" cy="203.1" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="842.1" cy="198.0" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="881.6" cy="176.7" r="3.4" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<text x="136.0" y="198.0" fill="#ff7038" font-size="12" paint-order="stroke" stroke="#151414" stroke-width="3.5" stroke-linejoin="round">0.8 s at 2K tokens</text>
+<text x="136.0" y="216.0" fill="#ff7038" font-size="12" paint-order="stroke" stroke="#151414" stroke-width="3.5" stroke-linejoin="round">75 s at 974K tokens</text>
+<text x="118.0" y="378.0" fill="#fffbf5" font-size="15" font-weight="600">Tokens written per second</text>
+<text x="118.0" y="396.0" fill="#9a9390" font-size="12">the writing rate stays close to flat, so the wait is all in the reading</text>
+<rect x="296.6" y="408" width="153.8" height="86" fill="#ff5e1f" opacity="0.13"/>
+<rect x="656.4" y="408" width="228.1" height="86" fill="#fffbf5" opacity="0.055"/>
+<line x1="296.6" y1="408" x2="296.6" y2="494" stroke="#ff5e1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="450.4" y1="408" x2="450.4" y2="494" stroke="#ff5e1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="656.4" y1="408" x2="656.4" y2="494" stroke="#6b6462" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="884.5" y1="408" x2="884.5" y2="494" stroke="#6b6462" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"/>
+<line x1="118" y1="494.0" x2="900" y2="494.0" stroke="#2a2725" stroke-width="1"/>
+<text x="108.0" y="498.0" fill="#6b6462" font-size="11.5" text-anchor="end">0</text>
+<line x1="118" y1="467.1" x2="900" y2="467.1" stroke="#2a2725" stroke-width="1"/>
+<text x="108.0" y="471.1" fill="#6b6462" font-size="11.5" text-anchor="end">100</text>
+<line x1="118" y1="440.2" x2="900" y2="440.2" stroke="#2a2725" stroke-width="1"/>
+<text x="108.0" y="444.2" fill="#6b6462" font-size="11.5" text-anchor="end">200</text>
+<line x1="118" y1="413.4" x2="900" y2="413.4" stroke="#2a2725" stroke-width="1"/>
+<text x="108.0" y="417.4" fill="#6b6462" font-size="11.5" text-anchor="end">300</text>
+<line x1="118" y1="494" x2="900" y2="494" stroke="#6b6462" stroke-width="1"/>
+<line x1="118.0" y1="494" x2="118.0" y2="499" stroke="#6b6462" stroke-width="1"/>
+<text x="118.0" y="512.0" fill="#6b6462" font-size="11.5" text-anchor="middle">1K</text>
+<line x1="373.5" y1="494" x2="373.5" y2="499" stroke="#6b6462" stroke-width="1"/>
+<text x="373.5" y="512.0" fill="#6b6462" font-size="11.5" text-anchor="middle">10K</text>
+<line x1="629.0" y1="494" x2="629.0" y2="499" stroke="#6b6462" stroke-width="1"/>
+<text x="629.0" y="512.0" fill="#6b6462" font-size="11.5" text-anchor="middle">100K</text>
+<line x1="884.5" y1="494" x2="884.5" y2="499" stroke="#6b6462" stroke-width="1"/>
+<text x="884.5" y="512.0" fill="#6b6462" font-size="11.5" text-anchor="middle">1M</text>
+<polyline points="199.4,433.2 276.7,431.9 353.0,440.3 425.6,430.1 502.6,429.8 577.0,426.3 653.6,436.9 730.5,439.3 774.1,417.1 809.1,414.4 842.1,419.2 881.6,453.1" fill="none" stroke="#ff5e1f" stroke-width="2.4" stroke-opacity="0.8"/>
+<circle cx="199.4" cy="433.2" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="276.7" cy="431.9" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="353.0" cy="440.3" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="425.6" cy="430.1" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="502.6" cy="429.8" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="577.0" cy="426.3" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="653.6" cy="436.9" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="730.5" cy="439.3" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="774.1" cy="417.1" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="809.1" cy="414.4" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="842.1" cy="419.2" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<circle cx="881.6" cy="453.1" r="3.2" fill="#ff5e1f" stroke="#151414" stroke-width="1.4"/>
+<line x1="118" y1="431.0" x2="900" y2="431.0" stroke="#ff5e1f" stroke-width="1" stroke-dasharray="2 6" opacity="0.55"/>
+<text x="130.0" y="422.0" fill="#ff7038" font-size="11.5" paint-order="stroke" stroke="#151414" stroke-width="3.5" stroke-linejoin="round">median 234 tokens a second</text>
+<text x="480.0" y="542.0" fill="#6b6462" font-size="11.5" text-anchor="middle">tokens in one request (log scale)</text>
+</svg>
