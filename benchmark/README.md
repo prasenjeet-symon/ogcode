@@ -13,8 +13,7 @@ six fixed tasks. It is not a general model-capability leaderboard, and its
 results should not be read as one. Version 1.0.2 adds a per-fixture index cache
 (build once with `--build-index`, restore into every attempt) and per-run peak
 RSS and CPU accounting, plus a serve-mode probe that needs no model calls.
-Version 1.0.1 refreshed the bundled sample and docs; 1.0.0 produced the r8
-sample.
+Version 1.0.1 refreshed the bundled sample and docs.
 
 ## Quick start
 
@@ -307,41 +306,30 @@ to modify tests; the verifier restores them anyway. Each repetition runs the
 same six tasks, so a 60-run sample is six tasks times five repetitions times
 two agents, not 60 distinct problems.
 
-## Samples
+## Sample
 
-Two 60-run samples on Ollama Cloud with `glm-5.3-flash` are bundled. They use the
-same agent versions (`ogcode v0.58.3-dirty`, `opencode 1.18.30`) and the same
-prices, and they disagree:
+One 60-run sample on Ollama Cloud with `glm-5.3-flash` is bundled. It is
+historical, recorded with `ogcode v0.58.3-dirty` and `opencode 1.18.30`:
 
-| Metric | r7 (historical) | r8 (fresh) |
-|---|---|---|
-| Harness | retired pre-1.0 runner | this package, 1.0.0 (code unchanged in 1.0.1) |
-| Solved | 30/30 vs 30/30 | 30/30 vs 30/30 |
-| ogcode total cost | $0.2005 | $0.2841 |
-| opencode total cost | $0.2686 | $0.2419 |
-| ogcode median wall time | 16.0 s | 29.4 s |
-| opencode median wall time | 22.0 s | 22.4 s |
-| ogcode vs opencode | 25.3% cheaper, 27.2% faster | 17.5% more expensive, 31.3% slower |
+| Metric | r7 (historical) |
+|---|---|
+| Harness | retired pre-1.0 runner |
+| Solved | 30/30 vs 30/30 |
+| ogcode total cost | $0.2005 |
+| opencode total cost | $0.2686 |
+| ogcode median wall time | 16.0 s |
+| opencode median wall time | 22.0 s |
+| ogcode vs opencode | 25.3% cheaper, 27.2% faster |
 
-Both samples are 60/60 green. r7 was the earlier result; r8 is a fresh sample
-from this package and **does not reproduce the r7 headline**.
-
-The reversal is accounted for by provider prefix caching, not by a change in the
-agents' workload. Between the two samples ogcode's prompt size per turn barely
-moved (20,107 to 20,403 tokens) and its turns moved from 202 to 215, but its
-uncached input per turn rose from 2,556 to 5,212 tokens and its cache share fell
-from 87.3% to 74.5%. opencode's token mix was almost unchanged. The whole cost
-difference decomposes into that mix at the shared prices; see
-[`examples/ollama-cloud-r8/README.md`](examples/ollama-cloud-r8/README.md) for
-the per-turn evidence, including smoke runs 24 minutes before the campaign that
-cached fully under the same harness and fresh worktree scheme.
-
-This is why neither sample is a target. r7 was produced by a runner that is no
-longer in the tree, and its raw log predates the current result schema and
-provider fields; its `metadata.json` is a reconstruction marked historical. r8
-records the provider-cache regime of its own date. Treat both as worked
-examples and record the timestamp, versions and token mix with any comparison.
-See [docs/reproducing-results.md](docs/reproducing-results.md).
+All 60 runs passed. The sample is a worked example, not a target. It was
+produced by a runner that is no longer in the tree, and its raw log predates the
+current result schema and provider fields; its `metadata.json` is a
+reconstruction marked historical. Provider cache behaviour also varies between
+campaigns, so a new run can land on either side of this headline without any
+change to the agents. Record the timestamp, versions and token mix with any
+comparison. See
+[`examples/ollama-cloud-r7/README.md`](examples/ollama-cloud-r7/README.md) and
+[docs/reproducing-results.md](docs/reproducing-results.md).
 
 ## Output
 
@@ -408,21 +396,19 @@ python3 report.py --raw results/ollama-cloud/raw.jsonl
 ```
 
 This runs 60 attempts. Compare `results/ollama-cloud/report.md` and
-`summary.json` with both bundled samples. Do not expect the same numbers:
+`summary.json` with the bundled sample. Do not expect the same numbers:
 model behaviour, provider prices, latency, the machine and the provider's cache
-regime can all differ. In particular, a new run can land on either side of the
-r7/r8 split without any change to the agents.
+regime can all differ, so a new run can land on either side of the sample's
+headline without any change to the agents.
 
-Both reports can be regenerated offline without spending anything:
+The report can be regenerated offline without spending anything:
 
 ```sh
 python3 report.py --raw examples/ollama-cloud-r7/raw.jsonl --out /tmp/ollama-cloud-r7
-python3 report.py --raw examples/ollama-cloud-r8/raw.jsonl --out /tmp/ollama-cloud-r8
 ```
 
 The r7 example includes a reconstructed `metadata.json` marked historical, and
-its old raw rows still lack the current per-row provider fields. The r8 example
-was recorded by this package and has the full schema. See
+its old raw rows still lack the current per-row provider fields. See
 [docs/reproducing-results.md](docs/reproducing-results.md).
 
 ## Caveats
@@ -460,9 +446,8 @@ was recorded by this package and has the full schema. See
 - The verifier is the only pass criterion. A pass means the task's tests
   passed after the tests were restored; there is no human review of the diff.
 - The r7 sample was produced by a retired runner and an older result schema;
-  its metadata is a reconstruction. The r8 sample was produced by this package.
-  Provider cache behaviour changed between them, so neither headline is an
-  expectation for a new run.
+  its metadata is a reconstruction. Provider cache behaviour varies between
+  campaigns, so its headline is not an expectation for a new run.
 - A dry run checks configuration and presence, not key validity, endpoint
   reachability or model availability.
 

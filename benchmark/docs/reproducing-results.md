@@ -1,21 +1,17 @@
 # Reproducing results
 
-There are three separate things you can reproduce:
+There are two separate things you can reproduce:
 
-1. the report for the fresh r8 sample, offline and at no cost;
-2. the report for the historical r7 sample, offline and at no cost;
-3. a new run of the same configuration with the current harness, which spends
-   money and will not necessarily produce either sample's numbers.
+1. the report for the historical r7 sample, offline and at no cost;
+2. a new run of the same configuration with the current harness, which spends
+   money and will not necessarily produce the sample's numbers.
 
-The two samples disagree, and that is the point of shipping both.
-`examples/ollama-cloud-r8/` was produced by the packaged 1.0.0 harness and is the
-fresh result: ogcode is 17.5% more expensive and 31.3% slower at the median.
 `examples/ollama-cloud-r7/` is a historical sample produced by a retired runner:
-ogcode is 25.3% cheaper and 27.2% faster there. The reversal is accounted for by
-provider prefix caching, not by an agent change. Read
-[`examples/ollama-cloud-r8/README.md`](../examples/ollama-cloud-r8/README.md) and
+ogcode is 25.3% cheaper and 27.2% faster there. It predates the current result
+schema, and provider cache behaviour varies between campaigns, so treat it as a
+worked example, not a baseline. Read
 [`examples/ollama-cloud-r7/README.md`](../examples/ollama-cloud-r7/README.md)
-for provenance before treating either as a baseline.
+for provenance.
 
 ## Requirements
 
@@ -23,67 +19,11 @@ for provenance before treating either as a baseline.
 - `git` for the fixture worktrees.
 - `ogcode` and `opencode` on `PATH`, or paths passed with `--ogcode` and
   `--opencode`, for a fresh run.
-- One provider API key for a fresh run. Reporting either raw log needs no key
+- One provider API key for a fresh run. Reporting a raw log needs no key
   and no network.
 
 All commands below run from the package root, the `benchmark/` directory in
 the source tree or `ogcode-benchmark/` after unzipping the release archive.
-
-## Regenerate the r8 report offline
-
-The r8 rows were written by this harness and carry the full current schema. The
-sidecar `metadata.json` records the versions, prices, fixtures and host.
-
-```sh
-python3 report.py \
-  --raw examples/ollama-cloud-r8/raw.jsonl \
-  --out /tmp/ollama-cloud-r8
-```
-
-`--out` is optional; without it the reporter writes beside the raw log. Use a
-separate directory if you want to keep the shipped files untouched. The reporter
-prints the Markdown report and writes `report.md`, `report.csv` and
-`summary.json` under `/tmp/ollama-cloud-r8/`. It never modifies the raw log.
-
-The command should produce the documented aggregates:
-
-| Metric | ogcode | opencode |
-|---|---|---|
-| Solved | 30/30 | 30/30 |
-| Total cost | $0.2841 | $0.2419 |
-| Median cost per task | $0.0076 | $0.0063 |
-| Median wall time | 29.4 s | 22.4 s |
-| Total agent time | 917.1 s | 749.3 s |
-
-Both agents solved every run (60/60 green). The report records 17.5% higher
-total cost, 19.5% higher median cost and 31.3% higher median wall time for
-ogcode in this sample. Compare the regenerated files with
-`examples/ollama-cloud-r8/report.md` and `summary.json`; `generated_at` and
-formatting can differ, so compare the aggregates rather than requiring a
-byte-for-byte match.
-
-Confirm the sample size:
-
-```sh
-wc -l examples/ollama-cloud-r8/raw.jsonl
-# 60
-```
-
-### Why r8 is not r7
-
-The agents did essentially the same work. ogcode's prompt tokens per turn moved
-from 20,107 to 20,403 and its turns from 202 to 215, but its uncached input per
-turn rose from 2,556 to 5,212 and its cache share fell from 87.3% to 74.5%.
-opencode's token mix was almost unchanged. The reported cost difference
-decomposes exactly into that mix at the shared prices.
-
-The provider's cache behaviour changed between the two samples. The package was
-smoke-tested 24 minutes before the r8 campaign with the same harness, task and
-fresh-worktree scheme; those runs cached the full prefix after the first
-request. During the campaign the cached prefix stopped extending at about
-14,600 tokens, leaving about 4,000 uncached tokens per turn. The per-turn evidence is in
-the r8 README. Treat the cache regime, not just the agent version, as part of
-the provenance.
 
 ## Regenerate the historical r7 report offline
 
@@ -137,7 +77,7 @@ python3 run_benchmark.py --dry-run
 ```
 
 Then run the default configuration. The explicit `--out` keeps the new sample
-separate from the bundled examples and from earlier results:
+separate from the bundled example and from earlier results:
 
 ```sh
 python3 run_benchmark.py \
@@ -147,7 +87,7 @@ python3 run_benchmark.py \
 ```
 
 This is 60 attempts (six tasks times five repetitions times two agents) and
-spends money: about $0.53 at the r8 prices. The run writes `raw.jsonl`,
+spends money at the configured prices. The run writes `raw.jsonl`,
 `metadata.json`, logs and tool-call audits. Generate the report:
 
 ```sh
@@ -172,7 +112,7 @@ python3 report.py --raw results/ollama-cloud-smoke/raw.jsonl
 A smoke run is not a benchmark sample. It is one attempt per selected agent on
 one task.
 
-## Comparing a new run with the samples
+## Comparing a new run with the sample
 
 Compare like with like:
 
@@ -182,14 +122,13 @@ Compare like with like:
 - the agent versions recorded in `metadata.json`;
 - the token mix (`input`, `cache_read`, cache share), not only the dollar total.
 
-Both samples used `ogcode v0.58.3-dirty` and `opencode 1.18.30`, so the agent
-versions alone do not explain the reversal. Model behaviour, provider latency,
-prices and provider cache behaviour can differ. The documented numbers are one
-sample each, not a target or a guarantee. Use the per-task medians and the
-cross-checks, and state the sample size and agent versions alongside any
-comparison.
+The bundled sample used `ogcode v0.58.3-dirty` and `opencode 1.18.30`. Model
+behaviour, provider latency, prices and provider cache behaviour can differ from
+that campaign. The documented numbers are one sample, not a target or a
+guarantee. Use the per-task medians and the cross-checks, and state the sample
+size and agent versions alongside any comparison.
 
-Do not concatenate either example's `raw.jsonl` with a new one. The r7 rows have
+Do not concatenate the example's `raw.jsonl` with a new one. The r7 rows have
 a different schema, and the reporter's labels and route fields would be mixed;
 the reporter also appends to a raw log rather than replacing it. Report each raw
 file separately, or keep a new sample in its own result directory.

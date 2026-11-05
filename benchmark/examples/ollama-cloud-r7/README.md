@@ -11,14 +11,12 @@ current `benchlib.runner` writes and `benchlib.reporting` reads; it was
 reconstructed (see [Metadata provenance](#metadata-provenance)) and no secret
 is stored in it.
 
-## Fresh sample does not reproduce this headline
+## This sample predates the current harness
 
-[`../ollama-cloud-r8/`](../ollama-cloud-r8/) is a fresh 60-run sample produced by
-the packaged 1.0.0 harness with the same agents, model and prices. It points the
-other way: ogcode is 17.5% more expensive and 31.3% slower at the median. The
-difference is a provider prefix-cache regime change during the day, not a change
-in the agents' workload; that directory's README has the per-turn evidence.
-This directory remains the unchanged historical r7 record.
+The r7 numbers come from the retired `bench/cost/run_bench.py` runner and an
+older result schema. A fresh run with the current harness can differ: model
+behaviour, prices, latency and the provider's prefix-cache regime all change
+between campaigns. This directory remains the unchanged historical r7 record.
 
 ## Result headline
 
@@ -99,10 +97,8 @@ modifies `raw.jsonl`.
 
 ## Caveats
 
-- This sample is **not regenerated** by the current harness, and it did not
-  reproduce when the packaged harness was run on 2026-11-04; see
-  [`../ollama-cloud-r8/`](../ollama-cloud-r8/). Its numbers should not be
-  compared with fresh runs without noting the harness and provider-cache
+- This sample is **not regenerated** by the current harness. Its numbers should
+  not be compared with fresh runs without noting the harness and provider-cache
   changes.
 - The old log lacks the fields the current reporter prefers (`provider_kind`,
   `agent_model`, `config_name`, `pricing_source`, `provider_route_ok`). Those
