@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "benchmark": {
+    "name": "ogcode-benchmark",
+    "version": "1.0.0",
+    "config": "ollama-cloud",
+    "config_path": "/Users/prasenjeet/Downloads/work/ogcode/.ogcode/bench-rerun/ogcode-benchmark/configs/ollama-cloud.json"
+  },
+  "started_at": "2026-11-04T16:24:39Z",
+  "finished_at": "2026-11-04T17:02:50Z",
+  "provider": {
+    "kind": "ollama-cloud",
+    "display_name": "Ollama Cloud",
+    "base_url": "https://ollama.com/v1",
+    "api_key_env": "OLLAMA_API_KEY",
+    "ogcode_provider": "openai",
+    "opencode_provider": "ollama-cloud",
+    "opencode_custom_config": false
+  },
+  "pricing": {
+    "source": "config",
+    "usd_per_million_tokens": {
+      "input": 0.15,
+      "output": 0.5,
+      "cache_read": 0.03
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "binary": "/Users/prasenjeet/.local/bin/ogcode",
+      "version": "ogcode v0.58.3-dirty (darwin/arm64)",
+      "model": "glm-5.3-flash",
+      "extra_args": []
+    },
+    "opencode": {
+      "binary": "/Users/prasenjeet/.opencode/bin/opencode",
+      "version": "1.18.30",
+      "model": "ollama-cloud/glm-5.3-flash",
+      "extra_args": []
+    }
+  },
+  "tasks": [
+    {
+      "name": "go-bugfix",
+      "fixture_sha256": "70bd9a04336452b5459028fe8f4ce6fe925265db0adf2112cb87189537b7275f"
+    },
+    {
+      "name": "js-bugfix",
+      "fixture_sha256": "23e0c8285f80497c7306200ba8e14bbe06a62b90e01f9c0ac9c2b82c9b71e5e8"
+    },
+    {
+      "name": "py-bugfix",
+      "fixture_sha256": "661068941682d89aba077ef2836f1d4c2345ddd24ab103ec9be577aa9ac49b08"
+    },
+    {
+      "name": "py-feature",
+      "fixture_sha256": "be2280157f37ccc759d7af2b871d3c3ccfdde6acdcd34312572dc89f9d36386f"
+    },
+    {
+      "name": "py-ledger",
+      "fixture_sha256": "c76d9552fff7b837d6bc74de2aaead25d6ff46910a33a174a5988efbf55e5689"
+    },
+    {
+      "name": "py-shop",
+      "fixture_sha256": "fbcf552eeba0f42bb2f11309ae362718b3a2a934592d9d0c7a05da1d30501b7a"
+    }
+  ],
+  "sampling": {
+    "reps": 5,
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900
+  },
+  "host": {
+    "platform": "macOS-15.5-arm64-arm-64bit-Mach-O",
+    "python": "3.14.7"
+  },
+  "config": {
+    "name": "ollama-cloud",
+    "description": "GLM-5.3 Flash on Ollama Cloud. Both agents receive the same model weights.",
+    "source": "/Users/prasenjeet/Downloads/work/ogcode/.ogcode/bench-rerun/ogcode-benchmark/configs/ollama-cloud.json",
+    "provider": {
+      "kind": "ollama-cloud",
+      "base_url": null,
+      "api_key_env": "OLLAMA_API_KEY",
+      "name": null,
+      "opencode_provider": null
+    },
+    "model": {
+      "id": "glm-5.3-flash",
+      "pricing": {
+        "input": 0.15,
+        "output": 0.5,
+        "cache_read": 0.03
+      }
+    },
+    "agents": {
+      "ogcode": {
+        "model": "glm-5.3-flash",
+        "extra_args": []
+      },
+      "opencode": {
+        "model": "ollama-cloud/glm-5.3-flash",
+        "extra_args": []
+      }
+    },
+    "run": {
+      "reps": 5,
+      "tasks": [],
+      "agents": [
+        "ogcode",
+        "opencode"
+      ],
+      "jobs": 1,
+      "timeout_s": 600,
+      "verify_timeout_s": 300,
+      "index_timeout_s": 900,
+      "output_dir": "results/ollama-cloud"
+    }
+  },
+  "total_runs": 60
+}

@@ -1,0 +1,6 @@
+Hi {first_name},
+
+The {item_name} from order {order_id} is back at the warehouse. Your refund of
+{amount} is queued.
+
+{store_name}

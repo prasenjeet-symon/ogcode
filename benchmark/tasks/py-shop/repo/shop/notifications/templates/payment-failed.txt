@@ -1,0 +1,8 @@
+Hi {first_name},
+
+We could not charge the card on order {order_id} for {total}. The items stay
+in your cart for another 24 hours.
+
+Update the card, or reply to {support_email} and we will help.
+
+{store_name}

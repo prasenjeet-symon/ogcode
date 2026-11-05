@@ -1,0 +1,5 @@
+Hi {first_name},
+
+You have {points} points waiting, worth {discount} off the next order.
+
+{store_name}

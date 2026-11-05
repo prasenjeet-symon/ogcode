@@ -1,0 +1,8 @@
+Hi {first_name},
+
+Order {order_id} left the warehouse with {carrier}.
+
+Tracking number: {tracking_number}
+Estimated arrival: {eta}
+
+{store_name}

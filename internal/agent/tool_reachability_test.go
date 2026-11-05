@@ -131,7 +131,7 @@ func TestDeepSearchGuidanceTracksAvailability(t *testing.T) {
 			continue
 		}
 
-		with := staticSystemPrompt(a, "/tmp/proj", false, "", "", sessionMemory{}, "", true, true)
+		with := staticSystemPrompt(a, "/tmp/proj", false, memoryFiles{}, "", true, true)
 		if !strings.Contains(with, "deep_search") {
 			t.Errorf("%s: search is available but the prompt never names deep_search", a.Name)
 		}
@@ -139,7 +139,7 @@ func TestDeepSearchGuidanceTracksAvailability(t *testing.T) {
 			t.Errorf("%s: search is available but the external-knowledge section is missing", a.Name)
 		}
 
-		without := staticSystemPrompt(a, "/tmp/proj", false, "", "", sessionMemory{}, "", false, true)
+		without := staticSystemPrompt(a, "/tmp/proj", false, memoryFiles{}, "", false, true)
 		if strings.Contains(without, "deep_search") {
 			t.Errorf("%s: no search backend, but the prompt still names deep_search — "+
 				"the model is told to call something it will never be offered", a.Name)
@@ -160,7 +160,7 @@ func TestDeepSearchGuidanceSkipsAgentsWithoutTheTool(t *testing.T) {
 			t.Errorf("%s: unexpectedly holds deep_search", a.Name)
 			continue
 		}
-		if p := staticSystemPrompt(a, "/tmp/proj", false, "", "", sessionMemory{}, "", true, true); strings.Contains(p, "deep_search") {
+		if p := staticSystemPrompt(a, "/tmp/proj", false, memoryFiles{}, "", true, true); strings.Contains(p, "deep_search") {
 			t.Errorf("%s: does not hold deep_search but its prompt names it", a.Name)
 		}
 	}
@@ -178,7 +178,7 @@ func TestLivePreviewReachesOnlyTheBuildAgent(t *testing.T) {
 		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
 	}
 	for _, a := range all {
-		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", sessionMemory{}, "", false, true), heading)
+		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, memoryFiles{}, "", false, true), heading)
 		want := a.ID == "build"
 		if got != want {
 			t.Errorf("%s: preview-hosting section = %v, want %v", a.Name, got, want)
@@ -201,7 +201,7 @@ func TestPublicFileHostingReachesOnlyTheBuildAgent(t *testing.T) {
 		NoteAgent, SubagentAgent, SearchAgent, IndexAgent, MemoryRecallAgent,
 	}
 	for _, a := range all {
-		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, "", "", sessionMemory{}, "", false, true), heading)
+		got := strings.Contains(staticSystemPrompt(a, "/tmp/proj", false, memoryFiles{}, "", false, true), heading)
 		want := a.ID == "build"
 		if got != want {
 			if want {
@@ -359,7 +359,7 @@ func TestMarkdownCapabilitiesPrompt_SavedToFileDropsInlineRendering(t *testing.T
 // cannot both sit in one prompt.
 func TestBuildSystemPrompt_ShellLineOnlyForShellAgents(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", sessionMemory{}, 0, 0, true)
+		prompt := buildSystemPrompt(a, "/tmp/test", true, memoryFiles{}, 0, 0, true)
 		hasShellLine := strings.Contains(prompt, "\nShell: ")
 		wantShellLine := slices.Contains(a.Tools, "bash")
 		if hasShellLine != wantShellLine {
@@ -372,16 +372,17 @@ func TestBuildSystemPrompt_ShellLineOnlyForShellAgents(t *testing.T) {
 	}
 }
 
-// The MEMORY.md section opens by pointing at the block above it. When no
-// MEMORY.md exists there is no block, and every agent — not just the
-// write-capable ones — needs the section to say so.
+// The MEMORY.md section used to open by pointing at a block above it. There is
+// no such block any more: the section names the discovered files and loads
+// nothing, so an absent file is reported by the pointer itself, for every
+// agent — not just the write-capable ones.
 func TestBuildSystemPrompt_NoDanglingMemoryMDReference(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", sessionMemory{}, 0, 0, true)
-		if strings.Contains(prompt, "The content above in the <memory-md> tag") {
+		prompt := buildSystemPrompt(a, "/tmp/test", true, memoryFiles{}, 0, 0, true)
+		if strings.Contains(prompt, "<memory-md>") {
 			t.Errorf("%s: points at a <memory-md> tag that is not in the prompt", a.Name)
 		}
-		if !strings.Contains(prompt, "This project has no MEMORY.md file") {
+		if !strings.Contains(prompt, "No MEMORY.md was found for this working directory") {
 			t.Errorf("%s: does not say the file is absent", a.Name)
 		}
 	}
@@ -394,7 +395,7 @@ func TestBuildSystemPrompt_NoDanglingMemoryMDReference(t *testing.T) {
 func TestBuildSystemPrompt_InstructionSourceBoundaryReachesEveryAgent(t *testing.T) {
 	all := append(codeFacingAgents(), IndexAgent, SearchAgent)
 	for _, a := range all {
-		prompt := buildSystemPrompt(a, "/tmp/test", true, "", "", sessionMemory{}, 0, 0, true)
+		prompt := buildSystemPrompt(a, "/tmp/test", true, memoryFiles{}, 0, 0, true)
 		if !strings.Contains(prompt, "## Where your instructions come from") {
 			t.Errorf("%s: no instruction-source boundary in the prompt", a.Name)
 			continue
@@ -420,7 +421,7 @@ func TestBuildSystemPrompt_InstructionSourceBoundaryReachesEveryAgent(t *testing
 // The boundary is the rule most likely to be tested by the next thing the agent
 // reads, so nothing in the cacheable block may sit after it and dilute it.
 func TestBuildSystemPrompt_BoundaryClosesTheStaticBlock(t *testing.T) {
-	prompt := staticSystemPrompt(BuildAgent, "/tmp/test", true, "", "", sessionMemory{}, "anthropic", true, true)
+	prompt := staticSystemPrompt(BuildAgent, "/tmp/test", true, memoryFiles{}, "anthropic", true, true)
 	idx := strings.Index(prompt, "## Where your instructions come from")
 	if idx < 0 {
 		t.Fatal("boundary section missing from the static block")
@@ -552,8 +553,8 @@ func TestIndexStatusPrompt(t *testing.T) {
 // outside it — otherwise indexing mid-session silently invalidates the cached
 // tools+system prefix for every remaining turn.
 func TestBuildSystemPromptEntries_IndexStatusStaysOutOfCachedPrefix(t *testing.T) {
-	unindexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", 0, true, true)
-	indexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", 900, true, true)
+	unindexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, memoryFiles{}, 1920, 1080, "", 0, true, true)
+	indexed := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, memoryFiles{}, 1920, 1080, "", 900, true, true)
 
 	if unindexed[0] != indexed[0] {
 		t.Error("index status leaked into entry [0]; building the index mid-session " +
@@ -568,12 +569,12 @@ func TestBuildSystemPromptEntries_IndexStatusStaysOutOfCachedPrefix(t *testing.T
 // reports on a tool they were never offered.
 func TestBuildSystemPromptEntries_IndexStatusOnlyForIndexAwareAgents(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		joined := strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", 7, true, true), "\n")
+		joined := strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, memoryFiles{}, 0, 0, "", 7, true, true), "\n")
 		if !strings.Contains(joined, "7 files indexed") {
 			t.Errorf("%s: has codebase_map but never hears the index status", a.Name)
 		}
 	}
-	joined := strings.Join(buildSystemPromptEntries(SearchAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", 7, true, true), "\n")
+	joined := strings.Join(buildSystemPromptEntries(SearchAgent, "/tmp/proj", false, memoryFiles{}, 0, 0, "", 7, true, true), "\n")
 	if strings.Contains(joined, "files indexed") {
 		t.Error("SearchAgent has no codebase_map but was told the index status")
 	}
@@ -613,9 +614,9 @@ func TestBuildSystemPromptEntries_LatexInfoIsInCachedPrefix(t *testing.T) {
 	}
 
 	setLatexCache(true)
-	withLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, true)
+	withLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, memoryFiles{}, 0, 0, "", -1, true, true)
 	setLatexCache(false)
-	withoutLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, true)
+	withoutLatex := buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, memoryFiles{}, 0, 0, "", -1, true, true)
 
 	// The LaTeX environment lives in the cached base (entry [0]), not a per-turn
 	// entry: detection is process-cached (getLatexEnv), so the block is
@@ -701,7 +702,7 @@ func TestSkillGuidancePrompt_EscapesSkillText(t *testing.T) {
 // it must never appear in the entries buildSystemPromptEntries produces.
 func TestBuildSystemPromptEntries_SkillGuidanceStaysOutOfTheCachedPrefix(t *testing.T) {
 	for _, a := range []Agent{BuildAgent} {
-		entries := buildSystemPromptEntries(a, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)
+		entries := buildSystemPromptEntries(a, "/tmp/proj", false, memoryFiles{}, 1920, 1080, "", -1, true, true)
 		for i, e := range entries {
 			if strings.Contains(e, "<available_skills>") {
 				t.Errorf("%s: skill guidance is in entry [%d]; it changes mid-session and must be appended by the loop", a.Name, i)
@@ -777,7 +778,7 @@ func TestStaticSystemPromptNeverInlinesHowToMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt := staticSystemPrompt(BuildAgent, dir, true, "", "", sessionMemory{}, "anthropic", true, true)
+	prompt := staticSystemPrompt(BuildAgent, dir, true, memoryFiles{}, "anthropic", true, true)
 	if strings.Contains(prompt, "SENTINEL-HOWTO-BODY") {
 		t.Error("static system prompt inlined the body of HOWTO.md")
 	}
@@ -789,17 +790,43 @@ func TestStaticSystemPromptNeverInlinesHowToMD(t *testing.T) {
 	}
 }
 
+// MEMORY.md and AGENTS.md/AGENT.md are pointers too. A body paste or a heading
+// index reintroduced here would be re-sent on every step and would go stale the
+// moment the file is edited, so both must stay out of the static prompt.
+func TestStaticSystemPromptNeverInlinesMEMORYMDOrAGENTSMD(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "MEMORY.md"), "## SentinelMemoryHeading\n\nSENTINEL-MEMORY-BODY\n")
+	mustWrite(t, filepath.Join(dir, "AGENTS.md"), "## SentinelAgentsHeading\n\nSENTINEL-AGENTS-BODY\n")
+
+	prompt := staticSystemPrompt(BuildAgent, dir, true, discoverMemoryFiles(dir, "ses_test"), "anthropic", true, true)
+	for _, unwanted := range []string{"SENTINEL-MEMORY-BODY", "SentinelMemoryHeading", "SENTINEL-AGENTS-BODY", "SentinelAgentsHeading"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Errorf("static system prompt inlined %q", unwanted)
+		}
+	}
+	for _, want := range []string{
+		"## MEMORY.md — Project Long-Term Memory",
+		"## AGENTS.md / AGENT.md — Project Instructions",
+		"- `MEMORY.md`",
+		"- `AGENTS.md`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("static system prompt missing %q", want)
+		}
+	}
+}
+
 // The pointer is gated on projectScoped (HasTool("codebase_map")): the agents
 // that read the user's tree get it; the utility agents that operate elsewhere
 // never see a section about a project file they cannot reach.
 func TestBuildSystemPrompt_HowToMDReachesOnlyProjectScopedAgents(t *testing.T) {
 	for _, a := range codeFacingAgents() {
-		if p := buildSystemPrompt(a, "/tmp/test", true, "", "", sessionMemory{}, 0, 0, true); !strings.Contains(p, "## HOWTO.md — Project Procedures") {
+		if p := buildSystemPrompt(a, "/tmp/test", true, memoryFiles{}, 0, 0, true); !strings.Contains(p, "## HOWTO.md — Project Procedures") {
 			t.Errorf("%s: project-scoped prompt is missing the HOWTO.md section", a.Name)
 		}
 	}
 	for _, a := range []Agent{IndexAgent, SearchAgent} {
-		if p := buildSystemPrompt(a, "/tmp/test", true, "", "", sessionMemory{}, 0, 0, true); strings.Contains(p, "## HOWTO.md") {
+		if p := buildSystemPrompt(a, "/tmp/test", true, memoryFiles{}, 0, 0, true); strings.Contains(p, "## HOWTO.md") {
 			t.Errorf("%s: utility prompt carries the project HOWTO.md section", a.Name)
 		}
 	}

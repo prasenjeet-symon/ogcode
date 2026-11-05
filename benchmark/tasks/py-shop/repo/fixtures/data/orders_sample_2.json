@@ -1,0 +1,71 @@
+[
+  {
+    "channel": "partner",
+    "coupon_codes": [
+      "SPRING10",
+      "WELCOME"
+    ],
+    "created_at": "2026-02-12T08:15:00Z",
+    "currency": "EUR",
+    "customer": {
+      "accepts_marketing": true,
+      "email": "ada@example.com",
+      "id": "cus-79",
+      "lifetime_cents": 2400,
+      "orders_count": 1,
+      "points": 24,
+      "tier": "silver"
+    },
+    "items_count": 4,
+    "lines": [
+      {
+        "category": "home",
+        "qty": 2,
+        "sku": "SKU-C3",
+        "unit_cents": 700,
+        "weight_g": 900
+      },
+      {
+        "category": "home",
+        "qty": 2,
+        "sku": "SKU-D9",
+        "unit_cents": 500,
+        "weight_g": 400
+      }
+    ],
+    "order_id": "ORD-1044",
+    "shipping_cents": 750,
+    "subtotal_cents": 2400
+  },
+  {
+    "channel": "web",
+    "coupon_codes": [],
+    "created_at": "2026-02-12T19:40:00Z",
+    "currency": "USD",
+    "customer": {
+      "accepts_marketing": true,
+      "email": "ada@example.com",
+      "id": "cus-80",
+      "lifetime_cents": 62000,
+      "orders_count": 7,
+      "points": 540,
+      "tier": "gold"
+    },
+    "items_count": 7,
+    "lines": [
+      {
+        "category": "tools",
+        "qty": 7,
+        "sku": "SKU-E2",
+        "unit_cents": 1250,
+        "weight_g": 350
+      }
+    ],
+    "order_id": "ORD-1045",
+    "refunded_cents": 2500,
+    "shipped_at": "2026-02-13T07:30:00Z",
+    "shipping_cents": 0,
+    "status": "refunded",
+    "subtotal_cents": 12500
+  }
+]

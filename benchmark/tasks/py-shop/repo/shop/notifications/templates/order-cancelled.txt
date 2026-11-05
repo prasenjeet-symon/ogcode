@@ -1,0 +1,6 @@
+Hi {first_name},
+
+Order {order_id} is cancelled. A refund of {amount} is on its way back to
+the card you paid with.
+
+{store_name}

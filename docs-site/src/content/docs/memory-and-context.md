@@ -7,12 +7,14 @@ A model can only reason over what is in front of it. Ogcode's job is to keep the
 
 ## Instructions you write
 
-Two files are loaded into every session, and both count as durable instructions. They are discovered at the project root, and parent directories are searched as well, so a monorepo or your home directory can carry a shared default:
+Two files count as durable instructions. They are discovered at the project root, and parent directories are searched as well, so a monorepo or your home directory can carry a shared default:
 
 - **`AGENTS.md`** (or `AGENT.md`): how you want the agent to behave in this project: conventions, commands to run, things to avoid. Think of it as a brief for a new teammate.
 - **`MEMORY.md`** carries the hard-won knowledge the agent needs *before it acts*: gotchas with their fix, invariants and the file or test that pins them, canonical values, decisions and why. It is not a log; keep it small.
 
-Both are read in full by default. If yours grow very large, you can cap them with `OGCODE_AGENT_MD_MAX_BYTES` and `OGCODE_MEMORY_MD_MAX_BYTES`, but most projects never need to.
+Neither file is pasted into the prompt. The agent is told which files exist and what each is for, and it is told to check them before it starts a task: it opens one with `file_map` to see its heading outline and reads only the sections it needs, the same way it handles `HOWTO.md` below. Both can grow, and you can edit them mid-session, without every request paying for the whole file.
+
+That is also why the headings matter: `## Migrations — goose keys by version number only` tells the agent, from the outline alone, whether the section is worth opening.
 
 A third file, **`HOWTO.md`**, records procedures the project has verified: ordered steps plus the check that says they worked. It is **not** loaded into the prompt: the agent is told the file exists and opens it when a task looks like one it already covers, so it can grow without costing every request. Record an entry at the end of a turn that ran the procedure end to end.
 

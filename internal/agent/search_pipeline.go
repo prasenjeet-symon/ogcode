@@ -255,8 +255,8 @@ func (lr *LoopRunner) searchGather(ctx context.Context, query string) []search.S
 //     research answer's own recommendation, in this system's voice, with
 //     headers and citations. Requiring actionable claims to stay attributed is
 //     what keeps the downstream check able to fire.
-//   - The frame itself must not be forgeable, the same way <agent-md> and
-//     <command> are not (see mdblock.go, riskGateSystem).
+//   - The frame itself must not be forgeable, the same way <command> is not
+//     (see riskGateSystem).
 
 // sourceFrameRe matches the separator this file prints between sources, so a
 // page body carrying the same shape cannot invent an extra source with a URL of
@@ -284,6 +284,22 @@ func webText(s string, limit int, collapse bool) string {
 		s = trimToRunes(s, limit)
 	}
 	return s
+}
+
+// trimToRunes returns the longest prefix of s that is at most n bytes and ends
+// on a rune boundary. The result goes straight into a JSON request body: a byte
+// slice through a multi-byte character leaves invalid UTF-8, which json.Marshal
+// does not reject — it substitutes U+FFFD — so the damage surfaces as mojibake
+// in the model's view of the text rather than as an error anywhere.
+func trimToRunes(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	// Walk back off any continuation bytes (0b10xxxxxx) the cut landed inside.
+	for n > 0 && s[n]&0xC0 == 0x80 {
+		n--
+	}
+	return s[:n]
 }
 
 // searchRankSystem is the selector's system prompt. rankBoundary tells it that

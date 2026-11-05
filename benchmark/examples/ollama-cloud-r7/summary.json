@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-04T16:09:46Z",
+  "model": "glm-5.3-flash",
+  "provider": "ollama-cloud",
+  "config": "ollama-cloud-r7",
+  "pricing_source": "config",
+  "runs": 60,
+  "tasks": [
+    "go-bugfix",
+    "js-bugfix",
+    "py-bugfix",
+    "py-feature",
+    "py-ledger",
+    "py-shop"
+  ],
+  "agents": {
+    "ogcode": {
+      "runs": 30,
+      "solved": 30,
+      "total_cost_usd": 0.20054542,
+      "median_cost_per_task_usd": 0.005670339999999999,
+      "mean_cost_per_task_usd": 0.0063673716666666665,
+      "total_duration_s": 560.67,
+      "median_duration_s": 16.0,
+      "median_turns": 6.0,
+      "median_tool_calls": 6.0,
+      "token_totals": {
+        "input": 516334,
+        "output": 33470,
+        "reasoning": 0,
+        "cache_read": 3545344,
+        "cache_write": 0
+      }
+    },
+    "opencode": {
+      "runs": 30,
+      "solved": 30,
+      "total_cost_usd": 0.26861161,
+      "median_cost_per_task_usd": 0.006599305,
+      "mean_cost_per_task_usd": 0.007941471666666667,
+      "total_duration_s": 831.6,
+      "median_duration_s": 21.99,
+      "median_turns": 5.0,
+      "median_tool_calls": 7.5,
+      "token_totals": {
+        "input": 867451,
+        "output": 61610,
+        "reasoning": 0,
+        "cache_read": 3589632,
+        "cache_write": 0
+      }
+    }
+  },
+  "cross_checks": {
+    "reported_cost_runs": 60,
+    "max_reported_cost_drift_usd": 1.734723475976807e-18,
+    "failed_verification": 0,
+    "errors_or_timeouts": 0,
+    "indexed_ogcode_runs": 30,
+    "index_pages_min": 3,
+    "index_pages_max": 266,
+    "index_median_build_s": 7.23,
+    "audited_tool_runs": 30,
+    "provider_routes_checked": 0,
+    "provider_route_failures": 0
+  },
+  "comparison": {
+    "ogcode_vs_opencode": {
+      "total_cost_reduction_pct": 25.34000298795722,
+      "median_cost_per_task_reduction_pct": 14.076709592904107,
+      "median_duration_reduction_pct": 27.239654388358343,
+      "total_duration_reduction_pct": 32.57936507936508,
+      "median_tool_calls_ratio": 0.8
+    }
+  }
+}

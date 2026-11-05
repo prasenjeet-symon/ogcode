@@ -1,0 +1,8 @@
+Hi {first_name},
+
+How did the {item_name} work out? A short review helps the next customer
+decide.
+
+{review_url}
+
+{store_name}

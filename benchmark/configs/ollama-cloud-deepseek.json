@@ -1,0 +1,34 @@
+{
+  "$schema": "../config.schema.json",
+  "name": "ollama-cloud-deepseek",
+  "description": "DeepSeek V4.1 Flash on Ollama Cloud. The account hit its session usage limit on 2026-11-05, so this preset has not been run end to end. No published price exists for this model, so the pricing block is zero and every cost column is 0 — read the token and resource columns, not cost.",
+  "provider": {
+    "kind": "ollama-cloud",
+    "api_key_env": "OLLAMA_API_KEY"
+  },
+  "model": {
+    "id": "deepseek-v4.1-flash",
+    "pricing": {
+      "input": 0.0,
+      "output": 0.0
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "model": "deepseek-v4.1-flash"
+    },
+    "opencode": {
+      "model": "ollama-cloud/deepseek-v4.1-flash"
+    }
+  },
+  "run": {
+    "reps": 5,
+    "tasks": "all",
+    "agents": ["ogcode", "opencode"],
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900,
+    "output_dir": "results/ollama-cloud-deepseek"
+  }
+}

@@ -1,0 +1,6 @@
+Hi {first_name},
+
+You moved up a tier. Shipping is free from now on and every order earns
+double points.
+
+{store_name}

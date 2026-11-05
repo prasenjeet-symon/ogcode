@@ -1,0 +1,6 @@
+Hi {first_name},
+
+The return for order {order_id} is approved. Pack the {item_name} and use the
+label from the earlier email.
+
+{store_name}

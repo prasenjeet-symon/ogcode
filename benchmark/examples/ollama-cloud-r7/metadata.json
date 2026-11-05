@@ -1,0 +1,121 @@
+{
+  "schema": 1,
+  "historical": true,
+  "note": "Historical sample: raw.jsonl was produced by the pre-1.0 bench/cost harness and predates this package's metadata schema. Provenance fields were reconstructed from the 60 raw rows (totals, agents, timestamps), the published report in this directory, the packaged ollama-cloud provider preset, and the current task fixtures (digests). The raw rows carry no provider, pricing or config fields, so those values describe the equivalent current configuration rather than fields the old harness recorded.",
+  "benchmark": {
+    "name": "ogcode-benchmark",
+    "version": "1.0.0",
+    "config": "ollama-cloud-r7",
+    "config_path": "configs/ollama-cloud.json"
+  },
+  "started_at": "2026-11-04T13:29:54Z",
+  "finished_at": "2026-11-04T14:01:50Z",
+  "provider": {
+    "kind": "ollama-cloud",
+    "display_name": "Ollama Cloud",
+    "base_url": "https://ollama.com/v1",
+    "api_key_env": "OLLAMA_API_KEY",
+    "ogcode_provider": "openai",
+    "opencode_provider": "ollama-cloud",
+    "opencode_custom_config": false
+  },
+  "pricing": {
+    "source": "config",
+    "usd_per_million_tokens": {
+      "input": 0.15,
+      "output": 0.5,
+      "cache_read": 0.03
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "binary": "ogcode",
+      "version": "ogcode v0.58.3-dirty",
+      "model": "glm-5.3-flash",
+      "extra_args": []
+    },
+    "opencode": {
+      "binary": "opencode",
+      "version": "1.18.30",
+      "model": "ollama-cloud/glm-5.3-flash",
+      "extra_args": []
+    }
+  },
+  "tasks": [
+    {
+      "name": "go-bugfix",
+      "fixture_sha256": "70bd9a04336452b5459028fe8f4ce6fe925265db0adf2112cb87189537b7275f"
+    },
+    {
+      "name": "js-bugfix",
+      "fixture_sha256": "23e0c8285f80497c7306200ba8e14bbe06a62b90e01f9c0ac9c2b82c9b71e5e8"
+    },
+    {
+      "name": "py-bugfix",
+      "fixture_sha256": "661068941682d89aba077ef2836f1d4c2345ddd24ab103ec9be577aa9ac49b08"
+    },
+    {
+      "name": "py-feature",
+      "fixture_sha256": "be2280157f37ccc759d7af2b871d3c3ccfdde6acdcd34312572dc89f9d36386f"
+    },
+    {
+      "name": "py-ledger",
+      "fixture_sha256": "c76d9552fff7b837d6bc74de2aaead25d6ff46910a33a174a5988efbf55e5689"
+    },
+    {
+      "name": "py-shop",
+      "fixture_sha256": "fbcf552eeba0f42bb2f11309ae362718b3a2a934592d9d0c7a05da1d30501b7a"
+    }
+  ],
+  "sampling": {
+    "reps": 5,
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900
+  },
+  "config": {
+    "name": "ollama-cloud-r7",
+    "description": "Historical r7 sample: GLM-5.3 Flash on Ollama Cloud, six tasks, five repetitions.",
+    "source": "configs/ollama-cloud.json",
+    "provider": {
+      "kind": "ollama-cloud",
+      "base_url": null,
+      "api_key_env": "OLLAMA_API_KEY",
+      "name": null,
+      "opencode_provider": null
+    },
+    "model": {
+      "id": "glm-5.3-flash",
+      "pricing": {
+        "input": 0.15,
+        "output": 0.5,
+        "cache_read": 0.03
+      }
+    },
+    "agents": {
+      "ogcode": {
+        "model": "glm-5.3-flash",
+        "extra_args": []
+      },
+      "opencode": {
+        "model": "ollama-cloud/glm-5.3-flash",
+        "extra_args": []
+      }
+    },
+    "run": {
+      "reps": 5,
+      "tasks": [],
+      "agents": [
+        "ogcode",
+        "opencode"
+      ],
+      "jobs": 1,
+      "timeout_s": 600,
+      "verify_timeout_s": 300,
+      "index_timeout_s": 900,
+      "output_dir": "examples/ollama-cloud-r7"
+    }
+  },
+  "total_runs": 60
+}

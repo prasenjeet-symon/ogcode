@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,7 +17,7 @@ import (
 
 // The tool finder behind update_intent. When the agent states a plan, each step
 // may carry a description of what it involves; this lines those steps up with
-// the skills and MCP tools the agent holds, and folds a short list into the tool
+// the skills, MCP servers and lazily loaded tools the agent can reach, and folds a short list into the tool
 // result the agent reads on its next step. The agent decides whether to load a
 // skill or call a tool; for an MCP tool the finder also adds it to the wire for
 // the rest of the turn, so a candidate it names is one the agent can call.
@@ -33,36 +34,96 @@ const intentMatchLLMTimeout = 12 * time.Second
 // intentRouteSystem is the router's system prompt. It is deliberately rigid: the
 // answer is parsed, so a model that chats instead of answering yields no hint
 // rather than a wrong one.
-const intentRouteSystem = `You route a coding agent's plan steps to the tools that could carry them out. You are given the plan's steps and a catalogue of the skills and MCP tools the agent has. For each step, name the catalogue entries that would genuinely help with THAT step.
+const intentRouteSystem = `You route a coding agent's plan steps to the tools that could carry them out. You are given the plan's steps and a catalogue of the skills, MCP servers and individual tools the agent can reach. For each step, name the catalogue entries that would genuinely help with THAT step.
 
 Rules:
 - Answer with JSON only: {"matches":[{"step":<index>,"names":["<exact name>", ...]}]}
 - "step" must be the step's own "index" field from the input, echoed verbatim — not the step's position in the list. The list is filtered, so the two differ.
 - Use names exactly as they appear in the catalogue. Never invent one.
-- "genuinely help" is a high bar: prefer one or two entries for a step, and only when an entry plainly does what the step describes. Most coding steps match nothing in the catalogue at all — an empty answer is a correct, expected answer, not a failure.
+- "genuinely help" is a high bar: name only entries that plainly do what the step describes. Most coding steps match nothing in the catalogue at all — an empty answer is a correct, expected answer, not a failure.
+- A tool entry is ONE tool, not a group: name every tool the step plainly needs and no others — often one, sometimes a pair, and every member when the step genuinely spans them all.
 - Include a step only when at least one entry clearly fits it. A wrong suggestion costs the agent real work, so leave a step out when nothing fits.
 - Do not explain, and add no prose outside the JSON.`
 
 // intentCandidate is one entry the matcher may pick: a skill the agent can load,
-// or an MCP server whose tools it can call.
+// an MCP server whose tools it can call, or one of the agent's own tools (a
+// "tool" entry) that the wire withholds until a step names it.
 //
 // For an MCP server, Name is the server name and ToolIDs holds the concrete
 // "mcp_<server>_*" tool IDs registered for that server (absent from the router
 // JSON payload via json:"-"). Grouping MCP tools by server keeps a 70-tool
 // server (e.g. Cal.com) to a single compact catalogue entry, and matching that
-// server offers all of its tools on the wire for the rest of the turn.
+// server offers all of its tools on the wire for the rest of the turn. A "tool"
+// entry is the opposite: Name is one tool id, and ToolIDs is that tool plus any
+// companion it is useless without — never a whole group.
 type intentCandidate struct {
-	Kind        string   `json:"kind"` // "skill" or "mcp"
+	Kind        string   `json:"kind"` // "skill", "mcp" or "tool"
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	ToolIDs     []string `json:"-"`
 }
 
-// intentCatalogue collects the skills and MCP servers the agent actually holds —
-// the only entries worth suggesting. A skill the agent cannot load, or an MCP
-// tool its glob does not reach, would be a suggestion it could not act on.
-// MCP tools are grouped by their owning server so the router sees one entry per
-// server rather than one per tool.
+// lazyTool is one of the agent's own tools kept off the wire until the intent
+// matcher names it for a plan step. Each tool is its own catalogue entry, so the
+// wire follows the plan instead of a fixed group: a step about one PDF page gets
+// the PDF pair, a step about a spreadsheet gets query_sheet alone, and a step
+// that spans documents, sheets and a render gets all of them.
+type lazyTool struct {
+	ID string
+	// Description is what the ROUTER sees, not what the model calling the tool
+	// sees. It is hand-written to compete with skills and MCP servers, so it
+	// names the artifacts (file types, extensions, common aliases) and the verbs
+	// a plan step is likely to use. The tool's own ToolDef.Description() is a
+	// separate text that explains the call to a model which has already picked
+	// it; editing one never changes the other.
+	Description string
+	// PairsWith names the ids the wire offers alongside this one. An index tool
+	// and the page reader it feeds are two halves of one job, so a step naming
+	// either half gets both — otherwise the agent pays the index call and then
+	// finds the reader was never offered.
+	PairsWith []string
+}
+
+// documentTools are the document, spreadsheet and LaTeX tools. They are the
+// genuinely task-specific tools of the coding loop: a turn that touches code
+// pays for their definitions on every request and never calls one. Every id here
+// must also sit in the agent's allowlist — the wire narrows, the allowlist does
+// not, so executeTool still accepts a call once the tool is offered.
+var documentTools = []lazyTool{
+	{ID: "docx_index", Description: "Open or inspect an existing Word document (.docx, a Word doc): list its pages with topic labels so you can pick which page to read. Covers specs, contracts, reports, proposals, resumes and any Word file a step needs to summarize, search or pull content from.", PairsWith: []string{"read_docx_page"}},
+	{ID: "latex_to_pdf", Description: "Compile LaTeX source (.tex) into a PDF with pdflatex: reports, papers, resumes, letters, invoices, certificates, any document a step must produce as a PDF. Use it when a step mentions building, rendering, compiling, typesetting or exporting a LaTeX or PDF document."},
+	{ID: "pdf_index", Description: "Open or inspect an existing PDF (.pdf): list its pages with topic labels so you can pick which page to read. Covers papers, reports, invoices, contracts, manuals, forms, scanned documents and slide exports when a step needs their structure or content; producing a PDF is latex_to_pdf.", PairsWith: []string{"read_pdf_page"}},
+	{ID: "query_sheet", Description: "Answer questions about the data in a spreadsheet — a .csv, .tsv, .xlsx or .xlsm file, Excel workbook, single sheet, data table or CSV export — by running read-only SQL, one table per sheet. Use it when a step needs to open, inspect, profile, summarize, filter, count, aggregate, compare or chart the file's rows, including when the step writes code around the file and first needs to know what the rows hold; writing code that only reads or writes the format is not a match."},
+	{ID: "read_docx_page", Description: "Read the text of a single page out of a Word document (.docx): its requirements, clauses, tables or prose. Use it when a step needs what is inside a Word file, a named or numbered page, or the content behind a page docx_index already located.", PairsWith: []string{"docx_index"}},
+	{ID: "read_pdf_page", Description: "Read a single PDF page: its extracted text, or a rendered image when the page is a scan, chart, diagram or figure. Use it when a step needs the content of a PDF — quotes, tables, terms, line items, any page or figure of a report, or a named or numbered page — whether a page number is already known or pdf_index still has to find it.", PairsWith: []string{"pdf_index"}},
+}
+
+// lazyTools are every tool the wire withholds until the matcher names it. A
+// tool the agent does not hold — a headless run has no schedule tool, for one —
+// is left out of the catalogue rather than offered. These entries ride every
+// agent that holds them, but only the interactive build agent runs the matcher,
+// so only there do they change what the wire carries.
+var lazyTools = append(append([]lazyTool{}, documentTools...), lazyTool{
+	ID:          "schedule",
+	Description: "Arm a one-shot reminder for this conversation: a note that comes back after a delay or at a set clock time. Use it when a step says to remind, set a timer, check back later, follow up after a pause, or defer something to a later moment; it never starts a turn on its own.",
+})
+
+// documentToolIDs lists the document tools' ids in catalogue order, for tests
+// and for anything that needs the group without the per-tool metadata.
+func documentToolIDs() []string {
+	ids := make([]string, 0, len(documentTools))
+	for _, t := range documentTools {
+		ids = append(ids, t.ID)
+	}
+	return ids
+}
+
+// intentCatalogue collects the skills, MCP servers and tool families the agent
+// actually holds — the only entries worth suggesting. A skill the agent cannot
+// load, an MCP tool its glob does not reach, or a tool family missing from its
+// allowlist would be a suggestion it could not act on. MCP tools are grouped by
+// their owning server so the router sees one entry per server rather than one
+// per tool.
 func (lr *LoopRunner) intentCatalogue(agent Agent, workDir string) []intentCandidate {
 	var out []intentCandidate
 	if lr.Skills != nil && agent.HasTool("skill") {
@@ -113,7 +174,37 @@ func (lr *LoopRunner) intentCatalogue(agent Agent, workDir string) []intentCandi
 			})
 		}
 	}
+	// The wire withholds these tools until the matcher names one, so each is a
+	// catalogue entry of its own: a step about a PDF is offered the PDF tools,
+	// not every document tool. Per-tool entries are what let the offer follow the
+	// plan — one tool, a pair, or the whole set — instead of flipping a group as
+	// soon as any member is mentioned.
+	for _, lt := range lazyTools {
+		if !lr.holdsTool(agent, lt.ID) {
+			continue
+		}
+		ids := []string{lt.ID}
+		for _, pair := range lt.PairsWith {
+			if lr.holdsTool(agent, pair) && !slices.Contains(ids, pair) {
+				ids = append(ids, pair)
+			}
+		}
+		out = append(out, intentCandidate{
+			Kind:        "tool",
+			Name:        lt.ID,
+			Description: lt.Description,
+			ToolIDs:     ids,
+		})
+	}
 	return out
+}
+
+// holdsTool reports whether the registry holds id AND the agent's allowlist
+// reaches it. Both matter: a registry can carry a tool this agent is not offered
+// (the schedule tool on a headless run), and an allowlist can name one the
+// registry never built.
+func (lr *LoopRunner) holdsTool(agent Agent, id string) bool {
+	return lr.Tools != nil && id != "" && agent.HasTool(id) && lr.Tools.Get(id) != nil
 }
 
 // maxMCPServerToolNames caps how many raw tool names are listed in a single MCP
@@ -427,18 +518,23 @@ func parseIntentMatches(text string) map[int][]string {
 
 // intentStepMatch is what the matcher paired with one step. The counts are what
 // the plan chip shows beside the step; the names ride along so hovering a count
-// can say which skill or MCP server it stands for.
+// can say which skill or MCP server it stands for. A lazy tool is counted here
+// but not persisted onto the plan: the chip has no row for it, and the tool's
+// arrival on the wire is the part the agent acts on.
 type intentStepMatch struct {
 	Skills     int
 	MCPs       int
+	Tools      int
 	SkillNames []string
 	MCPNames   []string
+	ToolNames  []string
 }
 
 // intentHint is one routing answer after validation: the note to append to the
-// tool result, the tools to offer on the wire (an MCP server's tools, plus the
-// whole browser_* takeover family when the browser-takeover skill was named),
-// and the per-step counts the loop stamps onto the persisted plan.
+// tool result, the tools to offer on the wire (an MCP server's tools, the lazy
+// tools the matcher named, plus the whole browser_* takeover family when the
+// browser-takeover skill was named), and the per-step counts the loop stamps
+// onto the persisted plan.
 type intentHint struct {
 	Text     string
 	OfferIDs []string
@@ -451,10 +547,13 @@ type intentHint struct {
 // on the wire. Names are resolved against the catalogue — a name the model
 // invented is dropped rather than suggested — and a repeated name is listed
 // once. Every surviving match is listed: there is no per-step cap, so a step
-// that genuinely fits several skills and servers shows all of them. The counts
-// and names it returns are over the matches that survived those filters.
-// browserTools is the takeover family the agent may offer; when the router
-// names the browser-takeover skill for a step, all of it is offered too.
+// that genuinely fits several skills and servers shows all of them — and a tool
+// entry offers exactly what it names, so the wire gains one tool, a pair, or a
+// whole group depending on the step. A tool's ToolIDs already carries the
+// companions it needs. The counts and names it returns are over the matches
+// that survived those filters. browserTools is the takeover family the agent may
+// offer; when the router names the browser-takeover skill for a step, all of it
+// is offered too.
 func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, matches map[int][]string, browserTools []string) intentHint {
 	byName := make(map[string]intentCandidate, len(catalogue))
 	for _, c := range catalogue {
@@ -479,7 +578,17 @@ func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, m
 			}
 			seen[n] = true
 			label := c.Name
-			if c.Kind == "skill" {
+			if c.Kind == "tool" {
+				// One of the agent's own tools: naming it puts it — and any
+				// companion it needs — on the wire for the rest of the turn. The
+				// rest of its group stays off unless a step names it too.
+				label += " (tool)"
+				count.Tools++
+				count.ToolNames = append(count.ToolNames, c.Name)
+				for _, id := range c.ToolIDs {
+					offered[id] = true
+				}
+			} else if c.Kind == "skill" {
 				label += " (skill)"
 				count.Skills++
 				count.SkillNames = append(count.SkillNames, c.Name)
@@ -520,7 +629,7 @@ func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, m
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	text := "\n\nPossible tools for these steps — a matcher compared each step's description against the skills and MCP servers you can reach. An MCP server named here has all of its tools offered to you from now on; a skill is loaded through the \"skill\" tool. Use a match when it fits the step; if you skip one, say in one line why it does not fit rather than ignoring it silently.\n" + b.String()
+	text := "\n\nPossible tools for these steps — a matcher compared each step's description against the skills, MCP servers and tools you can reach. A tool named here is offered to you from now on, together with any companion it needs; a skill is loaded through the \"skill\" tool. Use a match when it fits the step; if you skip one, say in one line why it does not fit rather than ignoring it silently.\n" + b.String()
 	if browserFamily {
 		text += "\nThe browser takeover tools are part of this app and are already on the wire for the rest of the turn; start with browser_status to check pairing before using them.\n"
 	}
@@ -537,11 +646,12 @@ func formatIntentHint(steps []session.IntentStep, catalogue []intentCandidate, m
 // executeTool checks it — and for the build agent it carries both the "mcp_*"
 // and the "browser_*" glob. For the build agent the wire is narrower: a
 // concrete MCP tool is offered only once the intent matcher has named it for
-// the turn's plan, and the browser takeover ops are offered once the matcher
-// names the browser-takeover skill (or the agent loads it) — browser_status
-// stays on the wire from step one, so even a turn the matcher never routes can
-// check whether the bridge is paired. Tools arrive with the task, not before
-// it. Every other agent's turn list is its allowlist unchanged.
+// the turn's plan, the browser takeover ops are offered once the matcher names
+// the browser-takeover skill (or the agent loads it), and a lazy tool
+// (lazyTools) is offered once the matcher names it for a step —
+// browser_status stays on the wire from step one, so even a turn the matcher
+// never routes can check whether the bridge is paired. Tools arrive with the
+// task, not before it. Every other agent's turn list is its allowlist unchanged.
 //
 // version moves whenever the offered set changes, and the loop re-resolves the
 // provider tool array on it exactly as it does on the registry's generation.
@@ -554,36 +664,57 @@ type turnToolset struct {
 
 // newTurnToolset narrows an allowlist to the wire list a turn starts with.
 //
-// matcherTurn drops the globs whose expansion would be upfront knowledge the
-// intent matcher keeps out: the "mcp_*" glob (ForAgent would expand it to every
-// MCP tool the registry happens to hold) and the "browser_*" glob (the
-// takeover ops ride the wire only once the family is offered). browser_status
-// is concrete, so it is kept either way. Only an agent that runs the matcher
-// can safely set it — with it false every id is kept, and the globs expand
-// from the first step as they always did.
+// matcherTurn drops the ids the intent matcher keeps off step one: the globs
+// whose expansion would be upfront knowledge (the "mcp_*" glob, which ForAgent
+// would expand to every MCP tool the registry happens to hold, and the
+// "browser_*" glob, whose ops ride the wire only once the family is offered),
+// and every lazy tool (the document tools, schedule) — a turn that never
+// mentions a document or a reminder should not pay their definitions on every
+// request.
+// browser_status and the doc tools are concrete ids in the allowlist, so the
+// allowlist keeps accepting a call either way; only the wire is narrower. Only
+// an agent that runs the matcher can safely set it — with it false every id is
+// kept, and the globs expand from the first step as they always did.
 func newTurnToolset(allow []string, matcherTurn bool) *turnToolset {
 	base := make([]string, 0, len(allow))
 	for _, id := range allow {
-		if matcherTurn && strings.Contains(id, "*") &&
-			(strings.HasPrefix(id, "mcp_") || strings.HasPrefix(id, "browser_")) {
-			continue
+		if matcherTurn {
+			if strings.Contains(id, "*") &&
+				(strings.HasPrefix(id, "mcp_") || strings.HasPrefix(id, "browser_")) {
+				continue
+			}
+			if lazyToolID(id) {
+				continue
+			}
 		}
 		base = append(base, id)
 	}
 	return &turnToolset{base: base}
 }
 
-// offer adds one concrete tool to the turn's wire list — an MCP tool named by
-// the intent matcher, or a browser takeover op surfaced when the matcher named
-// the browser-takeover skill for the plan or the agent loaded that skill. A
-// repeated id, a glob rather than a concrete id, an empty one, or an id the
-// base already covers (exactly, or through a glob it carries) is a no-op, so
-// a matcher naming the same tool for two steps costs nothing.
+// lazyToolID reports whether id is one of the tools the wire withholds until
+// the matcher names it for a plan step.
+func lazyToolID(id string) bool {
+	for _, lt := range lazyTools {
+		if lt.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// offer adds one concrete tool to the turn's wire list — an MCP tool or a lazy
+// tool named by the intent matcher, or a browser takeover op
+// surfaced when the matcher named the browser-takeover skill for the plan or the
+// agent loaded that skill. A repeated id, a glob rather than a concrete id, an
+// empty one, an id outside those families, or an id the base already covers
+// (exactly, or through a glob it carries) is a no-op, so a matcher naming the
+// same tool for two steps costs nothing.
 func (t *turnToolset) offer(id string) {
 	if id == "" || strings.Contains(id, "*") {
 		return
 	}
-	if !strings.HasPrefix(id, "mcp_") && !strings.HasPrefix(id, "browser_") {
+	if !strings.HasPrefix(id, "mcp_") && !strings.HasPrefix(id, "browser_") && !lazyToolID(id) {
 		return
 	}
 	for _, have := range t.base {

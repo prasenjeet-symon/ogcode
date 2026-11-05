@@ -1,0 +1,62 @@
+[
+  {
+    "channel": "web",
+    "coupon_codes": [
+      "SPRING10"
+    ],
+    "created_at": "2026-02-11T09:30:00Z",
+    "currency": "USD",
+    "customer": {
+      "accepts_marketing": true,
+      "email": "ada@example.com",
+      "id": "cus-77",
+      "lifetime_cents": 18000,
+      "orders_count": 4,
+      "points": 320,
+      "tier": "gold"
+    },
+    "items_count": 3,
+    "lines": [
+      {
+        "category": "tools",
+        "qty": 3,
+        "sku": "SKU-A1",
+        "unit_cents": 1200,
+        "weight_g": 700
+      }
+    ],
+    "order_id": "ORD-1042",
+    "shipping_cents": 499,
+    "subtotal_cents": 3600
+  },
+  {
+    "channel": "mobile",
+    "coupon_codes": [],
+    "created_at": "2026-02-11T14:05:00Z",
+    "currency": "USD",
+    "customer": {
+      "accepts_marketing": true,
+      "email": "grace@example.com",
+      "id": "cus-78",
+      "lifetime_cents": 140000,
+      "orders_count": 12,
+      "points": 980,
+      "tier": "platinum"
+    },
+    "items_count": 1,
+    "lines": [
+      {
+        "category": "audio",
+        "qty": 1,
+        "sku": "SKU-B7",
+        "unit_cents": 9900,
+        "weight_g": 1500
+      }
+    ],
+    "order_id": "ORD-1043",
+    "shipped_at": "2026-02-12T09:00:00Z",
+    "shipping_cents": 0,
+    "status": "shipped",
+    "subtotal_cents": 9900
+  }
+]

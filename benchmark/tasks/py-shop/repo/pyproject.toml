@@ -1,0 +1,9 @@
+[project]
+name = "shop"
+version = "0.4.2"
+description = "Order pricing for the storefront"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["shop*"]

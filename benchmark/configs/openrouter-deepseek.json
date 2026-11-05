@@ -1,0 +1,35 @@
+{
+  "$schema": "../config.schema.json",
+  "name": "openrouter-deepseek",
+  "description": "DeepSeek V4.1 Flash through OpenRouter. Same model as the ollama-cloud-deepseek preset, on a route that was available when the Ollama Cloud account hit its session usage limit.",
+  "provider": {
+    "kind": "openrouter",
+    "api_key_env": "OPENROUTER_API_KEY"
+  },
+  "model": {
+    "id": "deepseek/deepseek-v4.1-flash",
+    "pricing": {
+      "input": 0.045,
+      "output": 0.5,
+      "cache_read": 0.018
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "model": "deepseek/deepseek-v4.1-flash"
+    },
+    "opencode": {
+      "model": "openrouter/deepseek/deepseek-v4.1-flash"
+    }
+  },
+  "run": {
+    "reps": 5,
+    "tasks": "all",
+    "agents": ["ogcode", "opencode"],
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900,
+    "output_dir": "results/openrouter-deepseek"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "blue-crest": {
+    "latest": "out_for_delivery",
+    "parcel_id": "BC-4412098",
+    "status_history": [
+      {
+        "at": "2026-02-12T04:40:00Z",
+        "status": "transit"
+      }
+    ]
+  },
+  "cartwright": {
+    "consignment": {
+      "id": "CW-90114"
+    },
+    "progress": [
+      {
+        "at": "2026-02-12T10:05:00Z",
+        "state": "on_route"
+      }
+    ],
+    "summary": "in the network"
+  },
+  "riverdale-run": {
+    "barcode": "RR-77001",
+    "scans": [
+      {
+        "stage": "scan",
+        "time": "2026-02-12T05:55:00Z"
+      }
+    ],
+    "stage": "delivery"
+  },
+  "skyways": {
+    "awb": "012-44718293",
+    "flight_status": "landed",
+    "legs": [
+      {
+        "status": "airborne",
+        "time": "2026-02-12T02:15:00Z"
+      }
+    ]
+  }
+}

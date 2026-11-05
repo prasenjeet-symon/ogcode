@@ -10,7 +10,7 @@ import (
 )
 
 func TestMemoryMDPrompt_CanWrite(t *testing.T) {
-	prompt := memoryMDPrompt(true, true)
+	prompt := memoryMDPrompt(true, "/tmp/proj", nil)
 
 	if !strings.Contains(prompt, "### How to maintain MEMORY.md") {
 		t.Error("expected 'How to maintain' heading when canWriteFiles=true")
@@ -27,7 +27,7 @@ func TestMemoryMDPrompt_CanWrite(t *testing.T) {
 }
 
 func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
-	prompt := memoryMDPrompt(false, true)
+	prompt := memoryMDPrompt(false, "/tmp/proj", nil)
 
 	if !strings.Contains(prompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading when canWriteFiles=false")
@@ -45,12 +45,13 @@ func TestMemoryMDPrompt_ReadOnly(t *testing.T) {
 
 func TestMemoryMDPrompt_CommonSections(t *testing.T) {
 	// Both variants keep the durable content that survived the slim: what
-	// MEMORY.md is, that it is re-read every turn, and how it relates to AGENT.md.
+	// MEMORY.md is, when to open it again, and how it relates to
+	// AGENTS.md/AGENT.md.
 	for _, canWrite := range []bool{true, false} {
-		prompt := memoryMDPrompt(canWrite, true)
+		prompt := memoryMDPrompt(canWrite, "/tmp/proj", nil)
 		for _, sub := range []string{
 			"## MEMORY.md — Project Long-Term Memory",
-			"re-read at the start of every turn",
+			"Check it again whenever a task touches something it may already cover",
 			"AGENT.md",
 		} {
 			if !strings.Contains(prompt, sub) {
@@ -60,12 +61,28 @@ func TestMemoryMDPrompt_CommonSections(t *testing.T) {
 	}
 }
 
-// MEMORY.md is re-read every turn, so what goes into it must have been seen to
+func TestMemoryMDPromptListsDiscoveredPaths(t *testing.T) {
+	dir := "/tmp/proj"
+	prompt := memoryMDPrompt(true, dir, []string{dir + "/MEMORY.md"})
+	for _, want := range []string{
+		"Files found, outermost first — the closest file is the most specific:",
+		"- `MEMORY.md`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("MEMORY.md section missing %q", want)
+		}
+	}
+	if strings.Contains(prompt, "No MEMORY.md was found") {
+		t.Error("section claims MEMORY.md is absent when discovery found one")
+	}
+}
+
+// MEMORY.md is a long-lived store, so what goes into it must have been seen to
 // hold, with its source when that is not obvious; an unchecked inference is
 // marked as such or left out. The update comes before the final answer, which
 // reports on the task rather than on the bookkeeping.
 func TestMemoryMDPrompt_RecordsOnlyVerifiedFacts(t *testing.T) {
-	w := memoryMDPrompt(true, true)
+	w := memoryMDPrompt(true, "/tmp/proj", nil)
 	for _, want := range []string{
 		"Write down only what you have seen hold",
 		"the command or file that showed it",
@@ -77,7 +94,7 @@ func TestMemoryMDPrompt_RecordsOnlyVerifiedFacts(t *testing.T) {
 		}
 	}
 	// A read-only agent writes nothing, so it is not told how to write.
-	if r := memoryMDPrompt(false, true); strings.Contains(r, "(unverified)") {
+	if r := memoryMDPrompt(false, "/tmp/proj", nil); strings.Contains(r, "(unverified)") {
 		t.Error("read-only MEMORY.md section carries the writing rule")
 	}
 }
@@ -87,18 +104,18 @@ func TestMemoryMDPrompt_RecordsOnlyVerifiedFacts(t *testing.T) {
 // while HOWTO.md stays empty.
 func TestMemoryMDPromptNamesTheHowToSplit(t *testing.T) {
 	for _, canWrite := range []bool{true, false} {
-		if p := memoryMDPrompt(canWrite, true); !strings.Contains(p, "Ordered procedures belong in `HOWTO.md`") {
+		if p := memoryMDPrompt(canWrite, "/tmp/proj", nil); !strings.Contains(p, "Ordered procedures belong in `HOWTO.md`") {
 			t.Errorf("MEMORY.md section does not send procedures to HOWTO.md (canWrite=%v)", canWrite)
 		}
 	}
 }
 
-// MEMORY.md is re-read every turn, so it takes facts a future session needs
-// before acting — never a narrative of what one session did. The shapes named
+// MEMORY.md holds facts a future session needs before acting — never a
+// narrative of what one session did. The shapes named
 // are the whole list: an entry that fits none of them does not belong.
 func TestMemoryMDPromptSavesFactsNotSessionNarratives(t *testing.T) {
 	for _, canWrite := range []bool{true, false} {
-		p := memoryMDPrompt(canWrite, true)
+		p := memoryMDPrompt(canWrite, "/tmp/proj", nil)
 		for _, want := range []string{
 			"MEMORY.md is not a log",
 			"only what a future session must know before acting",
@@ -117,13 +134,13 @@ func TestMemoryMDPromptSavesFactsNotSessionNarratives(t *testing.T) {
 	}
 }
 
-// MEMORY.md and HISTORY.md are different stores: the first is re-read before
-// every action, the second is opened when a session investigates the past. If
-// the split is not named, measurements and session narratives keep landing in
-// the always-loaded file.
+// MEMORY.md and HISTORY.md are different stores: the first is scanned before
+// acting, the second is opened when a session investigates the past. If the
+// split is not named, measurements and session narratives keep landing in
+// MEMORY.md until it turns into a log.
 func TestMemoryMDPromptSendsHistoryToHistoryMDPrompt(t *testing.T) {
 	for _, canWrite := range []bool{true, false} {
-		p := memoryMDPrompt(canWrite, true)
+		p := memoryMDPrompt(canWrite, "/tmp/proj", nil)
 		for _, want := range []string{
 			"HISTORY.md",
 			"History is not memory",
@@ -150,7 +167,7 @@ func TestHistoryMDPrompt_CommonSection(t *testing.T) {
 			"measurements with",
 			"experiments and what they ruled out",
 			"Open it when a task touches past work",
-			"deliberately not loaded into your prompt",
+			"Search it by topic or date",
 		} {
 			if !strings.Contains(p, want) {
 				t.Errorf("HISTORY.md section missing %q (canWrite=%v)", want, canWrite)
@@ -192,7 +209,7 @@ func TestHowToMDPrompt_CommonSection(t *testing.T) {
 		for _, want := range []string{
 			"## HOWTO.md — Project Procedures",
 			"`HOWTO.md` at the project root",
-			"Open it when the",
+			"Before you start a task that looks like one it may already cover",
 			"when no heading matches",
 			"`Verified:`",
 			"`Touches:`",
@@ -278,7 +295,7 @@ func TestBuildSystemPrompt_NoCurrentDate(t *testing.T) {
 	// cache_control — must NOT contain the current date. It is injected as a
 	// separate system-reminder entry so the cached prefix stays byte-for-byte
 	// identical across turns.
-	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)[0]
+	prompt := buildSystemPromptEntries(BuildAgent, "/tmp/test", false, memoryFiles{}, 1920, 1080, "", -1, true, true)[0]
 	if strings.Contains(prompt, "Current date:") {
 		t.Error("did not expect 'Current date:' in the base system prompt (it should be in a separate system-reminder entry)")
 	}
@@ -307,8 +324,8 @@ func TestBuildSystemPrompt_OSEnvStaticAcrossAgents(t *testing.T) {
 	// gets the same cacheable prefix lines, so the prompt stays cache-stable
 	// regardless of which agent runs.
 	detectedOSEnv = nil // force re-detection
-	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
-	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
+	buildPrompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, memoryFiles{}, 0, 0, true)
+	notePrompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, memoryFiles{}, 0, 0, true)
 
 	for name, p := range map[string]string{"build": buildPrompt, "note": notePrompt} {
 		if !strings.Contains(p, "OS:") {
@@ -596,7 +613,7 @@ func TestProjectNotesPrompt_CanWrite(t *testing.T) {
 	if !strings.Contains(prompt, "managed exclusively by the NoteAgent") {
 		t.Error("expected NoteAgent restriction when canWriteFiles=true")
 	}
-	if !strings.Contains(prompt, "Do not create, modify, or delete any files in .ogcode/notes/") {
+	if !strings.Contains(prompt, "never create, modify or delete one") {
 		t.Error("expected explicit read-only restriction for notes dir when canWriteFiles=true")
 	}
 	if !strings.Contains(prompt, "You may only read notes") {
@@ -617,7 +634,7 @@ func TestProjectNotesPrompt_ReadOnly(t *testing.T) {
 	if strings.Contains(prompt, "managed exclusively by the NoteAgent") {
 		t.Error("did not expect NoteAgent restriction when canWriteFiles=false")
 	}
-	if strings.Contains(prompt, "Do not create, modify, or delete") {
+	if strings.Contains(prompt, "never create, modify or delete") {
 		t.Error("did not expect write restriction wording when canWriteFiles=false (they can't write at all)")
 	}
 }
@@ -629,7 +646,7 @@ func TestProjectNotesPrompt_CommonSections(t *testing.T) {
 		for _, sub := range []string{
 			"## Project notes",
 			".ogcode/notes/",
-			"don't repeat what is already documented",
+			"do not repeat what is already documented",
 		} {
 			if !strings.Contains(prompt, sub) {
 				t.Errorf("expected %q in projectNotesPrompt (canWrite=%v)", sub, canWrite)
@@ -720,7 +737,7 @@ func TestCodingAgents_ReviewAndEndToEndVerification(t *testing.T) {
 // TestBuildAgent_SystemPrompt_ContainsPublicServing verifies writing agents are
 // told about the workspace public/ folder served over HTTP at /public.
 func TestBuildAgent_SystemPrompt_ContainsPublicServing(t *testing.T) {
-	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", sessionMemory{}, "anthropic", true, true)
+	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, memoryFiles{}, "anthropic", true, true)
 	if !strings.Contains(p, "Public file hosting") {
 		t.Error("BuildAgent prompt should include the public file hosting section")
 	}
@@ -740,7 +757,7 @@ func TestBuildAgent_SystemPrompt_ContainsPublicServing(t *testing.T) {
 // gated on writing ability: a read-only agent (no write/edit) must never be
 // told about a /public hosting capability it cannot use.
 func TestReadOnlyAgent_SystemPrompt_OmitsPublicServing(t *testing.T) {
-	p := staticSystemPrompt(NoteAgent, "/tmp/testproj", false, "", "", sessionMemory{}, "", true, true)
+	p := staticSystemPrompt(NoteAgent, "/tmp/testproj", false, memoryFiles{}, "", true, true)
 	if strings.Contains(p, "Public file hosting") {
 		t.Error("read-only agent must not be offered the public file hosting section")
 	}
@@ -750,7 +767,7 @@ func TestReadOnlyAgent_SystemPrompt_OmitsPublicServing(t *testing.T) {
 // Build session is told how to hand the user a URL for a service it started on
 // a loopback port.
 func TestBuildAgent_SystemPrompt_ContainsPreviewServing(t *testing.T) {
-	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, "", "", sessionMemory{}, "anthropic", true, true)
+	p := staticSystemPrompt(BuildAgent, "/tmp/testproj", false, memoryFiles{}, "anthropic", true, true)
 	if !strings.Contains(p, "Live service preview") {
 		t.Error("BuildAgent prompt should include the live service preview section")
 	}
@@ -804,11 +821,11 @@ func TestPreviewServingPrompt_BrowserNoteOnlyForLocalhost(t *testing.T) {
 // The project-notes section is withheld unless the notes feature is enabled for
 // the session, and it appears only in a project-scoped agent's prompt.
 func TestBuildSystemPrompt_NotesGate(t *testing.T) {
-	off := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, false), "\n\n")
+	off := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, memoryFiles{}, 1920, 1080, "", -1, true, false), "\n\n")
 	if strings.Contains(off, "Project notes") {
 		t.Error("assembled prompt must omit project notes when the feature is disabled")
 	}
-	on := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true), "\n\n")
+	on := strings.Join(buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, memoryFiles{}, 1920, 1080, "", -1, true, true), "\n\n")
 	if !strings.Contains(on, "Project notes") {
 		t.Error("assembled prompt must carry project notes when the feature is enabled")
 	}
@@ -821,7 +838,7 @@ func TestBuildSystemPrompt_NotesGate(t *testing.T) {
 // (index, search, memory-recall) are not project-scoped and never see it either.
 func TestBuildSystemPrompt_NotesScope(t *testing.T) {
 	entries := func(a Agent, notes bool) string {
-		return strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, notes), "\n\n")
+		return strings.Join(buildSystemPromptEntries(a, "/tmp/proj", false, memoryFiles{}, 0, 0, "", -1, true, notes), "\n\n")
 	}
 
 	for _, a := range []Agent{BuildAgent, NoteAgent} {
@@ -878,7 +895,7 @@ func TestBuildSystemPrompt_NotesFlagIsRaceFree(t *testing.T) {
 			defer wg.Done()
 			child := *lr
 			for j := 0; j < 50; j++ {
-				_ = buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, child.notesOn())
+				_ = buildSystemPromptEntries(BuildAgent, "/tmp/proj", false, memoryFiles{}, 0, 0, "", -1, true, child.notesOn())
 			}
 		}()
 	}
@@ -919,14 +936,14 @@ func TestBuildSystemPrompt_FinalInstructionLast(t *testing.T) {
 	}
 	// Viewport dims are provided so a dynamic section is appended before the
 	// final instruction — proving it really is last.
-	p := buildSystemPrompt(NoteAgent, "/tmp/proj", false, "", "", sessionMemory{}, 1920, 1080, true)
+	p := buildSystemPrompt(NoteAgent, "/tmp/proj", false, memoryFiles{}, 1920, 1080, true)
 	if !strings.HasSuffix(p, NoteAgent.FinalInstruction) {
 		t.Error("NoteAgent FinalInstruction should be the final content of the assembled prompt")
 	}
 	if BuildAgent.FinalInstruction != "" {
 		t.Error("BuildAgent should not define a FinalInstruction")
 	}
-	bp := buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, true)
+	bp := buildSystemPrompt(BuildAgent, "/tmp/proj", false, memoryFiles{}, 0, 0, true)
 	if strings.HasSuffix(bp, "Reminder:") {
 		t.Error("BuildAgent prompt should not gain a stray final reminder")
 	}
@@ -1049,14 +1066,14 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 
 	// BuildAgent has latex_to_pdf tool — should get LaTeX info injected
 	if _, err := exec.LookPath("pdflatex"); err == nil {
-		prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, true)
+		prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, memoryFiles{}, 1920, 1080, true)
 		if !strings.Contains(prompt, "LaTeX environment") {
 			t.Error("expected LaTeX environment section in BuildAgent prompt when pdflatex is available")
 		}
 	}
 
 	// NoteAgent does NOT have latex_to_pdf tool — should NOT get LaTeX info
-	prompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, "", "", sessionMemory{}, 1920, 1080, true)
+	prompt := buildSystemPrompt(NoteAgent, "/tmp/test", false, memoryFiles{}, 1920, 1080, true)
 	if strings.Contains(prompt, "LaTeX environment") {
 		t.Error("did NOT expect LaTeX environment section in NoteAgent prompt (no latex_to_pdf tool)")
 	}
@@ -1070,9 +1087,9 @@ func TestBuildSystemPrompt_InjectsLatexInfo(t *testing.T) {
 // entry [0] is the only block providers mark cacheable, and the browser resends
 // its window size with every prompt, so a resize must not change [0] by one byte.
 func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.T) {
-	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)
-	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1280, 720, "", -1, true, true)
-	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 0, 0, "", -1, true, true)
+	desktop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, memoryFiles{}, 1920, 1080, "", -1, true, true)
+	laptop := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, memoryFiles{}, 1280, 720, "", -1, true, true)
+	none := buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, memoryFiles{}, 0, 0, "", -1, true, true)
 
 	if desktop[0] != laptop[0] {
 		t.Error("resizing the window changed the cacheable prefix — the tools+system cache is invalidated on every resize")
@@ -1101,12 +1118,12 @@ func TestBuildSystemPromptEntries_CacheablePrefixIsViewportInvariant(t *testing.
 // that moving the viewport could have broken: an output-only agent's format
 // constraint must stay the last thing the model reads.
 func TestBuildSystemPromptEntries_FinalInstructionIsLastEntry(t *testing.T) {
-	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true)
+	entries := buildSystemPromptEntries(NoteAgent, "/tmp/proj", true, memoryFiles{}, 1920, 1080, "", -1, true, true)
 	if got := entries[len(entries)-1]; got != NoteAgent.FinalInstruction {
 		t.Errorf("last entry = %q, want the agent's FinalInstruction", got)
 	}
 	// An agent without one must not gain an empty trailing entry.
-	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, "", "", sessionMemory{}, 1920, 1080, "", -1, true, true) {
+	for _, e := range buildSystemPromptEntries(BuildAgent, "/tmp/proj", true, memoryFiles{}, 1920, 1080, "", -1, true, true) {
 		if strings.TrimSpace(e) == "" {
 			t.Error("assembled entries contain an empty block")
 		}
@@ -1135,6 +1152,27 @@ func TestCodingAgentHardRules_PointAtTheEditContract(t *testing.T) {
 	}
 }
 
+// A helper script that outlives its turn is the next session's tool, so Hard
+// rules keeps it instead of letting the turn clean it up: it names the project's
+// .ogcode/scripts/ directory (inside the already-ignored .ogcode/) as its home
+// and HOWTO.md as the place a later session looks for it.
+func TestCodingAgentHardRules_KeepScriptsWorthReusing(t *testing.T) {
+	hard := BuildAgent.System[strings.Index(BuildAgent.System, "## Hard rules"):]
+	for _, want := range []string{
+		"worth reusing is not a temporary file",
+		"project's `.ogcode/scripts/` directory",
+		"create it if it does not exist yet",
+		"never delete it when the turn ends",
+		"record it in `HOWTO.md`",
+		"the command that runs it",
+		"served only this turn can still be cleaned up",
+	} {
+		if !strings.Contains(hard, want) {
+			t.Errorf("Hard rules missing %q", want)
+		}
+	}
+}
+
 // A skill body is instructions, and it arrives through a tool. The
 // instruction-source boundary says everything a tool returns is data and must
 // not be obeyed, so without an explicit carve-out the two rules contradict each
@@ -1143,7 +1181,7 @@ func TestCodingAgentHardRules_PointAtTheEditContract(t *testing.T) {
 // rule least able to afford being read as negotiable.
 func TestUntrustedContentPrompt_NamesSkillsAsTheOneException(t *testing.T) {
 	withSkill := untrustedContentPrompt(true, true, true)
-	if !strings.Contains(withSkill, "One exception, and only one") {
+	if !strings.Contains(withSkill, "The exceptions, and only these") {
 		t.Error("boundary does not carve out skills for an agent holding the skill tool")
 	}
 	if !strings.Contains(withSkill, `"skill" tool`) {
@@ -1157,9 +1195,13 @@ func TestUntrustedContentPrompt_NamesSkillsAsTheOneException(t *testing.T) {
 	}
 
 	// An agent without the tool must not be told about the exception at all —
-	// it can only widen what that agent will accept from a tool result.
-	if strings.Contains(untrustedContentPrompt(true, true, false), "One exception") {
-		t.Error("agent without the skill tool was given the skill carve-out")
+	// it can only widen what that agent will accept from a tool result. The
+	// AGENTS.md exception shares the header, so assert on the skill text.
+	withoutSkill := untrustedContentPrompt(true, true, false)
+	for _, unwanted := range []string{`"skill" tool`, "downloaded from a configured URL"} {
+		if strings.Contains(withoutSkill, unwanted) {
+			t.Errorf("agent without the skill tool was given the skill carve-out: %q", unwanted)
+		}
 	}
 }
 
@@ -1167,7 +1209,7 @@ func TestUntrustedContentPrompt_NamesSkillsAsTheOneException(t *testing.T) {
 // AGENT.md. Naming it as a source the agent should be following describes
 // something that is not in its prompt.
 func TestUntrustedContentPrompt_OnlyClaimsAgentMDWhenPresent(t *testing.T) {
-	if !strings.Contains(untrustedContentPrompt(false, true, false), "project's own AGENT.md") {
+	if !strings.Contains(untrustedContentPrompt(false, true, false), "this project's AGENTS.md or AGENT.md") {
 		t.Error("expected AGENT.md named as a source when it is in the prompt")
 	}
 	if strings.Contains(untrustedContentPrompt(false, false, false), "AGENT.md") {
@@ -1191,7 +1233,7 @@ func TestMarkdownCapabilities_DoesNotPointAtAnAbsentViewport(t *testing.T) {
 	}
 
 	// End to end: a client that reports no viewport gets neither.
-	bare := strings.Join(buildSystemPromptEntries(BuildAgent, "/proj", false, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
+	bare := strings.Join(buildSystemPromptEntries(BuildAgent, "/proj", false, memoryFiles{}, 0, 0, "", -1, true, true), "\n\n")
 	if strings.Contains(bare, "viewport dimensions provided below") {
 		t.Error("assembled prompt references viewport dimensions that were never supplied")
 	}
@@ -1234,7 +1276,7 @@ func TestProjectIndexPrompt_ShellRuleMatchesWhetherTheAgentMayWrite(t *testing.T
 // call it will never be offered.
 func TestMemoryMDPrompt_DoesNotNameRecallTools(t *testing.T) {
 	for _, canWrite := range []bool{true, false} {
-		s := memoryMDPrompt(canWrite, true)
+		s := memoryMDPrompt(canWrite, "/tmp/proj", nil)
 		for _, unwanted := range []string{"memory_recall", "project_memory_recall", "<prior_context>"} {
 			if strings.Contains(s, unwanted) {
 				t.Errorf("MEMORY.md section names %q (canWrite=%v); recall belongs in its own block", unwanted, canWrite)
@@ -1243,7 +1285,7 @@ func TestMemoryMDPrompt_DoesNotNameRecallTools(t *testing.T) {
 	}
 
 	// End to end: Note is project-scoped and holds neither tool.
-	note := strings.Join(buildSystemPromptEntries(NoteAgent, "/proj", true, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
+	note := strings.Join(buildSystemPromptEntries(NoteAgent, "/proj", true, memoryFiles{}, 0, 0, "", -1, true, true), "\n\n")
 	if strings.Contains(note, "memory_recall") {
 		t.Error("assembled Note prompt names a recall tool it does not have")
 	}
@@ -1267,7 +1309,7 @@ func TestParallelToolCallsPrompt_ExamplesMatchTheAgentsTools(t *testing.T) {
 	}
 
 	// End to end, against the agent that actually takes this branch.
-	assembled := strings.Join(buildSystemPromptEntries(SearchAgent, "/proj", true, "", "", sessionMemory{}, 0, 0, "", -1, true, true), "\n\n")
+	assembled := strings.Join(buildSystemPromptEntries(SearchAgent, "/proj", true, memoryFiles{}, 0, 0, "", -1, true, true), "\n\n")
 	for _, unwanted := range []string{"file_map", `"glob"`} {
 		if strings.Contains(assembled, unwanted) {
 			t.Errorf("assembled Search prompt names %q, which it cannot call", unwanted)
@@ -1359,8 +1401,8 @@ func TestExplorationIsMapThenBatchedReadsInEveryProject(t *testing.T) {
 		for _, want := range []string{
 			"## Mandatory: Explore Before You Read",
 			"This is not conditional",
-			"map them all in ONE block",
-			"read in the NEXT block",
+			"**map them all in one block**",
+			"**read in the next block**",
 			"one per file you expect to touch",
 			"indexed or not",
 		} {
@@ -1390,10 +1432,11 @@ func TestExplorationIsMapThenBatchedReadsInEveryProject(t *testing.T) {
 	}
 }
 
-// Step 2 told the agent to explore but never named the shape that makes it
-// cheap, so "map every file and read the parts" still ran one file per round
-// trip. The step has to name the batched calls it is asking for.
-func TestProcessStepTwoNamesTheBatchedCalls(t *testing.T) {
+// Step 2 tells the agent to explore; the batched shape it asks for is taught by
+// projectIndexPrompt and parallelToolCallsPrompt, which the step names by
+// reference. Repeating the calls inside the step made three copies of one rule,
+// so the step defers instead of restating — and the pointer must not rot.
+func TestProcessStepTwoPointsAtTheBatchingRules(t *testing.T) {
 	p := codingAgentSystem()
 	start := strings.Index(p, "2. **Explore before you write.**")
 	end := strings.Index(p, "3. **Implement focused, minimal changes.**")
@@ -1402,12 +1445,18 @@ func TestProcessStepTwoNamesTheBatchedCalls(t *testing.T) {
 	}
 
 	step := p[start:end]
+	if !strings.Contains(step, "following the rules above") {
+		t.Error("exploration step no longer points at the rules that teach the batched calls")
+	}
+
+	// The rules it points at must keep the shape those words promise.
+	rules := projectIndexPrompt("build", true, true) + parallelToolCallsPrompt(true, true)
 	for _, want := range []string{
-		`every "file_map" call in one block`,
+		`every "file_map" call, one per file you expect to touch`,
 		`files=[{"path"`,
 	} {
-		if !strings.Contains(step, want) {
-			t.Errorf("exploration step missing %q", want)
+		if !strings.Contains(rules, want) {
+			t.Errorf("rules above step 2 no longer teach %q", want)
 		}
 	}
 }
@@ -1426,7 +1475,7 @@ func TestAskUserPrompt_LeadsWithTheRuleAndKeepsTheBoundary(t *testing.T) {
 		"quiz",                 // the interactive case the old text never contemplated
 		"survey",
 		"walk-through",
-		"Ask each step through the tool",
+		"Ask everything you need in **one call**",
 		"if you can find it out yourself, find it out", // the boundary, stated positively
 		"source code",
 		"showWhen", // the branching rule: a screen may depend on an earlier answer
@@ -1495,5 +1544,27 @@ func TestPromptDoesNotAskToRecheckEveryTouchedFile(t *testing.T) {
 	}
 	if !strings.Contains(prompt, `already report syntax errors`) {
 		t.Error("prompt does not say write and edit already check syntax")
+	}
+}
+
+// A read-only agent has no write tool, so the pointer must not tell it to
+// create the file it just reported missing.
+func TestMemoryPointersAreRoleAwareWhenTheFileIsMissing(t *testing.T) {
+	readOnly := memoryMDPrompt(false, "/tmp/proj", nil)
+	if strings.Contains(readOnly, "Create one at the project root") {
+		t.Error("read-only agent was told to create MEMORY.md with a write tool it lacks")
+	}
+	if !strings.Contains(readOnly, "No MEMORY.md was found for this working directory") {
+		t.Error("read-only agent lost the no-file report")
+	}
+
+	agents := agentMDPrompt(false, "/tmp/proj", nil)
+	if strings.Contains(agents, "with the write tool") {
+		t.Error("read-only agent was told to create AGENTS.md with a write tool it lacks")
+	}
+
+	writable := memoryMDPrompt(true, "/tmp/proj", nil)
+	if !strings.Contains(writable, "Create one at the project root") {
+		t.Error("writable agent is not told where to create MEMORY.md")
 	}
 }

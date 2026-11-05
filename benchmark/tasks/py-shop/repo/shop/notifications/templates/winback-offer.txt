@@ -1,0 +1,6 @@
+Hi {first_name},
+
+We saved {coupon_code} for you: {discount} off any order placed before
+{expires_on}. {quantity} new arrivals landed this week.
+
+{store_name}

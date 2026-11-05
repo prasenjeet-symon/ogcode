@@ -1,0 +1,6 @@
+Hi {first_name},
+
+We refunded {amount} for order {order_id}. Banks usually take five business
+days to show it.
+
+{store_name}

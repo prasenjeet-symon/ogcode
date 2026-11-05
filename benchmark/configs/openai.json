@@ -1,0 +1,35 @@
+{
+  "$schema": "../config.schema.json",
+  "name": "openai",
+  "description": "GPT-5.1 through the OpenAI API. Replace model.id with another OpenAI model.",
+  "provider": {
+    "kind": "openai",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "model": {
+    "id": "gpt-5.1",
+    "pricing": {
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read": 0.125
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "model": "gpt-5.1"
+    },
+    "opencode": {
+      "model": "openai/gpt-5.1"
+    }
+  },
+  "run": {
+    "reps": 5,
+    "tasks": "all",
+    "agents": ["ogcode", "opencode"],
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900,
+    "output_dir": "results/openai"
+  }
+}

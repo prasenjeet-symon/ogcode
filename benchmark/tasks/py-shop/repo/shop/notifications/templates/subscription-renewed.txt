@@ -1,0 +1,6 @@
+Hi {first_name},
+
+The subscription for {item_name} renewed. We charged {total} and the next box
+ships to {address_line}.
+
+{store_name}

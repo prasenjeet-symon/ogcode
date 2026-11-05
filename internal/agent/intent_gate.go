@@ -131,4 +131,4 @@ func (g *intentGate) observe(toolName string, res *tool.Result) {
 // block it is about to act on, so it says what to do next.
 const intentGateReminder = `
 
-**No plan was stated this turn.** A tool call has already run without one — the user cannot see where this turn is heading, and the matcher that names the skills and MCP tools fitted to your steps never saw a plan. Call update_intent in the next block with the full list — it may ride alongside other calls — then carry on: mark what you have already done as done, and list what remains.`
+**No plan was stated this turn.** A tool call has already run without one — the user cannot see where this turn is heading, and the matcher that names the skills, MCP servers and lazily loaded tools fitted to your steps never saw a plan. Call update_intent in the next block with the full list — it may ride alongside other calls — then carry on: mark what you have already done as done, and list what remains.`

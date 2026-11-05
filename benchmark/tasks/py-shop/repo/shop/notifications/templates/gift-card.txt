@@ -1,0 +1,6 @@
+Hi {first_name},
+
+A gift card worth {amount} is ready against order {order_id}. Use {coupon_code}
+at checkout before {expires_on}.
+
+{store_name}

@@ -899,7 +899,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		}}
 		at := len(messages)
 		for _, img := range pendingImages {
-			wireImages = append(wireImages, wireImage{message: at, part: len(parts), tool: true})
+			wireImages = append(wireImages, wireImage{message: at, part: len(parts), tool: true, bytes: len(img.Data)})
 			parts = append(parts, imageURLPart(img))
 		}
 		messages = append(messages, oaiMessage{Role: "user", Content: parts})
@@ -953,7 +953,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 			}
 			at := len(messages)
 			for _, img := range m.Images {
-				wireImages = append(wireImages, wireImage{message: at, part: len(parts)})
+				wireImages = append(wireImages, wireImage{message: at, part: len(parts), bytes: len(img.Data)})
 				parts = append(parts, imageURLPart(img))
 			}
 			msg.Content = parts
@@ -1026,11 +1026,20 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	if err := p.checkBodyFits(len(jsonBody)); err != nil {
 		// A body the gateway would refuse is usually one long turn carrying a
 		// screenshot per step: browser_screenshot alone adds ~400 KB of base64
-		// each time. Shed the oldest images and send what remains rather than
+		// each time. Keep the newest frames and send what remains rather than
 		// failing the turn — the newest frames are the ones this step reasons
 		// about, and the note left in their place tells the model what is gone.
+		// Keeping a window instead of shedding the minimum is what holds the
+		// boundary still from step to step (see shedOldestImages).
 		// body.Messages aliases messages, so a shed part reaches the marshal.
-		dropped := 0
+		dropped := shedOldestImages(messages, wireImages, ogxShedRetainBytes)
+		if jsonBody, err = json.Marshal(body); err != nil {
+			return nil, fmt.Errorf("marshal request: %w", err)
+		}
+		// Text that fills the cap on its own, or an attachment too large to sit
+		// beside the window, can leave the body over it still: shed
+		// oldest-first until it fits. This is the path that has no headroom to
+		// trade for cache stability, so it stays a last resort.
 		for p.overBodyLimit(len(jsonBody)) && dropOldestImage(messages, wireImages) {
 			dropped++
 			if jsonBody, err = json.Marshal(body); err != nil {
@@ -1179,6 +1188,21 @@ func (p *OpenAIProvider) isOGX() bool {
 // refusal aligned with what the edge will carry.
 const ogxMaxRequestBytes = 20 << 20
 
+// ogxShedRetainBytes is how much of the newest screenshot payload a shed body
+// keeps. Prompt caching bills the longest leading run of the request it has
+// already seen, so the shed boundary decides how much of each step is billed as
+// fresh input: everything from the first rewritten image to the end. The body is
+// re-assembled from the session's full history on every step, so a rule that
+// sheds only what it must to fit pushes that boundary one frame forward as the
+// turn grows — and the boundary is the oldest surviving frame, near the front,
+// which leaves nearly the whole turn uncached. Keeping a fixed newest-frames
+// window puts the boundary at the tail instead: the uncached remainder is the
+// window, not the turn, and it stops growing with the conversation.
+//
+// 4 MiB is roughly ten browser frames — more history than a step reasons about
+// — while keeping the per-step uncached tail small against the 20 MiB body.
+const ogxShedRetainBytes = 4 << 20
+
 // OGXBodyLimitMiB names that ceiling in whole MiB, for user-facing text that
 // must not restate the number.
 func OGXBodyLimitMiB() int { return ogxMaxRequestBytes >> 20 }
@@ -1200,13 +1224,17 @@ func (p *OpenAIProvider) checkBodyFits(n int) error {
 }
 
 // wireImage locates one image part in the assembled request: the message it
-// rides, its index inside that message's content array, and whether it is a
-// tool result's rendered frame rather than a user attachment.
+// rides, its index inside that message's content array, whether it is a tool
+// result's rendered frame rather than a user attachment, and how many base64
+// bytes it carries.
 type wireImage struct {
 	message int
 	part    int
 	tool    bool
 	dropped bool
+	// bytes is the image's base64 payload — the part of the body a window of
+	// frames is measured in (see shedOldestImages).
+	bytes int
 }
 
 // omittedImageNote stands in for a shed image, so the model reads why a frame it
@@ -1225,16 +1253,53 @@ func imageURLPart(img MessageImage) map[string]any {
 	}
 }
 
+// shedOldestImages keeps the body's newest tool-result frames up to budget
+// bytes of base64 and replaces every older frame with omittedImageNote,
+// returning how many it shed. User attachments are left alone: they are what
+// the turn was asked about, so dropOldestImage sheds them only when the body
+// still will not fit.
+//
+// The window, rather than "shed the minimum that fits", is what makes the shed
+// decision STABLE. Session history keeps every screenshot, so the body is
+// rebuilt from the full turn on every step: a minimum-to-fit rule moves its
+// boundary one frame forward as the turn grows, and because that boundary is
+// the oldest surviving frame it sits near the front of the request — where a
+// single replaced part invalidates the provider's cached prefix for everything
+// after it. A newest-frames window keeps the boundary at the tail, so each step
+// re-reads only the window instead of the whole turn.
+func shedOldestImages(messages []oaiMessage, images []wireImage, budget int) int {
+	shed, kept := 0, 0
+	full := false
+	for i := len(images) - 1; i >= 0; i-- {
+		img := &images[i]
+		if img.dropped || !img.tool {
+			continue
+		}
+		// Always keep the newest frame, however large: it is the page the step
+		// is looking at. The budget sets how far back the window reaches.
+		if !full && (kept == 0 || kept+img.bytes <= budget) {
+			kept += img.bytes
+			continue
+		}
+		full = true
+		if dropImageAt(messages, img) {
+			shed++
+		}
+	}
+	return shed
+}
+
 // dropOldestImage sheds one image from the assembled messages — the oldest
 // tool-result frame first, and a user attachment only once none is left — and
 // reports whether it shed one.
 //
-// A turn that screens the browser carries roughly 400 KB of base64 per
-// screenshot, so a long one pushes the body past the gateway's cap on its
-// own. The newest frames are the ones the current step is reasoning
-// about, so the oldest go first: the same choice a person would make scrolling
-// a thread. The part is REPLACED in place, not removed, so the part indexes
-// recorded in wireImages stay valid for the next call.
+// shedOldestImages has already brought the body down to the newest-frames
+// window; this covers what the window cannot — text that fills the cap on its
+// own, or an attachment too large to sit beside it. The newest frames are the
+// ones the current step is reasoning about, so the oldest go first: the same
+// choice a person would make scrolling a thread. The part is REPLACED in place,
+// not removed, so the part indexes recorded in wireImages stay valid for the
+// next call.
 func dropOldestImage(messages []oaiMessage, images []wireImage) bool {
 	shed := func(toolOnly bool) bool {
 		for i := range images {
@@ -1242,20 +1307,29 @@ func dropOldestImage(messages []oaiMessage, images []wireImage) bool {
 			if img.dropped || (toolOnly && !img.tool) {
 				continue
 			}
-			img.dropped = true
-			if img.message >= len(messages) {
-				continue
+			if dropImageAt(messages, img) {
+				return true
 			}
-			parts, ok := messages[img.message].Content.([]any)
-			if !ok || img.part >= len(parts) {
-				continue
-			}
-			parts[img.part] = map[string]any{"type": "text", "text": omittedImageNote()}
-			return true
 		}
 		return false
 	}
 	return shed(true) || shed(false)
+}
+
+// dropImageAt replaces one recorded image part with the omission note and marks
+// it dropped. The part is REPLACED in place, not removed, so the part indexes
+// recorded in wireImages stay valid for the next call.
+func dropImageAt(messages []oaiMessage, img *wireImage) bool {
+	img.dropped = true
+	if img.message >= len(messages) {
+		return false
+	}
+	parts, ok := messages[img.message].Content.([]any)
+	if !ok || img.part >= len(parts) {
+		return false
+	}
+	parts[img.part] = map[string]any{"type": "text", "text": omittedImageNote()}
+	return true
 }
 
 // isOpenRouter reports whether this provider's endpoint is OpenRouter. The gate

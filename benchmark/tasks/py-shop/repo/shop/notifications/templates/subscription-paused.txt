@@ -1,0 +1,6 @@
+Hi {first_name},
+
+The subscription for {item_name} is paused. Resume whenever you like and we
+ship within two days.
+
+{store_name}

@@ -1,0 +1,49 @@
+{
+  "harbor-freight": {
+    "current_state": "arrived",
+    "events": [
+      {
+        "at": "2026-02-12T09:20:00Z",
+        "state": "departed"
+      }
+    ],
+    "reference": {
+      "number": "HF-2291470"
+    }
+  },
+  "northpost": {
+    "history": [
+      {
+        "status": "PICKED_UP",
+        "timestamp": "2026-02-12T08:10:00Z"
+      }
+    ],
+    "status": "IN_TRANSIT",
+    "tracking_number": "NP-884120"
+  },
+  "peak-parcel": {
+    "milestones": [
+      {
+        "at": "2026-02-12T07:00:00Z",
+        "label": "picked"
+      },
+      {
+        "at": "2026-02-12T11:30:00Z",
+        "label": "on_van"
+      }
+    ],
+    "tracking": {
+      "code": "PP-338204"
+    }
+  },
+  "swiftlink": {
+    "checkpoints": [
+      {
+        "state": "in_transit",
+        "when": "2026-02-12T06:45:00Z"
+      }
+    ],
+    "id": "SW-5510983",
+    "state": "shipment.out_for_delivery"
+  }
+}

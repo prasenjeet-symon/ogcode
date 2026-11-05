@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,45 +13,35 @@ import (
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
 
-func TestBuildSystemPrompt_MemoryMDSection_PresentRegardlessOfContent(t *testing.T) {
-	agent := BuildAgent
-	dir := "/tmp/test"
+func TestBuildSystemPrompt_MemoryMDSectionIsAPointer(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "MEMORY.md"), "## SentinelMemoryHeading\n\nSENTINEL-MEMORY-BODY\n")
+	files := discoverMemoryFiles(dir, "ses_test")
 
-	// Case 1: No MEMORY.md content — section should still appear
-	prompt := buildSystemPrompt(agent, dir, false, "", "", sessionMemory{}, 0, 0, true)
-	if !strings.Contains(prompt, "## MEMORY.md — Project Long-Term Memory") {
-		t.Error("expected MEMORY.md section to appear even when memoryMDContent is empty")
+	prompt := buildSystemPrompt(BuildAgent, dir, true, files, 0, 0, true)
+	for _, want := range []string{
+		"## MEMORY.md — Project Long-Term Memory",
+		"Check it again whenever a task touches something it may already cover",
+		"Files found, outermost first — the closest file is the most specific:",
+		"- `MEMORY.md`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("system prompt missing %q", want)
+		}
 	}
-	if !strings.Contains(prompt, "This project has no MEMORY.md file") {
-		t.Error("expected the absent-file wording when memoryMDContent is empty")
-	}
-	if strings.Contains(prompt, "The content above in the <memory-md> tag") {
-		t.Error("must not point at a <memory-md> tag when none was prepended")
-	}
-
-	// Case 2: With MEMORY.md content — section should appear with file content indicator
-	memContent := "\n\n<memory-md path=\"MEMORY.md\">\n# Project Notes\nSome facts.\n</memory-md>"
-	prompt = buildSystemPrompt(agent, dir, false, "", memContent, sessionMemory{}, 0, 0, true)
-	if !strings.Contains(prompt, "## MEMORY.md — Project Long-Term Memory") {
-		t.Error("expected MEMORY.md section to appear when memoryMDContent is present")
-	}
-	if !strings.Contains(prompt, "The content above in the <memory-md> tag") {
-		t.Error("expected content indicator when memoryMDContent is present")
-	}
-	if !strings.Contains(prompt, memContent) {
-		t.Error("expected memoryMDContent to be included in prompt")
-	}
-	if strings.Contains(prompt, "This project has no MEMORY.md file") {
-		t.Error("did not expect the absent-file wording when memoryMDContent is present")
+	for _, unwanted := range []string{"SENTINEL-MEMORY-BODY", "SentinelMemoryHeading", "<memory-md>"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Errorf("system prompt inlined %q from MEMORY.md", unwanted)
+		}
 	}
 }
 
 func TestBuildSystemPrompt_HistoryMDSectionIsAPointer(t *testing.T) {
-	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, "", "", sessionMemory{}, 0, 0, true)
+	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", false, memoryFiles{}, 0, 0, true)
 	for _, want := range []string{
 		"## HISTORY.md — Project History",
 		"### Adding an entry",
-		"not loaded into your prompt",
+		"Search it by topic or date",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("system prompt missing %q", want)
@@ -58,116 +49,144 @@ func TestBuildSystemPrompt_HistoryMDSectionIsAPointer(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPrompt_MemoryMDSection_ContainsPurposeSection(t *testing.T) {
-	agent := BuildAgent
-	dir := "/tmp/test"
-
-	prompt := buildSystemPrompt(agent, dir, false, "", "", sessionMemory{}, 0, 0, true)
-
-	// The slimmed section still states what MEMORY.md is, that it is re-read each
-	// turn, how it differs from AGENT.md, and (for a write-capable agent) how to
-	// maintain it — just without the long prose the earlier version carried.
-	for _, sub := range []string{
+func TestBuildSystemPrompt_MemoryMDSectionNamesItsPurpose(t *testing.T) {
+	prompt := buildSystemPrompt(BuildAgent, "/tmp/test", true, memoryFiles{}, 0, 0, true)
+	for _, want := range []string{
 		"## MEMORY.md — Project Long-Term Memory",
-		"re-read at the start of every turn",
-		"AGENT.md",
+		"Check it again whenever a task touches something it may already cover",
+		"No MEMORY.md was found for this working directory",
+		"AGENTS.md",
 		"### How to maintain MEMORY.md",
 	} {
-		if !strings.Contains(prompt, sub) {
-			t.Errorf("expected %q in prompt when no MEMORY.md exists", sub)
+		if !strings.Contains(prompt, want) {
+			t.Errorf("system prompt missing %q", want)
 		}
 	}
 }
 
-func TestBuildSystemPrompt_MemoryMDSection_RoleAware(t *testing.T) {
+// The pointer sections say what each memory file is; this section is the
+// instruction that makes an agent open them before starting the task, which is
+// the part the pointers alone did not guarantee. It also has to sit ahead of the
+// sections it points at.
+func TestBuildSystemPrompt_ChecksMemoryBeforeTheTask(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "AGENTS.md"), "SENTINEL-AGENTS-BODY\n")
+	mustWrite(t, filepath.Join(dir, "MEMORY.md"), "SENTINEL-MEMORY-BODY\n")
+	files := discoverMemoryFiles(dir, "ses_task")
+
+	prompt := buildSystemPrompt(BuildAgent, dir, true, files, 0, 0, true)
+
+	check := "## Before you start — check what is already written down"
+	at := strings.Index(prompt, check)
+	if at < 0 {
+		t.Fatalf("system prompt has no pre-task memory check")
+	}
+	for _, later := range []string{
+		"## AGENTS.md / AGENT.md — Project Instructions",
+		"## MEMORY.md — Project Long-Term Memory",
+		"## Session memory — this conversation",
+		"## HOWTO.md — Project Procedures",
+	} {
+		if i := strings.Index(prompt, later); i < 0 || i < at {
+			t.Errorf("%q must follow the pre-task check", later)
+		}
+	}
+
+	for _, want := range []string{
+		"Before the first step of a task",
+		"`file_map`",
+		"`codebase_map`",
+		"`AGENTS.md`/`AGENT.md`",
+		"`MEMORY.md`",
+		"session memory",
+		"`HOWTO.md`",
+		"before the first edit, command, or teammate spawn",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("pre-task check missing %q", want)
+		}
+	}
+}
+
+// Utility agents have no project memory to check and no codebase_map to check
+// it with, so the section stays out of their prompt.
+func TestBuildSystemPrompt_UtilityAgentsSkipPreTaskCheck(t *testing.T) {
+	for _, a := range []Agent{IndexAgent, SearchAgent} {
+		p := staticSystemPrompt(a, "/tmp/proj", true, memoryFiles{}, "", true, true)
+		if strings.Contains(p, "## Before you start") {
+			t.Errorf("%s prompt carries the project memory check", a.ID)
+		}
+	}
+}
+
+func TestBuildSystemPrompt_MemoryMDSectionRoleAware(t *testing.T) {
 	dir := "/tmp/test"
 
-	// BuildAgent has write and edit tools — should get read/write instructions
-	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", "", sessionMemory{}, 0, 0, true)
+	// BuildAgent has write and edit tools — it is told how to write the file.
+	buildPrompt := buildSystemPrompt(BuildAgent, dir, true, memoryFiles{}, 0, 0, true)
 	if !strings.Contains(buildPrompt, "### How to maintain MEMORY.md") {
 		t.Error("expected 'How to maintain' heading for BuildAgent (has write tools)")
 	}
 	if !strings.Contains(buildPrompt, "Use the edit tool for targeted updates") {
 		t.Error("expected 'Use the edit tool' instruction for BuildAgent")
 	}
-	if !strings.Contains(buildPrompt, "create one in the project root with the write tool") {
-		t.Error("expected creation prompt when memoryMDContent is empty and agent can write")
+	if !strings.Contains(buildPrompt, "Create one at the project root") {
+		t.Error("expected creation guidance when no MEMORY.md exists and the agent can write")
 	}
 
-	// NoteAgent has no write/edit tools — should get read-only instructions
-	notePrompt := buildSystemPrompt(NoteAgent, dir, false, "", "", sessionMemory{}, 0, 0, true)
+	// NoteAgent has no write/edit tools — it gets the read-only variant.
+	notePrompt := buildSystemPrompt(NoteAgent, dir, true, memoryFiles{}, 0, 0, true)
 	if !strings.Contains(notePrompt, "### How to use MEMORY.md") {
 		t.Error("expected 'How to use' heading for NoteAgent (read-only)")
 	}
-	if strings.Contains(notePrompt, "Use the write tool") {
-		t.Error("did not expect 'Use the write tool' for read-only NoteAgent")
-	}
-}
-
-func TestBuildSystemPrompt_MemoryMDSection_WithContent(t *testing.T) {
-	dir := "/tmp/test"
-	memContent := "\n\n<memory-md path=\"MEMORY.md\">\n# Project Notes\nSome facts.\n</memory-md>"
-
-	// BuildAgent with MEMORY.md content — should show content but NOT creation prompt
-	buildPrompt := buildSystemPrompt(BuildAgent, dir, false, "", memContent, sessionMemory{}, 0, 0, true)
-	if !strings.Contains(buildPrompt, "The content above in the <memory-md> tag") {
-		t.Error("expected content indicator when memoryMDContent is present for BuildAgent")
-	}
-	if strings.Contains(buildPrompt, "No MEMORY.md file was found") {
-		t.Error("did not expect 'No MEMORY.md file was found' when memoryMDContent is present for BuildAgent")
-	}
-	if strings.Contains(buildPrompt, "create one in the project root with the write tool") {
-		t.Error("did not expect creation prompt when memoryMDContent is present for BuildAgent")
-	}
-}
-
-func TestBuildSystemPrompt_ViewportPrompt(t *testing.T) {
-	dir := "/tmp/test"
-
-	// Without viewport dimensions — should NOT contain viewport section
-	prompt := buildSystemPrompt(BuildAgent, dir, false, "", "", sessionMemory{}, 0, 0, true)
-	if strings.Contains(prompt, "Rendering viewport") {
-		t.Error("did not expect viewport section when dimensions are 0x0")
-	}
-
-	// With viewport dimensions — should contain viewport section
-	prompt = buildSystemPrompt(BuildAgent, dir, false, "", "", sessionMemory{}, 1920, 1080, true)
-	if !strings.Contains(prompt, "Rendering viewport") {
-		t.Error("expected viewport section when dimensions are provided")
-	}
-	if !strings.Contains(prompt, "1920") {
-		t.Error("expected width 1920 in viewport prompt")
-	}
-	if !strings.Contains(prompt, "1080") {
-		t.Error("expected height 1080 in viewport prompt")
-	}
-	if !strings.Contains(prompt, "responsive") {
-		t.Error("expected responsive design guidance in viewport prompt")
+	if strings.Contains(notePrompt, "### How to maintain MEMORY.md") {
+		t.Error("did not expect the writing section for read-only NoteAgent")
 	}
 }
 
 // TestBuildSystemPrompt_UtilityAgentsSkipProjectContext verifies that the
-// codebase agents get project context (working dir, AGENT.md, MEMORY.md) while
-// the utility agents (Index, Search) omit it, and that the agentic-memory block
-// only appears for agents that actually have the memory_recall tool.
+// codebase agents get project context (working dir, AGENTS.md/AGENT.md,
+// MEMORY.md) while the utility agents (Index, Search) omit it, and that the
+// agentic-memory block only appears for agents that actually have the
+// memory_recall tool. Neither instruction file is ever loaded: the prompt
+// carries the discovered path, not the body.
 func TestBuildSystemPrompt_UtilityAgentsSkipProjectContext(t *testing.T) {
-	dir := "/tmp/proj"
-	const agentMD = "AGENT_MD_SENTINEL rules"
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "AGENTS.md"), "SENTINEL-AGENTS-BODY\n")
+	mustWrite(t, filepath.Join(dir, "MEMORY.md"), "SENTINEL-MEMORY-BODY\n")
+	files := discoverMemoryFiles(dir, "ses_test")
 
-	// Project-scoped agent keeps the context sections and (memory on + has
-	// memory_recall) gets the agentic-memory block.
-	build := buildSystemPrompt(BuildAgent, dir, true, agentMD, "", sessionMemory{}, 0, 0, true)
-	for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall"} {
-		if !strings.Contains(build, s) {
-			t.Errorf("BuildAgent prompt should contain %q", s)
+	build := buildSystemPrompt(BuildAgent, dir, true, files, 0, 0, true)
+	for _, want := range []string{
+		"Working directory:",
+		"AGENTS.md / AGENT.md — Project Instructions",
+		"MEMORY.md — Project Long-Term Memory",
+		"- `AGENTS.md`",
+		"- `MEMORY.md`",
+		"memory_recall",
+	} {
+		if !strings.Contains(build, want) {
+			t.Errorf("BuildAgent prompt should contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{"SENTINEL-AGENTS-BODY", "SENTINEL-MEMORY-BODY"} {
+		if strings.Contains(build, unwanted) {
+			t.Errorf("BuildAgent prompt inlined %q", unwanted)
 		}
 	}
 
 	// Utility agents omit project context — even with memory enabled — because
 	// they don't operate on the codebase and lack memory_recall.
 	for _, a := range []Agent{IndexAgent, SearchAgent} {
-		p := buildSystemPrompt(a, dir, true, agentMD, "some memory content", sessionMemory{}, 0, 0, true)
-		for _, s := range []string{"Working directory:", "MEMORY.md — Project Long-Term Memory", agentMD, "memory_recall"} {
+		p := buildSystemPrompt(a, dir, true, files, 0, 0, true)
+		for _, s := range []string{
+			"Working directory:",
+			"AGENTS.md / AGENT.md — Project Instructions",
+			"MEMORY.md — Project Long-Term Memory",
+			"SENTINEL-AGENTS-BODY",
+			"SENTINEL-MEMORY-BODY",
+			"memory_recall",
+		} {
 			if strings.Contains(p, s) {
 				t.Errorf("%s prompt should NOT contain project-context %q", a.ID, s)
 			}
@@ -837,7 +856,7 @@ func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
 		if !a.HasTool("memory_recall") {
 			t.Errorf("%s has project_memory_recall but not memory_recall; the scope guidance is gated on the latter and would never render", a.ID)
 		}
-		p := buildSystemPrompt(a, "/tmp/proj", true, "", "", sessionMemory{}, 0, 0, true)
+		p := buildSystemPrompt(a, "/tmp/proj", true, memoryFiles{}, 0, 0, true)
 		if !strings.Contains(p, sentinel) {
 			t.Errorf("%s prompt is missing the project scope guidance", a.ID)
 		}
@@ -850,12 +869,12 @@ func TestBuildSystemPrompt_ProjectMemoryScopeGuidance(t *testing.T) {
 	}
 
 	// Memory inactive: no recall guidance at all, whatever tools the agent holds.
-	if strings.Contains(buildSystemPrompt(BuildAgent, "/tmp/proj", false, "", "", sessionMemory{}, 0, 0, true), sentinel) {
+	if strings.Contains(buildSystemPrompt(BuildAgent, "/tmp/proj", false, memoryFiles{}, 0, 0, true), sentinel) {
 		t.Error("scope guidance leaked into the prompt with memory inactive")
 	}
 	// Agents without the tool must not be told to use it.
 	for _, a := range withoutTool {
-		if strings.Contains(buildSystemPrompt(a, "/tmp/proj", true, "", "", sessionMemory{}, 0, 0, true), sentinel) {
+		if strings.Contains(buildSystemPrompt(a, "/tmp/proj", true, memoryFiles{}, 0, 0, true), sentinel) {
 			t.Errorf("%s lacks project_memory_recall but its prompt advertises it", a.ID)
 		}
 	}

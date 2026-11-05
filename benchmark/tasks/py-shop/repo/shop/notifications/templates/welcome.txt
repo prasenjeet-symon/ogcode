@@ -1,0 +1,6 @@
+Welcome, {first_name}.
+
+Your account at {store_name} is ready. Use {coupon_code} for {discount} off the
+first order, before {expires_on}.
+
+Unsubscribe: {unsubscribe_url}

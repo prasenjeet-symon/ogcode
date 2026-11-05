@@ -143,7 +143,9 @@ func TestParallelCallsPromptStatesTheSameFileOrder(t *testing.T) {
 // is billed to the child's context instead of a parent history re-sent on every
 // step — so the section states both drivers, makes the side-by-side default
 // explicit, sizes the fan-out, says what the parent does with its own time, and
-// names the cases that still want one agent.
+// names the cases that still want one agent. Orientation comes before the split —
+// enough reading to see the seams and name real files in each brief — but the
+// survey of each stream belongs to that stream's child.
 //
 // It also carries the one rail nothing else enforces: a completion is reported
 // into a RUNNING turn and no turn starts on its own, so the parent must not end
@@ -155,6 +157,8 @@ func TestBoardPromptPrefersTheSplit(t *testing.T) {
 	for _, want := range []string{
 		"You orchestrate; teammates do the work",
 		"Running the streams side by side is the default, not an upgrade",
+		"Orient, then fan out",
+		"That is orientation, not the survey",
 		"A stream's clock starts when you spawn it",
 		"one child reporting the conclusion",
 		"Hand the implementation to a teammate",
@@ -172,9 +176,8 @@ func TestBoardPromptPrefersTheSplit(t *testing.T) {
 		"Stay with one agent only when",
 		"`task` is cheaper and read-only",
 		"park a long investigation off your turn's critical path",
-		"right after `update_intent` states your plan",
-		"the plan goes first — before the fan-out",
-		"may ride the first tool block",
+		"once `update_intent` has stated your plan",
+		"the plan first, then the check, then the fan-out",
 		"`teammate stop <handle>`",
 		"nothing is cancelled, and the finished report is delivered to you at your next turn's start",
 	} {
@@ -189,12 +192,20 @@ func TestBoardPromptPrefersTheSplit(t *testing.T) {
 	// spawning as the thing you do when you run short of room, and the plan
 	// mandate that forced update_intent to stand alone in its own block ahead of
 	// any other first-block call. None may return.
-	for _, stale := range []string{"Reach for a teammate first", "take a stream yourself", "as the opening move of the turn", "the plan goes first, and alone"} {
+	for _, stale := range []string{"Reach for a teammate first", "take a stream yourself", "as the opening move of the turn", "the plan goes first, and alone", "before your first read"} {
 		if strings.Contains(p, stale) {
 			t.Errorf("board prompt still frames the parent as one of the workers (%q)", stale)
 		}
 	}
 
+	// The update_intent timing rule has one home — updateIntentPrompt — and the
+	// board prompt must not restate it.
+	if strings.Contains(p, "may ride the first tool block") {
+		t.Error("board prompt repeats the update_intent timing rule")
+	}
+	if !strings.Contains(updateIntentPrompt(), "may ride the first tool block") {
+		t.Error("updateIntentPrompt lost the rule that the plan rides the first tool block")
+	}
 	if !strings.Contains(BuildAgent.System, "You orchestrate") {
 		t.Error("BuildAgent prompt lost the orchestrator role")
 	}
@@ -223,6 +234,7 @@ func TestProjectIndexPromptBridgesThePlanAndCarriesRevealedMaps(t *testing.T) {
 
 		for _, want := range []string{
 			"update_intent comes before it, for agents that state a plan",
+			"as does the pre-task memory check",
 			"map-before-read holds file by file, not block by block",
 		} {
 			if !strings.Contains(workflow, want) {
@@ -275,16 +287,15 @@ func TestWorkflowLetsASearchStandInForTheMap(t *testing.T) {
 }
 
 // A wave that knows several windows across several files has no reason to spend
-// a call per file: the files array is that one call. The workflow is where the
-// read step is learned, so the rule sits next to the range example.
+// a call per file: the files array is that one call. The call shape is taught
+// once, in the workflow diagram, so the map section restates only the batching.
 func TestWorkflowSpendsOneReadCallPerWave(t *testing.T) {
 	p := projectIndexPrompt("build", true, true)
 	maps := p[strings.Index(p, "### Map a file before reading it"):]
 
 	for _, want := range []string{
 		"**One read call per wave.**",
-		`read(files=[{"path": "a.go", "ranges": [...]}, {"path": "b.go", "ranges": [...]}])`,
-		"two or more are never two calls",
+		"Every window the wave needs, across every file, travels in a single call",
 	} {
 		if !strings.Contains(maps, want) {
 			t.Errorf("map section missing %q", want)

@@ -1,22 +1,13 @@
 package agent
 
 import (
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-const (
-	agentMDFilename = "AGENT.md"
-	// agentMDBudgetEnv optionally caps the total bytes of AGENT.md content
-	// interpolated into the system prompt across all discovered files. Unset —
-	// the default — means no cap at all: every file is loaded whole.
-	agentMDBudgetEnv = "OGCODE_AGENT_MD_MAX_BYTES"
-)
+const agentMDFilename = "AGENT.md"
 
-// agentMDFilenames are the instruction files read from each directory, in the
-// order they are added to the prompt.
+// agentMDFilenames are the instruction files discovered in each directory.
 //
 // AGENTS.md is the cross-tool convention several other agents already read, so
 // honouring it means a project that has one needs no ogcode-specific file at
@@ -26,95 +17,17 @@ const (
 // matching how the outer-to-inner precedence already works.
 var agentMDFilenames = []string{"AGENTS.md", agentMDFilename}
 
-// LoadAgentMD discovers and loads AGENT.md files by walking from dir up to
-// the filesystem root. Files are returned in root-to-leaf order (outermost
-// first), so that closer/leaf files appear later in the concatenated result
-// and naturally take precedence for the LLM.
+// agentMDPaths discovers the AGENTS.md/AGENT.md files that govern dir by
+// walking from dir up to the filesystem root. Paths come back root-to-leaf
+// (outermost first), so a closer file appears later and takes precedence when
+// two of them state a rule.
 //
-// There is no size limit by default — the whole of every discovered file
-// reaches the model. Set OGCODE_AGENT_MD_MAX_BYTES to a positive number of
-// bytes to cap the total, in which case the first file that would overrun it is
-// cut (on a rune boundary, with a marker) and the remainder are skipped.
-//
-// Missing files are silently skipped. Permission or read errors are logged
-// as warnings and the file is skipped.
-func LoadAgentMD(dir string) string {
-	paths := discoverAgentMDPaths(dir)
-	if len(paths) == 0 {
-		return ""
-	}
-
-	var b strings.Builder
-	var totalSize int
-	// 0 means no budget: include every file whole. A positive value is the total
-	// across all discovered files.
-	limit := mdSizeLimit(agentMDBudgetEnv)
-	// Content already included, so a project carrying AGENTS.md and AGENT.md with
-	// the same text — a copy, or two tools generating the same file — states its
-	// instructions once rather than twice. Only an exact match is skipped: files
-	// that genuinely differ are both the author's, and dropping either would lose
-	// something they wrote.
-	seen := make(map[string]bool, len(paths))
-
-	for _, p := range paths {
-		content, err := os.ReadFile(p)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				slog.Warn("failed to read AGENT.md", "path", p, "err", err)
-			}
-			continue
-		}
-
-		trimmed := strings.TrimSpace(string(content))
-		if trimmed == "" {
-			continue
-		}
-		if seen[trimmed] {
-			slog.Debug("skipping duplicate agent instructions", "path", p)
-			continue
-		}
-		seen[trimmed] = true
-
-		// remaining is 0 (uncapped) unless an operator set a budget, in which
-		// case it is what is left of that budget for this file.
-		remaining := 0
-		if limit > 0 {
-			remaining = limit - totalSize
-			if remaining <= 0 {
-				slog.Warn("AGENT.md total size exceeds budget, skipping remaining files", "limit", limit)
-				break
-			}
-		}
-
-		relPath, err := filepath.Rel(dir, p)
-		if err != nil {
-			relPath = p
-		}
-		// Normalize to forward slashes so the path is identical on every OS.
-		// filepath.Rel returns OS-native separators (backslashes on Windows),
-		// which would leak Windows-style paths into the system prompt and break
-		// the Anthropic prompt-cache prefix byte-for-byte across platforms.
-		relPath = filepath.ToSlash(relPath)
-
-		// Rendered rather than formatted in place: the file's own text is
-		// neutralized so it cannot close this block or forge the other one, and
-		// the cut to the remaining budget lands on a rune boundary. See
-		// renderMDBlock.
-		block, used, truncated := renderMDBlock("agent-md", relPath, trimmed, remaining)
-		if truncated {
-			slog.Warn("AGENT.md truncated due to size budget", "path", p, "limit", limit)
-		}
-		b.WriteString(block)
-		totalSize += used
-	}
-
-	return b.String()
-}
-
-// discoverAgentMDPaths walks from dir up to the filesystem root,
-// collecting AGENT.md file paths. Returns paths in root-to-leaf order
-// (outermost first, innermost last).
-func discoverAgentMDPaths(dir string) []string {
+// The files are never read here. The prompt carries only their locations and
+// the agent opens them with file_map and read, so editing an instruction file
+// no longer rewrites the cached system prompt. A file that exists is listed
+// even when it is empty: that is the file a writable agent should fill in
+// rather than create a second one beside it.
+func agentMDPaths(dir string) []string {
 	// Per directory, innermost-last overall. Collected as groups so a directory
 	// holding both names keeps them adjacent and in agentMDFilenames order after
 	// the reversal below.

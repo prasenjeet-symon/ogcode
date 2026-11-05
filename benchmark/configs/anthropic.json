@@ -1,0 +1,35 @@
+{
+  "$schema": "../config.schema.json",
+  "name": "anthropic",
+  "description": "Claude Sonnet 4.5 through Anthropic's native API.",
+  "provider": {
+    "kind": "anthropic",
+    "api_key_env": "ANTHROPIC_API_KEY"
+  },
+  "model": {
+    "id": "claude-sonnet-4-5",
+    "pricing": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "model": "claude-sonnet-4-5"
+    },
+    "opencode": {
+      "model": "anthropic/claude-sonnet-4-5"
+    }
+  },
+  "run": {
+    "reps": 5,
+    "tasks": "all",
+    "agents": ["ogcode", "opencode"],
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900,
+    "output_dir": "results/anthropic"
+  }
+}

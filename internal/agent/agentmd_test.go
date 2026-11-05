@@ -3,265 +3,109 @@ package agent
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestLoadAgentMD_NoFiles(t *testing.T) {
+func TestAgentMDPaths_NoFiles(t *testing.T) {
 	dir := t.TempDir()
-	got := LoadAgentMD(dir)
-	if got != "" {
-		t.Errorf("expected empty string with no AGENT.md files, got %q", got)
+	if got := agentMDPaths(dir); len(got) != 0 {
+		t.Errorf("expected no paths, got %v", got)
 	}
 }
 
-func TestLoadAgentMD_SingleFile(t *testing.T) {
+func TestAgentMDPaths_SingleFile(t *testing.T) {
 	dir := t.TempDir()
-	content := "Always use Go style comments."
-	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
+	path := filepath.Join(dir, "AGENT.md")
+	mustWrite(t, path, "Always use Go style comments.")
 
-	got := LoadAgentMD(dir)
-	if got == "" {
-		t.Fatal("expected non-empty result")
-	}
-	if !contains(got, "<agent-md") {
-		t.Errorf("expected <agent-md> tag, got %q", got)
-	}
-	if !contains(got, content) {
-		t.Errorf("expected content %q in result, got %q", content, got)
-	}
-	if !contains(got, `path="AGENT.md"`) {
-		t.Errorf("expected relative path in result, got %q", got)
+	got := agentMDPaths(dir)
+	if len(got) != 1 || got[0] != path {
+		t.Fatalf("expected [%s], got %v", path, got)
 	}
 }
 
-func TestLoadAgentMD_EmptyFile(t *testing.T) {
+// Discovery stats a file and never opens it, so an empty instruction file is
+// still listed. Whether it says anything is the agent's judgement, made after
+// it reads the file on demand.
+func TestAgentMDPaths_EmptyFileIsStillListed(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte("  \n\n  "), 0644); err != nil {
-		t.Fatal(err)
-	}
+	path := filepath.Join(dir, "AGENTS.md")
+	mustWrite(t, path, "")
 
-	got := LoadAgentMD(dir)
-	if got != "" {
-		t.Errorf("expected empty string for whitespace-only AGENT.md, got %q", got)
+	got := agentMDPaths(dir)
+	if len(got) != 1 || got[0] != path {
+		t.Fatalf("an empty instruction file must still be discovered; got %v", got)
 	}
 }
 
-func TestLoadAgentMD_Hierarchy(t *testing.T) {
+// Both names in one directory are both listed, AGENTS.md first: the generic
+// cross-tool file is the outer rule, ogcode's own name the more specific one.
+func TestAgentMDPaths_BothNamesInOneDir(t *testing.T) {
+	dir := t.TempDir()
+	agents := filepath.Join(dir, "AGENTS.md")
+	agent := filepath.Join(dir, "AGENT.md")
+	mustWrite(t, agents, "Generic house style.")
+	mustWrite(t, agent, "Ogcode-specific rule.")
+
+	got := agentMDPaths(dir)
+	if len(got) != 2 || got[0] != agents || got[1] != agent {
+		t.Errorf("want [%s %s], got %v", agents, agent, got)
+	}
+}
+
+// The names are honoured at every level of the walk, and the order is
+// outermost first — the same precedence a directory walk gives, so a global
+// file cannot override the project's own.
+func TestAgentMDPaths_WalksUpRootToLeaf(t *testing.T) {
 	root := t.TempDir()
-	subdir := filepath.Join(root, "project")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	rootPath := filepath.Join(root, "AGENT.md")
+	projectPath := filepath.Join(project, "AGENTS.md")
+	mustWrite(t, rootPath, "Root instructions.")
+	mustWrite(t, projectPath, "Project instructions.")
 
-	rootContent := "# Root instructions\nUse tabs for indentation."
-	projectContent := "# Project instructions\nAlways run tests before committing."
-
-	if err := os.WriteFile(filepath.Join(root, "AGENT.md"), []byte(rootContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(subdir, "AGENT.md"), []byte(projectContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := LoadAgentMD(subdir)
-	if got == "" {
-		t.Fatal("expected non-empty result")
-	}
-
-	// Root content should appear before project content (root-to-leaf order)
-	rootIdx := indexOf(got, rootContent)
-	projectIdx := indexOf(got, projectContent)
-	if rootIdx == -1 || projectIdx == -1 {
-		t.Fatalf("expected both contents in result, got %q", got)
-	}
-	if rootIdx >= projectIdx {
-		t.Errorf("expected root content before project content, root at %d, project at %d", rootIdx, projectIdx)
+	got := agentMDPaths(project)
+	if len(got) != 2 || got[0] != rootPath || got[1] != projectPath {
+		t.Errorf("want root-to-leaf [%s %s], got %v", rootPath, projectPath, got)
 	}
 }
 
-// With no budget configured — the default — a large AGENT.md reaches the model
-// whole. The project's own instructions must not be silently cut.
-func TestLoadAgentMD_NoBudgetByDefault(t *testing.T) {
-	dir := t.TempDir()
-	bigContent := strings.Repeat("a", 128*1024)
-	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(bigContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := LoadAgentMD(dir)
-	if !strings.Contains(got, bigContent) {
-		t.Errorf("expected the whole file with no budget set, got %d bytes", len(got))
-	}
-	if strings.Contains(got, mdTruncationMarker) {
-		t.Error("an uncapped load must not carry the truncation marker")
-	}
-}
-
-// A budget set through the environment caps the total across all files.
-func TestLoadAgentMD_BudgetFromEnv(t *testing.T) {
-	dir := t.TempDir()
-	// Create a file larger than the budget
-	bigContent := make([]byte, 24*1024)
-	for i := range bigContent {
-		bigContent[i] = 'a'
-	}
-	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), bigContent, 0644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(agentMDBudgetEnv, "8192")
-
-	got := LoadAgentMD(dir)
-	if got == "" {
-		t.Fatal("expected non-empty result")
-	}
-	// Should be truncated to the configured budget.
-	tagOverhead := len("\n\n<agent-md path=\"AGENT.md\">\n\n</agent-md>")
-	if len(got) > 8192+tagOverhead {
-		t.Errorf("result too long: got %d bytes, expected at most %d", len(got), 8192+tagOverhead)
-	}
-}
-
-func TestDiscoverAgentMDPaths_WalksUp(t *testing.T) {
-	root := t.TempDir()
-	subdir := filepath.Join(root, "a", "b")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create AGENT.md at root and at subdir
-	if err := os.WriteFile(filepath.Join(root, "AGENT.md"), []byte("root"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(subdir, "AGENT.md"), []byte("subdir"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	paths := discoverAgentMDPaths(subdir)
-	if len(paths) != 2 {
-		t.Fatalf("expected 2 paths, got %d: %v", len(paths), paths)
-	}
-	// Root-to-leaf order: root first, subdir second
-	if filepath.Base(paths[0]) != "AGENT.md" || filepath.Dir(paths[0]) != root {
-		t.Errorf("expected first path in root, got %s", paths[0])
-	}
-	if filepath.Dir(paths[1]) != subdir {
-		t.Errorf("expected second path in subdir, got %s", paths[1])
-	}
-}
-
-func TestDiscoverAgentMDPaths_NoFiles(t *testing.T) {
-	dir := t.TempDir()
-	paths := discoverAgentMDPaths(dir)
-	if len(paths) != 0 {
-		t.Errorf("expected no paths, got %v", paths)
-	}
-}
-
-// helpers
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || stringContains(s, substr))
-}
-
-func stringContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-// TestLoadAgentMD_AgentsPluralIsRead covers the cross-tool convention. A project
-// that already carries AGENTS.md for another agent needs no ogcode-specific
-// file: its instructions are honoured as they stand.
-func TestLoadAgentMD_AgentsPluralIsRead(t *testing.T) {
-	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "AGENTS.md"), "Always reply in Russian.")
-
-	out := LoadAgentMD(dir)
-	if !contains(out, "Always reply in Russian.") {
-		t.Errorf("AGENTS.md was not loaded:\n%s", out)
-	}
-	if !contains(out, "AGENTS.md") {
-		t.Errorf("the block should name the file it came from:\n%s", out)
-	}
-}
-
-// TestLoadAgentMD_BothNamesInOneDir pins the order when a directory holds both.
-// The generic cross-tool file comes first and ogcode's own name last, which puts
-// the more specific instructions closer to the model — the same outer-to-inner
-// precedence the directory walk already uses.
-func TestLoadAgentMD_BothNamesInOneDir(t *testing.T) {
-	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "AGENTS.md"), "Generic house style.")
-	mustWrite(t, filepath.Join(dir, "AGENT.md"), "Ogcode-specific rule.")
-
-	out := LoadAgentMD(dir)
-	generic := strings.Index(out, "Generic house style.")
-	specific := strings.Index(out, "Ogcode-specific rule.")
-	if generic < 0 || specific < 0 {
-		t.Fatalf("both files should load:\n%s", out)
-	}
-	if generic > specific {
-		t.Errorf("AGENT.md should come last so it takes precedence:\n%s", out)
-	}
-}
-
-// TestLoadAgentMD_IdenticalNamesDeduped is the copy case: two names, same text,
-// which a project gets from keeping the files in sync or from a tool writing
-// both. Stating it twice would double the token cost for no added instruction.
-func TestLoadAgentMD_IdenticalNamesDeduped(t *testing.T) {
-	dir := t.TempDir()
-	const body = "Explain each action — why and how."
-	mustWrite(t, filepath.Join(dir, "AGENTS.md"), body)
-	mustWrite(t, filepath.Join(dir, "AGENT.md"), body)
-
-	out := LoadAgentMD(dir)
-	if n := strings.Count(out, body); n != 1 {
-		t.Errorf("identical content appeared %d times, want 1:\n%s", n, out)
-	}
-}
-
-// TestLoadAgentMD_PluralWalksUpToo checks the new name is honoured at every
-// level of the walk, not only in the working directory — so a single
-// ~/AGENTS.md covers every project beneath it.
-func TestLoadAgentMD_PluralWalksUpToo(t *testing.T) {
+// A single ~/AGENTS.md covers every project beneath it, and the plural name is
+// the one a tree of repos is most likely to carry.
+func TestAgentMDPaths_PluralWalksUpToo(t *testing.T) {
 	home := t.TempDir()
 	proj := filepath.Join(home, "work", "repo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mustWrite(t, filepath.Join(home, "AGENTS.md"), "Global: reply in Russian.")
-	mustWrite(t, filepath.Join(proj, "AGENT.md"), "Project: targets Go 1.26.")
+	global := filepath.Join(home, "AGENTS.md")
+	local := filepath.Join(proj, "AGENT.md")
+	mustWrite(t, global, "Global: reply in Russian.")
+	mustWrite(t, local, "Project: targets Go 1.26.")
 
-	out := LoadAgentMD(proj)
-	global := strings.Index(out, "Global: reply in Russian.")
-	project := strings.Index(out, "Project: targets Go 1.26.")
-	if global < 0 || project < 0 {
-		t.Fatalf("both levels should load:\n%s", out)
+	got := agentMDPaths(proj)
+	if len(got) != 2 || got[0] != global || got[1] != local {
+		t.Errorf("want [%s %s], got %v", global, local, got)
 	}
-	if global > project {
-		t.Errorf("the outer file should come first:\n%s", out)
+}
+
+func TestAgentMDPaths_SkipsDirectories(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := agentMDPaths(dir); len(got) != 0 {
+		t.Errorf("a directory named like the instruction file is not one; got %v", got)
 	}
 }
 
 // mustWrite creates one instruction file for the tests below.
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

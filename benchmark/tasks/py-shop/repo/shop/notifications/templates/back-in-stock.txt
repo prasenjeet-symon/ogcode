@@ -1,0 +1,5 @@
+Hi {first_name},
+
+{item_name} is back in stock and we held your size for 48 hours.
+
+{store_name}

@@ -1,0 +1,7 @@
+Hi {first_name},
+
+Order {order_id} was delivered. We hope the {item_name} is what you wanted.
+
+Tell us how it went: {review_url}
+
+{store_name}

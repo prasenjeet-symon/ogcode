@@ -1,0 +1,5 @@
+Hi {first_name},
+
+Payment received. Invoice {invoice_number} covers {total} on order {order_id}.
+
+{store_name}

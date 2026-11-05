@@ -1,0 +1,35 @@
+{
+  "$schema": "../config.schema.json",
+  "name": "ollama-cloud",
+  "description": "GLM-5.3 Flash on Ollama Cloud. Both agents receive the same model weights.",
+  "provider": {
+    "kind": "ollama-cloud",
+    "api_key_env": "OLLAMA_API_KEY"
+  },
+  "model": {
+    "id": "glm-5.3-flash",
+    "pricing": {
+      "input": 0.15,
+      "output": 0.5,
+      "cache_read": 0.03
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "model": "glm-5.3-flash"
+    },
+    "opencode": {
+      "model": "ollama-cloud/glm-5.3-flash"
+    }
+  },
+  "run": {
+    "reps": 5,
+    "tasks": "all",
+    "agents": ["ogcode", "opencode"],
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900,
+    "output_dir": "results/ollama-cloud"
+  }
+}

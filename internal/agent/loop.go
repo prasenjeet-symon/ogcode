@@ -566,7 +566,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			"sessionType", sess.SessionType, "agentName", agentName, "session", sessionID)
 	}
 
-	// Load AGENT.md and MEMORY.md files from session directory
+	// Discover where the project's instruction and memory files live. Their
+	// contents are never loaded into the prompt: the pointer sections below
+	// tell the agent to open them with file_map and read, so editing one does
+	// not rewrite the cached prompt.
 	workDir := lr.Dir
 	if sess != nil && sess.Directory != "" {
 		workDir = sess.Directory
@@ -577,13 +580,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// not arguments, which would freeze the still-empty slice — sees the
 	// searches collected after this point.
 	defer func() { lr.recordDeepSearches(ctx, sessionID, deepSearches, workDir, agent.ID) }()
-	agentMDContent := LoadAgentMD(workDir)
-	memoryMDContent := LoadMemoryMD(workDir)
 	// Session memory is a per-conversation file, so it is keyed by the ROOT
 	// session: a teammate shares, reads and writes its parent conversation's
-	// memory rather than a private copy. Loaded once per turn alongside the
-	// project files — it rides the same cached base and the same staleness.
-	sessionMem := loadSessionMemory(workDir, sessionMemoryKey(sessionID, lr.ParentSessionOf))
+	// memory rather than a private copy.
+	memFiles := discoverMemoryFiles(workDir, sessionMemoryKey(sessionID, lr.ParentSessionOf))
 
 	// Hand this turn the completions its own teammates reported while it was not
 	// running, as pending notices. Build only, like the board tool itself: the
@@ -1161,20 +1161,36 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// only, so anything that changes mid-session must stay out of it.
 		// Recall guidance appears when turn-memory is active and the agent holds
 		// the recall tools.
-		systemPrompts := buildSystemPromptEntries(agent, workDir, turnMemoryActive, agentMDContent, memoryMDContent, sessionMem, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles, hasDeepSearch, lr.notesOn())
-		var modelMessages []provider.ModelMessage
-
+		systemPrompts := buildSystemPromptEntries(agent, workDir, turnMemoryActive, memFiles, viewportWidth, viewportHeight, modelFamily(providerID, modelID), indexedFiles, hasDeepSearch, lr.notesOn())
 		// Only the current user turn goes on the wire — from the last text-user
 		// message forward — unless the agent narrowed it itself via compact_context.
 		// Earlier turns live on disk as summaries reachable through recall; the
 		// previous turn's final response is re-injected for cheap continuity, and
 		// compaction (if it ever fires) covers anything older within the session.
 		turnStartIdx := findLastTextUserMessageIndex(messages)
-		if turnStartIdx >= 0 && turnStartIdx < len(messages) {
-			modelMessages = convertMessages(watermark.sliceTurn(messages, turnStartIdx), modelSupportsImages, modelID, echoReasoning, echoToolExtra)
-		} else {
-			modelMessages = convertMessages(messages, modelSupportsImages, modelID, echoReasoning, echoToolExtra)
+		// assembleMessages builds the conversation half of a request from exactly
+		// the state the NEXT step reads: the working set plus the watermark. It is
+		// a closure because compaction can fire later in this step (proactively
+		// before the send, reactively after a context-length error), and rebuilding
+		// through this same function is what keeps the compacted request
+		// byte-identical to the one the following step sends — so the provider's
+		// prefix cache survives the boundary instead of re-billing the kept tail.
+		assembleMessages := func() []provider.ModelMessage {
+			var msgs []provider.ModelMessage
+			if turnStartIdx >= 0 && turnStartIdx < len(messages) {
+				msgs = convertMessages(watermark.sliceTurn(messages, turnStartIdx), modelSupportsImages, modelID, echoReasoning, echoToolExtra)
+			} else {
+				msgs = convertMessages(messages, modelSupportsImages, modelID, echoReasoning, echoToolExtra)
+			}
+			if prevTurnResponse != "" {
+				msgs = prependPreviousResponse(msgs, prevTurnResponse)
+			}
+			if watermark.active() && (turnStartIdx < 0 || watermark.sliceStart(messages, turnStartIdx) > turnStartIdx) {
+				msgs = prependCompactionSummary(msgs, watermark.summary)
+			}
+			return msgs
 		}
+		modelMessages := assembleMessages()
 		// Skip when this same summary is already carried this turn by the
 		// watermark's prepended message. Proactive compaction sets the watermark
 		// summary to compactionSummary itself, so appending here too would send it
@@ -1182,13 +1198,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// carries a DIFFERENT summary (the agent's own), so the cross-turn
 		// compactionSummary is still appended alongside it — the equality check,
 		// not merely watermark.active(), is what distinguishes the two.
-		carriesCompactionSummary := compactionSummary != "" &&
-			!(watermark.active() && watermark.summary == compactionSummary)
-		if prevTurnResponse != "" {
-			modelMessages = prependPreviousResponse(modelMessages, prevTurnResponse)
-		}
-		if watermark.active() && (turnStartIdx < 0 || watermark.sliceStart(messages, turnStartIdx) > turnStartIdx) {
-			modelMessages = prependCompactionSummary(modelMessages, watermark.summary)
+		//
+		// A closure rather than a value because a mid-step compaction updates both
+		// compactionSummary and the watermark; the rebuild below has to read that
+		// settled state, not what was true before the step started.
+		carriesCompactionSummary := func() bool {
+			return compactionSummary != "" &&
+				!(watermark.active() && watermark.summary == compactionSummary)
 		}
 		// Kept out of the cacheable base with the other post-base blocks. It is
 		// constant across a turn's steps (it depends only on the agent's toolset),
@@ -1230,6 +1246,10 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		if browserSteer != "" {
 			systemPrompts = appendSystemEntry(systemPrompts, agent, browserSteer)
 		}
+		// Everything above is fixed for the turn. A mid-step rebuild starts from
+		// this base and re-derives only the one entry that can change (the
+		// summary), so the rebuilt System is exactly what the next step builds.
+		baseSystemPrompts := systemPrompts
 		// Last of the system entries, because it is the only one that can change
 		// DURING a turn: compaction fires mid-loop and rewrites this summary,
 		// while everything above is fixed once the turn starts. On the endpoints
@@ -1238,7 +1258,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// its own position — so putting it ahead of the skill list and the
 		// compaction guidance threw those away too, on the one step that could
 		// least afford it.
-		if carriesCompactionSummary {
+		if carriesCompactionSummary() {
 			systemPrompts = appendSystemEntry(systemPrompts, agent, compactionSummary)
 		}
 
@@ -1365,6 +1385,34 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			StepMechanical: nextStepMechanical,
 		}
 
+		// rebuildRequest re-derives System and Messages from the settled state after
+		// a mid-step compaction. compactRequest trims the request it just sent and
+		// parks the new summary in the System tail; the NEXT step instead rebuilds
+		// from the watermark and folds that summary into the turn's first user
+		// message. Sending one shape now and another on the next step makes the two
+		// requests diverge at the first byte the summary touches, so a provider's
+		// longest-common-prefix cache re-bills the whole kept tail — on the largest
+		// request of the turn. Rebuilding through the same closures the next step
+		// uses removes that boundary. Guidance and this step's notices are re-applied
+		// because the rebuilt slice starts clean, and no notice has been stamped yet
+		// (the stamp waits for a real dispatch).
+		rebuildRequest := func() {
+			streamReq.System = baseSystemPrompts
+			if carriesCompactionSummary() {
+				streamReq.System = appendSystemEntry(streamReq.System, agent, compactionSummary)
+			}
+			msgs := assembleMessages()
+			if lc := LoopControlFromContext(ctx); lc != nil {
+				if accumulated := lc.DeliveredGuidance(); accumulated != "" && !provider.PlacesGuidance(p) {
+					appendGuidanceToUserMessage(msgs, accumulated)
+				}
+			}
+			if (len(wireFresh) > 0 || len(wireDigest) > 0) && !provider.PlacesGuidance(p) {
+				msgs = appendTailUserMessage(msgs, noticesUserContent(wireFresh, wireDigest))
+			}
+			streamReq.Messages = msgs
+		}
+
 		// Per-step, not per-run: the proactive check may fire on every step
 		// while the run-wide reactive budget still has room, because each step
 		// adds fresh tool output the previous compaction never saw.
@@ -1401,8 +1449,6 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// leaving it set would keep sizing every remaining step of the turn
 			// against history that is no longer being sent.
 			lastInputTokens = 0
-			slog.Info("proactive compaction completed", "session", sessionID, "before", before, "after", len(streamReq.Messages), "newEstimatedTokens", estimateRequestTokens(streamReq))
-			requestTokens = effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
 			// Advance the in-turn watermark to the recent tail so the FOLLOWING
 			// steps resume from there plus this summary, instead of rebuilding the
 			// full (still-growing) turn history and re-tripping the threshold on
@@ -1423,9 +1469,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 						// Without this the reminder, now uncapped, would keep firing about
 						// content already compacted away.
 						pressure.reset()
+						// Send the body the next step will send, not the one the
+						// summarizer left behind: compactRequest parks the summary in
+						// the System tail, while the next step folds it into the turn's
+						// first user message. Rebuilding here makes this step and the
+						// step after it share their whole prefix.
+						rebuildRequest()
 					}
 				}
 			}
+			requestTokens = effectiveRequestTokens(estimateRequestTokens(streamReq), lastInputTokens)
+			slog.Info("proactive compaction completed", "session", sessionID, "before", before, "after", len(streamReq.Messages), "newEstimatedTokens", requestTokens)
 		}
 
 		// Ask for as much output as the model and the remaining window allow.
@@ -1532,6 +1586,23 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				// the oversized request that just failed.
 				lastInputTokens = 0
 				slog.Info("llm-compacted context", "session", sessionID, "before", before, "after", len(streamReq.Messages))
+				// This branch used to trim only the request it retried. The next step
+				// rebuilds from the working set, which knows nothing about that trim,
+				// so it re-sent the whole turn — plus the summary appended to System —
+				// overflowed again, and paid to summarize the same history once per
+				// step until the run-wide budget ran out. Advancing the watermark is
+				// what makes the trim outlive this step; rebuilding makes this retry
+				// and the step after it the same bytes.
+				if compactionSummary != "" {
+					keep := compactionKeepRecent(modelContextWindow)
+					if b := proactiveCompactionBoundary(messages, turnStartIdx, keep); b >= 0 {
+						if watermark.set(messages[b].Info.ID, compactionSummary, messages) {
+							slog.Info("reactive compaction watermark advanced", "session", sessionID, "step", step, "boundaryIdx", b, "keptTail", len(messages)-b)
+							pressure.reset()
+							rebuildRequest()
+						}
+					}
+				}
 				attempt-- // don't count compaction as a retry attempt
 				continue
 			}
@@ -3370,8 +3441,8 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 	}
 	pressure.endStep()
 
-	// Line the plan the agent just stated up with the skills and MCP tools that
-	// could carry each step out, and fold the suggestion into the tool result the
+	// Line the plan the agent just stated up with the skills, MCP servers and lazily
+	// loaded tools that could carry each step out, and fold the suggestion into the tool result the
 	// agent reads next. This runs here, not where the plan is persisted, for the
 	// same reason the read-pressure reminder above does: the model-facing history
 	// is rebuilt from the STORED output, so a note added after the store write is
@@ -3396,14 +3467,16 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 		if perr != nil {
 			continue
 		}
-		hint, mcpIDs := lr.suggestIntentTools(toolCtx, sessionID, modelID, providerID, agent, workDir, intent.Steps, intentFind)
+		hint, offerIDs := lr.suggestIntentTools(toolCtx, sessionID, modelID, providerID, agent, workDir, intent.Steps, intentFind)
 		if hint != "" {
 			execInfos[i].result.Output += hint
 		}
-		// Offer the matched MCP tools for the rest of the turn, so the model can
-		// call what the hint just named. This only touches this turn's wire list;
-		// the agent's own allowlist already covers them.
-		for _, id := range mcpIDs {
+		// Offer what the matcher named for the rest of the turn, so the model can
+		// call what the hint just named: an MCP server's tools, the lazy tools
+		// (document tools, schedule) a plan step made relevant — one, a pair, or
+		// the whole set, depending on the step. This only touches this turn's
+		// wire list; the agent's own allowlist already covers them.
+		for _, id := range offerIDs {
 			turnTools.offer(id)
 		}
 		break
@@ -4622,18 +4695,18 @@ func appendSystemEntry(entries []string, a Agent, entry string) []string {
 
 // buildSystemPrompt builds the full system prompt with no model-family tuning
 // (family = generic). Retained for callers/tests that have no model in hand.
-func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, viewportWidth int, viewportHeight int, notes bool) string {
-	return buildSystemPromptForFamily(a, dir, memoryEnabled, agentMDContent, memoryMDContent, sessionMem, viewportWidth, viewportHeight, "", notes)
+func buildSystemPrompt(a Agent, dir string, memoryEnabled bool, memFiles memoryFiles, viewportWidth int, viewportHeight int, notes bool) string {
+	return buildSystemPromptForFamily(a, dir, memoryEnabled, memFiles, viewportWidth, viewportHeight, "", notes)
 }
 
 // buildSystemPromptForFamily returns the assembled entries joined into one
 // string. The provider is given the entries separately (see
 // buildSystemPromptEntries) so the cacheable prefix can be isolated; this
 // convenience form is for callers and tests that just want the whole text.
-func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, viewportWidth int, viewportHeight int, family string, notes bool) string {
+func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, memFiles memoryFiles, viewportWidth int, viewportHeight int, family string, notes bool) string {
 	// hasDeepSearch=true: these callers have no registry in hand, and the prompt
 	// they want is the full one.
-	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, agentMDContent, memoryMDContent, sessionMem, viewportWidth, viewportHeight, family, -1, true, notes), "\n\n")
+	return strings.Join(buildSystemPromptEntries(a, dir, memoryEnabled, memFiles, viewportWidth, viewportHeight, family, -1, true, notes), "\n\n")
 }
 
 // buildSystemPromptEntries returns the system-prompt entries in wire order:
@@ -4642,18 +4715,16 @@ func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMD
 //	     Providers attach the cache breakpoint here, so nothing that changes
 //	     between the steps of a turn may go in it.
 //
-//	     Two things in it do change *across* turns, and knowingly: AGENT.md and
-//	     MEMORY.md are re-read once per turn (RunLoop, top), and the prompt
-//	     actively tells the agent to write to MEMORY.md as it works. Each such
-//	     edit makes the next turn a cache write rather than a cache read. That is
-//	     the price of having the project's own knowledge inside the cached prefix
-//	     where it is cheapest to re-send on every step of every other turn; it is
-//	     paid once per edit, not per step. Anything that varies more often than
-//	     that — the viewport, the index status, the date, the skill list, the
-//	     compaction offer — belongs in the entries below.
-//	[1:] per-turn dynamic content: the rendering viewport (the browser resends
-//	     its window size with every prompt), the project index status, and the
-//	     current date.
+//	     The memory sections are pointers, not payloads: discovery runs once
+//	     per turn and supplies only the paths of AGENTS.md/AGENT.md, MEMORY.md
+//	     and the session memory file. Editing one of those files no longer
+//	     rewrites entry [0]; a file appearing or disappearing does, once.
+//	     Anything that varies more often than that — the viewport, the index
+//	     status, the date, the skill list, the compaction offer — belongs in
+//	     the entries below.
+//	[1:] per-turn dynamic content: the project index status, the current date,
+//	     and the rendering viewport (the browser resends its window size with
+//	     every prompt).
 //	last the agent's FinalInstruction, kept adjacent to the model's response.
 //
 // Putting the viewport in [0] would invalidate the cached tools+system prefix
@@ -4663,8 +4734,8 @@ func buildSystemPromptForFamily(a Agent, dir string, memoryEnabled bool, agentMD
 // while the session is open.
 //
 // indexedFiles < 0 means no count was reported and the status line is omitted.
-func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, viewportWidth int, viewportHeight int, family string, indexedFiles int, hasDeepSearch bool, notes bool) []string {
-	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, agentMDContent, memoryMDContent, sessionMem, family, hasDeepSearch, notes)}
+func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, memFiles memoryFiles, viewportWidth int, viewportHeight int, family string, indexedFiles int, hasDeepSearch bool, notes bool) []string {
+	entries := []string{staticSystemPrompt(a, dir, memoryEnabled, memFiles, family, hasDeepSearch, notes)}
 
 	// Ordered stable -> volatile, which is a caching decision and not a cosmetic
 	// one. OpenAI, Ollama and OpenRouter join EVERY system entry into a single
@@ -4705,11 +4776,11 @@ func buildSystemPromptEntries(a Agent, dir string, memoryEnabled bool, agentMDCo
 // plus everything that is fixed for the whole session. The model-family
 // working-style block belongs here — the model is fixed per session, so it stays
 // byte-identical across turns.
-func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent string, memoryMDContent string, sessionMem sessionMemory, family string, hasDeepSearch bool, notes bool) string {
-	// Project context (working dir, host env, AGENT.md, MEMORY.md) is only
-	// relevant to agents that operate on the user's codebase. Utility agents —
-	// the keyword indexer and web-research agent — skip it to keep their prompt
-	// lean, which also avoids referencing files and tools they don't have.
+func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, memFiles memoryFiles, family string, hasDeepSearch bool, notes bool) string {
+	// Project context (working dir, host env, memory files) is only relevant to
+	// agents that operate on the user's codebase. Utility agents — the keyword
+	// indexer and web-research agent — skip it to keep their prompt lean, which
+	// also avoids referencing files and tools they don't have.
 	prompt := a.System
 	if a.projectScoped() {
 		if style := modelFamilyStylePrompt(family); style != "" {
@@ -4717,37 +4788,28 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 		}
 		prompt += fmt.Sprintf("\n\nWorking directory: %s\nPlatform: %s/%s%s", dir, runtime.GOOS, runtime.GOARCH, osEnvPrompt(a.HasTool("bash")))
 
-		if agentMDContent != "" {
-			prompt += agentMDContent
-		}
-
-		if memoryMDContent != "" {
-			prompt += memoryMDContent
-		}
-
-		// Session memory block: next to the project one, so both files sit above
-		// the two sections that explain them. Same cadence as MEMORY.md — read
-		// once per turn, so an edit costs one cache write, not one per step.
-		if sessionMem.block != "" {
-			prompt += sessionMem.block
-		}
-
-		// MEMORY.md section: role-aware instructions based on whether the agent
-		// can write files, and on whether a <memory-md> block was actually
-		// prepended above. BuildAgent gets full read/write maintenance
-		// instructions; read-only agents (Note, Subagent) get read-only guidance.
-		// The absent-file case (including the nudge to create one) is handled
-		// inside memoryMDPrompt so the section never points at a tag that the
-		// prompt does not contain.
 		canWriteFiles := a.HasTool("write") || a.HasTool("edit")
-		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, memoryMDContent != "")
 
-		// Session memory section: what the per-session file is and — the part
+		// The pre-task check leads the memory sections: it is the instruction to
+		// look before starting, and the pointers after it are what gets looked
+		// at. Pointers alone read as reference material, not as a first step.
+		prompt += "\n\n" + memoryCheckPrompt()
+
+		// AGENTS.md / AGENT.md pointer: the project owner's instructions, with
+		// the discovered paths and the file_map-first reading order. No content
+		// is loaded, so editing an instruction file never rewrites entry [0].
+		prompt += "\n\n" + agentMDPrompt(canWriteFiles, dir, memFiles.agentMD)
+
+		// MEMORY.md pointer: what the file is for, where it was found, and how
+		// to write it so file_map carries the knowledge. Nothing is loaded.
+		prompt += "\n\n" + memoryMDPrompt(canWriteFiles, dir, memFiles.memoryMD)
+
+		// Session memory pointer: what the per-session file is and — the part
 		// this section exists for — the rule deciding which fact goes in the
-		// project file and which stays with the conversation. relPath is passed
-		// even when there is no block: the absent-file wording is what tells a
-		// writable agent where the file goes.
-		prompt += "\n\n" + sessionMemoryPrompt(canWriteFiles, sessionMem.block != "", sessionMem.relPath)
+		// project file and which stays with the conversation. The path is passed
+		// even when the file does not exist: it is what the writable agent is
+		// told to create.
+		prompt += "\n\n" + sessionMemoryPrompt(canWriteFiles, memFiles.sessionMD)
 
 		// HISTORY.md pointer: the log MEMORY.md is not. Nothing is loaded and
 		// no existence check is made, so the section stays constant and the
@@ -4816,9 +4878,11 @@ func staticSystemPrompt(a Agent, dir string, memoryEnabled bool, agentMDContent 
 	if memoryEnabled && a.HasTool("memory_recall") {
 		prompt += `
 
+## Recall past work
+
 This project keeps a persistent memory: every completed turn is saved as a structured markdown summary, and a read-only recall sub-agent searches those summaries on your behalf. Use it proactively whenever the request touches past work, prior decisions, or earlier context you do not already have in view — do not guess or hallucinate past details. Each call runs the sub-agent, so it may take a moment and returns a brief, synthesized answer rather than raw excerpts. Ask one precise question per call.
 
-Use memory_recall for THIS conversation's earlier turns — what was decided or done before but is no longer in view.`
+Use memory_recall for THIS conversation's earlier turns — what was decided or done before but is no longer in view. The session memory file holds only what an earlier turn chose to write down; recall searches the saved summaries themselves, so it reaches detail the file never recorded.`
 
 		if a.HasTool("project_memory_recall") {
 			prompt += `
@@ -4831,7 +4895,10 @@ Use project_memory_recall for anything reaching beyond this session — why some
 	// too — and it sits last because it is the rule most likely to be tested by
 	// the very next thing the agent reads.
 	canAct := a.HasTool("bash") || a.HasTool("write") || a.HasTool("edit")
-	prompt += "\n\n" + untrustedContentPrompt(canAct, agentMDContent != "", a.HasTool("skill"))
+	// hasAgentFiles mirrors where agentMDPrompt is rendered: only a
+	// project-scoped agent's prompt names AGENTS.md/AGENT.md.
+	hasAgentFiles := a.projectScoped() && len(memFiles.agentMD) > 0
+	prompt += "\n\n" + untrustedContentPrompt(canAct, hasAgentFiles, a.HasTool("skill"))
 
 	return prompt
 }

@@ -1,0 +1,6 @@
+Hi {first_name},
+
+The {item_name} in your cart is still waiting. Finish the order and {discount}
+comes off the total.
+
+{store_name}

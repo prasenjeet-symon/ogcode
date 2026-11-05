@@ -1,0 +1,49 @@
+{
+  "granite-express": {
+    "detail": {
+      "status": "on_truck"
+    },
+    "history": [
+      {
+        "at": "2026-02-12T03:10:00Z",
+        "status": "in_transit"
+      }
+    ],
+    "id": "GE-1002338"
+  },
+  "iron-bridge": {
+    "audit": [
+      {
+        "at": "2026-02-11T19:30:00Z",
+        "state": "in_transit"
+      }
+    ],
+    "shipment": {
+      "tracking_number": "IB-6620471"
+    },
+    "state": "with_courier",
+    "zone": "yard"
+  },
+  "meadow-mover": {
+    "currentMilestone": "van",
+    "events": [
+      {
+        "at": "2026-02-12T06:20:00Z",
+        "milestone": "depot"
+      }
+    ],
+    "trackingNumber": "MM-31228"
+  },
+  "willow-post": {
+    "status": "final_mile",
+    "tracking": {
+      "events": [
+        {
+          "code": "moving",
+          "ts": "2026-02-12T08:00:00Z"
+        }
+      ],
+      "number": "WP-55809"
+    }
+  }
+}

@@ -3,160 +3,70 @@ package agent
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/prasenjeet-symon/ogcode/internal/memfile"
 )
 
-func TestLoadMemoryMD_NoFiles(t *testing.T) {
+func TestMemoryMDPaths_NoFiles(t *testing.T) {
 	dir := t.TempDir()
-	got := LoadMemoryMD(dir)
-	if got != "" {
-		t.Errorf("expected empty string with no MEMORY.md files, got %q", got)
+	if got := memoryMDPaths(dir); len(got) != 0 {
+		t.Errorf("expected no paths, got %v", got)
 	}
 }
 
-func TestLoadMemoryMD_SingleFile(t *testing.T) {
-	dir := t.TempDir()
-	content := "Important decisions and patterns for this project."
-	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := LoadMemoryMD(dir)
-	if got == "" {
-		t.Fatal("expected non-empty result")
-	}
-	if !contains(got, "<memory-md") {
-		t.Errorf("expected <memory-md> tag, got %q", got)
-	}
-	if !contains(got, content) {
-		t.Errorf("expected content %q in result, got %q", content, got)
-	}
-	if !contains(got, `path="MEMORY.md"`) {
-		t.Errorf("expected relative path in result, got %q", got)
-	}
-}
-
-func TestLoadMemoryMD_EmptyFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("  \n\n  "), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := LoadMemoryMD(dir)
-	if got != "" {
-		t.Errorf("expected empty string for whitespace-only MEMORY.md, got %q", got)
-	}
-}
-
-func TestLoadMemoryMD_Hierarchy(t *testing.T) {
+// The closest MEMORY.md is the most specific one, so the order is outermost
+// first and the project's own file comes last — the order the prompt states.
+func TestMemoryMDPaths_WalksUpRootToLeaf(t *testing.T) {
 	root := t.TempDir()
-	subdir := filepath.Join(root, "project")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	rootPath := filepath.Join(root, "MEMORY.md")
+	projectPath := filepath.Join(project, "MEMORY.md")
+	mustWrite(t, rootPath, "Root memory.")
+	mustWrite(t, projectPath, "Project memory.")
 
-	rootContent := "# Root memory\nWe use Go for backend."
-	projectContent := "# Project memory\nThis project uses React."
-
-	if err := os.WriteFile(filepath.Join(root, "MEMORY.md"), []byte(rootContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(subdir, "MEMORY.md"), []byte(projectContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := LoadMemoryMD(subdir)
-	if got == "" {
-		t.Fatal("expected non-empty result")
-	}
-
-	// Root content should appear before project content (root-to-leaf order)
-	rootIdx := indexOf(got, rootContent)
-	projectIdx := indexOf(got, projectContent)
-	if rootIdx == -1 || projectIdx == -1 {
-		t.Fatalf("expected both contents in result, got %q", got)
-	}
-	if rootIdx >= projectIdx {
-		t.Errorf("expected root content before project content, root at %d, project at %d", rootIdx, projectIdx)
+	got := memoryMDPaths(project)
+	if len(got) != 2 || got[0] != rootPath || got[1] != projectPath {
+		t.Errorf("want root-to-leaf [%s %s], got %v", rootPath, projectPath, got)
 	}
 }
 
-// With no budget configured — the default — a large MEMORY.md reaches the
-// model whole. Long-term memory is the file the agent is told to append to
-// every turn, so a silent cut is the one failure that compounds.
-func TestLoadMemoryMD_NoBudgetByDefault(t *testing.T) {
+// discoverMemoryFiles is the one call the loop makes: project instructions,
+// long-term memory, and the per-session path — paths only, never contents.
+func TestDiscoverMemoryFiles_CollectsAllThreeStores(t *testing.T) {
 	dir := t.TempDir()
-	bigContent := strings.Repeat("a", 128*1024)
-	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(bigContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	agentPath := filepath.Join(dir, "AGENTS.md")
+	memoryPath := filepath.Join(dir, "MEMORY.md")
+	mustWrite(t, agentPath, "PROJECT INSTRUCTION BODY")
+	mustWrite(t, memoryPath, "LONG TERM MEMORY BODY")
+	const key = "ses_01M269J8TEST"
 
-	got := LoadMemoryMD(dir)
-	if !strings.Contains(got, bigContent) {
-		t.Errorf("expected the whole file with no budget set, got %d bytes", len(got))
+	got := discoverMemoryFiles(dir, key)
+	if len(got.agentMD) != 1 || got.agentMD[0] != agentPath {
+		t.Errorf("agentMD = %v, want [%s]", got.agentMD, agentPath)
 	}
-	if strings.Contains(got, mdTruncationMarker) {
-		t.Error("an uncapped load must not carry the truncation marker")
+	if len(got.memoryMD) != 1 || got.memoryMD[0] != memoryPath {
+		t.Errorf("memoryMD = %v, want [%s]", got.memoryMD, memoryPath)
+	}
+	if want := memfile.SessionMemoryRelPath(dir, key); got.sessionMD != want {
+		t.Errorf("sessionMD = %q, want %q even when the file does not exist yet", got.sessionMD, want)
 	}
 }
 
-// A budget set through the environment caps the total across all files.
-func TestLoadMemoryMD_BudgetFromEnv(t *testing.T) {
+// A project with none of the files still gets the session path: it is where the
+// writable agent is told to create the file.
+func TestDiscoverMemoryFiles_NoProjectFiles(t *testing.T) {
 	dir := t.TempDir()
-	// Create a file larger than the budget
-	bigContent := make([]byte, 24*1024)
-	for i := range bigContent {
-		bigContent[i] = 'a'
-	}
-	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), bigContent, 0644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(memoryMDBudgetEnv, "8192")
+	const key = "ses_empty"
 
-	got := LoadMemoryMD(dir)
-	if got == "" {
-		t.Fatal("expected non-empty result")
+	got := discoverMemoryFiles(dir, key)
+	if len(got.agentMD) != 0 || len(got.memoryMD) != 0 {
+		t.Errorf("a directory with no memory files must discover none; got %+v", got)
 	}
-	// Should be truncated to the configured budget.
-	tagOverhead := len("\n\n<memory-md path=\"MEMORY.md\">\n\n</memory-md>")
-	if len(got) > 8192+tagOverhead {
-		t.Errorf("result too long: got %d bytes, expected at most %d", len(got), 8192+tagOverhead)
-	}
-}
-
-func TestDiscoverMemoryMDPaths_WalksUp(t *testing.T) {
-	root := t.TempDir()
-	subdir := filepath.Join(root, "a", "b")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create MEMORY.md at root and at subdir
-	if err := os.WriteFile(filepath.Join(root, "MEMORY.md"), []byte("root"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(subdir, "MEMORY.md"), []byte("subdir"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	paths := discoverMemoryMDPaths(subdir)
-	if len(paths) != 2 {
-		t.Fatalf("expected 2 paths, got %d: %v", len(paths), paths)
-	}
-	// Root-to-leaf order: root first, subdir second
-	if filepath.Base(paths[0]) != "MEMORY.md" || filepath.Dir(paths[0]) != root {
-		t.Errorf("expected first path in root, got %s", paths[0])
-	}
-	if filepath.Dir(paths[1]) != subdir {
-		t.Errorf("expected second path in subdir, got %s", paths[1])
-	}
-}
-
-func TestDiscoverMemoryMDPaths_NoFiles(t *testing.T) {
-	dir := t.TempDir()
-	paths := discoverMemoryMDPaths(dir)
-	if len(paths) != 0 {
-		t.Errorf("expected no paths, got %v", paths)
+	if got.sessionMD == "" {
+		t.Error("sessionMD must name the path the agent can create")
 	}
 }

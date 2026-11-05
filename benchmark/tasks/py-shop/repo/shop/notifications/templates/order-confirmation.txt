@@ -1,0 +1,11 @@
+Hi {first_name},
+
+Thanks for order {order_id}. We charged {total} and will ship to:
+
+    {address_line}
+
+You get a tracking number as soon as {carrier} picks the parcel up.
+
+Questions? Write to {support_email}.
+
+{store_name}

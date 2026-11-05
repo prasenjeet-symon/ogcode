@@ -1,0 +1,38 @@
+{
+  "_source": "Provider price pages and models.dev, fetched 2026-11-04",
+  "_note": "USD per 1M tokens. This file is a fallback for configs without model.pricing; an embedded price always wins. Verify current prices before publishing results.",
+  "_sources": {
+    "glm-5.3-flash": "models.dev, provider ollama-cloud",
+    "z-ai/glm-4.6": "OpenRouter models API (2026-11-04)",
+    "deepseek/deepseek-v4.1-flash": "OpenRouter models API (2026-11-05)",
+    "claude-sonnet-4-5": "Anthropic pricing page (2026-11-04)",
+    "gpt-5.1": "OpenAI pricing page (2026-11-04)"
+  },
+  "models": {
+    "glm-5.3-flash": {
+      "input": 0.15,
+      "output": 0.5,
+      "cache_read": 0.03
+    },
+    "z-ai/glm-4.6": {
+      "input": 0.5,
+      "output": 2.0,
+      "cache_read": 0.1
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "input": 0.045,
+      "output": 0.5,
+      "cache_read": 0.018
+    },
+    "claude-sonnet-4-5": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3
+    },
+    "gpt-5.1": {
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read": 0.125
+    }
+  }
+}

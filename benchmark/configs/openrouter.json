@@ -1,0 +1,35 @@
+{
+  "$schema": "../config.schema.json",
+  "name": "openrouter",
+  "description": "GLM-4.6 through OpenRouter. Replace model.id with any OpenRouter model id.",
+  "provider": {
+    "kind": "openrouter",
+    "api_key_env": "OPENROUTER_API_KEY"
+  },
+  "model": {
+    "id": "z-ai/glm-4.6",
+    "pricing": {
+      "input": 0.5,
+      "output": 2.0,
+      "cache_read": 0.1
+    }
+  },
+  "agents": {
+    "ogcode": {
+      "model": "z-ai/glm-4.6"
+    },
+    "opencode": {
+      "model": "openrouter/z-ai/glm-4.6"
+    }
+  },
+  "run": {
+    "reps": 5,
+    "tasks": "all",
+    "agents": ["ogcode", "opencode"],
+    "jobs": 1,
+    "timeout_s": 600,
+    "verify_timeout_s": 300,
+    "index_timeout_s": 900,
+    "output_dir": "results/openrouter"
+  }
+}
