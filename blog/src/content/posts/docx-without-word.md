@@ -1,5 +1,5 @@
 ---
-title: "Your agent doesn't need Word to read a .docx"
+title: "Why Corporate .docx Files Break AI Agents"
 description: "A .docx is a zip of XML with no pages in it. Ogcode reads Word documents (.docx, .docm, .dotx) directly without Word, LibreOffice, or external converters. It gives them heading-aware pages, extracts footnotes and tables, labels each page once, and opens one page at a time with checkable citations."
 pubDate: 2026-11-06
 tags: ["agents", "docx", "context-engine"]
