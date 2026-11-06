@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 348" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img">
+<rect width="960" height="348" fill="#151414"/>
+<text x="40" y="32" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.5">Words per pseudo-page: a 7-page .docx, split by two rules</text>
+<text x="40" y="54" fill="#9a9390" font-size="12.5">an explicit page break wins; otherwise a page ends when it reaches 500 words</text>
+
+<line x1="40" y1="109" x2="920" y2="109" stroke="#9a9390" stroke-dasharray="4 5" stroke-opacity="0.65"/>
+<text x="920" y="102" fill="#9a9390" font-size="11.5" text-anchor="end">500 words</text>
+
+<rect x="70" y="234.6" width="64" height="35.4" rx="3" fill="#ff7038"/>
+<text x="102" y="226" fill="#fffbf5" font-size="12.5" text-anchor="middle">110</text>
+<text x="102" y="290" fill="#fffbf5" font-size="12.5" text-anchor="middle">p1</text>
+
+<rect x="195" y="178.4" width="64" height="91.6" rx="3" fill="#ff7038"/>
+<text x="227" y="170" fill="#fffbf5" font-size="12.5" text-anchor="middle">285</text>
+<text x="227" y="290" fill="#fffbf5" font-size="12.5" text-anchor="middle">p2</text>
+
+<rect x="320" y="106.7" width="64" height="163.3" rx="3" fill="#ff5e1f"/>
+<text x="352" y="98" fill="#fffbf5" font-size="12.5" text-anchor="middle">508</text>
+<text x="352" y="290" fill="#fffbf5" font-size="12.5" text-anchor="middle">p3</text>
+
+<rect x="445" y="222.4" width="64" height="47.6" rx="3" fill="#ff7038" opacity="0.5"/>
+<text x="477" y="214" fill="#fffbf5" font-size="12.5" text-anchor="middle">148</text>
+<text x="477" y="290" fill="#fffbf5" font-size="12.5" text-anchor="middle">p4</text>
+
+<rect x="570" y="118.9" width="64" height="151.1" rx="3" fill="#ff7038"/>
+<text x="602" y="110" fill="#fffbf5" font-size="12.5" text-anchor="middle">470</text>
+<text x="602" y="290" fill="#fffbf5" font-size="12.5" text-anchor="middle">p5</text>
+
+<rect x="695" y="106.7" width="64" height="163.3" rx="3" fill="#ff5e1f"/>
+<text x="727" y="98" fill="#fffbf5" font-size="12.5" text-anchor="middle">508</text>
+<text x="727" y="290" fill="#fffbf5" font-size="12.5" text-anchor="middle">p6</text>
+
+<rect x="820" y="252.6" width="64" height="17.4" rx="3" fill="#ff7038" opacity="0.5"/>
+<text x="852" y="244" fill="#fffbf5" font-size="12.5" text-anchor="middle">54</text>
+<text x="852" y="290" fill="#fffbf5" font-size="12.5" text-anchor="middle">p7</text>
+
+<rect x="40" y="318" width="12" height="12" rx="2" fill="#ff5e1f"/>
+<text x="60" y="328" fill="#fffbf5" font-size="12">hit the ceiling</text>
+<rect x="180" y="318" width="12" height="12" rx="2" fill="#ff7038"/>
+<text x="200" y="328" fill="#fffbf5" font-size="12">ended by a page break</text>
+<rect x="380" y="318" width="12" height="12" rx="2" fill="#ff7038" opacity="0.5"/>
+<text x="400" y="328" fill="#fffbf5" font-size="12">the tail a split left behind</text>
+<text x="920" y="328" fill="#9a9390" font-size="12" text-anchor="end">same file, same seven pages, every time</text>
+</svg>
