@@ -115,6 +115,13 @@ Paragraphs: [░░░░░░░░░░░░░░░░░░░░░░�
 3. **Heading Lookahead:** Once 500 words are accumulated, the paginator does not immediately cut the page. Instead, it peers ahead up to `pageLookaheadWords` (750 words total accumulated text). If a heading appears within that window, the flush is deferred until right before that heading. The current page ends cleanly, and the heading begins the next page at the top.
 4. **Ceiling Fallback:** If no heading is found within the 750-word lookahead budget, the page flushes at the paragraph boundary nearest the 500-word mark.
 
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/docx-pseudo-pages.svg" alt="Words per pseudo-page: a 7-page .docx, split by two rules: an explicit page break wins; otherwise a page ends when it reaches 500 words or a heading within the lookahead window." width="960" height="348" loading="lazy">
+  </div>
+  <figcaption>Words per pseudo-page across a 7-page document. Explicit breaks end pages early; continuous text accumulates up to 500 words, deferring the cut if a heading appears in the lookahead window.</figcaption>
+</figure>
+
 ### Resolving Styles and Outlines
 
 Detecting a heading in Word isn't just checking whether text is bold or large. Heading definitions live in `word/styles.xml`:
@@ -210,6 +217,58 @@ If an agent needs Page 4, then Page 5, then Page 6, unpacking and re-parsing a 5
 - **Cache Eviction Guarantee:** The cache eviction logic guarantees that at least one document entry is always preserved, preventing thrashing even if a single oversized document exceeds the memory target.
 
 For consecutive page reads, the archive unpack cost is paid exactly once. Subsequent reads take less than a microsecond, just the time required for a single `stat` system call.
+
+## The Token Math: Why On-Demand Pages Win
+
+To understand the difference this architecture makes, consider a real 137-page corporate document: 68,886 words and 502,276 characters of technical specifications, architecture diagrams, and service definitions.
+
+When an AI agent needs to answer questions about that document, there are three common approaches:
+
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/docx-tokens-per-question.svg" alt="Tokens a 137-page .docx puts in front of the model: Whole document dumped is approximately 125,600 tokens every turn; Index prompt once is approximately 39,600 tokens for the whole file; One page on demand is approximately 840 tokens. Over ten questions, the dump carries ~1,255,600 tokens versus ~48,000 for the index plus ten pages." width="960" height="300" loading="lazy">
+  </div>
+  <figcaption>Tokens a 137-page Word document puts in front of the model across three access strategies. Over a ten-question exchange, the on-demand page model saves over 96% of the context window.</figcaption>
+</figure>
+
+| Dimension | Whole-Document Dump | RAG Pipeline (Vector Search) | Ogcode: Index, Then Pages |
+|---|---|---|---|
+| **Per-question prompt tokens** | ≈125,600 tokens (the entire document, every turn) | ≈2,500–5,000 tokens (5–10 arbitrary text chunks) | **≈840 tokens** (one specific pseudo-page) |
+| **Ten-question session** | **≈1,255,600 tokens** re-ingested | ≈35,000 tokens + 10 vector embedding round trips | **≈48,000 tokens** (catalog + 10 targeted pages) |
+| **Token savings** | Baseline (0%) | ~97% (at the cost of broken context) | **>96% reduction** (with complete context) |
+| **Structural fidelity** | Preserved, but drowns prompt attention | Poor: splits tables, severs headers, drops footnotes | **High**: complete markdown tables, resolved footnotes |
+| **Verifiability** | Difficult: model must point into a 125k-token blob | Low: opaque chunk IDs (`chunk-842`) without page numbers | **Exact**: checkable page citations (e.g., "Page 14, Table 2") |
+| **Latency & Cost** | Severe: 30–70s time-to-first-token; massive token bills | Medium: external embedding call + vector DB search | **Fast**: SQLite index lookup in <2ms, page extraction via LRU cache |
+
+### The Dump: The Context Cliff
+
+Dumping the converted text directly into the agent's prompt puts approximately 125,600 tokens into the context window on every turn. In an interactive conversation or multi-step agent workflow, context compounds: by turn ten, the agent has ferried over 1.25 million tokens through the model.
+
+Even with multi-million-token context windows, context-stuffing has well-known failure modes:
+
+1. **The Context Cliff:** As demonstrated in our analysis of [the 64k context budget](/blog/context-budget-64k), LLM recall and reasoning degrade significantly past 32,000–64,000 tokens. Critical clauses in the middle of a 137-page document get missed or misattributed ("lost in the middle").
+2. **First-Token Latency:** Processing a 125k-token prompt takes tens of seconds before the model generates its first word, rendering conversational agent loops sluggish and painful.
+3. **Compounding Cost:** Paying for 125,000 prompt tokens on every turn quickly turns a simple research question into an expensive API invoice.
+
+### The RAG Shortcut: Severed Structure
+
+The standard reaction to oversized documents is a Retrieval-Augmented Generation (RAG) pipeline: chunk the document into 500-token windows, compute vector embeddings, and retrieve the top-$k$ nearest chunks.
+
+For Word documents, this creates structural chaos:
+
+- **Torn Tables:** A 30-row pricing matrix gets sliced arbitrarily across multiple chunks. The retrieved snippet might contain rows 12–18 without the header row, leaving the model to guess what each column represents.
+- **Dangling Headings:** An outline heading lands at the bottom of chunk $N$, while the contractual obligation it defines starts at the top of chunk $N+1$.
+- **Orphaned Footnotes:** Footnotes stored at the end of the document XML get embedded in isolation, severed from the specific clauses they qualify.
+- **No Page Citations:** Because chunks have no concept of document geography, the agent cannot cite an authoritative page number that a human reviewer can verify in Word or Google Docs.
+
+### Ogcode: 96% Fewer Tokens, 100% Verifiable
+
+Ogcode's two-tool approach treats the document like a database:
+
+1. **Catalog Once (`docx_index`):** The agent scans page summaries and topical labels from SQLite. For the entire 137-page document, the index is ≈39,600 tokens. Using range slicing (`start_page=1, end_page=10`), the agent can survey chapters for just 200–300 tokens per slice.
+2. **Fetch on Demand (`read_docx_page`):** The agent requests only the targeted page (≈840 tokens), complete with its tables, inline footnotes, and section context.
+
+Across a ten-question interrogation, the agent consumes approximately 48,000 tokens total (39.6k for the catalog + 8.4k for ten distinct page fetches). Compared to the whole-document dump (1,255,600 tokens), **this eliminates more than 96% of token consumption**, while ensuring the model operates well within its peak-accuracy window and provides human-checkable page numbers for every claim.
 
 ## Transactional Indexing
 
