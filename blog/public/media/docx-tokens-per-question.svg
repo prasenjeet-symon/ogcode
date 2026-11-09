@@ -1,22 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img">
-<rect width="960" height="300" fill="#151414"/>
-<text x="78" y="30" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.5">Tokens a 137-page .docx puts in front of the model</text>
-<text x="882" y="30" fill="#9a9390" font-size="12" text-anchor="end">68,886 words, 502,276 characters</text>
-
-<text x="68" y="103" fill="#9a9390" font-size="12.5" text-anchor="end">&#160;</text>
-<text x="78" y="103" fill="#fffbf5" font-size="12.5">Whole document, dumped</text>
-<rect x="330" y="85" width="400" height="30" rx="3" fill="#ff5e1f"/>
-<text x="744" y="103" fill="#fffbf5" font-size="12.5">&#8776;125,600, every turn</text>
-
-<text x="68" y="167" fill="#9a9390" font-size="12.5" text-anchor="end">&#160;</text>
-<text x="78" y="167" fill="#fffbf5" font-size="12.5">Index prompt, once</text>
-<rect x="330" y="149" width="126" height="30" rx="3" fill="#ff7038"/>
-<text x="470" y="167" fill="#fffbf5" font-size="12.5">&#8776;39,600 for the whole file</text>
-
-<text x="68" y="231" fill="#9a9390" font-size="12.5" text-anchor="end">&#160;</text>
-<text x="78" y="231" fill="#fffbf5" font-size="12.5">One page, on demand</text>
-<rect x="330" y="213" width="7" height="30" rx="3" fill="#ff7038" opacity="0.8"/>
-<text x="351" y="231" fill="#fffbf5" font-size="12.5">&#8776;840, the page you can cite</text>
-
-<text x="78" y="272" fill="#9a9390" font-size="12">Tokens are characters &#247; 4. Over ten questions: the dump carries &#8776;1,255,600; the index plus ten pages, &#8776;48,000.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="340" viewBox="0 0 960 340" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Tokens put in front of the model, per question</title>
+<desc id="dsc">Horizontal bars on a logarithmic scale from 100 to 200,000 tokens per question. Dumping the whole 147-page document sends about 125,550 tokens every question, retrieval about 2,500, and opening the pages one answer needs about 1,400, which is 50 and 90 times smaller.</desc>
+<rect width="960" height="340" fill="#151414"/>
+<text x="40" y="34" fill="#fffbf5" font-size="14" font-weight="600" letter-spacing="0.4">Tokens put in front of the model, per question</text>
+<text x="40" y="56" fill="#9a9390" font-size="12">147 pages &#183; 68,886 words &#183; 502,199 characters, answered from the pages the labels point at</text>
+<line x1="240.0" y1="88.0" x2="240.0" y2="246.0" stroke="#2a2726" stroke-width="1"/>
+<text x="240.0" y="266.0" fill="#9a9390" font-size="11.5" text-anchor="middle">100</text>
+<line x1="382.4" y1="88.0" x2="382.4" y2="246.0" stroke="#2a2726" stroke-width="1"/>
+<text x="382.4" y="266.0" fill="#9a9390" font-size="11.5" text-anchor="middle">1k</text>
+<line x1="524.8" y1="88.0" x2="524.8" y2="246.0" stroke="#2a2726" stroke-width="1"/>
+<text x="524.8" y="266.0" fill="#9a9390" font-size="11.5" text-anchor="middle">10k</text>
+<line x1="667.1" y1="88.0" x2="667.1" y2="246.0" stroke="#2a2726" stroke-width="1"/>
+<text x="667.1" y="266.0" fill="#9a9390" font-size="11.5" text-anchor="middle">100k</text>
+<text x="475.0" y="288.0" fill="#9a9390" font-size="11.5" text-anchor="middle">tokens per question &#183; log scale</text>
+<text x="24.0" y="115.0" fill="#fffbf5" font-size="12.5" font-weight="600">Whole document, dumped</text>
+<rect x="240.0" y="96" width="441.2" height="30" rx="3" fill="#ff5e1f"/>
+<rect x="690.2" y="102" width="74.5" height="18" fill="#151414"/>
+<text x="695.2" y="116" font-size="13"><tspan fill="#fffbf5" font-weight="600">&#8776;125,550</tspan></text>
+<text x="24.0" y="169.0" fill="#fffbf5" font-size="12.5" font-weight="600">RAG, top-5 chunks</text>
+<rect x="240.0" y="150" width="199.0" height="30" rx="3" fill="#7d8fb3"/>
+<rect x="448.0" y="156" width="155.1" height="18" fill="#151414"/>
+<text x="453.0" y="170" font-size="13"><tspan fill="#fffbf5" font-weight="600">&#8776;2,500</tspan><tspan fill="#9a9390"> &#183; &#215;50 fewer</tspan></text>
+<text x="24.0" y="223.0" fill="#fffbf5" font-size="12.5" font-weight="600">Pages for one answer</text>
+<rect x="240.0" y="204" width="163.2" height="30" rx="3" fill="#fffbf5"/>
+<rect x="412.2" y="210" width="155.1" height="18" fill="#151414"/>
+<text x="417.2" y="224" font-size="13"><tspan fill="#fffbf5" font-weight="600">&#8776;1,400</tspan><tspan fill="#9a9390"> &#183; &#215;90 fewer</tspan></text>
+<text x="40.0" y="318.0" fill="#9a9390" font-size="11">Characters &#247; 4. Bars are logarithmic; equal visual steps are equal multiples.</text>
 </svg>

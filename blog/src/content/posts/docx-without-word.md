@@ -238,57 +238,136 @@ The content stamp is the part that earns its keep. A file replaced by a differen
 
 > A cache that trusts a timestamp is a cache that will eventually quote the wrong contract.
 
-## The Token Math: Why On-Demand Pages Win
+## The Token Math: Three Ways to Read the Same Document
 
-To see the difference this architecture makes, consider a real 137-page corporate document: 68,886 words and 502,276 characters of technical specifications, architecture diagrams and service definitions.
+To see what the architecture buys, take a real 147-page technical document: 68,886 words and 502,199 characters of specifications, architecture notes and service definitions. That is about 125,500 tokens, dividing characters by four, the same back-of-the-envelope convention used in [the PDF post](/blog/pdfs-one-page-at-a-time). Treat the figures as estimates and trust the shape.
 
-When an AI agent needs to answer questions about that document, there are three common approaches:
-
-<figure class="bp-chart">
-  <div class="bp-chart-pan" tabindex="0">
-    <img src="/blog/media/docx-tokens-per-question.svg" alt="Tokens a 137-page .docx puts in front of the model: whole document dumped is approximately 125,600 tokens every turn; index prompt once is approximately 39,600 tokens for the whole file; one page on demand is approximately 840 tokens. Over ten questions, the dump carries about 1,255,600 tokens versus about 48,000 for the index plus ten pages." width="960" height="300" loading="lazy">
-  </div>
-  <figcaption>Tokens a 137-page Word document puts in front of the model across three access strategies. Over a ten-question exchange, the on-demand page model saves over 96% of the context window.</figcaption>
-</figure>
+An agent asked a question about that file has three ways to get text in front of the model: dump the whole document, retrieve fragments from a vector index, or keep a labelled table of pages and open the one page the question needs. Per question, the three are not close:
 
 | Dimension | Whole-Document Dump | RAG Pipeline (Vector Search) | Ogcode: Index, Then Pages |
 |---|---|---|---|
-| **Per-question prompt tokens** | about 125,600 tokens (the entire document, every turn) | about 2,500 to 5,000 tokens (5 to 10 arbitrary chunks) | **about 840 tokens** (one specific pseudo-page) |
-| **Ten-question session** | **about 1,255,600 tokens** re-ingested | about 35,000 tokens plus 10 embedding round trips | **about 48,000 tokens** (catalogue plus 10 targeted pages) |
-| **Token savings** | Baseline (0%) | about 97% (at the cost of broken context) | **over 96% reduction** (with complete context) |
-| **Structural fidelity** | Preserved, but drowns prompt attention | Poor: splits tables, severs headings, drops footnotes | **High**: complete tables, resolved footnotes, text boxes in place |
-| **Verifiability** | Difficult: the model must point into a 125k-token blob | Low: opaque chunk ids without page numbers | **Exact**: checkable page citations, such as "Page 14, Table 2" |
-| **Latency and cost** | Severe: tens of seconds before the first token; large token bills | Medium: external embedding call and vector search | **Fast**: index lookup in milliseconds, pages served from memory |
+| **What enters the prompt** | about 125,500 tokens, the entire document, every turn | about 2,500 tokens, the top five of 279 chunks | **about 1,400 tokens**, the one or two pages an answer needs |
+| **Setup** | nothing | chunk into 279 windows of 500 tokens with 50-token overlap, embed every one | one background labelling job: pages named once, about 40,000 tokens of labels |
+| **Ten-question session** | **about 1,255,500 tokens** re-sent | about 25,000 tokens plus ten retrieval round trips | **about 19,700**, measured; about 54,000 if the whole catalogue is read first |
+| **Savings against the dump** | baseline | about 98%, paid for in broken context | **96% to 98%**, with complete pages |
+| **Structural fidelity** | preserved, but drowns prompt attention | poor: splits tables, severs headings, drops footnotes | **high**: complete tables, resolved footnotes, text boxes in place |
+| **Verifiability** | difficult: the model must point into a 125k-token blob | low: opaque chunk ids without page numbers | **exact**: checkable page citations, such as "Page 14, Table 2" |
+| **Accuracy** | cut text it cannot see, so a gap reads as the whole story | plausible fragments: nothing to check, and top five never returns nothing | **measured**: 17 pages opened, 0 misses, absent questions reported absent |
+| **Latency and cost** | severe: tens of seconds before the first token; large token bills | medium: an embedding call and a vector search per question | **fast**: an index lookup in milliseconds, one page from memory |
+
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/docx-tokens-per-question.svg?v=2" alt="Bar chart on a log scale: prompt tokens for one answer on a 147-page Word document. Dumping the whole file costs about 125,550 tokens every turn. A RAG pipeline's top-five retrieved chunks cost about 2,500. The pages one answer actually needs cost about 1,400, roughly 90 times fewer than the dump and about 1.8 times fewer than retrieval." width="960" height="340" loading="lazy">
+  </div>
+  <figcaption>Tokens put in front of the model for one answer on a 147-page Word document. The bars are logarithmic, so equal steps are equal multiples; the gap between dumping the file and opening the pages an answer needs is about 90×.</figcaption>
+</figure>
 
 ### The Dump: The Context Cliff
 
-Dumping the converted text directly into the agent's prompt puts about 125,600 tokens into the context window on every turn. In a conversation or a multi-step workflow, context compounds: by turn ten, the agent has ferried over 1.25 million tokens through the model.
+Dumping the converted text directly into the agent's prompt puts about 125,500 tokens into the context window on every turn. Context compounds: by the tenth question the agent has ferried about 1.25 million tokens through the model, more than any production context window will hold at once. In practice the dump is not a large prompt but a truncated one, and what gets cut is decided by position, not by relevance.
 
 Even with multi-million-token windows, context stuffing has well-known failure modes:
 
-1. **The context cliff:** as we wrote in [the 64k context budget](/blog/context-budget-64k), recall and reasoning degrade well before the window is full. Critical clauses in the middle of a 137-page document get missed or misattributed.
+1. **The context cliff:** as we wrote in [the 64k context budget](/blog/context-budget-64k), recall and reasoning degrade well before the window is full. Critical clauses in the middle of a 147-page document get missed or misattributed.
 2. **First-token latency:** processing a 125k-token prompt takes tens of seconds before the model generates a word.
 3. **Compounding cost:** paying for 125,000 prompt tokens on every turn turns a simple research question into an expensive invoice.
 
 ### The RAG Shortcut: Severed Structure
 
-The standard reaction to oversized documents is a retrieval pipeline: chunk the document into small token windows, embed the chunks, and retrieve the nearest ones.
+The standard reaction to oversized documents is a retrieval pipeline: chunk the document into small token windows, embed every chunk, and put the nearest ones in the prompt. The arithmetic is concrete. Windows of 500 tokens with 50 tokens of overlap give 279 chunks for this document; retrieving the top five puts about 2,500 tokens of fragments in front of the model, fifty times less than the dump and, on the face of it, the cheapest line in the table.
 
-For Word documents, that creates structural chaos:
+For Word documents, that discount is paid in structure:
 
 - **Torn tables:** a 30-row pricing matrix gets sliced across chunks. The retrieved snippet might contain rows 12 to 18 without the header row, leaving the model to guess what each column means.
 - **Dangling headings:** an outline heading lands at the bottom of one chunk while the obligation it defines starts at the top of the next.
 - **Orphaned footnotes:** note bodies stored at the end of the file get embedded in isolation, severed from the clauses they qualify.
 - **No page citations:** chunks have no idea where they sat in the document, so the agent cannot cite a page a human reviewer can open in Word.
+- **Cold every time:** the retriever ranks from scratch on each question. Nothing it learned on question three makes question four cheaper.
 
-### Ogcode: 96% Fewer Tokens, 100% Verifiable
+Two costs sit outside that per-question figure, and neither is an accounting trick. The embedding pass reads the whole document once, about 125,500 tokens through an embedding model, before the first question can be asked. And this is the plain, untuned pipeline: chunk, embed, cosine similarity, top five. Production retrieval adds a reranker, metadata filters and often a second model call to repair what the first one missed, every one of which adds latency and tokens the table does not charge.
+
+### Ogcode: A Map You Read Once, Then a Page or Two
 
 Ogcode's two-tool approach treats the document like a database:
 
-1. **Catalogue once (`docx_index`):** the agent scans page summaries and labels from the index. For the entire 137-page document, the catalogue is about 39,600 tokens. With range slicing, it can survey a chapter for a few hundred tokens per slice.
-2. **Fetch on demand (`read_docx_page`):** the agent requests the page it needs, about 840 tokens, with its tables, footnotes and section context.
+1. **Catalogue once (`docx_index`):** the agent reads a table of page numbers and labels. For this document it is about 40,000 tokens, roughly 270 per page, built in the background and stored in SQLite. Read whole, it is the most expensive single call in this post. Read as a twenty-page slice, it costs about 5,600 tokens and still tells the agent which chapter holds a clause.
+2. **Fetch on demand (`read_docx_page`):** the agent requests the pages the labels point at, about 850 tokens each, with their tables, footnotes and section context intact. Across these 147 pages the mean is 854: 624 on the shortest page, 1,537 on the longest. A question usually needs the page after it as well, since the clause it asks about tends to break across the page boundary; measured below, the real cost of an answer is about 1,400 tokens.
 
-Across a ten-question interrogation, the agent consumes about 48,000 tokens in total (39.6k for the catalogue and 8.4k for ten page fetches). Against the whole-document dump at 1,255,600 tokens, **that removes more than 96% of token consumption**, keeps the model inside its peak-accuracy window, and gives every claim a page number a person can check.
+Nothing is embedded and nothing is re-ranked, and the page that comes back is the page a reviewer can open in Word.
+
+### A QA Session, Not a Question
+
+A single question flatters every strategy. Dumping 125,500 tokens once, retrieving 2,500, or opening the pages one answer needs are all affordable. Real use is a session: a pile of questions against the same file, each one landing somewhere else, with the context bill accumulating question by question.
+
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/docx-qa-session.svg" alt="Line chart on a logarithmic scale: cumulative prompt tokens across a thirty-question session on a 147-page Word document. Dumping the whole file climbs to about 3.77 million tokens by question thirty. A RAG pipeline reaches 75,000. Ogcode, opening pages from a label slice, reaches 47,600, and is cheaper than retrieval from about the sixth question onward." width="960" height="520" loading="lazy">
+  </div>
+  <figcaption>Cumulative prompt tokens over a session. Retrieval's per-question bill never falls; the page index is paid once, then costs about 1,400 tokens an answer. At question ten this model reads 19,600 tokens; the measured run below came within about sixty of it.</figcaption>
+</figure>
+
+Three things on that chart are worth saying plainly.
+
+**The dump is not a competitor.** By question thirty it has carried 3.77 million tokens, seventy-nine times what the page model needed, and no production context window holds that much at once.
+
+**Retrieval is cheap, and on a short session it beats the index.** One question costs 2,500 tokens through retrieval and about 7,000 through a label slice, because the slice has 5,600 tokens of labels to pay off before the first page opens. Retrieval stays ahead until about the fifth question. From the sixth the lines cross and do not come back: each further question adds about 1,400 tokens to the page model and 2,500 to retrieval.
+
+**The catalogue is a different trade, which is why `docx_index` takes a page range.** Read whole, forty thousand tokens of labels is the better map, and it does not beat retrieval on tokens until roughly the thirty-sixth question. Read as a twenty-page slice, it is what makes the first ten questions cheap.
+
+What retrieval loses is not the token count. It is what the tokens buy: fragments without headers, fragments without page numbers, and a fresh ranking on every question. The page model spends about 1,400 tokens an answer and gets a page a reviewer can open.
+
+### Ten Questions, Asked and Answered, Measured
+
+Estimates are cheap, and the session curve above is still modelled arithmetic. So we ran the same document through the real flow: ten substantive questions, the label map first, then only the pages the labels pointed at, with every page recorded and every answer checked against the page it came from.
+
+| Question asked | Pages opened | Page tokens |
+|---|---|---|
+| What makes a method safe, and what makes it idempotent? → Read-only semantics versus repeatable effect; `PUT` and `DELETE` are idempotent, `POST` is not. | 53–54 | ≈1,669 |
+| What does a client expect from `Expect: 100-continue`, and what must the server do? → Send `100 (Continue)` or a final status without waiting for the body. | 63–64 | ≈1,658 |
+| Which status codes are cacheable by default? → The heuristic list: 200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501. | 96 | ≈814 |
+| What does `Retry-After` mean, and when may it be sent? → A wait time, as a date or a delay; with 503, and with any 3xx. | 68–69 | ≈1,692 |
+| How is the origin of a URI determined? → The normalized triple of scheme, host and port, defaulting the port from the scheme. | 16–17 | ≈1,621 |
+| What may a client change on a 301, and what does the document say about 308? → 301 permits `POST`→`GET`; 308 is named as the alternative, and is heuristically cacheable. | 104, 106 | ≈1,649 |
+| Which headers are hop-by-hop? → `Proxy-Connection`, `Keep-Alive`, `TE`, `Transfer-Encoding`, `Upgrade`. | 36 | ≈834 |
+| When must a server send 405, and what must that response include? → When the method is known but not supported by the target; an `Allow` header listing what is. | 107–108 | ≈1,629 |
+| Which fields are required in a 206 response? → `Date`, `Cache-Control`, `ETag`, `Expires`, `Content-Location`, `Vary`, and a `Content-Range`. | 100 | ≈835 |
+| What are the rules for `Location`? → A URI reference resolved against the target URI; meaningful for 201 and 3xx; fragments are inherited. | 67–68 | ≈1,656 |
+| **All ten questions** | **17 page opens** | **≈14,057** |
+
+Seventeen page opens, 14,057 tokens: about 1,400 per question, against the flat 850 the model assumed. The gap is not padding. Seven of the ten answers need two pages, because the clause that answers the question starts at the foot of one page and finishes at the head of the next. That is a property of the pagination, and it is the kind of thing only a measurement finds.
+
+Add the 5,600 tokens of labels that told the agent where to look and the session comes to about 19,700 tokens, **98.4% below the 1,255,500-token dump**. Retrieval would have carried 25,000 and handed back fragments; reading the whole catalogue first would have carried about 54,000.
+
+Two of our first ten candidate questions were not in the document at all: 429 is defined in RFC 6585, and the rule that `Transfer-Encoding` overrides `Content-Length` belongs to RFC 9112. Rather than answer from a plausible-looking page, the run recorded the absence. That is the behaviour you want from a reader that cites pages, and it is not something top-*k* retrieval hands you for free: five chunks always come back, and none of them says "this file does not cover it".
+
+## Accuracy: A Window Smaller Than the Answer
+
+The token charts above price the three strategies. They do not say what the tokens buy, and that is where retrieval's bill actually lands. A 500-token window is not a unit of meaning in a Word document; it is a unit of arithmetic, and the arithmetic was chosen before anything was read.
+
+The measured run shows what that gap looks like on the page. Ten questions opened seventeen pages, and every page belonged to the answer that cited it. Each answer came back with the address attached — "pp. 53–54", "p. 96", "p. 100" — so a reviewer can open the file and check the sentence, not just the gist.
+
+<figure class="bp-chart">
+  <div class="bp-chart-pan" tabindex="0">
+    <img src="/blog/media/docx-answer-span.svg" alt="Horizontal bar chart, measured: page text opened per answer across ten questions on a 147-page Word document, in tokens. Bars run from 814 to 1,692. A dashed line marks one 500-token retrieval window and a dotted line the 854-token mean page. All ten answers are larger than one window; seven of the ten span two pages and are drawn in orange." width="960" height="592" loading="lazy">
+  </div>
+  <figcaption>Pages opened per answer in the measured run, in tokens. The shortest page in the document is 624 tokens and the mean is 854, so even a one-page answer is larger than a 500-token window; seven of the ten answers straddle a page break and needed the following page as well.</figcaption>
+</figure>
+
+The shortest page in this file is 624 tokens. Every bar above clears the dashed line, and seven of the ten clear it twice over, because seven of the answers begin at the foot of one page and finish at the head of the next. The chunk size was picked to be uniform; the document was not.
+
+Four properties put retrieval in that position.
+
+**The window is smaller than the smallest page.** With 500-token chunks and 50 tokens of overlap, the document yields 279 of them, and the shortest page still needs 624 tokens to say what it says. An answer that spans a page break has to get both halves into the same top-five draw, and the two halves rarely score alike: the definition and the sentence that qualifies it use different words. When one half misses, the model still receives a fluent passage, so it answers from half an argument in exactly the tone it uses for a whole one.
+
+**A fragment has no address.** A chunk id identifies a row in a vector store, not a place in the file. Without a page number there is nothing for a reviewer to open and no cheap way to discover that the passage was the wrong one. The page table carries the number from the index into the answer, which is why "p. 100" can appear in a reply at all.
+
+**Top five always returns five.** The two questions this file does not cover came back absent, because a page model is allowed to return nothing. Retrieval ranks 279 chunks and hands back the best of whatever exists, so the same question returns five passages about caching or message framing, and they arrive looking like a successful search.
+
+**The damage looks like an answer.** A torn table, a dangling heading and an orphaned footnote all read as prose. There is no error, no gap marker, and no missing page to notice. The [spreadsheet post](/blog/spreadsheets-query-dont-read) is the sharp version of the same point: a retrieval lane over 4,092 windows got the shape of all ten questions right and the answer to every one wrong, computing £1,392 of net sales from a workbook that holds £1,727,708. Nothing in the output looked broken.
+
+**What this does not prove.** We did not run a graded head-to-head against a tuned retrieval pipeline, and a number from a hurried one would be a rigged comparison rather than a measurement. Embedding search is good at finding passages, and with reranking and metadata filters it can keep an argument together. The claim here is narrower and measured: on this document, with this index, seventeen pages were opened, none was a miss, every answer carried the page it came from, and the questions the file does not answer were reported as absent.
+
+That is the other half of the token argument. Retrieval is cheap per question and getting cheaper. What those tokens buy is a fragment of a page — and in this document a page is already bigger than the fragment that stands in for it. The part left out does not send an error.
 
 ## Transactional Indexing
 
@@ -337,7 +416,7 @@ The model answers with the section and the page number:
 
 > Under Section 4 of `contracts/cloud-services.docx` (Page 4), the monthly uptime commitment is 99.95%. If uptime falls between 99.0% and 99.94%, a 10% service credit applies; below 99.0%, the credit increases to 25%. Sunday maintenance windows between 02:00 and 04:00 UTC are excluded per footnote 1.
 
-The answer is checkable. The prompt spent fewer than 800 tokens. No external process was spawned.
+The answer is checkable. The prompt spent about a thousand tokens: one page of the contract. No external process was spawned.
 
 If the contract had been edited since the last index run, that first call would have carried `(stale index)` and a line telling the agent to run `ogcode index` again. The agent can still choose to use the old labels, but it cannot do the dangerous thing quietly: cite page 4 of a version it never read.
 
