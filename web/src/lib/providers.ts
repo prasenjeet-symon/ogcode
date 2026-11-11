@@ -207,11 +207,15 @@ export function vendorHostOf(baseURL: string): string {
 }
 
 /** The vendor id a custom endpoint connects as: "custom-" plus the slugified
- *  hostname. https://vllm.mycompany.com/v1 → "custom-vllm-mycompany-com".
+ *  host — port included, so localhost:8000 and localhost:8080 stay two slots
+ *  instead of both collapsing to "custom-localhost".
+ *  https://vllm.mycompany.com/v1 → "custom-vllm-mycompany-com".
  *  The prefix is what distinguishes customs from preset slugs and keeps them
  *  clear of the reserved ids even for a bare-IP endpoint. */
 export function vendorIdForBaseURL(baseURL: string): string {
-  return `custom-${slugify(vendorHostOf(baseURL)) || 'endpoint'}`;
+  let host = '';
+  try { host = new URL(baseURL).host.toLowerCase(); } catch { /* malformed */ }
+  return `custom-${slugify(host) || 'endpoint'}`;
 }
 
 const presetForVendorId = (id: string): CompatiblePreset | undefined =>

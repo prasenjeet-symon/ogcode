@@ -88,6 +88,11 @@ export default function ModelsSettings() {
   const shell = useShell();
   const [configs, setConfigs] = createSignal<Record<string, ProviderConfig>>({});
   const [loadingConfigs, setLoadingConfigs] = createSignal(true);
+  // A failed config fetch must never leave the credential forms mounted with an
+  // empty config: every field would read "no key stored", and Save then sends
+  // "" — which the server writes verbatim, erasing a working key. Keep the
+  // forms closed and say why instead.
+  const [configError, setConfigError] = createSignal('');
   const [active, setActive] = createSignal('');
 
   createEffect(() => shell.report({ noun: 'settings' }));
@@ -98,6 +103,10 @@ export default function ModelsSettings() {
       const map: Record<string, ProviderConfig> = {};
       for (const c of list) map[c.providerId] = c;
       setConfigs(map);
+    } catch {
+      setConfigError(
+        'Could not load the saved provider settings. Reload the page before changing credentials — saving from here could erase a stored key.',
+      );
     } finally {
       setLoadingConfigs(false);
     }
@@ -445,6 +454,7 @@ export default function ModelsSettings() {
             models={modelsFor(slot().id)}
             config={configs()[slot().id]}
             loadingConfig={loadingConfigs()}
+            configError={configError()}
             onSaved={(c) => setConfigs({ ...configs(), [slot().id]: c })}
             onApplied={() => session.reloadModels()}
             onRemoveVendor={isVendorSlotId(slot().id) ? () => removeVendorById(slot().id) : undefined}
@@ -528,6 +538,9 @@ function OGXSection(props: {
   let pollTimer: number | undefined;
   let noteTimer: number | undefined;
   let lastCheck = 0;
+  // One status request in flight at a time: a slow or unreachable server must
+  // not let a 2 s poll stack up behind itself.
+  let pollBusy = false;
 
   const state = (): OGXState => {
     const st = status();
@@ -622,7 +635,10 @@ function OGXSection(props: {
       // no longer complete.
       const startedAt = Date.now();
       pollTimer = window.setInterval(async () => {
+        if (pollBusy) return;
+        pollBusy = true;
         const st = await getOGXStatus().catch(() => null);
+        pollBusy = false;
         if (st?.connected && st.connectedAt !== before) {
           setStatus(st);
           setRevoked(false);
@@ -920,6 +936,10 @@ function ProviderSection(props: {
   models: ModelInfo[];
   config: ProviderConfig | undefined;
   loadingConfig: boolean;
+  /** Non-empty when the stored configs could not be fetched. The credential
+   *  forms stay unmounted: without the config they would misread a stored key
+   *  as "none" and send "" over it. */
+  configError: string;
   onSaved: (c: ProviderConfig) => void;
   onApplied: () => Promise<void>;
   onToggle: (m: ModelInfo) => void | Promise<void>;
@@ -985,7 +1005,11 @@ function ProviderSection(props: {
         </Show>
       }
     >
-      <Show when={props.slot.def && !props.loadingConfig}>
+      <Show when={props.configError}>
+        <Banner tone="warn">{props.configError}</Banner>
+      </Show>
+
+      <Show when={props.slot.def && !props.loadingConfig && !props.configError}>
         <Credentials
           def={props.slot.def!}
           config={props.config}
@@ -1058,6 +1082,8 @@ function Credentials(props: {
   // catalogue re-fetched. Drives the "Fetching models…" indicator.
   const [refreshing, setRefreshing] = createSignal(false);
   const [saved, setSaved] = createSignal(false);
+  let savedTimer: number | undefined;
+  onCleanup(() => clearTimeout(savedTimer));
   const [error, setError] = createSignal('');
   // The form is locked through both the save and the follow-up catalogue fetch.
   const busy = () => saving() || refreshing();
@@ -1149,7 +1175,8 @@ function Credentials(props: {
       // Key stored and models present. If the request itself blipped we simply
       // didn't refresh this time — not a credential problem, so don't alarm.
       setSaved(true);
-      setTimeout(() => setSaved(false), 4000);
+      clearTimeout(savedTimer);
+      savedTimer = window.setTimeout(() => setSaved(false), 4000);
     } else if (refreshFailed) {
       setError('Saved, but ogcode could not reach the server to refresh the model list. Check that the ogcode server is running, then Save again.');
     } else {

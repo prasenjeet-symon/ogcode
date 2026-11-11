@@ -93,7 +93,11 @@ export function mergeTranscript(
     return [...incoming.map(normalize), ...prev].sort(byId);
   }
 
-  const kept = prev.filter((m) => m.info.id < incomingMin);
+  // Keep everything outside the page's range, in both directions: older pages
+  // loaded earlier sit above it, and messages that arrived after the page was
+  // fetched sit below it. Dropping the newer tail let an older response landing
+  // last remove the newest bubbles from the screen.
+  const kept = prev.filter((m) => m.info.id < incomingMin || m.info.id > incomingMax);
   const prevById = new Map(prev.map((m) => [m.info.id, m]));
   const merged = incoming.map((m) => {
     const normalized = normalize(m);

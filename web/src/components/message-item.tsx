@@ -1,4 +1,4 @@
-import { Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import type { MessageWithParts, Part, TextPartData, ToolPartData, ToolState, ReasoningPartData, ImagePartData, AgentPartData, Interruption, InterruptReason } from '../api/client';
 import AgentPart from './agent-part';
@@ -505,11 +505,11 @@ function samePaneSegment(a: PaneSegment, b: PaneSegment): boolean {
 // group's elapsed clock, one monospace line per call with a status LED and a
 // rail swept by the running flow, and the call's outcome on the right. The
 // pane reads tool-part data alone (status, input, timestamps) — the same data
-// a generic tool row had — so nothing new is fetched. Clicking a line
-// discloses that call's input/output exactly like a generic tool row does.
+// a generic tool row had — so nothing new is fetched. Like the housekeeping
+// tool rows (codebase_map, file_map, …), a line is a flat record with nothing
+// to open: not clickable, not focusable, no disclosure panel.
 function TeammatePane(props: { parts: Part[] }) {
   const [nowTick, setNowTick] = createSignal(Date.now());
-  const [openIdx, setOpenIdx] = createSignal(-1);
 
   // Re-read every second while any line is running so its elapsed read ticks
   // (the same clock every tool row shows, one interval for the whole pane).
@@ -577,7 +577,9 @@ function TeammatePane(props: { parts: Part[] }) {
   const anyRunning = createMemo(() => lines().some((l) => l.status === 'running'));
   createEffect(() => {
     if (!anyRunning()) return;
-    setNowTick(Date.now());
+    // The write must not be read back by this effect through lines() → nowTick,
+    // or the effect re-runs (and rebuilds its interval) on every tick.
+    untrack(() => setNowTick(Date.now()));
     const id = setInterval(() => setNowTick(Date.now()), 1000);
     onCleanup(() => clearInterval(id));
   });
@@ -627,46 +629,23 @@ function TeammatePane(props: { parts: Part[] }) {
       </div>
       <Index each={lines()}>
         {(l, i) => (
-          <>
-            <button
-              type="button"
-              class="tp-line"
-              aria-expanded={openIdx() === i}
-              title={`teammate ${l().op || ''}`.trim()}
-              onClick={() => setOpenIdx(openIdx() === i ? -1 : i)}
-            >
-              <span class={`tp-led ${l().ledClass}`} />
-              <span class="tp-cmd">{l().op ? `teammate:${l().op}` : 'teammate'}</span>
-              <Show when={l().target}>
-                <span class="tp-arrow" aria-hidden="true">→</span>
-                <span class="tp-name">{l().target}</span>
-              </Show>
-              <Show when={l().arg}>
-                <span class="tp-arg">· {l().arg}</span>
-              </Show>
-              <span class="tp-rail">
-                <Show when={l().status === 'running'}>
-                  <i style={{ 'animation-delay': `${(-i * 0.45).toFixed(2)}s` }} />
-                </Show>
-              </span>
-              <span class={`tp-state ${l().stateClass}`}>{l().stateLabel}</span>
-            </button>
-            <Show when={openIdx() === i}>
-              <div class="tp-detail">
-                <div class="space-y-1.5 min-w-0 overflow-hidden">
-                  <Show when={l().state.input && Object.keys(l().state.input).length > 0}>
-                    <CodeBlock label="input" maxHeight={200} text={safeStringify(l().state.input)} />
-                  </Show>
-                  <Show when={l().state.output}>
-                    <CodeBlock label="output" maxHeight={280} text={l().state.output || ''} />
-                  </Show>
-                  <Show when={l().state.error}>
-                    <CodeBlock label="error" maxHeight={160} text={l().state.error || ''} />
-                  </Show>
-                </div>
-              </div>
+          <div class="tp-line">
+            <span class={`tp-led ${l().ledClass}`} />
+            <span class="tp-cmd">{l().op ? `teammate:${l().op}` : 'teammate'}</span>
+            <Show when={l().target}>
+              <span class="tp-arrow" aria-hidden="true">→</span>
+              <span class="tp-name">{l().target}</span>
             </Show>
-          </>
+            <Show when={l().arg}>
+              <span class="tp-arg">· {l().arg}</span>
+            </Show>
+            <span class="tp-rail">
+              <Show when={l().status === 'running'}>
+                <i style={{ 'animation-delay': `${(-i * 0.45).toFixed(2)}s` }} />
+              </Show>
+            </span>
+            <span class={`tp-state ${l().stateClass}`}>{l().stateLabel}</span>
+          </div>
         )}
       </Index>
     </div>
@@ -941,10 +920,11 @@ function UserMessage(props: { msg: MessageWithParts }) {
 
   function checkOverflow() {
     if (!contentRef) return;
-    const el = contentRef;
-    // When expanded, compare against a tall sentinel. When collapsed, check if content exceeds clamp.
-    const limit = expanded() ? 9999 : CLAMP_HEIGHT;
-    setOverflow(el.scrollHeight > limit + 1);
+    // While expanded the clamp is lifted, so a measurement now would always say
+    // "no overflow" and hide the very button that restores the clamp. Keep the
+    // result measured while collapsed.
+    if (expanded()) return;
+    setOverflow(contentRef.scrollHeight > CLAMP_HEIGHT + 1);
   }
 
   onMount(() => {
@@ -986,7 +966,7 @@ function UserMessage(props: { msg: MessageWithParts }) {
             />
           </Show>
         </div>
-        <Show when={overflow()}>
+        <Show when={overflow() || expanded()}>
           <button
             type="button"
             onClick={() => { setExpanded(!expanded()); requestAnimationFrame(checkOverflow); }}

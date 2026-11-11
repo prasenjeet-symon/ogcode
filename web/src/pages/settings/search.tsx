@@ -1,4 +1,4 @@
-import { Show, For, createSignal, createEffect, on, onMount, type JSX } from 'solid-js';
+import { Show, For, createSignal, createEffect, on, onMount, onCleanup, type JSX } from 'solid-js';
 import { useServer } from '../../context/server';
 import {
   fetchAPI,
@@ -157,8 +157,11 @@ export default function SearchSettings() {
   const [applied, setApplied] = createSignal(false);
   const flashApplied = () => {
     setApplied(true);
-    setTimeout(() => setApplied(false), 2200);
+    clearTimeout(appliedTimer);
+    appliedTimer = setTimeout(() => setApplied(false), 2200);
   };
+  let appliedTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(appliedTimer));
 
   // A search for something folded away opens the fold so the hit is visible
   // rather than hidden behind a collapsed row. An empty query leaves it shut.

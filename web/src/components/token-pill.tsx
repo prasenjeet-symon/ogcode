@@ -184,7 +184,9 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
     if (sseTimer) clearTimeout(sseTimer);
     sseTimer = setTimeout(() => {
       sseTimer = null;
-      setTick((n) => n + 1);
+      // Skip while the last read is still out: a slow server must not collect
+      // one queued request per event.
+      if (!server.loading) setTick((n) => n + 1);
     }, 150);
   }, { defer: true }));
   onCleanup(() => {
@@ -193,7 +195,9 @@ export default function TokenPill(props: { messages?: () => MessageWithParts[] }
 
   createEffect(() => {
     if (!teammateRunning()) return;
-    const id = setInterval(() => setTick((n) => n + 1), 5000);
+    const id = setInterval(() => {
+      if (!server.loading) setTick((n) => n + 1);
+    }, 5000);
     onCleanup(() => clearInterval(id));
   });
 

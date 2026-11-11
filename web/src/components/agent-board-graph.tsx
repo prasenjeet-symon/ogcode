@@ -154,9 +154,11 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
   });
 
   // parentOf and childrenOf light a hovered subtree. Declared before the lit
-  // effect reads them; relationMaps is a hoisted function so the order holds.
-  const parentOf = createMemo(() => relationMaps(props.rows).parentOf);
-  const childrenOf = createMemo(() => relationMaps(props.rows).childrenOf);
+  // effect reads them; one memo, so a poll builds the two maps once rather
+  // than twice.
+  const relations = createMemo(() => relationMaps(props.rows));
+  const parentOf = () => relations().parentOf;
+  const childrenOf = () => relations().childrenOf;
 
   // The view: board coordinates to screen, as x = tx + world * k.
   const view = { x: 0, y: 0, k: 1 };
@@ -204,6 +206,7 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
     if (!rafId) rafId = requestAnimationFrame(frame);
   }
 
+  let lastLiveDraw = 0;
   function frame(ts: number) {
     rafId = 0;
     if (anim) {
@@ -217,7 +220,13 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
       if (p >= 1) anim = null;
       draw();
     } else if (anyRunning()) {
-      draw();
+      // A pulse only needs enough frames to read as alive; 30 fps halves the
+      // cost of a board with a running agent, and the transition above keeps
+      // its full frame rate.
+      if (ts - lastLiveDraw >= 32) {
+        lastLiveDraw = ts;
+        draw();
+      }
     }
     if (anim || anyRunning()) rafId = requestAnimationFrame(frame);
   }
@@ -692,7 +701,13 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
     return null;
   }
 
+  // A pointermove storm would otherwise run the whole node scan on every
+  // event; the cursor only needs to keep up with the eye, not the mouse.
+  let lastHoverScan = 0;
   function updateHover(e: PointerEvent) {
+    const now = performance.now();
+    if (now - lastHoverScan < 40) return;
+    lastHoverScan = now;
     const hit = hitTest(e.clientX, e.clientY);
     setCursor(hit ? 'pointer' : 'grab');
     const id = hit?.id ?? null;

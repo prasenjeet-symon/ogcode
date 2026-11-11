@@ -35,11 +35,21 @@ function toFilename(title: string): string {
 }
 
 function previewLines(content: string, max = 8): string[] {
-  return content
-    .split('\n')
-    .slice(0, 30)
-    .filter((l) => l.trim())
-    .slice(0, max);
+  const out: string[] = [];
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    out.push(line);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function hasMoreLines(content: string, max = 8): boolean {
+  let seen = 0;
+  for (const line of content.split('\n')) {
+    if (line.trim() && ++seen > max) return true;
+  }
+  return false;
 }
 
 function NoteCard(props: { note: Note; onDelete: (e: MouseEvent) => void; onClick: () => void }) {
@@ -82,13 +92,14 @@ function NoteCard(props: { note: Note; onDelete: (e: MouseEvent) => void; onClic
           </Show>
           <span class="text-[11px] text-zinc-500">{formatTime(n().updatedAt)}</span>
 
-          {/* Delete — visible on hover */}
+          {/* Delete — always visible on touch, on hover with a pointer */}
           <button
             onClick={(e) => { e.stopPropagation(); props.onDelete(e); }}
             class="w-6 h-6 rounded flex items-center justify-center
-                   opacity-0 group-hover:opacity-100
+                   opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100
                    text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition"
             title="Delete note"
+            aria-label="Delete note"
           >
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 7V4a1 1 0 011-1h2a1 1 0 011 1v3" />
@@ -134,7 +145,7 @@ function NoteCard(props: { note: Note; onDelete: (e: MouseEvent) => void; onClic
                 );
               }}
             </For>
-            <Show when={previewLines(n().content, 100).length > 8}>
+            <Show when={hasMoreLines(n().content)}>
               <div class="text-zinc-700 text-[11px] pt-1">…</div>
             </Show>
           </div>
@@ -171,6 +182,7 @@ export default function NotesPage() {
   const navigate = useNavigate();
   const [search, setSearch] = createSignal('');
   const [creatingManual, setCreatingManual] = createSignal(false);
+  const [deleteError, setDeleteError] = createSignal('');
 
   const filtered = () => {
     const q = search().trim().toLowerCase();
@@ -183,7 +195,13 @@ export default function NotesPage() {
   const handleDelete = async (e: MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm('Delete this note? This cannot be undone.')) return;
-    await noteCtx.deleteNote(id);
+    setDeleteError('');
+    try {
+      await noteCtx.deleteNote(id);
+    } catch (err) {
+      console.error('delete note failed:', err);
+      setDeleteError('Could not delete the note. Please try again.');
+    }
   };
 
   const handleNewNote = async () => {
@@ -275,6 +293,12 @@ export default function NotesPage() {
                 </Show>
               </div>
             </div>
+          </Show>
+
+          <Show when={deleteError()}>
+            <p class="max-w-3xl mx-auto w-full mb-3 text-[12px] text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-3 py-2">
+              {deleteError()}
+            </p>
           </Show>
 
           <div class="max-w-3xl mx-auto space-y-4">

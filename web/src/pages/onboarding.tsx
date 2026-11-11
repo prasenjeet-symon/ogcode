@@ -1,8 +1,14 @@
 import { useNavigate } from '@solidjs/router';
-import { For, Show, createSignal, createMemo, onMount } from 'solid-js';
+import { For, Show, createEffect, createSignal, createMemo, onMount } from 'solid-js';
 import { useOnboarding } from '../context/onboarding';
 import { useSession } from '../context/session';
-import { setProviderConfig, validateProviderConfig, type ModelInfo } from '../api/client';
+import {
+  getProviderConfigs,
+  setProviderConfig,
+  validateProviderConfig,
+  type ModelInfo,
+  type ProviderConfig,
+} from '../api/client';
 import { PROVIDER_DEFS, COMPATIBLE_PRESETS, type ProviderDef, type CompatiblePreset } from '../lib/providers';
 
 // Providers that work without an API key (local).
@@ -62,17 +68,39 @@ export default function Onboarding() {
   const [testResult, setTestResult] = createSignal<'idle' | 'ok' | 'fail'>('idle');
   const [testMessage, setTestMessage] = createSignal('');
 
+  // Credentials already on the server, read once on mount. This wizard can be
+  // reopened for a provider that already has a key, and its key field then
+  // starts blank — so a blank field must send the "__SET__" sentinel (the one
+  // value the server preserves) rather than "", which would erase the key.
+  const [stored, setStored] = createSignal<Record<string, ProviderConfig>>({});
+  const storedKey = (id: string) => stored()[id]?.apiKey === '__SET__';
+  const storedBase = (id: string) => stored()[id]?.baseUrl || '';
+
   const ollamaStatus = () => onboarding.ollamaStatus();
 
-  // On mount, if Ollama is detected as running, jump straight to the "ready"
-  // screen so the user sees the zero-config welcome instead of the provider
-  // picker. We only do this once (before the user has chosen anything).
-  onMount(() => {
-    if (ollamaStatus()?.running) {
-      setProviderId('ollama');
-      setBaseUrl(OLLAMA_DEFAULT_BASE_URL);
-      setStep('ready');
-    }
+  // The server may already hold credentials for the provider picked below, so
+  // read them now: a blank key field means "keep the stored key", and the base
+  // URL starts from what was saved rather than from a blank.
+  onMount(async () => {
+    const list = await getProviderConfigs().catch(() => [] as ProviderConfig[]);
+    const map: Record<string, ProviderConfig> = {};
+    for (const c of list) map[c.providerId] = c;
+    setStored(map);
+  });
+
+  // Ollama detection resolves after the first paint, so this watches the probe
+  // rather than reading it once on mount — otherwise a cold load lands on the
+  // provider picker and the "ready to go" screen is never offered. It fires at
+  // most once, and never after the user has picked a provider.
+  let offeredOllama = false;
+  createEffect(() => {
+    if (offeredOllama) return;
+    if (!onboarding.ollamaStatus()?.running) return;
+    if (step() !== 1 || providerId()) return;
+    offeredOllama = true;
+    setProviderId('ollama');
+    setBaseUrl(OLLAMA_DEFAULT_BASE_URL);
+    setStep('ready');
   });
 
   const def = createMemo<ProviderDef | undefined>(() =>
@@ -106,7 +134,7 @@ export default function Onboarding() {
     setCompatPreset(null);
     setError('');
     setApiKey('');
-    setBaseUrl(id === 'ollama' ? OLLAMA_DEFAULT_BASE_URL : '');
+    setBaseUrl(storedBase(id) || (id === 'ollama' ? OLLAMA_DEFAULT_BASE_URL : ''));
     setModelQuery('');
     resetTest();
     setStep(2);
@@ -155,37 +183,50 @@ export default function Onboarding() {
 
   const saveAndContinue = async () => {
     setError('');
-    if (keyRequired() && !apiKey().trim()) {
+    if (keyRequired() && !apiKey().trim() && !storedKey(providerId())) {
       setError('Please enter your API key.');
       return;
     }
     setSaving(true);
+    const typed = apiKey().trim();
     try {
       await setProviderConfig(providerId(), {
-        apiKey: apiKey().trim(),
+        apiKey: typed === '' && storedKey(providerId()) ? '__SET__' : typed,
         baseUrl: baseUrl().trim(),
       });
-      // The provider hot-reloads server-side on save, so the model list now
-      // reflects the new credentials.
-      await session.refreshModels();
-      const models = providerModels();
-      if (models.length === 0) {
-        setError(
-          'Saved, but no models were found for this provider. Double-check your API key or base URL.',
-        );
-        return;
-      }
-      const preferred =
-        models.find((m) => m.default && m.enabled) ||
-        models.find((m) => m.enabled) ||
-        models[0];
-      setSelectedModelId(preferred.id);
-      setStep(3);
     } catch (e: any) {
       setError(e?.message || 'Failed to save provider configuration.');
-    } finally {
       setSaving(false);
+      return;
     }
+    // The credentials are stored now. A failed refresh is a different problem,
+    // so it gets its own message rather than "could not save".
+    try {
+      // Reload, not refresh: refreshModels re-reads the cached catalogue, and
+      // the whole point here is to fetch the provider's list with the key that
+      // was just saved.
+      await session.reloadModels();
+    } catch {
+      setError(
+        'Credentials saved, but ogcode could not refresh the model list. Check that the server is running, then press Continue again.',
+      );
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
+    const models = providerModels();
+    if (models.length === 0) {
+      setError(
+        'Saved, but no models were found for this provider. Double-check your API key or base URL.',
+      );
+      return;
+    }
+    const preferred =
+      models.find((m) => m.default && m.enabled) ||
+      models.find((m) => m.enabled) ||
+      models[0];
+    setSelectedModelId(preferred.id);
+    setStep(3);
   };
 
   // Ollama is already running and registered server-side — no credentials to
@@ -195,7 +236,9 @@ export default function Onboarding() {
     setError('');
     setSaving(true);
     try {
-      await session.refreshModels();
+      // Reload so the endpoint is actually asked for its models; refreshModels
+      // would only re-read the cached catalogue.
+      await session.reloadModels();
       const models = providerModels();
       if (models.length === 0) {
         setError('Ollama is running, but no models are pulled. Run `ollama pull <model>` first, then refresh.');
@@ -241,6 +284,9 @@ export default function Onboarding() {
   };
 
   const back = () => {
+    // A save in flight owns the step: leaving now would let its promise land on
+    // the step the user just left.
+    if (saving()) return;
     setError('');
     setStep((s) => {
       if (s === 3 || s === 'ready') return 2;
@@ -541,7 +587,8 @@ export default function Onboarding() {
             <button
               type="button"
               onClick={back}
-              class="text-sm text-zinc-400 hover:text-zinc-200"
+              disabled={saving()}
+              class="text-sm text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
             >
               ← Back
             </button>

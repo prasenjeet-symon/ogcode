@@ -54,6 +54,9 @@ export default function NoteDetailPage() {
   // The provider that serves selectedModel, chosen alongside it in the same
   // picker; '' lets the server resolve by model id.
   const [selectedProvider, setSelectedProvider] = createSignal('');
+  // Set when the generating-note poll gives up after repeated failures, so a
+  // note deleted server-side (or an unreachable API) stops the request loop.
+  const [pollFailed, setPollFailed] = createSignal(false);
 
   onMount(async () => {
     const n = await noteCtx.refreshNote(params.id);
@@ -90,16 +93,21 @@ export default function NoteDetailPage() {
   }
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let pollMisses = 0;
   const startPoll = () => {
     if (pollTimer) return;
     pollTimer = setInterval(async () => {
       const n = await noteCtx.refreshNote(params.id);
       if (n) {
+        pollMisses = 0;
         setNote(n);
         if (n.status !== 'generating') {
           stopPoll();
           loadVersions();
         }
+      } else if (++pollMisses >= 3) {
+        stopPoll();
+        setPollFailed(true);
       }
     }, 2500);
   };
@@ -110,7 +118,7 @@ export default function NoteDetailPage() {
 
   const currentNote = () => {
     const n = note();
-    if (n?.status === 'generating') startPoll();
+    if (n?.status === 'generating' && !pollFailed()) startPoll();
     else stopPoll();
     return n;
   };
@@ -215,10 +223,15 @@ export default function NoteDetailPage() {
               </span>
 
               {/* Status badge */}
-              <Show when={currentNote()?.status === 'generating'}>
+              <Show when={currentNote()?.status === 'generating' && !pollFailed()}>
                 <span class="flex items-center gap-1.5 text-[11px] font-medium text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-full px-2.5 py-0.5 shrink-0">
                   <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                   Generating…
+                </span>
+              </Show>
+              <Show when={pollFailed()}>
+                <span class="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 bg-zinc-400/10 border border-zinc-400/20 rounded-full px-2.5 py-0.5 shrink-0" title="Could not refresh this note. Reload the page to try again.">
+                  Not updating
                 </span>
               </Show>
               <Show when={currentNote()?.status === 'error'}>

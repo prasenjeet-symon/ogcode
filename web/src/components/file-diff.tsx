@@ -16,9 +16,13 @@ function splitLines(value: string): string[] {
 
 // diffStat returns the added/removed line counts between two texts.
 export function diffStat(oldText: string, newText: string): DiffStat {
+  return diffStatFromParts(diffLines(oldText || '', newText || ''));
+}
+
+function diffStatFromParts(parts: { added?: boolean; removed?: boolean; value: string }[]): DiffStat {
   let adds = 0;
   let dels = 0;
-  for (const part of diffLines(oldText || '', newText || '')) {
+  for (const part of parts) {
     if (!part.added && !part.removed) continue;
     const n = splitLines(part.value).length;
     if (part.added) adds += n;
@@ -38,10 +42,11 @@ export default function FileDiff(props: {
   mode: 'create' | 'edit' | 'overwrite';
   omitted?: boolean;
 }) {
+  const parts = createMemo(() => (props.omitted ? [] : diffLines(props.oldText || '', props.newText || '')));
+
   const rows = createMemo<Row[]>(() => {
-    if (props.omitted) return [];
     const out: Row[] = [];
-    for (const part of diffLines(props.oldText || '', props.newText || '')) {
+    for (const part of parts()) {
       const type: Row['type'] = part.added ? 'add' : part.removed ? 'del' : 'ctx';
       for (const ln of splitLines(part.value)) out.push({ type, text: ln });
     }
@@ -50,7 +55,7 @@ export default function FileDiff(props: {
 
   const shown = createMemo(() => rows().slice(0, MAX_ROWS));
   const truncated = createMemo(() => rows().length - shown().length);
-  const stat = createMemo(() => diffStat(props.oldText, props.newText));
+  const stat = createMemo(() => diffStatFromParts(parts()));
   const modeLabel = () =>
     props.mode === 'create' ? 'new file' : props.mode === 'edit' ? 'edit' : 'overwrite';
 

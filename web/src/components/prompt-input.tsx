@@ -39,6 +39,9 @@ export default function PromptInput() {
   const [pendingImages, setPendingImages] = createSignal<PendingImage[]>([]);
   const [imageError, setImageError] = createSignal('');
   const [guidanceSent, setGuidanceSent] = createSignal(false); // brief confirmation after sending guidance
+  // True while the guidance POST is in flight: a second Enter during the round
+  // trip used to send it again and cancel the running tool twice.
+  const [guidanceSending, setGuidanceSending] = createSignal(false);
   const [attachOpen, setAttachOpen] = createSignal(false);
   const [attachPos, setAttachPos] = createSignal<{ left: number; top?: number; bottom?: number } | null>(null);
   let textareaRef: HTMLTextAreaElement | undefined;
@@ -46,6 +49,7 @@ export default function PromptInput() {
   let cameraInputRef: HTMLInputElement | undefined;
   let attachBtnRef: HTMLButtonElement | undefined;
   let guidanceSentTimer: ReturnType<typeof setTimeout> | null = null;
+  let imageErrorTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Composer contents are per-session. PromptInput stays mounted across session
   // switches (the route param changes but the component is reused), so a single
@@ -168,7 +172,8 @@ export default function PromptInput() {
 
     if (error) {
       setImageError(error);
-      setTimeout(() => setImageError(''), 4000);
+      if (imageErrorTimer) clearTimeout(imageErrorTimer);
+      imageErrorTimer = setTimeout(() => setImageError(''), 4000);
     }
     if (newImages.length > 0) {
       setPendingImages((prev) => [...prev, ...newImages]);
@@ -195,7 +200,10 @@ export default function PromptInput() {
       }
     }
     if (imageFiles.length > 0) {
-      e.preventDefault();
+      // An image and text can arrive in the same clipboard. Cancelling the
+      // paste here threw the text away; only cancel it when the image is the
+      // whole clipboard and the browser would otherwise insert nothing useful.
+      if (!e.clipboardData?.getData('text/plain')) e.preventDefault();
       addFiles(imageFiles);
     }
   };
@@ -213,12 +221,14 @@ export default function PromptInput() {
     pendingImages().forEach((img) => URL.revokeObjectURL(img.previewUrl));
     drafts.forEach((d) => d.images.forEach((img) => URL.revokeObjectURL(img.previewUrl)));
     if (guidanceSentTimer) clearTimeout(guidanceSentTimer);
+    if (imageErrorTimer) clearTimeout(imageErrorTimer);
   });
 
   const hasImages = () => pendingImages().length > 0;
   // When the agent is running, the user can still type and send — this becomes
   // mid-loop guidance (not a new prompt). Images are not supported for guidance.
   const canSend = () => {
+    if (guidanceSending()) return false;
     if (isRunning()) return text().trim().length > 0;
     return text().trim().length > 0 || hasImages();
   };
@@ -232,8 +242,15 @@ export default function PromptInput() {
       // Mid-loop guidance: inject into the running loop. If no loop is running
       // (409), fall back to a normal prompt. The in-flight stream and tool are
       // always cancelled so the loop acts on the guidance immediately.
+      if (guidanceSending()) return;
       const targetSessionId = session.activeSession()?.id;
-      const accepted = await session.guidance(content, true);
+      setGuidanceSending(true);
+      let accepted = false;
+      try {
+        accepted = await session.guidance(content, true);
+      } finally {
+        setGuidanceSending(false);
+      }
       // Guard against session-switch race: if the user navigated to a different
       // session while the guidance request was in flight, don't show the
       // "Guidance sent" badge on the destination session.
@@ -324,6 +341,13 @@ export default function PromptInput() {
     if (files && files.length > 0) addFiles(files);
   };
 
+  // A dialog, the mobile drawer or the session palette owns the keyboard while
+  // it is open. The composer's document listener used to reach through all of
+  // them: Escape closed the overlay AND aborted the loop, and a keystroke
+  // pulled focus out of the modal into the composer behind it.
+  const overlayOpen = () =>
+    !!document.querySelector('[aria-modal="true"]') || document.body.classList.contains('drawer-open');
+
   // Global keys:
   //   Escape  — cancel the running agent loop
   //   any printable character — start typing anywhere and the composer takes
@@ -332,12 +356,16 @@ export default function PromptInput() {
   //     in the textarea and nothing is lost.
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && isRunning()) {
+      // Already handled by the layer on top, or such a layer is open: aborting
+      // the loop here would kill the turn the user just tried to keep.
+      if (e.defaultPrevented || overlayOpen()) return;
       e.preventDefault();
       e.stopPropagation();
       session.abort();
       return;
     }
 
+    if (overlayOpen()) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key.length !== 1) return;                 // arrows, F-keys, Tab, …
     const target = e.target as HTMLElement | null;

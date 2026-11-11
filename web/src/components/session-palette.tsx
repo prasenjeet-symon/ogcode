@@ -1,7 +1,8 @@
 import { createSignal, createMemo, createEffect, onMount, onCleanup, For, Show } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import { useSession } from '../context/session';
-import { searchSessions, type Session, type SessionSearchHit } from '../api/client';
+import { getBoardRoster, searchSessions, type BoardHandle, type Session, type SessionSearchHit } from '../api/client';
+import { childSessionIds } from '../lib/board-tree';
 import { fuzzyMatch } from '../lib/fuzzy';
 import { loadPinned } from '../lib/pinned-sessions';
 import './session-palette.css';
@@ -20,6 +21,14 @@ export function openSessionPalette() {
 export function closeSessionPalette() {
   setPaletteOpen(false);
 }
+
+// The last board roster the palette fetched, and whether any ever did. The
+// palette only searches what the person can continue, and the roster is what
+// says which sessions the board placed beneath another one. Module-level like
+// the sidebar's cache: the palette stays mounted across routes, and the first
+// open after a cold start must not list teammates while the fetch is in flight.
+let ROSTER_CACHE: BoardHandle[] = [];
+let ROSTER_LOADED = false;
 
 // A row in the palette. Headings and the muted nudge are rows too, so the whole
 // list is one array and ↑/↓ walks it — they just are not selectable, and the
@@ -46,6 +55,19 @@ const rowSession = (s: Session): PaletteSession => ({
   model: s.model,
   updatedAt: s.updatedAt,
 });
+
+// Session types the palette never offers: a headless run is not a conversation
+// the person can continue, so it is neither searchable nor listed under
+// "Continue". The server applies the same set to content hits
+// (mainSessionFilter, internal/memfile/search.go); this keeps the local title
+// rows drawn from the session list in step with them.
+//
+// A teammate's session is NOT one of these types — it is an ordinary 'build'
+// session, and only the board roster says who spawned it — so `hidden` below
+// removes those.
+const NON_MAIN_SESSION_TYPES = new Set(['subagent', 'memory-recall', 'note', 'index', 'search']);
+
+const isMainSession = (s: Session) => !NON_MAIN_SESSION_TYPES.has(s.sessionType ?? '');
 
 // Compact age for the row's right edge. Deliberately shorter than a sentence:
 // it sits beside the title, not under it.
@@ -106,9 +128,30 @@ export default function SessionPalette() {
   const [searching, setSearching] = createSignal(false);
   const [pinned, setPinned] = createSignal<Set<string>>(new Set());
   let inputRef: HTMLInputElement | undefined;
+  let listRef: HTMLDivElement | undefined;
   // What had focus when the palette opened, so Esc can put the user back
   // where they were instead of on <body>.
   let restoreFocus: HTMLElement | null = null;
+
+  // Which sessions the board trees beneath another: a teammate's session is a
+  // real session row, so the type filter above cannot see it. Same rule as the
+  // sidebar — and the same gate, so an empty answer before the first roster
+  // lands can never hide a main row.
+  const [roster, setRoster] = createSignal<BoardHandle[]>(ROSTER_CACHE);
+  const [rosterReady, setRosterReady] = createSignal(ROSTER_LOADED);
+  async function readRoster() {
+    try {
+      const next = (await getBoardRoster()).agents ?? [];
+      ROSTER_CACHE = next;
+      ROSTER_LOADED = true;
+      setRoster(next);
+      setRosterReady(true);
+    } catch (err) {
+      // The board may be unavailable (503 when it is nil); the last roster is
+      // still the best answer, and an empty one hides nothing.
+      console.error('board roster failed:', err);
+    }
+  }
 
   // Reset on open, restore focus on close. Writing signals inside the effect is
   // safe here: it reads only paletteOpen().
@@ -123,6 +166,9 @@ export default function SessionPalette() {
       // Re-read pins: they are a local preference the sidebar can change while
       // the palette is closed.
       setPinned(loadPinned());
+      // And the roster: a teammate spawned since the last open must be hidden
+      // by this open, not the one after it.
+      void readRoster();
       queueMicrotask(() => inputRef?.focus());
     } else {
       const el = restoreFocus;
@@ -168,11 +214,22 @@ export default function SessionPalette() {
     });
   });
 
+  // Sessions that are someone's teammate, subtask or nested child. Read
+  // through session.sessions() so a root that was deleted releases its members
+  // as soon as the list says so.
+  const hidden = createMemo(() => {
+    if (!rosterReady()) return new Set<string>();
+    return childSessionIds(roster(), session.sessions().map((s) => s.id));
+  });
+
   const rows = createMemo<Row[]>(() => {
     const q = query().trim();
     // Newest first regardless of how the list arrived, so "Continue" really is
     // the five most recently touched conversations.
-    const all = [...session.sessions()].sort((a, b) => b.updatedAt - a.updatedAt);
+    const hiddenIds = hidden();
+    const all = [...session.sessions()]
+      .filter((s) => isMainSession(s) && !hiddenIds.has(s.id))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
 
     if (!q) {
       const pinnedIds = pinned();
@@ -198,7 +255,10 @@ export default function SessionPalette() {
     const hitById = new Map(hits().map((h) => [h.sessionId, h]));
     const local = all.filter((s) => fuzzyMatch(`${s.title || ''} ${s.model || ''}`, q));
     const localIds = new Set(local.map((s) => s.id));
-    const found = hits().filter((h) => !localIds.has(h.sessionId));
+    // Content hits are already attributed to the root session, but an index
+    // written before the roll-up (or one whose roster row vanished) can still
+    // carry a child's id — never let it through as its own row.
+    const found = hits().filter((h) => !localIds.has(h.sessionId) && !hiddenIds.has(h.sessionId));
 
     const out: Row[] = [];
     if (local.length) {
@@ -240,6 +300,32 @@ export default function SessionPalette() {
     setActive(idx[next]);
   };
 
+  // Keep the keyboard-active row on screen. The list is taller than its 52vh
+  // box after a handful of sessions, and arrow navigation used to walk the
+  // highlight out of view while Enter opened whatever happened to be down there.
+  createEffect(() => {
+    const i = active();
+    if (i < 0) return;
+    queueMicrotask(() =>
+      listRef?.querySelector<HTMLElement>(`[data-row="${i}"]`)?.scrollIntoView({ block: 'nearest' }),
+    );
+  });
+
+  // Escape belongs to the palette while it is open, wherever focus sits. The
+  // handler used to live on the search input alone, so once a row button had
+  // focus Escape fell through to the composer's global abort and killed the
+  // running turn without closing the palette.
+  createEffect(() => {
+    if (!paletteOpen()) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || document.querySelector('[aria-modal="true"]')) return;
+      e.preventDefault();
+      closeSessionPalette();
+    };
+    document.addEventListener('keydown', onEsc);
+    onCleanup(() => document.removeEventListener('keydown', onEsc));
+  });
+
   const openSession = (id: string) => {
     closeSessionPalette();
     navigate(`/session/${id}`);
@@ -274,14 +360,18 @@ export default function SessionPalette() {
       e.preventDefault();
       runRow(rows()[active()]);
     } else if (e.key === 'Escape') {
+      // Handled by the palette's document listener, which also covers the case
+      // where focus has moved onto a row.
       e.preventDefault();
-      closeSessionPalette();
     }
   };
 
   // Global shortcuts. ⌘K opens from anywhere (the sidebar binds it too, for the
   // panel the user is looking at); ⌘⇧N closes and starts a new session.
   onMount(() => {
+    // Warm the roster before the first ⌘K: the open handler refreshes it again,
+    // this keeps the first open from listing teammates while that lands.
+    void readRoster();
     const onShortcut = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
@@ -352,7 +442,7 @@ export default function SessionPalette() {
         </div>
 
         {/* Results */}
-        <div class="max-h-[52vh] overflow-y-auto py-1.5" role="listbox" aria-label="Sessions">
+        <div ref={listRef} class="max-h-[52vh] overflow-y-auto py-1.5" role="listbox" aria-label="Sessions">
           <For each={rows()}>
             {(row, i) => {
               if (row.kind === 'heading') {
@@ -379,6 +469,7 @@ export default function SessionPalette() {
                   <button
                     type="button"
                     role="option"
+                    data-row={i()}
                     aria-selected={active() === i()}
                     onMouseEnter={() => setActive(i())}
                     onClick={() => runRow(row)}
@@ -405,6 +496,7 @@ export default function SessionPalette() {
                 <button
                   type="button"
                   role="option"
+                  data-row={i()}
                   aria-selected={active() === i()}
                   onMouseEnter={() => setActive(i())}
                   onClick={() => runRow(row)}

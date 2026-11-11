@@ -62,7 +62,7 @@ const COVERED = '#d95926';
 
 export default function UsageSettings() {
   const shell = useShell();
-  createEffect(() => shell.report({ noun: 'models' }));
+  createEffect(() => shell.report({ noun: 'settings' }));
 
   const server = useServer();
   const [range, setRange] = createSignal<RangeId>(lastRange);

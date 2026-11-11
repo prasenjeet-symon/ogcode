@@ -228,16 +228,22 @@ export default function PreviewPage() {
   };
 
   let timer: ReturnType<typeof setInterval> | undefined;
-  const refresh = (ports: number[] = requested()) =>
-    getPreviewServices(ports, server.directory())
+  let refreshSeq = 0;
+  const refresh = (ports: number[] = requested()) => {
+    const seq = ++refreshSeq;
+    return getPreviewServices(ports, server.directory())
       .then((r) => {
+        // A response a newer refresh has superseded must not land: a poll
+        // snapshotted before a Publish would otherwise drop the new tile.
+        if (seq !== refreshSeq) return;
         setServices(reconcile(r.services ?? [], { key: 'port' }));
         setChecking(false);
       })
       .catch(() => {
         // Keep the last list: a blip must not blank the grid.
-        setChecking(false);
+        if (seq === refreshSeq) setChecking(false);
       });
+  };
 
   // The grid is scoped to the project in view, so the workspace has to be read
   // before the first query and re-read when it changes — otherwise switching
@@ -259,7 +265,7 @@ export default function PreviewPage() {
     if (p) navigate(`/preview?port=${p}`, { replace: true });
     const d = deepLinkPort();
     if (d) setExpanded(d);
-    timer = setInterval(() => refresh(), POLL_MS);
+    timer = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
   });
   onCleanup(() => {
     if (timer) clearInterval(timer);

@@ -123,6 +123,19 @@ export function capture(event: string, properties?: Record<string, any>): void {
   }
 }
 
+/** Capture a pageview for a client-side navigation. PostHog records the first
+ *  one when it initialises; the router then swaps pages without a document
+ *  load, so each route change has to be reported or the funnel stops at the
+ *  landing page. */
+export function capturePageview(path: string): void {
+  if (!initialised) return;
+  try {
+    posthog.capture('$pageview', { $current_url: `${window.location.origin}${path}` });
+  } catch {
+    // swallow
+  }
+}
+
 /** Identify the current user. No-op if not initialised. */
 export function identify(distinctId?: string, properties?: Record<string, any>): void {
   if (!initialised) return;

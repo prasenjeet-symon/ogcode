@@ -1,5 +1,5 @@
 import { createContext, useContext, type ParentComponent } from 'solid-js';
-import { createSignal, createMemo, createEffect, on, onMount, onCleanup, batch } from 'solid-js';
+import { createSignal, createMemo, createEffect, on, onMount, onCleanup, batch, untrack } from 'solid-js';
 import {
   type Session,
   type SessionIntent,
@@ -306,6 +306,12 @@ export const SessionProvider: ParentComponent = (props) => {
     if (!id) return;
     const msgs = messagesRaw();
     if (msgs.length === 0) return;
+    // The destination's cached transcript is restored BEFORE the active session
+    // flips (see selectSession), so this effect can fire while `id` still names
+    // the session being left. Recording B's messages under A's key poisons the
+    // cache with the wrong conversation.
+    const owner = msgs[0]?.info.sessionId;
+    if (owner && owner !== id) return;
     transcriptCache.delete(id);
     transcriptCache.set(id, { messages: msgs, hasOlder: hasOlder() });
     if (transcriptCache.size > 8) {
@@ -600,11 +606,14 @@ export const SessionProvider: ParentComponent = (props) => {
     setActiveSession({ ...sess, effort: level }); // optimistic
     try {
       const updated = await updateSession(sess.id, { effort: level });
+      // The view may have moved on while the PATCH was in flight; the reply
+      // belongs to `sess`, not to whatever is on screen now.
+      if (activeSession()?.id !== updated.id) return;
       setActiveSession(updated);
       setSessions((list) => list.map((s) => (s.id === updated.id ? updated : s)));
     } catch (e) {
       console.error('update effort failed:', e);
-      setActiveSession(sess); // revert on failure
+      if (activeSession()?.id === sess.id) setActiveSession(sess); // revert on failure
     }
   }
 
@@ -632,6 +641,9 @@ export const SessionProvider: ParentComponent = (props) => {
         ...(providerId ? { provider: providerId } : {}),
         ...(effort !== undefined ? { effort } : {}),
       });
+      // The reply belongs to the session the PATCH was sent for; a model change
+      // followed by a quick session click used to flip the store back.
+      if (activeSession()?.id !== sess.id) return;
       setActiveSession(updated);
     } catch (e) {
       console.error('update model failed:', e);
@@ -653,11 +665,12 @@ export const SessionProvider: ParentComponent = (props) => {
     setActiveSession({ ...sess, permission: mode }); // optimistic
     try {
       const updated = await updateSession(sess.id, { permission: mode });
+      if (activeSession()?.id !== sess.id) return;
       setActiveSession(updated);
       setSessions((list) => list.map((s) => (s.id === updated.id ? updated : s)));
     } catch (e) {
       console.error('update permission mode failed:', e);
-      setActiveSession(sess); // revert on failure
+      if (activeSession()?.id === sess.id) setActiveSession(sess); // revert on failure
     }
   }
 
@@ -825,35 +838,40 @@ export const SessionProvider: ParentComponent = (props) => {
     // setMessagesRaw is deliberate here: the merge wrapper drops pages that
     // do not match the session on screen — which is still the previous
     // session until setActiveSession runs — so it would drop the restore.
-    if (!sameSession) {
-      const cached = transcriptCache.get(id);
-      if (cached) {
-        setMessagesRaw(cached.messages);
-        setHasOlder(cached.hasOlder);
-      } else {
-        setMessagesRaw([]);
-        setHasOlder(false);
+    // One batch: writing the restored transcript and flipping the active
+    // session in separate ticks let the cache effect above run in between and
+    // file the restored messages under the session we are leaving.
+    batch(() => {
+      if (!sameSession) {
+        const cached = transcriptCache.get(id);
+        if (cached) {
+          setMessagesRaw(cached.messages);
+          setHasOlder(cached.hasOlder);
+        } else {
+          setMessagesRaw([]);
+          setHasOlder(false);
+        }
+        setLoadingOlder(false);
+        // Drop unconfirmed bubbles too: a failed send in a session the user has
+        // left would otherwise sit in memory for the life of the page.
+        setOptimistic([]);
+        // Clear pendingModel when switching sessions so the destination session's
+        // own persisted model is used, not whatever was selected in the previous session.
+        setPendingModel('');
+        setPendingProvider('');
+        // Stop any existing polling from previous session when switching
+        stopPolling();
+        setLoadingSessionId('');
+        setCompacted(false);
+        setLoopError(null);
+        if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
+        // Clear any lingering guidance indicator — guidance is per-session and
+        // must not leak into the destination session's UI.
+        if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
+        setGuidanceStatus('idle');
       }
-      setLoadingOlder(false);
-      // Drop unconfirmed bubbles too: a failed send in a session the user has
-      // left would otherwise sit in memory for the life of the page.
-      setOptimistic([]);
-      // Clear pendingModel when switching sessions so the destination session's
-      // own persisted model is used, not whatever was selected in the previous session.
-      setPendingModel('');
-      setPendingProvider('');
-      // Stop any existing polling from previous session when switching
-      stopPolling();
-      setLoadingSessionId('');
-      setCompacted(false);
-      setLoopError(null);
-      if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
-      // Clear any lingering guidance indicator — guidance is per-session and
-      // must not leak into the destination session's UI.
-      if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
-      setGuidanceStatus('idle');
-    }
-    setActiveSession(session);
+      setActiveSession(session);
+    });
     // Re-entering the same session keeps cached messages and refreshes in place.
     try {
       const page = await getMessagesPage(id);
@@ -891,6 +909,9 @@ export const SessionProvider: ParentComponent = (props) => {
         }
       }
       if (fresh) {
+        // The getSession above may have awaited; the user can be on another
+        // session by now, and installing this record would drag them back.
+        if (activeSession()?.id !== id) return;
         setActiveSession(fresh);
       }
 
@@ -956,6 +977,11 @@ export const SessionProvider: ParentComponent = (props) => {
         /* non-fatal — the SSE handler will still append future batches */
       }
 
+      // A switch during the fetches above means this tail belongs to a session
+      // the user already left. startBgPoll() stops the current poll first, so
+      // running it here would leave the session on screen with none at all.
+      if (activeSession()?.id !== id) return;
+
       // Always keep a background poll so the session stays in sync
       startBgPoll(id);
 
@@ -990,7 +1016,11 @@ export const SessionProvider: ParentComponent = (props) => {
     const sessionProvider = provider || selectedProvider();
     const session = await createSession(server.directory(), sessionModel, sessionProvider, effortToSend(sessionModel, sessionProvider));
     trackSessionStarted({ model: session.model || '', provider: session.provider || '' });
-    setSessions((prev) => [session, ...prev]);
+    // Prepend only when absent: the server publishes the session.created event
+    // BEFORE it writes this POST's reply, so the SSE handler below usually
+    // already put the row in the list — an unconditional prepend here doubled
+    // every new session in the sidebar. The event's copy is the same row.
+    setSessions((prev) => (prev.some((s) => s.id === session.id) ? prev : [session, ...prev]));
     // The transcript is cleared raw, in the same update that puts the new
     // session on screen. setMessages merges, and a merge never takes an empty
     // list as a reason to clear (see mergeTranscript), so it kept the last
@@ -1408,12 +1438,13 @@ export const SessionProvider: ParentComponent = (props) => {
   // or message.part.updated events for the active session, fetch fresh messages
   // immediately instead of waiting for the next poll tick.
   let sseRefreshDebounce: ReturnType<typeof setTimeout> | null = null;
-  createEffect(on([server.eventTick, activeSession], ([_tick, sess]) => {
-    // Cancel any pending SSE refresh from a previous session
-    if (sseRefreshDebounce) {
-      clearTimeout(sseRefreshDebounce);
-      sseRefreshDebounce = null;
-    }
+  // Depends on the event tick ALONE. Tracking the active session re-ran this
+  // branch on every switch with the last event still in hand: an extra fetch on
+  // loop.done, a re-armed banner and a duplicate trackCompactTriggered on
+  // loop.compacted, and a guidance delivery counted twice — reported as applied
+  // while the loop was still waiting on it.
+  createEffect(on(server.eventTick, () => {
+    const sess = untrack(activeSession);
     if (!sess) return;
     const last = server.lastEvent();
     if (!last) return;
@@ -1533,7 +1564,10 @@ export const SessionProvider: ParentComponent = (props) => {
     if (evtSessionId && evtSessionId !== sess.id) return;
     // Capture current session ID to detect if session changes before timer fires
     const targetSessionId = sess.id;
-    // Debounce: coalesce rapid bursts of events into a single fetch
+    // Debounce: coalesce rapid bursts of events into a single fetch. Cancelling
+    // only when a fetch is actually scheduled keeps an event for another session
+    // from throwing away the active session's pending refresh.
+    if (sseRefreshDebounce) clearTimeout(sseRefreshDebounce);
     sseRefreshDebounce = setTimeout(async () => {
       // Guard: if the user switched sessions while the timer was pending, discard
       if (activeSession()?.id !== targetSessionId) return;
@@ -1604,6 +1638,29 @@ export const SessionProvider: ParentComponent = (props) => {
         if (activeSession()?.id === id) setActiveSession(fresh);
       }).catch(() => { /* transient — keep the cached record */ });
     }, 150);
+  }));
+
+  // --- New sessions appearing elsewhere ---
+  // A teammate or background task is created by the server, not by this tab, so
+  // nothing in the list would otherwise know it exists until the next full
+  // refresh (a page load or a delete). The server registers the child on the
+  // board before publishing this event, so the sidebar can nest it straight
+  // away. Both paths are guarded: this one because a full refresh may have
+  // already loaded the session, and newSession's because the server publishes
+  // this event before its POST reply, so whoever loses the race sees the id
+  // already in the list and leaves the existing row alone.
+  let lastProcessedCreatedTick = 0;
+  createEffect(on(server.eventTick, (tick) => {
+    if (tick === lastProcessedCreatedTick) return;
+    lastProcessedCreatedTick = tick;
+    const last = server.lastEvent();
+    if (!last || last.type !== 'session.created') return;
+    const created = last.properties as Session | undefined;
+    if (!created?.id) return;
+    // The list is scoped to the directory on screen: a session that belongs to
+    // another project must not surface in this one.
+    if (created.directory !== server.directory()) return;
+    setSessions((list) => (list.some((s) => s.id === created.id) ? list : [created, ...list]));
   }));
 
   // --- Intent (the agent's plan for the current turn) ---
@@ -1699,35 +1756,53 @@ export const SessionProvider: ParentComponent = (props) => {
     }).catch(() => {});
   }));
 
+  // A 404 for a prompt reply means the prompt was already resolved or cancelled
+  // server-side, so there is nothing to restore and nothing to log.
+  const isGone = (e: unknown) => (e as { status?: number } | null)?.status === 404;
+
   async function respondPermission(permissionId: string, response: PermissionResponse) {
     const sess = activeSession();
-    const entry = sess ? (permQueues()[sess.id] || []).find((x) => x.permissionId === permissionId) : undefined;
+    const queue = sess ? permQueues()[sess.id] || [] : [];
+    const at = queue.findIndex((x) => x.permissionId === permissionId);
+    const entry = at >= 0 ? queue[at] : undefined;
     // A teammate's prompt is listed in this session but owned by the teammate's
     // own loop: name its session in the path. The backend resolves the reply by
     // permission id alone, so either page can answer it; naming the owner keeps
     // the resolution event on the queue that is actually blocked.
     const owner = entry?.sessionId || sess?.id;
     // Optimistically dismiss so the UI feels instant; the backend also emits
-    // permission.replied which reconciles any other client.
+    // permission.replied which reconciles any other client. Kept here so a
+    // failed reply can put the card back.
     if (sess) setPermQueue(sess.id, (prev) => prev.filter((x) => x.permissionId !== permissionId));
     if (!sess || !owner) return;
     trackPermissionPromptAnswered({ tool: entry?.tool || 'unknown', response });
     try {
       await replyPermission(owner, permissionId, response);
     } catch (e) {
-      // 404 = already resolved/cancelled server-side — safe to ignore.
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!msg.includes('404')) console.error('permission reply failed:', e);
+      // 404 = already resolved/cancelled server-side — safe to ignore. Anything
+      // else means the reply never landed: restore the prompt rather than
+      // leaving the loop blocked behind a card that has vanished.
+      if (isGone(e)) return;
+      console.error('permission reply failed:', e);
+      if (entry) {
+        setPermQueue(sess.id, (prev) =>
+          prev.some((x) => x.permissionId === entry.permissionId)
+            ? prev
+            : [...prev.slice(0, at), entry, ...prev.slice(at)],
+        );
+      }
     }
   }
 
   async function respondQuestion(questionId: string, answers: QuestionAnswerAPI[]) {
     const sess = activeSession();
+    const queue = sess ? questionQueues()[sess.id] || [] : [];
+    const at = queue.findIndex((x) => x.questionId === questionId);
+    const entry = at >= 0 ? queue[at] : undefined;
     // A teammate's dialog is listed in this session but owned by the teammate's
     // own loop: name its session in the path, exactly as a permission reply
     // does. The backend resolves the reply by question id alone, so either page
     // can answer it.
-    const entry = sess ? (questionQueues()[sess.id] || []).find((x) => x.questionId === questionId) : undefined;
     const owner = entry?.sessionId || sess?.id;
     // Optimistic dismissal, same as a permission reply; the backend's
     // question.replied event reconciles any other client.
@@ -1736,9 +1811,18 @@ export const SessionProvider: ParentComponent = (props) => {
     try {
       await replyQuestion(owner, questionId, answers);
     } catch (e) {
-      // 404 = already answered/cancelled server-side — safe to ignore.
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!msg.includes('404')) console.error('question reply failed:', e);
+      // 404 = already answered/cancelled server-side — safe to ignore. Anything
+      // else means the reply never landed: put the dialog back rather than
+      // leaving the loop blocked on a question that has vanished from the UI.
+      if (isGone(e)) return;
+      console.error('question reply failed:', e);
+      if (entry) {
+        setQuestionQueue(sess.id, (prev) =>
+          prev.some((x) => x.questionId === entry.questionId)
+            ? prev
+            : [...prev.slice(0, at), entry, ...prev.slice(at)],
+        );
+      }
     }
   }
 
@@ -1770,6 +1854,13 @@ export const SessionProvider: ParentComponent = (props) => {
   });
   onCleanup(() => {
     document.removeEventListener('keydown', handleHotkey);
+    // Nothing outlives the provider: a timer that fires after teardown would
+    // write into disposed signals.
+    if (compactedTimer) { clearTimeout(compactedTimer); compactedTimer = null; }
+    if (guidanceTimer) { clearTimeout(guidanceTimer); guidanceTimer = null; }
+    if (sseRefreshDebounce) { clearTimeout(sseRefreshDebounce); sseRefreshDebounce = null; }
+    if (fastPollInterval) { clearInterval(fastPollInterval); fastPollInterval = null; }
+    if (bgPollInterval) { clearInterval(bgPollInterval); bgPollInterval = null; }
   });
 
   const value: SessionContextValue = {

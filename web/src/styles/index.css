@@ -1562,6 +1562,14 @@ body.drawer-open {
   overflow: hidden;
 }
 
+/* The same lock for modals: a dialog is painted over the page, so the page
+   behind it must not scroll (or rubber-band on iOS) while it is open. `:has`
+   covers every dialog, including the ones that mount without a shell of their
+   own, and stacks harmlessly. */
+body:has(.modal-backdrop) {
+  overflow: hidden;
+}
+
 /* Touch sizing ----------------------------------------------------------
    On touch, un-hide every hover-gated action. These mirror the specific
    class pairs used by the app (opacity-0 group-hover:*). Using CSS rather
@@ -2873,11 +2881,7 @@ body.drawer-open {
   font-size: 11.5px;
   color: var(--text-secondary);
   background: transparent;
-  border: 0;
-  text-align: left;
-  cursor: pointer;
 }
-.tp-line:hover { background: var(--bg-hover); }
 .tp-led { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--border-strong); }
 .tp-led.run {
   background: var(--accent);
@@ -2910,7 +2914,6 @@ body.drawer-open {
 .tp-state.err { color: var(--danger); }
 .tp-state.warn { color: var(--warning); }
 .tp-state.pend { color: var(--text-muted); }
-.tp-detail { padding: 2px 14px 10px 24px; }
 @media (prefers-reduced-motion: reduce) {
   .tp-led.run { animation: none; }
   .tp-rail i { animation: none; opacity: 0; }

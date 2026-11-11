@@ -1,4 +1,5 @@
 import { createSignal, createMemo, For, Show, onCleanup, onMount } from 'solid-js';
+import { reconcile } from 'solid-js/store';
 import { useSearchParams } from '@solidjs/router';
 import { useServer } from '../context/server';
 import { getScrcpyStatus, getScrcpyDevices, type ScrcpyDevice, type ScrcpyStatus } from '../api/client';
@@ -80,27 +81,39 @@ export default function DevicePage() {
   const [copied, setCopied] = createSignal(false);
 
   let timer: ReturnType<typeof setInterval> | undefined;
+  let inFlight = false;
+  let failStreak = 0;
   const refresh = () => {
+    if (inFlight) return;
+    inFlight = true;
     getScrcpyStatus()
       .then((st) => {
+        failStreak = 0;
         setStatus(st);
         setChecking(false);
       })
       .catch(() => {
-        setStatus({ up: false, target: '' });
+        // A single transport blip must not tear the live stream out of the DOM —
+        // the panel and the iframe are gated on status().up, and unmounting the
+        // frame kills ws-scrcpy's WebSocket. Only give up after repeated misses.
+        if (++failStreak >= 3) setStatus({ up: false, target: '' });
         setChecking(false);
-      });
+      })
+      .finally(() => { inFlight = false; });
     getScrcpyDevices()
-      .then((res) => setDevices(res.devices))
-      .catch(() => setDevices([]));
+      // Keep the previous list on a failure: an empty list re-resolves the
+      // stream target and navigates the live iframe to a new src.
+      .then((res) => setDevices(reconcile(res.devices ?? [], { key: 'serial' })))
+      .catch(() => {});
   };
 
   onMount(() => {
     refresh();
-    timer = setInterval(refresh, POLL_MS);
+    timer = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
   });
   onCleanup(() => {
     if (timer) clearInterval(timer);
+    if (copyTimer) clearTimeout(copyTimer);
   });
 
   // Which device to stream. An explicit ?udid= wins; otherwise the first
@@ -112,16 +125,22 @@ export default function DevicePage() {
   // A memo, not a bare getter: resolvedUdid() is read many times over (once
   // per device row, in the header, in the stream URL), and each read of a
   // plain getter re-walks the device list.
+  let pinnedUdid = '';
   const resolvedUdid = createMemo(() => {
     const explicit = udid();
-    if (explicit) return explicit;
+    if (explicit) { pinnedUdid = explicit; return explicit; }
     const list = devices() ?? [];
-    return (
+    // Hold the streaming device steady while it is still attached: a partial
+    // adb listing must not re-point (and restart) the live iframe.
+    if (pinnedUdid && (list.length === 0 || list.some((d) => d.serial === pinnedUdid))) return pinnedUdid;
+    const next = (
       attached().find((d) => d.serial.startsWith('emulator-'))?.serial ??
       attached()[0]?.serial ??
       list[0]?.serial ??
       DEFAULT_UDID
     );
+    pinnedUdid = next;
+    return next;
   });
 
   // The WebSocket URL the stream client connects to: same origin (so it
@@ -185,11 +204,13 @@ export default function DevicePage() {
       player: player() || defaultPlayer(),
     }).toString()}`;
 
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(deepLink());
       setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
+      if (copyTimer) clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => setCopied(false), 1400);
     } catch {
       // clipboard unavailable — nothing to do
     }
@@ -320,6 +341,7 @@ export default function DevicePage() {
                       <li>
                         <button
                           onClick={() => selectPlayer(p.name)}
+                          disabled={!p.supported()}
                           class={`w-full text-left px-3 py-2 flex items-center gap-2 transition ${
                             p.name === (player() || defaultPlayer())
                               ? 'bg-[color:var(--accent-soft)] text-[color:var(--text-primary)]'

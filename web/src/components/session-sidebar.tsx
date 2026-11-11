@@ -4,7 +4,7 @@ import { useServer } from '../context/server';
 import { createSignal, createMemo, createEffect, For, Show, onCleanup, onMount, type JSXElement } from 'solid-js';
 import { deleteSession, getBoardRoster, type BoardHandle } from '../api/client';
 import type { Session } from '../api/client';
-import { isLive, statusMeta } from '../lib/board-tree';
+import { childSessionIds as boardChildSessionIds, isLive, statusMeta } from '../lib/board-tree';
 import { loadPinned, savePinned } from '../lib/pinned-sessions';
 import { createSidebarWidth } from '../lib/sidebar-width';
 import Logo from './logo';
@@ -42,6 +42,35 @@ function shortenPath(path: string): string {
 // it — and a remount must not start cold. See SessionSidebarInner.
 let ROSTER_CACHE: BoardHandle[] = [];
 let ROSTER_LOADED = false;
+
+const sameBoardRow = (a: BoardHandle, b: BoardHandle) =>
+  a.id === b.id &&
+  a.handle === b.handle &&
+  a.sessionId === b.sessionId &&
+  a.role === b.role &&
+  a.kind === b.kind &&
+  a.spawnedBy === b.spawnedBy &&
+  a.status === b.status &&
+  a.title === b.title &&
+  a.model === b.model &&
+  a.directory === b.directory &&
+  a.createdAt === b.createdAt &&
+  a.updatedAt === b.updatedAt;
+
+// Merge rather than reconcile. reconcile() is a store setter helper: handed to
+// a plain signal setter it mutates the previous array in place and returns the
+// same reference, so the signal saw no change and never notified — the roster
+// stayed empty for that component instance and every teammate rendered flat
+// until a remount picked up the module cache. Merging by handle into a NEW
+// array always changes the reference, while rows whose fields did not change
+// keep their identity so the 15 s poll still does not tear down team trees.
+function mergeRoster(prev: BoardHandle[], next: BoardHandle[]): BoardHandle[] {
+  const before = new Map(prev.map((row) => [row.handle, row]));
+  return next.map((row) => {
+    const old = before.get(row.handle);
+    return old && sameBoardRow(old, row) ? old : row;
+  });
+}
 
 // The sidebar itself. Exported wrapped in SidebarShell so every page that
 // renders <SessionSidebar /> gets the drawer behaviour below lg for free.
@@ -204,27 +233,19 @@ function SessionSidebarInner() {
 
   // A session the board trees beneath another — every roster agent that climbs
   // to a root other than itself — must not ALSO float as a main session row:
-  // it renders only as a team row under its root's chip. Search lifts the
-  // grouping, so a teammate session stays findable by name.
+  // it renders only as a team row under its root's chip. That holds while
+  // searching too: a title match must not lift a teammate out of its tree (the
+  // ⌘K palette applies the same rule to its rows and server hits).
   //
-  // But only a team whose ROOT session still exists may hide its members:
-  // roster rows are never deleted, so once the root's session is, its
-  // board_agent row would keep them grouped under a row that never renders —
-  // gone from the list with no chip left to unfold them under. A member of a
-  // dead-root team therefore floats as a main session row again, exactly like
-  // a session no one ever grouped.
+  // boardChildSessionIds owns the climb and the dead-root caveat: roster rows
+  // are never deleted, so a team whose root session is gone lets its members
+  // float as main rows again rather than vanish with no chip to unfold under.
   const childSessionIds = createMemo(() => {
     // Before the first roster lands, nothing may be hidden: the fetch would
     // otherwise take rows away mid-list — appear then vanish. An empty roster
     // after a real load means just that: no agents, nothing to group.
     if (!rosterReady()) return new Set<string>();
-    const ids = new Set<string>();
-    const exists = new Set(session.sessions().map((s) => s.id));
-    for (const [rootSessionId, team] of teamsById()) {
-      if (!exists.has(rootSessionId)) continue;
-      for (const m of team.members) if (m.sessionId) ids.add(m.sessionId);
-    }
-    return ids;
+    return boardChildSessionIds(roster(), session.sessions().map((s) => s.id));
   });
 
   const filtered = createMemo(() => {
@@ -232,7 +253,7 @@ function SessionSidebarInner() {
     const matches = (s: Session) =>
       !q || (s.title || '').toLowerCase().includes(q) || (s.model || '').toLowerCase().includes(q);
     const childIds = childSessionIds();
-    return session.sessions().filter((s) => matches(s) && (q || !childIds.has(s.id)));
+    return session.sessions().filter((s) => matches(s) && !childIds.has(s.id));
   });
 
   // A session whose turn is in flight is being modified right now, but the
@@ -345,30 +366,54 @@ function SessionSidebarInner() {
   // board.* SSE events folded into one debounced read 150 ms later, a resync
   // on reconnect (events published while the stream was down never arrived),
   // and a 15 s poll as backstop for moves that publish no event of their own.
-  const refreshRoster = async () => {
+  // Reads are serialized: one spawn publishes several events and the
+  // session.created path reads without waiting for the debounce, so two reads
+  // in flight could land out of order — the older answer would then be the one
+  // on screen until the next event or the 15 s poll.
+  let rosterChain: Promise<void> = Promise.resolve();
+  async function readRoster() {
     try {
       const r = await getBoardRoster();
       ROSTER_CACHE = r.agents ?? [];
       ROSTER_LOADED = true;
-      setRoster(ROSTER_CACHE);
+      // mergeRoster, not reconcile: a row whose handle did not change keeps
+      // its identity, so the 15 s poll stops tearing down and rebuilding the
+      // whole team tree under every expanded session — but the array itself is
+      // a new reference, which is what makes the signal notify at all.
+      setRoster(mergeRoster(roster(), ROSTER_CACHE));
       setRosterReady(true);
     } catch (err) {
       // The board may be unavailable (503 when it is nil); the last roster
       // keeps rendering — a chip is a summary, not ground truth.
       console.error('board roster failed:', err);
     }
+  }
+  const refreshRoster = (): Promise<void> => {
+    rosterChain = rosterChain.then(readRoster, readRoster);
+    return rosterChain;
   };
 
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   createEffect(() => {
     const last = server.lastEvent();
-    if (!last || !last.type.startsWith('board.')) return;
+    if (!last) return;
+    // A session that just came into being is already registered on the board —
+    // the server publishes its board.agent BEFORE session.created — so read the
+    // roster now rather than after the debounce: the session row is inserted
+    // into the list in the same tick as this event, and only a roster holding
+    // the new edge nests it under the session that spawned it.
+    if (last.type === 'session.created') {
+      refreshRoster();
+      return;
+    }
+    if (!last.type.startsWith('board.')) return;
     if (sseTimer) clearTimeout(sseTimer);
     sseTimer = setTimeout(() => {
       sseTimer = null;
       refreshRoster();
     }, 150);
   });
+  onCleanup(() => { if (sseTimer) clearTimeout(sseTimer); });
   createEffect(() => {
     server.reconnectTick();
     refreshRoster();
@@ -620,8 +665,8 @@ function SessionSidebarInner() {
           </Show>
           <button
             onClick={() => navigate('/docindex')}
-            title="Project Index"
-            aria-label="Project Index"
+            title="Source"
+            aria-label="Source"
             class={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-[0.92]
               ${location.pathname.startsWith('/docindex')
                 ? 'text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)]'
@@ -805,7 +850,7 @@ function SessionSidebarInner() {
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
           </svg>
-          <span>Project Index</span>
+          <span>Source</span>
         </button>
         <Show when={deviceOn()}>
           <button
@@ -849,7 +894,7 @@ function SessionSidebarInner() {
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
           </svg>
-          <span>Preview</span>
+          <span>Artifacts</span>
         </button>
       </div>
       </div>

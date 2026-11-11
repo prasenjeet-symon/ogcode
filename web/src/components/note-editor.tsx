@@ -41,7 +41,7 @@ interface Block { id: string; raw: string; }
 
 interface SlashMenu { slashPos: number; filter: string; selectedIdx: number; }
 
-interface SelState { text: string; top: number; left: number; startBlockId: string | null; endBlockId: string | null; }
+interface SelState { text: string; top: number; left: number; startBlockId: string | null; endBlockId: string | null; startOffset: number | null; }
 
 let _ctr = 0;
 function uid(): string { return `b${++_ctr}`; }
@@ -162,7 +162,19 @@ export default function NoteEditor(props: NoteEditorProps) {
     listRef.querySelector<HTMLElement>(`[data-idx="${m.selectedIdx}"]`)?.scrollIntoView({ block: 'nearest' });
   });
 
-  function notify() { props.onChange(serialize(blocks)); }
+  let notifyTimer: ReturnType<typeof setTimeout> | null = null;
+  function flushNotify() {
+    if (notifyTimer) { clearTimeout(notifyTimer); notifyTimer = null; }
+    props.onChange(serialize(blocks));
+  }
+  // Serialising the whole document (base64 images included) on every keystroke
+  // is costly, so coalesce the onChange calls; blur and unmount flush so no
+  // edit is lost before the parent saves.
+  function notify() {
+    if (notifyTimer) clearTimeout(notifyTimer);
+    notifyTimer = setTimeout(flushNotify, 120);
+  }
+  onCleanup(flushNotify);
   function resize(ta: HTMLTextAreaElement) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
   function idxOf(id: string) { return blocks.findIndex(b => b.id === id); }
 
@@ -266,12 +278,14 @@ export default function NoteEditor(props: NoteEditorProps) {
     if (hasImg) { e.preventDefault(); setFileDragOver(true); }
   }
   function onFileDragLeave() { setFileDragOver(false); }
-  function onFileDrop(e: DragEvent) {
+  async function onFileDrop(e: DragEvent) {
     if (dragSrcId()) return;
     e.preventDefault(); setFileDragOver(false);
     const files = Array.from(e.dataTransfer?.files ?? []).filter(f => f.type.startsWith('image/'));
     const idx = blocks.length - 1;
-    for (const f of files) insertImageAt(idx, f);
+    // insertImageAt inserts directly after idx, so walk the files backwards to
+    // land them in the order they were dropped.
+    for (const f of [...files].reverse()) await insertImageAt(idx, f);
   }
 
   // ── Paste ─────────────────────────────────────────────────────────────────
@@ -343,7 +357,7 @@ export default function NoteEditor(props: NoteEditorProps) {
     resize(ta); updateRaw(id, ta.value); notify(); detectSlash(ta);
   }
 
-  function onBlur(id: string) { setTimeout(() => { if (activeId() === id) setActiveId(null); }, 120); }
+  function onBlur(id: string) { flushNotify(); setTimeout(() => { if (activeId() === id) setActiveId(null); }, 120); }
 
   // ── Slash palette ─────────────────────────────────────────────────────────
 
@@ -417,6 +431,29 @@ export default function NoteEditor(props: NoteEditorProps) {
 
   // ── AI selection toolbar ──────────────────────────────────────────────────
 
+  // Character offset of a DOM selection point within the block's raw markdown,
+  // so a transform rewrites the selected occurrence rather than the first one.
+  function rawOffset(blockEl: Element | null | undefined, container: Node, offset: number): number | null {
+    if (!blockEl) return null;
+    const id = blockEl.getAttribute('data-block-id');
+    const i = id ? idxOf(id) : -1;
+    if (i === -1) return null;
+    const raw = blocks[i].raw;
+    const holder = container.nodeType === Node.TEXT_NODE ? container.parentElement : (container as Element);
+    if (holder?.tagName === 'TEXTAREA') return Math.min(offset, raw.length);
+    const scope = holder && holder !== blockEl && blockEl.contains(holder) ? holder : blockEl;
+    try {
+      const pre = document.createRange();
+      pre.selectNodeContents(scope);
+      pre.setEnd(container, offset);
+      // Rendered text omits the markdown prefix, so add it back.
+      const prefixLen = getPrefix(raw, blockType(raw)).length;
+      return Math.min(raw.length, pre.toString().length + prefixLen);
+    } catch {
+      return null;
+    }
+  }
+
   function handleSelectionChange() {
     // Use mouseup-based detection (more reliable than selectionchange)
     // This is called from the mouseup handler below
@@ -451,6 +488,7 @@ export default function NoteEditor(props: NoteEditorProps) {
       left: Math.max(140, Math.min(rect.left + rect.width / 2, window.innerWidth - 140)),
       startBlockId: startBlockEl?.getAttribute('data-block-id') ?? null,
       endBlockId:   endBlockEl?.getAttribute('data-block-id') ?? null,
+      startOffset:  rawOffset(startBlockEl, range.startContainer, range.startOffset),
     });
     setTransformResult(null);
   }
@@ -490,12 +528,18 @@ export default function NoteEditor(props: NoteEditorProps) {
       if (i !== -1) {
         const raw = blocks[i].raw;
         const type = blockType(raw);
-        if (raw.includes(ss.text)) {
-          updateRaw(ss.startBlockId, raw.replace(ss.text, result));
+        const prefix = getPrefix(raw, type);
+        const content = stripPrefix(raw, type);
+        const at = ss.startOffset;
+        if (at != null && raw.startsWith(ss.text, at)) {
+          updateRaw(ss.startBlockId, raw.slice(0, at) + result + raw.slice(at + ss.text.length));
         } else {
-          const prefix = getPrefix(raw, type);
-          const content = stripPrefix(raw, type);
-          if (content.includes(ss.text)) {
+          const cAt = at != null ? at - prefix.length : -1;
+          if (cAt >= 0 && content.startsWith(ss.text, cAt)) {
+            updateRaw(ss.startBlockId, prefix + content.slice(0, cAt) + result + content.slice(cAt + ss.text.length));
+          } else if (raw.includes(ss.text)) {
+            updateRaw(ss.startBlockId, raw.replace(ss.text, result));
+          } else if (content.includes(ss.text)) {
             updateRaw(ss.startBlockId, prefix + content.replace(ss.text, result));
           } else {
             insertAfter(i, result);

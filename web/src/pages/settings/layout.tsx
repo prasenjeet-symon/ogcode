@@ -145,8 +145,15 @@ export default function SettingsLayout(props: RouteSectionProps) {
   // attributeFilter the observer would never fire and every count would freeze.
   const rescan = () => {
     if (!deskEl) return;
-    setTotal(deskEl.querySelectorAll('[data-setting]').length);
-    setShown(deskEl.querySelectorAll('[data-setting]:not([hidden])').length);
+    // One pass, not two: the observer below fires on every subtree change, and
+    // two full walks of the page per frame is a lot of work for two numbers.
+    const rows = deskEl.querySelectorAll('[data-setting]');
+    let visible = 0;
+    for (const row of rows) {
+      if (!(row as HTMLElement).hasAttribute('hidden')) visible++;
+    }
+    setTotal(rows.length);
+    setShown(visible);
   };
 
   onMount(() => {

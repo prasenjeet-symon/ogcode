@@ -1,4 +1,4 @@
-import { createMemo, createEffect, createSignal, Show } from 'solid-js';
+import { createMemo, createEffect, createSignal, onCleanup, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
@@ -81,12 +81,70 @@ function decodeHtmlFromSrcdoc(encoded: string): string {
   return decodeURIComponent(escape(atob(encoded)));
 }
 
+// A ```latex block is compiled by POSTing its source to the server, which runs
+// pdflatex. The markdown effect re-runs on every streaming chunk, so the
+// result is cached by source and an in-flight compile is shared: one compile
+// per block instead of one per render.
+interface LatexResult {
+  pages?: { image: string; pageNum: number }[];
+  pdfBase64?: string;
+  pdfSize?: number;
+  title?: string;
+}
+
+const latexResults = new Map<string, LatexResult>();
+const latexInflight = new Map<string, Promise<LatexResult>>();
+
+function compileLatex(source: string): Promise<LatexResult> {
+  const cached = latexResults.get(source);
+  if (cached) return Promise.resolve(cached);
+  const running = latexInflight.get(source);
+  if (running) return running;
+
+  const baseURL = import.meta.env.VITE_API_URL || '';
+  const p = (async () => {
+    const res = await fetch(`${baseURL}/api/latex/pages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source }),
+    });
+
+    if (!res.ok) {
+      let errorMsg = `Error ${res.status}`;
+      try {
+        const errData = await res.json();
+        errorMsg = errData.error || errorMsg;
+        if (errData.output) {
+          errorMsg += '\n\npdflatex output:\n' + errData.output.slice(0, 500);
+        }
+      } catch {}
+      throw new Error(errorMsg);
+    }
+
+    const data = (await res.json()) as LatexResult;
+    latexResults.set(source, data);
+    return data;
+  })();
+  latexInflight.set(source, p);
+  // Settle either way: a failure is not cached, so a later render may retry.
+  p.then(() => latexInflight.delete(source), () => latexInflight.delete(source));
+  return p;
+}
+
 export default function MarkdownContent(props: { text: string; class?: string }) {
   let containerRef: HTMLDivElement | undefined;
   // Holds encoded HTML blocks from the latest memo run. The memo always
   // executes before the effect (memo is a dependency), so this is always
   // current by the time the effect reads it.
   let currentHtmlBlocks: string[] = [];
+
+  // Window listeners attached for the inline HTML frames of the latest render.
+  // The frames (and their listeners) are rebuilt on every render, so the
+  // previous batch is detached before the DOM is replaced and on teardown.
+  const detachFrameListeners: Array<() => void> = [];
+  onCleanup(() => {
+    for (const detach of detachFrameListeners.splice(0)) detach();
+  });
 
   // A diagram can be wider than the chat column; the magnifier under each one
   // opens the same diagram redrawn at the width of a large dialog. The dialog
@@ -190,6 +248,7 @@ export default function MarkdownContent(props: { text: string; class?: string })
   createEffect(() => {
     const _ = html();
     if (!containerRef) return;
+    for (const detach of detachFrameListeners.splice(0)) detach();
 
     const blocksData = currentHtmlBlocks;
 
@@ -308,13 +367,14 @@ export default function MarkdownContent(props: { text: string; class?: string })
 
       const rawHtml = decodeHtmlFromSrcdoc(blocksData[idx]);
 
-      // Create a sandboxed iframe
+      // Create a sandboxed iframe. It runs the block's scripts but is NOT given
+      // allow-same-origin, so the document keeps an opaque origin and cannot
+      // reach this page's DOM, cookies or storage. Its height therefore arrives
+      // by postMessage from a script injected into the frame, because the
+      // parent cannot measure it — which is exactly the point.
       const iframe = document.createElement('iframe');
       iframe.style.cssText = 'width:100%;border:none;overflow:hidden;background:transparent;';
-      iframe.sandbox.add('allow-scripts', 'allow-same-origin');
-      // Note: allow-same-origin is needed for scripts within the iframe to
-      // execute properly (e.g., to access their own DOM). The iframe is still
-      // sandboxed — it cannot access the parent page's DOM.
+      iframe.sandbox.add('allow-scripts');
 
       // Wrap the content in a transparent template that blends seamlessly
       // into the chat. No background or card styling — the HTML content
@@ -326,30 +386,29 @@ table { border-collapse: collapse; margin: 0.75em 0; }
 th, td { border: 1px solid #2a2a30; padding: 6px 12px; text-align: left; }
 th { background: rgba(255, 255, 255, 0.05); }
 img { max-width: 100%; height: auto; }
-</style></head><body>${rawHtml}</body></html>`;
+</style></head><body>${rawHtml}<script>
+(function () {
+  function post() {
+    var h = Math.max(
+      document.body ? document.body.scrollHeight : 0,
+      document.documentElement ? document.documentElement.scrollHeight : 0
+    );
+    parent.postMessage({ type: 'ogcode-html-height', height: h }, '*');
+  }
+  window.addEventListener('load', function () { post(); setTimeout(post, 200); setTimeout(post, 1000); });
+  if (window.ResizeObserver) { new ResizeObserver(post).observe(document.documentElement); }
+})();
+</script></body></html>`;
 
-      // Set height via resize observer after content loads
-      iframe.addEventListener('load', () => {
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (doc?.body) {
-            // Add a small delay for scripts to render
-            const setHeight = () => {
-              const height = doc.body.scrollHeight;
-              if (height > 0) {
-                iframe.style.height = height + 'px';
-              }
-            };
-            setHeight();
-            // Also set height after a short delay for async rendering
-            setTimeout(setHeight, 200);
-            setTimeout(setHeight, 1000);
-          }
-        } catch {
-          // Cross-origin restrictions — set a reasonable default
-          iframe.style.height = '300px';
-        }
-      });
+      const onFrameMessage = (e: MessageEvent) => {
+        if (e.source !== iframe.contentWindow) return;
+        const d = e.data as { type?: string; height?: number } | null;
+        if (d?.type !== 'ogcode-html-height' || typeof d.height !== 'number' || d.height <= 0) return;
+        // A runaway frame must not push the transcript thousands of pixels tall.
+        iframe.style.height = `${Math.min(d.height, 4000)}px`;
+      };
+      window.addEventListener('message', onFrameMessage);
+      detachFrameListeners.push(() => window.removeEventListener('message', onFrameMessage));
 
       iframe.srcdoc = darkWrap;
       el.textContent = '';
@@ -462,8 +521,48 @@ img { max-width: 100%; height: auto; }
         });
       }
 
-      // Compile and render inline
-      const baseURL = import.meta.env.VITE_API_URL || '';
+      // Compile and render inline (cached by source — see compileLatex)
+      const applyLatexResult = (data: LatexResult) => {
+        // Hide loading spinner
+        loadingDiv.style.display = 'none';
+
+        // Render page images inline
+        if (data.pages && data.pages.length > 0) {
+          pagesDiv.style.display = 'block';
+          pagesDiv.innerHTML = ''; // clear previous
+
+          data.pages.forEach((page) => {
+            const pageDiv = document.createElement('div');
+            pageDiv.className = 'latex-page';
+
+            const img = document.createElement('img');
+            img.src = `data:image/jpeg;base64,${page.image}`;
+            img.alt = `Page ${page.pageNum}`;
+            img.className = 'latex-page-img';
+            img.loading = 'lazy';
+
+            pageDiv.appendChild(img);
+            pagesDiv.appendChild(pageDiv);
+          });
+
+          // Store pdfBase64 for download
+          (container as any)._pdfBase64 = data.pdfBase64;
+          (container as any)._pdfSize = data.pdfSize;
+          (container as any)._docTitle = data.title || 'output';
+        } else if (data.pdfBase64) {
+          // Fallback: no page images but have PDF (fitz unavailable)
+          pagesDiv.style.display = 'none';
+          (container as any)._pdfBase64 = data.pdfBase64;
+          (container as any)._pdfSize = data.pdfSize;
+          (container as any)._docTitle = data.title || 'output';
+
+          // Show source since we can't render pages
+          sourceDiv.style.display = 'block';
+          statusDiv.className = 'latex-render-status latex-success';
+          statusDiv.style.display = 'block';
+          statusDiv.textContent = '✓ PDF compiled (page rendering unavailable — download to view)';
+        }
+      };
 
       const compileAndRender = async () => {
         loadingDiv.style.display = 'flex';
@@ -471,66 +570,7 @@ img { max-width: 100%; height: auto; }
         statusDiv.className = 'latex-render-status';
 
         try {
-          const res = await fetch(`${baseURL}/api/latex/pages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: rawLatex }),
-          });
-
-          if (!res.ok) {
-            let errorMsg = `Error ${res.status}`;
-            try {
-              const errData = await res.json();
-              errorMsg = errData.error || errorMsg;
-              if (errData.output) {
-                errorMsg += '\n\npdflatex output:\n' + errData.output.slice(0, 500);
-              }
-            } catch {}
-            throw new Error(errorMsg);
-          }
-
-          const data = await res.json();
-
-          // Hide loading spinner
-          loadingDiv.style.display = 'none';
-
-          // Render page images inline
-          if (data.pages && data.pages.length > 0) {
-            pagesDiv.style.display = 'block';
-            pagesDiv.innerHTML = ''; // clear previous
-
-            data.pages.forEach((page: { image: string; pageNum: number }) => {
-              const pageDiv = document.createElement('div');
-              pageDiv.className = 'latex-page';
-
-              const img = document.createElement('img');
-              img.src = `data:image/jpeg;base64,${page.image}`;
-              img.alt = `Page ${page.pageNum}`;
-              img.className = 'latex-page-img';
-              img.loading = 'lazy';
-
-              pageDiv.appendChild(img);
-              pagesDiv.appendChild(pageDiv);
-            });
-
-            // Store pdfBase64 for download
-            (container as any)._pdfBase64 = data.pdfBase64;
-            (container as any)._pdfSize = data.pdfSize;
-            (container as any)._docTitle = data.title || 'output';
-          } else if (data.pdfBase64) {
-            // Fallback: no page images but have PDF (fitz unavailable)
-            pagesDiv.style.display = 'none';
-            (container as any)._pdfBase64 = data.pdfBase64;
-            (container as any)._pdfSize = data.pdfSize;
-            (container as any)._docTitle = data.title || 'output';
-
-            // Show source since we can't render pages
-            sourceDiv.style.display = 'block';
-            loadingDiv.style.display = 'none';
-            statusDiv.className = 'latex-render-status latex-success';
-            statusDiv.style.display = 'block';
-            statusDiv.textContent = '✓ PDF compiled (page rendering unavailable — download to view)';
-          }
+          applyLatexResult(await compileLatex(rawLatex));
         } catch (err) {
           loadingDiv.style.display = 'none';
           statusDiv.className = 'latex-render-status latex-error';
@@ -605,6 +645,7 @@ img { max-width: 100%; height: auto; }
           `;
 
           try {
+            const baseURL = import.meta.env.VITE_API_URL || '';
             const res = await fetch(`${baseURL}/api/latex`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },

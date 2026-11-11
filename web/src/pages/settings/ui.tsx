@@ -2,6 +2,7 @@ import {
   Show,
   createContext,
   createSignal,
+  onCleanup,
   useContext,
   type Accessor,
   type JSX,
@@ -289,8 +290,14 @@ export function Select(props: {
         onChange={(e) => props.onChange(e.currentTarget.value)}
         class={`${fieldClass} ${props.width ?? 'w-[13rem]'} max-w-full appearance-none pr-7 cursor-pointer`}
       >
+        {/* `selected` per option, not just `value` on the select: when the
+            option list re-renders (e.g. the model list refreshes) the browser
+            would otherwise fall back to another option while `value` is not
+            re-applied because it did not change. */}
         {props.options.map((o) => (
-          <option value={o.value}>{o.label}</option>
+          <option value={o.value} selected={o.value === props.value}>
+            {o.label}
+          </option>
         ))}
       </select>
       <svg
@@ -506,11 +513,14 @@ export function Spinner(props: { class?: string }) {
 
 export function CopyButton(props: { text: string; label?: string }) {
   const [copied, setCopied] = createSignal(false);
+  let resetTimer: number | undefined;
+  onCleanup(() => clearTimeout(resetTimer));
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(props.text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
+      clearTimeout(resetTimer);
+      resetTimer = window.setTimeout(() => setCopied(false), 1400);
     } catch {
       // Clipboard blocked (insecure origin, denied permission) — say nothing
       // rather than claim a copy that never happened.

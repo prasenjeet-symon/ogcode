@@ -1,4 +1,4 @@
-import { Show, createEffect, onCleanup, type JSX } from 'solid-js';
+import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
 import { drawerIsOpen, openDrawer, closeDrawer } from '../lib/mobile-drawer';
 
 interface SidebarShellProps {
@@ -15,13 +15,31 @@ interface SidebarShellProps {
 // hamburger buttons in each page header) and closes on: scrim tap, Escape,
 // or any navigation.
 //
-// The children are NOT unmounted when the drawer is closed — they stay in the
+// The children are kept mounted while the drawer is closed — they stay in the
 // DOM behind the translateX(-102%) transform, which keeps sidebar state
 // (search text, rename-in-progress, collapsed rail) alive across open/close
 // cycles and keeps the closed state free of layout cost.
+//
+// IMPORTANT: only ONE of the two insertion sites renders at a time. Putting
+// props.children at both sites built two live SessionSidebars on every page —
+// two roster polls, two board-SSE debouncers, two ⌘K listeners and two copies
+// of the pinned/collapsed/width state that could disagree. The breakpoint picks
+// the site instead, so crossing 1024px remounts the panel (rare) rather than
+// doubling every effect for the life of the tab.
 export default function SidebarShell(props: SidebarShellProps) {
   const isOpen = () => drawerIsOpen(props.drawer);
   const label = () => 'Sessions';
+
+  const [desktop, setDesktop] = createSignal(
+    typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches,
+  );
+  onMount(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => setDesktop(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    onCleanup(() => mq.removeEventListener('change', onChange));
+  });
 
   // Close-on-navigation lives in DrawerNavCloser (app.tsx), which mounts once
   // above the router outlet and survives page swaps — a shell here unmounts
@@ -34,7 +52,9 @@ export default function SidebarShell(props: SidebarShellProps) {
   createEffect(() => {
     if (!isOpen()) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeDrawer();
+      // A dialog opened above the drawer owns Escape; closing both at once left
+      // the user looking at a sheet whose backdrop had already gone.
+      if (e.key === 'Escape' && !document.querySelector('[aria-modal="true"]')) closeDrawer();
     };
     document.addEventListener('keydown', onKey);
     document.body.classList.add('drawer-open');
@@ -47,42 +67,46 @@ export default function SidebarShell(props: SidebarShellProps) {
   return (
     <>
       {/* Inline on desktop — zero cost, unchanged layout. */}
-      <nav class="hidden lg:flex shrink-0" aria-label={label()}>{props.children}</nav>
-
-      {/* Scrim — a SIBLING of the drawer, never a child. The drawer carries a
-          CSS transform, and a transformed element becomes the containing
-          block for position:fixed descendants: a scrim inside it would cover
-          only the drawer's own 320px box (dimming the sidebar instead of the
-          page behind) and paint above the sidebar content, swallowing every
-          tap on session rows. As a sibling under the root it covers the
-          real viewport, sits under the drawer (z 59 < 60), and its tap
-          closes the drawer. */}
-      <Show when={isOpen()}>
-        <div
-          class="sidebar-drawer-scrim is-active"
-          onClick={closeDrawer}
-          aria-label="Close navigation"
-        />
+      <Show when={desktop()}>
+        <nav class="hidden lg:flex shrink-0" aria-label={label()}>{props.children}</nav>
       </Show>
 
-      {/* Drawer below lg */}
-      <nav
-        class={`sidebar-drawer lg:hidden ${isOpen() ? 'is-open' : ''}`}
-        aria-hidden={!isOpen()}
-        inert={!isOpen()}
-        aria-label={label()}
-      >
-        <div
-          class="sidebar-drawer-viewport"
-          onClick={(e) => {
-            // Taps on the sidebar's own empty padding (not its controls) also
-            // close it, matching how mobile apps treat a drawer surface.
-            if (e.target === e.currentTarget) closeDrawer();
-          }}
+      <Show when={!desktop()}>
+        {/* Scrim — a SIBLING of the drawer, never a child. The drawer carries a
+            CSS transform, and a transformed element becomes the containing
+            block for position:fixed descendants: a scrim inside it would cover
+            only the drawer's own 320px box (dimming the sidebar instead of the
+            page behind) and paint above the sidebar content, swallowing every
+            tap on session rows. As a sibling under the root it covers the
+            real viewport, sits under the drawer (z 59 < 60), and its tap
+            closes the drawer. */}
+        <Show when={isOpen()}>
+          <div
+            class="sidebar-drawer-scrim is-active"
+            onClick={closeDrawer}
+            aria-label="Close navigation"
+          />
+        </Show>
+
+        {/* Drawer below lg */}
+        <nav
+          class={`sidebar-drawer lg:hidden ${isOpen() ? 'is-open' : ''}`}
+          aria-hidden={!isOpen()}
+          inert={!isOpen()}
+          aria-label={label()}
         >
-          {props.children}
-        </div>
-      </nav>
+          <div
+            class="sidebar-drawer-viewport"
+            onClick={(e) => {
+              // Taps on the sidebar's own empty padding (not its controls) also
+              // close it, matching how mobile apps treat a drawer surface.
+              if (e.target === e.currentTarget) closeDrawer();
+            }}
+          >
+            {props.children}
+          </div>
+        </nav>
+      </Show>
     </>
   );
 }

@@ -103,6 +103,14 @@ export async function prepareImageAttachment(file: File): Promise<PreparedImage>
   }
 
   const { width, height } = dimensions(img);
+
+  // Drawing an animated GIF onto a canvas keeps only the first frame, so a GIF
+  // is attached as-is however large: its animation is worth more than the
+  // pixels the downscale would save, and the provider tile-caps it anyway.
+  if (file.type === 'image/gif') {
+    closeDecoded(img);
+    return raw();
+  }
   const longEdge = Math.max(width, height);
   if (longEdge <= 0) {
     closeDecoded(img);

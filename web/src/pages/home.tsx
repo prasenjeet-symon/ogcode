@@ -80,6 +80,8 @@ function HomeContent() {
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    // Enter that confirms an IME candidate must not also submit the prompt.
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -112,9 +114,11 @@ function HomeContent() {
                 <Logo class="w-3.5 h-3.5 text-[color:var(--on-primary)]" small />
               </div>
               <span class="text-[14px] font-semibold tracking-tight text-zinc-100">ogcode</span>
-              <span class="ml-1.5 px-1.5 py-[1px] rounded text-[9px] font-mono font-medium text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/20">
-                v{version()}
-              </span>
+              <Show when={version()}>
+                <span class="ml-1.5 px-1.5 py-[1px] rounded text-[9px] font-mono font-medium text-[color:var(--accent-ink)] bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/20">
+                  v{version()}
+                </span>
+              </Show>
             </div>
             <div class="flex items-center gap-3">
               <button

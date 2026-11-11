@@ -1,6 +1,7 @@
 import { Navigate, Route, Router, useNavigate, useLocation } from '@solidjs/router';
 import { createEffect, onCleanup, Show } from 'solid-js';
 import { closeDrawer } from './lib/mobile-drawer';
+import { capturePageview } from './lib/posthog';
 import { useServer } from './context/server';
 import { OnboardingProvider, useOnboarding } from './context/onboarding';
 import { SessionProvider } from './context/session';
@@ -99,6 +100,7 @@ function AppWrapper(props: { children?: any }) {
                             changed, so it would never see a "navigation".
                             AppWrapper mounts once and observes every change. */}
                         <DrawerNavCloser />
+                        <PageviewTracker />
                         <div class="flex h-dvh bg-[color:var(--bg-base)] text-zinc-100 antialiased">
                           {props.children}
                         </div>
@@ -131,6 +133,20 @@ function OnboardingGate() {
     if (onboarding.needsOnboarding() && location.pathname !== '/onboarding') {
       navigate('/onboarding', { replace: true });
     }
+  });
+  return null;
+}
+
+// Reports each client-side navigation to PostHog. PostHog captures the page a
+// document load lands on itself; a router swap is invisible to it. The first
+// run only records the current path, which the load already counted.
+function PageviewTracker() {
+  const location = useLocation();
+  let lastPath = location.pathname;
+  createEffect(() => {
+    const p = location.pathname;
+    if (p !== lastPath) capturePageview(p);
+    lastPath = p;
   });
   return null;
 }

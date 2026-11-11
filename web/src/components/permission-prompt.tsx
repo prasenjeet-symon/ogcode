@@ -16,6 +16,7 @@ export default function PermissionPrompt() {
   const current = () => queue()[0];
 
   let allowBtn: HTMLButtonElement | undefined;
+  let cardEl: HTMLDivElement | undefined;
 
   // A prompt raised by a teammate is surfaced here but belongs to the
   // teammate's own loop; it must not steal focus from the user's typing in the
@@ -29,21 +30,39 @@ export default function PermissionPrompt() {
   // human can answer it while watching this session.
   const fromTeammate = (req: { teammate?: string; sessionId?: string }) => !!req.teammate && !isOwn(req);
 
+  // Focusing Allow is the one keystroke-saving affordance here, so it happens
+  // once per request. Re-running it on every queue write (a second tool asking,
+  // a session switch) yanked the caret out of whatever the user was typing and
+  // parked it on Allow, where the next Space approved the tool.
+  let focusedFor = '';
   createEffect(() => {
     const req = current();
-    if (req && isOwn(req)) queueMicrotask(() => allowBtn?.focus());
+    if (!req || !isOwn(req) || req.permissionId === focusedFor) return;
+    focusedFor = req.permissionId;
+    const active = document.activeElement as HTMLElement | null;
+    const typing =
+      !!active &&
+      (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable);
+    if (typing) return;
+    queueMicrotask(() => allowBtn?.focus());
   });
 
   const handleKey = (e: KeyboardEvent) => {
     const req = current();
     if (!req) return;
+    // A dialog or the mobile drawer sits above the composer: Escape closes that
+    // layer, it does not reject the tool waiting behind it.
+    if (document.querySelector('[aria-modal="true"]') || document.body.classList.contains('drawer-open')) return;
     const target = e.target as HTMLElement | null;
     const typing = !!target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable);
+    // "A" is the card's own shortcut: keep it to the card (focus normally rests
+    // on Allow), so a stray letter elsewhere cannot allow every future call.
+    const inCard = !!target && (!!cardEl?.contains(target) || target === document.body);
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopImmediatePropagation();
       session.respondPermission(req.permissionId, 'reject');
-    } else if ((e.key === 'a' || e.key === 'A') && !typing) {
+    } else if ((e.key === 'a' || e.key === 'A') && !typing && inCard) {
       e.preventDefault();
       e.stopImmediatePropagation();
       session.respondPermission(req.permissionId, 'always');
@@ -57,7 +76,7 @@ export default function PermissionPrompt() {
       {(req) => {
         const isBash = () => req().tool === 'bash';
         return (
-          <div class="border-b border-[color:var(--border-subtle)] px-3.5 pt-2.5 pb-2">
+          <div ref={cardEl} class="border-b border-[color:var(--border-subtle)] px-3.5 pt-2.5 pb-2">
             {/* Row 1 — what it wants to do */}
             <div class="flex items-center gap-2">
               <span

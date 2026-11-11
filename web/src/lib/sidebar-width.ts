@@ -57,16 +57,23 @@ export function createSidebarWidth(options: SidebarWidthOptions = {}): SidebarWi
 
   const start = (e: PointerEvent) => {
     e.preventDefault();
+    // Capture the pointer on the grip: without it a release outside the window
+    // never delivers pointerup, and every later move keeps resizing the panel.
+    const grip = e.currentTarget as HTMLElement | null;
+    try { grip?.setPointerCapture(e.pointerId); } catch { /* not supported */ }
     const x0 = e.clientX;
     const w0 = width();
     const onMove = (ev: PointerEvent) => setWidth(clamp(w0 + (ev.clientX - x0), min, max));
-    const onUp = () => {
+    const stop = () => {
       window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      try { if (grip?.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId); } catch { /* gone */ }
       persist();
     };
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
   };
 
   // Arrows step by 8 (Shift 24); Home/End jump to the limits. The element is

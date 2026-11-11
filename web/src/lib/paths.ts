@@ -5,5 +5,10 @@
 /** The project's own name, not the whole path — the full path is one hover
  *  away and a truncated absolute path tells you nothing. */
 export function projectName(dir: string): string {
-  return dir.split('/').filter(Boolean).pop() || dir || 'No workspace';
+  // Both separators: a Windows workspace (C:\Users\me\proj) and a UNC share
+  // (\\server\share) name themselves by their last segment, as a POSIX path
+  // does. A bare drive root (C:\) has no name to give, so it stays whole.
+  const parts = dir.split(/[\\/]+/).filter(Boolean);
+  const last = parts.pop() || '';
+  return last && !/^[A-Za-z]:$/.test(last) ? last : (dir || 'No workspace');
 }

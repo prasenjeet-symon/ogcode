@@ -37,7 +37,10 @@ export function parseUnifiedDiff(text: string): Hunk[] {
       file = extractFilePath(line);
       continue;
     }
-    if (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+    // Header lines only appear before the first hunk. Inside a hunk, `--- x`
+    // and `+++ x` are ordinary removed/added lines that happen to start with
+    // those characters, and skipping them breaks the hunk's `@@` counts.
+    if (cur === null && (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ '))) {
       continue;
     }
     if (line.startsWith('@@')) {
@@ -92,13 +95,16 @@ function extractFilePath(diffLine: string): string {
 // GitDiff renders raw unified-diff text (from `git diff` / `git show`) as a
 // GitHub-style line diff. Unlike FileDiff it does not recompute a diff — it
 // parses the @@ hunks directly.
+const MAX_ROWS = 1500;
+
 export default function GitDiff(props: { diff: string; filename?: string }) {
   const hunks = createMemo(() => parseUnifiedDiff(props.diff));
 
   // Flatten hunks into renderable rows. A `file` row is emitted whenever the
   // file path changes between consecutive hunks, so multi-file commits (e.g.
-  // `git show`) get a visible per-file separator. No row cap — the whole diff
-  // is rendered.
+  // `git show`) get a visible per-file separator. The list itself is uncapped
+  // (the counts below need it), but the DOM only gets MAX_ROWS rows: a lockfile
+  // diff is tens of thousands of lines and mounting them all freezes the tab.
   const rows = createMemo(() => {
     type Row =
       | { kind: 'file'; text: string; first: boolean }
@@ -119,6 +125,9 @@ export default function GitDiff(props: { diff: string; filename?: string }) {
     return out;
   });
 
+  const shown = createMemo(() => rows().slice(0, MAX_ROWS));
+  const truncated = createMemo(() => rows().length - shown().length);
+
   return (
     <div class="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] overflow-hidden">
       <Show
@@ -131,7 +140,7 @@ export default function GitDiff(props: { diff: string; filename?: string }) {
       >
         <div class="overflow-x-auto font-mono text-[12px] leading-[1.5] py-1">
           <div class="w-max min-w-full">
-          <For each={rows()}>
+          <For each={shown()}>
             {(row) => (
               <Show
                 when={row.kind === 'file'}
@@ -162,6 +171,11 @@ export default function GitDiff(props: { diff: string; filename?: string }) {
               </Show>
             )}
           </For>
+          <Show when={truncated() > 0}>
+            <div class="px-3 py-1 text-[11px] select-none" style={{ color: 'var(--text-muted)' }}>
+              … {truncated()} more lines not shown
+            </div>
+          </Show>
           </div>
         </div>
       </Show>

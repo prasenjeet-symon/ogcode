@@ -89,18 +89,34 @@ export default function IntentPill() {
   const heading = () =>
     allDone() ? 'Plan complete' : (active()?.step ?? nextPending()?.step ?? 'Planning…');
 
+  const place = () => {
+    const r = triggerRef?.getBoundingClientRect();
+    if (!r) return;
+    const W = 340, GAP = 6, M = 8;
+    const vw = window.innerWidth;
+    const phone = window.matchMedia('(max-width: 640px)').matches;
+    const right = phone ? M : Math.min(Math.max(vw - r.right, M), Math.max(M, vw - W - M));
+    setPos({ top: r.bottom + GAP, right, phone });
+  };
+
   const toggleOpen = () => {
     if (open()) { setOpen(false); return; }
-    const r = triggerRef?.getBoundingClientRect();
-    if (r) {
-      const W = 340, GAP = 6, M = 8;
-      const vw = window.innerWidth;
-      const phone = window.matchMedia('(max-width: 640px)').matches;
-      const right = phone ? M : Math.min(Math.max(vw - r.right, M), Math.max(M, vw - W - M));
-      setPos({ top: r.bottom + GAP, right, phone });
-    }
+    place();
     setOpen(true);
   };
+
+  // The anchor moves with the viewport — a resize, a rotation, or a scrolling
+  // header — so an open panel is re-placed instead of staying where it opened.
+  createEffect(() => {
+    if (!open()) return;
+    const onMove = () => place();
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    onCleanup(() => {
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+    });
+  });
 
   // Escape closes the popover — and only it: the composer reads Escape as "stop
   // the agent", which must not fire while the checklist is in the way.

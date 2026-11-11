@@ -96,6 +96,39 @@ function byStatus(a: BoardHandle, b: BoardHandle): number {
   return (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9) || a.handle.localeCompare(b.handle);
 }
 
+/**
+ * Session ids the board places beneath ANOTHER session: every roster agent
+ * that climbs its spawned_by chain to a root other than itself.
+ *
+ * Used by both the session sidebar and the ⌘K palette to keep a teammate's
+ * session out of the main session list — a teammate's session is an ordinary
+ * 'build' session, so its type alone cannot tell it apart from the session it
+ * was spawned by. It stays reachable through its root's team rows.
+ *
+ * A team hides its members only while the ROOT session is in `sessionIds`:
+ * board rows are never deleted, so a dead root would otherwise take its
+ * members out of the list with no chip left to unfold them under.
+ */
+export function childSessionIds(handles: BoardHandle[], sessionIds: Iterable<string>): Set<string> {
+  const exists = new Set(sessionIds);
+  const byHandle = new Map<string, BoardHandle>();
+  for (const h of handles) if (h.handle !== 'user') byHandle.set(h.handle, h);
+  const ids = new Set<string>();
+  for (const h of byHandle.values()) {
+    // Climb cycle-safely: two rows naming each other — nothing writes that,
+    // but a hand-edited database could hold it — must not hang the caller.
+    const seen = new Set<string>([h.handle]);
+    let root: BoardHandle | undefined = h;
+    while (root && root.spawnedBy && byHandle.has(root.spawnedBy) && !seen.has(root.spawnedBy)) {
+      seen.add(root.spawnedBy);
+      root = byHandle.get(root.spawnedBy);
+    }
+    if (!root || root === h || !root.sessionId || !exists.has(root.sessionId)) continue;
+    if (h.sessionId) ids.add(h.sessionId);
+  }
+  return ids;
+}
+
 /** Flat, indented rows: parents before their children, cycle-safe, status-ranked siblings. */
 export function buildTree(handles: BoardHandle[]): TreeRow[] {
   const { roots, children } = childrenOf(handles);

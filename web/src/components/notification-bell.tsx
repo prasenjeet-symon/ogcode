@@ -29,6 +29,10 @@ export default function NotificationBell() {
   const [showUpdatePopover, setShowUpdatePopover] = createSignal(false);
 
   onMount(() => {
+    // "Dismiss (7 days)" is only worth writing if the next load reads it back.
+    let dismissedUntil = 0;
+    try { dismissedUntil = Number(localStorage.getItem('ogcode-update-dismissed-until')) || 0; } catch { /* private mode */ }
+    if (Date.now() < dismissedUntil) return;
     // Check for updates on mount
     getVersion().then(info => {
       if (info.updateAvailable) {
@@ -152,7 +156,11 @@ export default function NotificationBell() {
 
       <button
         type="button"
-        onClick={() => { setOpen((o) => !o); if (!open()) notifs.markAllRead(); }}
+        onClick={() => {
+          const next = !open();
+          setOpen(next);
+          if (next) notifs.markAllRead();
+        }}
         class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-[color:var(--bg-hover)] transition relative"
         title="Notifications"
       >

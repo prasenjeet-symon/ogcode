@@ -5,6 +5,7 @@ import {
   type ThemeMode,
   getTheme,
   setTheme as setThemeAPI,
+  deleteTheme,
   getAppearance,
   setAppearance,
 } from '../api/client';
@@ -58,6 +59,15 @@ function persistMode(mode: ThemeMode) {
     localStorage.setItem(MODE_STORAGE_KEY, mode);
   } catch {
     /* private mode or storage disabled — the server still holds the truth */
+  }
+}
+
+function storedMode(): ThemeMode | null {
+  try {
+    const v = localStorage.getItem(MODE_STORAGE_KEY);
+    return v === 'light' || v === 'dark' || v === 'system' ? v : null;
+  } catch {
+    return null;
   }
 }
 
@@ -118,7 +128,13 @@ export const ThemeProvider: ParentComponent = (props) => {
         persistMode(a.mode);
         applyModeCSS(a.mode);
       })
-      .catch(() => applyModeCSS(mode()));
+      .catch(() => {
+        // index.html's pre-paint script already applied the pinned mode; keep
+        // it rather than snapping to 'system' on a failed read.
+        const fallback = storedMode() ?? mode();
+        setModeSignal(fallback);
+        applyModeCSS(fallback);
+      });
 
     const mq = window.matchMedia('(prefers-color-scheme: light)');
     const onChange = () => {
@@ -134,12 +150,15 @@ export const ThemeProvider: ParentComponent = (props) => {
     if (!dir) return;
     try {
       const t = await getTheme(dir);
+      // A switch mid-flight belongs to the directory that is now active.
+      if (server.directory() !== dir) return;
       setTheme(t);
       applyThemeCSS(t);
     } catch {
-      setTheme({ ...DEFAULT_THEME, directory: dir });
+      if (server.directory() !== dir) return;
       resetCSS();
-      applyThemeCSS(DEFAULT_THEME);
+      applyThemeCSS({ ...DEFAULT_THEME, directory: dir });
+      setTheme({ ...DEFAULT_THEME, directory: dir });
     }
   }));
 
@@ -157,6 +176,10 @@ export const ThemeProvider: ParentComponent = (props) => {
   };
 
   const resetTheme = () => {
+    const dir = server.directory();
+    // Optimistic locally, persisted on the server — otherwise the next mount
+    // reads the old colour back and the reset appears to undo itself.
+    if (dir) deleteTheme(dir).catch((e) => console.error('reset theme failed:', e));
     resetCSS();
     if (theme()) {
       applyThemeCSS({ ...DEFAULT_THEME, directory: theme()!.directory });
@@ -164,7 +187,11 @@ export const ThemeProvider: ParentComponent = (props) => {
     setTheme(null);
   };
 
+  // Only the newest mode choice may restore its own predecessor: two quick
+  // clicks (Light → Dark) must not let the first, failing call land last.
+  let modeSeq = 0;
   const setMode = async (next: ThemeMode) => {
+    const seq = ++modeSeq;
     const prev = mode();
     setModeSignal(next);
     persistMode(next);
@@ -172,9 +199,11 @@ export const ThemeProvider: ParentComponent = (props) => {
     try {
       await setAppearance(next);
     } catch (e) {
-      setModeSignal(prev);
-      persistMode(prev);
-      applyModeCSS(prev);
+      if (seq === modeSeq) {
+        setModeSignal(prev);
+        persistMode(prev);
+        applyModeCSS(prev);
+      }
       throw e;
     }
   };
