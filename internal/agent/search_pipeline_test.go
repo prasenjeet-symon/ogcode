@@ -319,6 +319,97 @@ func TestSearchRank_ShortCircuitsAndSetsLowEffort(t *testing.T) {
 	}
 }
 
+// TestSearchRank_TruncatedRankerFallsBackToTopResults pins the guard that turns
+// a ranker which ran out of budget mid-thought into a failed call. The
+// reasoning stream is number-shaped prose here — exactly what beam@low writes
+// when the cap is spent before the first pick — so a regression would parse it
+// as picks (Two, One) instead of falling back.
+func TestSearchRank_TruncatedRankerFallsBackToTopResults(t *testing.T) {
+	var calls atomic.Int32
+	length := "length"
+	p := scriptedSearchProvider{
+		events: []provider.StreamEvent{
+			{Type: provider.EventReasoning, Text: "2\n1\n"},
+			{Type: provider.EventFinish, FinishReason: &length},
+		},
+		calls: &calls,
+	}
+	lr := &LoopRunner{}
+	tune := searchTuning{fetchTopK: 2, pageChars: 6000}
+	candidates := []search.SearchResult{
+		{Title: "One", URL: "https://a.dev/1"},
+		{Title: "Two", URL: "https://b.dev/2"},
+		{Title: "Three", URL: "https://c.dev/3"},
+	}
+
+	picks := lr.searchRank(context.Background(), p, "test-model", "q", candidates, tune)
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", calls.Load())
+	}
+	if len(picks) != 2 || picks[0].Title != "One" || picks[1].Title != "Two" {
+		t.Fatalf("picks = %+v, want the top-results fallback [One, Two]", picks)
+	}
+}
+
+// TestSearchRank_ReasoningAnswerWithStopIsUsed keeps the reasoning fallback
+// honest: a thinking model that genuinely answers as reasoning and stops on
+// its own is still an answer. Without this, the guard above invites deleting
+// the substitution altogether.
+func TestSearchRank_ReasoningAnswerWithStopIsUsed(t *testing.T) {
+	var calls atomic.Int32
+	stop := "stop"
+	p := scriptedSearchProvider{
+		events: []provider.StreamEvent{
+			{Type: provider.EventReasoning, Text: "2\n1\n"},
+			{Type: provider.EventFinish, FinishReason: &stop},
+		},
+		calls: &calls,
+	}
+	lr := &LoopRunner{}
+	tune := searchTuning{fetchTopK: 2, pageChars: 6000}
+	candidates := []search.SearchResult{
+		{Title: "One", URL: "https://a.dev/1"},
+		{Title: "Two", URL: "https://b.dev/2"},
+		{Title: "Three", URL: "https://c.dev/3"},
+	}
+
+	picks := lr.searchRank(context.Background(), p, "test-model", "q", candidates, tune)
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", calls.Load())
+	}
+	if len(picks) != 2 || picks[0].Title != "Two" || picks[1].Title != "One" {
+		t.Fatalf("picks = %+v, want [Two, One] parsed from the reasoning stream", picks)
+	}
+}
+
+// TestSearchRank_MissingFinishKeepsTheReasoningSubstitution pins the case an
+// OpenAI-compatible endpoint that omits finish_reason on its last chunk
+// produces: no finish event at all must behave exactly as before the guard.
+func TestSearchRank_MissingFinishKeepsTheReasoningSubstitution(t *testing.T) {
+	var calls atomic.Int32
+	p := scriptedSearchProvider{
+		events: []provider.StreamEvent{
+			{Type: provider.EventReasoning, Text: "2\n1\n"},
+		},
+		calls: &calls,
+	}
+	lr := &LoopRunner{}
+	tune := searchTuning{fetchTopK: 2, pageChars: 6000}
+	candidates := []search.SearchResult{
+		{Title: "One", URL: "https://a.dev/1"},
+		{Title: "Two", URL: "https://b.dev/2"},
+		{Title: "Three", URL: "https://c.dev/3"},
+	}
+
+	picks := lr.searchRank(context.Background(), p, "test-model", "q", candidates, tune)
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", calls.Load())
+	}
+	if len(picks) != 2 || picks[0].Title != "Two" || picks[1].Title != "One" {
+		t.Fatalf("picks = %+v, want [Two, One] parsed from the reasoning stream", picks)
+	}
+}
+
 func TestBuildSourceMaterial_FallbackUsesRankedPicks(t *testing.T) {
 	picks := []search.SearchResult{
 		{Title: "RankedFirst", URL: "https://best.dev/doc", Snippet: "authoritative snippet"},

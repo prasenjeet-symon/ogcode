@@ -83,11 +83,101 @@ type ReindexStats struct{ Scanned, Indexed, Purged int }
 //
 // It is separate from Store (the memory_turn_index the memory_map tool reads)
 // because the two have different freshness contracts — see the migration.
-type SearchStore struct{ db *db.DB }
+//
+// Documents it indexes are attributed to the ROOT of a spawn chain, not the
+// child session that produced them: a teammate or background task child's turn
+// summaries roll up to the session a human opened, so search shows one answer
+// per conversation. rootOf resolves that chain through the board's agent rows
+// fresh on every call — no cache — because a session can be indexed before its
+// board row exists (a spawned child turns fast), and a cached miss would pin
+// the child attribution forever, defeating the repair sweep.
+type SearchStore struct {
+	db *db.DB
+}
 
 // NewSearchStore creates a SearchStore backed by the given (project-local)
 // database.
 func NewSearchStore(database *db.DB) *SearchStore { return &SearchStore{db: database} }
+
+// rootOf returns the root session of the spawn chain the given session belongs
+// to. A session with no board row, or one registered at the top (roots have
+// spawned_by empty), is its own root.
+func (s *SearchStore) rootOf(sessionID string) string {
+	if s == nil || s.db == nil || sessionID == "" {
+		return sessionID
+	}
+	return s.resolveRoot(sessionID)
+}
+
+// resolveRoot walks the board's agent rows from the child up to the top of its
+// spawn chain. Rows live in board_agent: handle → session_id, with spawned_by
+// naming the handle of whatever spawned it. The walk mirrors board.go's
+// parentSessionOf — it stops at the first ancestor that is not itself a
+// teammate, which is the session a human opened — but the kinds are spelled as
+// literals here because memory storage must not depend on the board package.
+func (s *SearchStore) resolveRoot(sessionID string) string {
+	const maxDepth = 32
+	rows, err := s.db.Query(`SELECT handle, session_id, spawned_by, kind FROM board_agent
+		WHERE handle <> ''`)
+	if err != nil {
+		// A missing board_agent table (fresh db before migrations, or an
+		// embedded use without board) must not break indexing: the session
+		// is then simply its own root.
+		return sessionID
+	}
+	defer rows.Close()
+	byHandle := make(map[string]boardRow)
+	for rows.Next() {
+		var r boardRow
+		if err := rows.Scan(&r.handle, &r.sessionID, &r.spawnedBy, &r.kind); err != nil {
+			return sessionID
+		}
+		byHandle[r.handle] = r
+	}
+	if err := rows.Err(); err != nil {
+		return sessionID
+	}
+
+	self, ok := byHandleBySessionID(byHandle, sessionID)
+	if !ok {
+		return sessionID
+	}
+	cur := self
+	for depth := 0; depth < maxDepth; depth++ {
+		parent, ok := byHandle[cur.spawnedBy]
+		if !ok || parent.sessionID == "" || parent.kind != "teammate" {
+			// Chain top: the spawned row's parent is not another teammate,
+			// so its session is the root conversation.
+			if parent.sessionID != "" {
+				return parent.sessionID
+			}
+			break
+		}
+		cur = parent
+	}
+	if cur.sessionID != "" {
+		return cur.sessionID
+	}
+	return sessionID
+}
+
+// boardRow is one row of board_agent, read for root-chain resolution.
+type boardRow struct {
+	handle    string
+	sessionID string
+	spawnedBy string
+	kind      string
+}
+
+// byHandleBySessionID finds the board row registered for a session id.
+func byHandleBySessionID(byHandle map[string]boardRow, sessionID string) (boardRow, bool) {
+	for _, r := range byHandle {
+		if r.sessionID == sessionID {
+			return r, true
+		}
+	}
+	return boardRow{}, false
+}
 
 // searchDoc is one document on its way into the index.
 type searchDoc struct {
@@ -192,10 +282,13 @@ func (s *SearchStore) IndexTurn(path string, meta Meta) error {
 	if t, ok := parseFrontmatterTime(fields.createdAt); ok {
 		created = t
 	}
+	sessionID := firstNonEmpty(fields.sessionID, meta.SessionID)
 	return s.upsert(searchDoc{
 		ref:       turnRef(path),
 		kind:      kindTurn,
-		sessionID: firstNonEmpty(fields.sessionID, meta.SessionID),
+		// A spawned child's turns answer as its root conversation, so the
+		// document carries the root's id even though the file is the child's.
+		sessionID: s.rootOf(sessionID),
 		projectID: firstNonEmpty(fields.projectID, meta.ProjectID),
 		path:      path,
 		// The summary's own H1 titles the file better than a fallback when the
@@ -233,9 +326,11 @@ func (s *SearchStore) IndexSessionMemory(projectDir, sessionID string) error {
 		created = t
 	}
 	return s.upsert(searchDoc{
-		ref:       memoryRef(path),
-		kind:      kindMemory,
-		sessionID: sessionID,
+		ref:  memoryRef(path),
+		kind: kindMemory,
+		// The file is keyed by the session that owns it, but a spawned
+		// child's notes answer as its root conversation.
+		sessionID: s.rootOf(sessionID),
 		projectID: project.Resolve(projectDir),
 		path:      path,
 		title:     firstNonEmpty(fields.title, firstH1(body)),
@@ -260,9 +355,13 @@ func (s *SearchStore) IndexSession(sessionID, title, summary, projectID string, 
 	}
 	_, body := splitFrontmatter(summary)
 	return s.upsert(searchDoc{
+		// ref stays keyed by the original session id — the root and the child
+		// each carry their own session-kind document, and collapsing both onto
+		// one ref would let whichever indexed last overwrite the other. Only
+		// the attribution moves to the root.
 		ref:       sessionRef(sessionID),
 		kind:      kindSession,
-		sessionID: sessionID,
+		sessionID: s.rootOf(sessionID),
 		projectID: projectID,
 		title:     title,
 		labels:    extractTopics(summary),
@@ -582,6 +681,16 @@ func (s *SearchStore) Search(ctx context.Context, projectID, projectDir, query s
 	return hits, nil
 }
 
+// mainSessionFilter keeps sub-agent and headless sessions out of the answer.
+// The search namespace is the conversations a person had: a spawned child's
+// documents are attributed to its chain's root at index time (rootOf), and an
+// index or note run is housekeeping. The kinds mirror turnMemorableSession
+// (internal/agent/loop.go), the list that already refuses to remember them;
+// anything else — "" on rows predating the column, "build" on the interactive
+// default — counts as main. Filtering the join rather than the index means a
+// document that predates this rule stops surfacing too.
+const mainSessionFilter = `s.session_type NOT IN ('subagent', 'memory-recall', 'note', 'index', 'search')`
+
 // termMatchSQL is one term's candidate query. It returns every document that
 // matches, with its per-term score and its snippet, joined to the session table:
 // the INNER JOIN drops rows whose conversation no longer exists and hands back
@@ -593,7 +702,7 @@ const termMatchSQL = `SELECT m.rowid, m.session_id, m.kind, m.title, m.labels, m
   FROM memory_search_fts
   JOIN memory_search m ON m.rowid = memory_search_fts.rowid
   JOIN session s ON s.id = m.session_id
- WHERE memory_search_fts MATCH ? AND m.project_id = ?`
+ WHERE memory_search_fts MATCH ? AND m.project_id = ? AND ` + mainSessionFilter
 
 // matches runs one MATCH per query term and unions the results. The terms are
 // intersected per session by rankHits, never ANDed in one MATCH: a per-turn row
@@ -670,7 +779,8 @@ func (s *SearchStore) matches(ctx context.Context, projectID string, terms []str
 	return rows, sessions, nil
 }
 
-// termMatches runs one MATCH and returns every matching document.
+// termMatches runs one MATCH and returns every matching document of a main
+// session.
 func (s *SearchStore) termMatches(ctx context.Context, projectID, expr string) ([]termRow, error) {
 	rows, err := s.db.QueryContext(ctx, termMatchSQL, expr, projectID)
 	if err != nil {
@@ -695,8 +805,9 @@ func (s *SearchStore) termMatches(ctx context.Context, projectID, expr string) (
 }
 
 // purgeProject drops the rows of a project whose document or conversation is
-// gone: a deleted session takes its memory files' rows with it, and a deleted or
-// renamed file must not keep answering queries.
+// gone: a deleted session takes its memory files' rows with it, a deleted or
+// renamed file must not keep answering queries, and a row still attributed to
+// a spawned child (indexed before the roll-up) is rebuilt under its root.
 func (s *SearchStore) purgeProject(projectID string) (int, error) {
 	purged := 0
 
@@ -706,13 +817,20 @@ func (s *SearchStore) purgeProject(projectID string) (int, error) {
 		return 0, fmt.Errorf("memfile: find orphaned search rows: %w", err)
 	}
 	var orphans []string
+	seen := map[string]bool{}
+	addOrphan := func(ref string) {
+		if !seen[ref] {
+			seen[ref] = true
+			orphans = append(orphans, ref)
+		}
+	}
 	for rows.Next() {
 		var ref string
 		if err := rows.Scan(&ref); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("memfile: scan orphaned search row: %w", err)
 		}
-		orphans = append(orphans, ref)
+		addOrphan(ref)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -732,13 +850,38 @@ func (s *SearchStore) purgeProject(projectID string) (int, error) {
 			return 0, fmt.Errorf("memfile: scan search document: %w", err)
 		}
 		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
-			orphans = append(orphans, ref)
+			addOrphan(ref)
 		}
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return 0, fmt.Errorf("memfile: scan search documents: %w", err)
+	}
+
+	// Rows still attributed to a spawned child session predate the roll-up:
+	// root-attributed indexing (rootOf) never writes a child id under a board
+	// row, and a child's row always carries spawned_by. Drop them so the
+	// sweep re-indexes the same documents under their root — this is how a
+	// project heals its legacy index at the next reindex or startup sweep.
+	rows, err = s.db.Query(`SELECT m.ref FROM memory_search m
+		WHERE m.project_id = ? AND EXISTS (SELECT 1 FROM board_agent b
+			WHERE b.session_id = m.session_id AND b.spawned_by <> '')`, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("memfile: find child-attributed search rows: %w", err)
+	}
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("memfile: scan child-attributed search row: %w", err)
+		}
+		addOrphan(ref)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, fmt.Errorf("memfile: scan child-attributed search rows: %w", err)
 	}
 
 	for _, ref := range orphans {

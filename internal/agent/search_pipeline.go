@@ -27,9 +27,15 @@ import (
 // outside the bounds are clamped, and an unparseable one is ignored with a
 // warning rather than failing the search.
 const (
-	searchResultCount    = 20   // results requested for the query from the bridge
-	searchMaxCandidates  = 24   // cap on unique results fed to the ranker
-	searchRankMaxTokens  = 256  // output budget for the ranker (a few line-separated numbers)
+	searchResultCount   = 20 // results requested for the query from the bridge
+	searchMaxCandidates = 24 // cap on unique results fed to the ranker
+	// searchRankMaxTokens is the ranker's whole output budget, and a reasoning
+	// model spends it on its chain of thought before it writes the numbers:
+	// beam@low used 481 of a 512-token cap on one probe. A cap sized for "a few
+	// line-separated numbers" therefore returns no numbers at all, with
+	// finish=length. The number is a bound, not an allocation — nothing is billed
+	// or waited for that the model does not write.
+	searchRankMaxTokens  = 1024
 	searchSynthMaxTokens = 4096 // output budget for the final synthesis call
 
 	// searchFetchTimeout bounds Stage 3 as a whole so a single wedged host or
@@ -172,6 +178,7 @@ func (lr *LoopRunner) RunSearchSession(ctx context.Context, query, dir, model, p
 // default and then the immutable startup default. When model is empty it adopts
 // the default provider's first model so the pipeline always has something to run.
 func (lr *LoopRunner) resolveSearchProvider(model, providerID string) (provider.Provider, string) {
+	model, providerID = lr.resolveBackgroundModel(model, providerID)
 	if model == "" {
 		dp := lr.Registry.DefaultUsable()
 		if dp == nil {
@@ -586,8 +593,10 @@ func buildSourceMaterial(picks []search.SearchResult, pages []search.PageContent
 // and the usage the provider reported (nil when it reported none — the caller
 // charges it to the session either way, since a failed call can still have been
 // billed). It falls back to the reasoning stream when the text stream is empty
-// (some thinking models emit their whole answer as reasoning). maxTokens of 0
-// leaves the provider default in place.
+// (some thinking models emit their whole answer as reasoning), except when the
+// call ran out of budget: finish=length means that reasoning is an unfinished
+// chain of thought, not an answer. maxTokens of 0 leaves the provider default
+// in place.
 func oneShotLLM(ctx context.Context, p provider.Provider, model, system, user string, maxTokens int) (string, *provider.TokenUsage, error) {
 	return oneShotLLMWithEffort(ctx, p, model, system, user, maxTokens, "")
 }
@@ -603,13 +612,14 @@ func oneShotLLMWithEffort(ctx context.Context, p provider.Provider, model, syste
 		Messages:  []provider.ModelMessage{{Role: "user", Content: userJSON}},
 		MaxTokens: maxTokens,
 		Effort:    effort,
+		Task:      provider.TaskSearch,
 	}
 	ch, err := p.StreamChat(ctx, req)
 	if err != nil {
 		return "", nil, err
 	}
 	var text, reasoning strings.Builder
-	var streamErr string
+	var streamErr, finish string
 	var usage *provider.TokenUsage
 	for evt := range ch {
 		switch evt.Type {
@@ -623,6 +633,10 @@ func oneShotLLMWithEffort(ctx context.Context, p provider.Provider, model, syste
 			usage = evt.Usage
 		case provider.EventError:
 			streamErr = evt.Error
+		case provider.EventFinish:
+			if evt.FinishReason != nil {
+				finish = *evt.FinishReason
+			}
 		}
 	}
 	// A provider can emit useful-looking partial text before the connection or
@@ -634,6 +648,16 @@ func oneShotLLMWithEffort(ctx context.Context, p provider.Provider, model, syste
 	}
 	out := strings.TrimSpace(text.String())
 	if out == "" {
+		// finish=length means the budget ran out mid-thought, not that the
+		// answer arrived as reasoning. A chain of thought is not an answer:
+		// parsed for digits it yields line numbers, quoted limits and page
+		// counts, which look like picks and rank the sources by accident.
+		// Anthropic normalises max_tokens → length (provider/anthropic.go:656),
+		// so one check covers every provider.
+		if finish == "length" {
+			return "", usage, fmt.Errorf("no answer within %d output tokens (finish=%s, reasoningChars=%d)",
+				maxTokens, finish, reasoning.Len())
+		}
 		out = strings.TrimSpace(reasoning.String())
 	}
 	return out, usage, nil

@@ -338,6 +338,54 @@ type LoopRunner struct {
 	// rather than overwritten. nil (tests) leaves every mutation exactly as it
 	// was before the gate existed.
 	FileLog *filechange.Log
+	// BackgroundModel, when set, returns the machine-wide (model, providerID)
+	// override for behind-the-scenes LLM tasks (turn memory summary, context
+	// compaction, command risk assessment, intent tool matching, auto-index,
+	// deep search, memory recall, and task sub-agents). Returning an empty model
+	// inherits the parent session's model and provider.
+	BackgroundModel func() (model, providerID string)
+}
+
+// resolveBackgroundModel returns the (model, providerID) to use for a
+// behind-the-scenes LLM call: when BackgroundModel names a model a registered
+// provider actually serves, that override wins; otherwise the inherited session
+// (model, providerID) is returned. The check is an existence check rather than
+// ResolveProviderFor's nil test — that one falls back to the highest-priority
+// provider, so a misspelled, removed or disabled-provider model would be
+// accepted here and then fail every call it was stamped onto instead of
+// inheriting the session's. A nil Registry (tests) cannot check, so it honours
+// the configured model.
+func (lr *LoopRunner) resolveBackgroundModel(inheritedModel, inheritedProvider string) (string, string) {
+	if lr.BackgroundModel != nil {
+		if bgModel, bgProv := lr.BackgroundModel(); bgModel != "" {
+			if lr.Registry == nil || lr.Registry.ModelAvailable(bgModel, bgProv) {
+				return bgModel, bgProv
+			}
+		}
+	}
+	return inheritedModel, inheritedProvider
+}
+
+// resolveBackgroundProvider returns the provider and modelID for a
+// behind-the-scenes LLM call that already holds a resolved fallback provider.
+// When BackgroundModel names a model a registered provider actually serves (or
+// Registry is nil in tests), the background provider and model override the
+// fallback; a configured model nothing serves leaves the fallback in place.
+func (lr *LoopRunner) resolveBackgroundProvider(fallbackProvider provider.Provider, fallbackModel string) (provider.Provider, string) {
+	if lr.BackgroundModel != nil {
+		if bgModel, bgProv := lr.BackgroundModel(); bgModel != "" {
+			if lr.Registry != nil {
+				if lr.Registry.ModelAvailable(bgModel, bgProv) {
+					if p := lr.Registry.ResolveProviderFor(bgModel, bgProv); p != nil {
+						return p, bgModel
+					}
+				}
+			} else if fallbackProvider != nil {
+				return fallbackProvider, bgModel
+			}
+		}
+	}
+	return fallbackProvider, fallbackModel
 }
 
 // notesOn reports whether this runner's turns include the notes section.
@@ -1363,6 +1411,17 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			System:   systemPrompts,
 			Messages: modelMessages,
 			Tools:    providerTools,
+			// The task kind rides the agent name, so an index pass and a user's
+			// turn can be routed to different models.
+			Task: taskForAgent(agentName),
+			// The spawning agent's prediction of how hard this session's work
+			// is, empty unless a spawner classified it. It rides beside the task
+			// kind so a router can send an easy child to a cheaper model.
+			Complexity: provider.Complexity(sess.Complexity),
+			// What the session's work mostly does, empty unless a spawner
+			// classified it. It rides with complexity so a router can tell a
+			// read-heavy child from a write-heavy one.
+			Workload: provider.Workload(sess.Workload),
 			// Routing hint for prompt caches that live behind a pool of
 			// machines: every step of every turn in this session carries the
 			// same key, so they land on the node already holding the prefix.
@@ -2749,6 +2808,7 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 // returns at once; the barrier is entered synchronously first so a recall firing
 // right after the turn waits for this write to land in the index.
 func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.SessionID, chatProvider provider.Provider, chatModel string) {
+	chatProvider, chatModel = lr.resolveBackgroundProvider(chatProvider, chatModel)
 	if chatProvider == nil {
 		slog.Info("writeTurnMemory: no provider to synthesize with, skipping")
 		return
@@ -2803,7 +2863,16 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 	// Utility/ephemeral sessions (the recall agent itself, subagents, notes,
 	// indexing, search) are not units of work worth remembering — and
 	// summarizing a memory-recall turn would recurse — so skip them.
-	if !turnMemorableSession(meta.SessionType) {
+	//
+	// Subagent turns are the one exception, and only for search: a spawned
+	// child's work is the root conversation's evidence, so its turn summaries
+	// are indexed (attributed to the chain's root by SearchStore.rootOf) but
+	// kept out of the memory corpus the memory_map tool reads — search-only,
+	// never memory. The memorable check stays on turnMemorableSession itself;
+	// that list must not change (session_types_test pins it against the
+	// search filter and the palette's list).
+	memorable := turnMemorableSession(meta.SessionType)
+	if !memorable && meta.SessionType != "subagent" {
 		return
 	}
 
@@ -2850,16 +2919,24 @@ func (lr *LoopRunner) writeTurnMemory(ctx context.Context, sessionID session.Ses
 			slog.Warn("writeTurnMemory: write summary failed", "session", sessionID, "err", err)
 			return
 		}
-		if err := lr.MemFiles.IndexFile(path, meta); err != nil {
-			slog.Warn("writeTurnMemory: index summary failed", "path", path, "err", err)
-			return
+		if memorable {
+			if err := lr.MemFiles.IndexFile(path, meta); err != nil {
+				slog.Warn("writeTurnMemory: index summary failed", "path", path, "err", err)
+				return
+			}
 		}
+		// For a spawned child the summary file stays on disk — it is the
+		// search row's input (IndexTurn above, and purgeProject keeps rows
+		// whose file exists) — but it is deliberately never added to
+		// memory_turn_index: subagent turns are search-only, not memory.
 		if lr.Search != nil {
 			if err := lr.Search.IndexTurn(path, meta); err != nil {
 				slog.Warn("writeTurnMemory: search index failed", "path", path, "err", err)
 			}
-			if err := lr.Search.IndexSessionMemory(dir, string(sessionID)); err != nil {
-				slog.Warn("writeTurnMemory: session memory search index failed", "session", sessionID, "err", err)
+			if memorable {
+				if err := lr.Search.IndexSessionMemory(dir, string(sessionID)); err != nil {
+					slog.Warn("writeTurnMemory: session memory search index failed", "session", sessionID, "err", err)
+				}
 			}
 		}
 		slog.Info("writeTurnMemory: turn summary written and indexed", "session", sessionID, "path", path)
@@ -2911,6 +2988,7 @@ func (lr *LoopRunner) autoIndexTurn(agentID string, sessionID session.SessionID,
 	if agentID != "build" {
 		return
 	}
+	model, provider = lr.resolveBackgroundModel(model, provider)
 
 	sess, err := lr.Store.Get(sessionID)
 	if err != nil || sess == nil {
@@ -3844,6 +3922,55 @@ const riskLLMTimeout = 12 * time.Second
 // per-command median of 1.5-3.3s (max ~7s) still sits inside riskLLMTimeout.
 const riskLLMMaxTokens = 1024
 
+// riskGateCanaryEngine is the engine the router reports (X-Ogx-Engine) for a
+// verdict served by the JEV risk profile. A SAFE from it is not cached: the
+// profile is reconfigured out of band, and a cached SAFE has to expire with it
+// rather than persist for the life of the process. See docs/jev-risk-gate.md
+// §16.3 in the router repo.
+const riskGateCanaryEngine = "clef"
+
+// riskGateLLMEngine is the engine the router reports when it relayed the
+// request to the ordinary model — the arm that is not the risk profile.
+const riskGateLLMEngine = "llm"
+
+// engineIsRiskProfile reports whether the engine named by the gateway's
+// X-Ogx-Engine header is the risk profile (the canary). The name is compared
+// after trimming and lower-casing, and a qualified name such as "clef-2026-11"
+// counts as the same engine: a router deploy may suffix it, and a renamed
+// engine must not silently restore caching of its SAFE verdicts.
+//
+// This decision is about caching only, never safety. An unrecognised or empty
+// engine is not treated as the risk profile, so its verdict is cached exactly
+// as before — the fail-safe for an engine we cannot name is the old behaviour,
+// not a new approval path. Mistaking an ordinary engine for the profile costs
+// only a cache miss.
+func engineIsRiskProfile(engine string) bool {
+	v := strings.ToLower(strings.TrimSpace(engine))
+	return strings.HasPrefix(v, riskGateCanaryEngine)
+}
+
+// riskEngineWarnOnce makes the unrecognised-engine warning a one-off: a router
+// answering with a new engine name would otherwise repeat the same line on
+// every unclear command, which is noise, not a signal.
+var riskEngineWarnOnce sync.Once
+
+// warnUnrecognisedRiskEngine names an engine the gate does not recognise. The
+// engine string only drives the cache decision (see engineIsRiskProfile), so a
+// renamed gateway engine would silently change cache behaviour with nothing in
+// the log to explain it. One warning per process is enough to make it visible.
+// An empty engine, the risk profile and the relayed model are all expected and
+// stay quiet.
+func warnUnrecognisedRiskEngine(engine string) {
+	v := strings.ToLower(strings.TrimSpace(engine))
+	if v == "" || engineIsRiskProfile(v) || v == riskGateLLMEngine {
+		return
+	}
+	riskEngineWarnOnce.Do(func() {
+		slog.Warn("auto-mode risk gate sees an unrecognised serving engine; verdict caching unchanged",
+			"engine", v, "riskProfile", riskGateCanaryEngine)
+	})
+}
+
 // assessAutoRisk decides, in Auto mode, whether a tool call is safe to run
 // without asking. write/edit are judged purely by the path rules; bash uses the
 // command rules and escalates the unclear middle to a quick LLM check. The
@@ -3997,12 +4124,18 @@ func (lr *LoopRunner) recordUtilityCounts(sessionID session.SessionID, tc sessio
 }
 
 // assessCommandRiskLLM asks the model whether a shell command the rules couldn't
-// classify is safe to auto-run. Verdicts are cached (command risk is context-
-// independent). Any failure — no provider, error, timeout, or an ambiguous
+// classify is safe to auto-run. Verdicts are cached per model: command risk is
+// context-independent, but a verdict is the judgement of the model that gave it,
+// and switching the model that serves the gate must not keep serving the old
+// one's SAFE. Any failure — no provider, error, timeout, or an ambiguous
 // answer — resolves to RiskAsk so Auto mode never auto-runs something it isn't
 // confident about.
 func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, sessionID session.SessionID, model, providerID, command string) permission.Risk {
-	if v, ok := lr.Permissions.CachedRisk(command); ok {
+	// Resolved before the cache is consulted: the cache is keyed by the model
+	// that judged the command, so the verdict a previous preference cached is
+	// not the answer for this one.
+	model, providerID = lr.resolveBackgroundModel(model, providerID)
+	if v, ok := lr.Permissions.CachedRisk(command, model); ok {
 		return v
 	}
 	p := lr.Registry.ResolveProviderFor(model, providerID)
@@ -4026,6 +4159,8 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, sessionID sessio
 		System:    []string{riskGateSystem},
 		Messages:  []provider.ModelMessage{{Role: "user", Content: userContent}},
 		MaxTokens: riskLLMMaxTokens,
+		// The gate is its own kind of work, so it routes independently of turns.
+		Task: provider.TaskRisk,
 	})
 	if err != nil {
 		slog.Warn("auto-mode risk check failed; asking", "err", err)
@@ -4033,6 +4168,7 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, sessionID sessio
 	}
 	var out strings.Builder
 	var finish string
+	var engine string
 	var usage *provider.TokenUsage
 	reasoningChars := 0
 	for evt := range ch {
@@ -4047,12 +4183,15 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, sessionID sessio
 			reasoningChars += len(evt.Text)
 		case provider.EventUsage:
 			usage = evt.Usage
+		case provider.EventEngine:
+			engine = evt.Engine
 		case provider.EventFinish:
 			if evt.FinishReason != nil {
 				finish = *evt.FinishReason
 			}
 		}
 	}
+	warnUnrecognisedRiskEngine(engine)
 	lr.recordUtilityUsage(sessionID, p.ID(), model, usage)
 	text := strings.TrimSpace(out.String())
 	verdict := permission.RiskAsk
@@ -4074,11 +4213,25 @@ func (lr *LoopRunner) assessCommandRiskLLM(ctx context.Context, sessionID sessio
 			"command", truncateText(command, 80), "finish", finish, "reasoningChars", reasoningChars)
 		return permission.RiskAsk
 	}
-	slog.Info("auto-mode risk verdict", "command", truncateText(command, 80), "verdict", verdict)
+	// The serving model is part of the record: a wrong SAFE has to be traceable
+	// to the model (and endpoint) that produced it, not only to the command.
+	slog.Info("auto-mode risk verdict", "command", truncateText(command, 80), "verdict", verdict,
+		"engine", engine, "model", model, "provider", p.ID())
 	// Caching is skipped for the unanswered case above: RiskAsk there is the
 	// absence of a verdict, not one, and caching it would keep re-asking the
 	// user without ever consulting the model again.
-	lr.Permissions.CacheRisk(command, verdict)
+	//
+	// A verdict served by the router's risk profile is cached only when it is an
+	// ASK. An ASK can only make Auto mode ask for confirmation, so a stale one
+	// cannot hide intent — the worst it costs is a prompt. A SAFE from that
+	// profile is not evidence: it is the canary the gate is still being measured
+	// against (§16.3), it is reconfigured out of band, and a cached SAFE must not
+	// outlive the configuration that justified it. Every other engine —
+	// including one we do not recognise — keeps the old caching behaviour.
+	cacheable := verdict != permission.RiskSafe || !engineIsRiskProfile(engine)
+	if cacheable {
+		lr.Permissions.CacheRisk(command, model, verdict)
+	}
 	return verdict
 }
 
@@ -5252,7 +5405,23 @@ func (lr *LoopRunner) indexSessionSummary(sessionID session.SessionID) {
 // (unchanged when the summarizer produced nothing). Shared by the proactive
 // (pre-send, size-based) and reactive (on context-length error) compaction paths.
 func (lr *LoopRunner) compactRequest(ctx context.Context, p provider.Provider, modelID string, sessionID session.SessionID, streamReq *provider.StreamRequest, prevSummary string, contextWindow int) string {
-	summaryAddendum, compactedMsgs := lr.llmCompact(ctx, sessionID, p, modelID, streamReq.Messages, prevSummary, contextWindow)
+	compactProv, compactModel := lr.resolveBackgroundProvider(p, modelID)
+	// The summarizer request is sized from the compact model's own window: the
+	// background model is often a smaller one, and handing llmCompact the
+	// session's window for it builds a request that model cannot take, which then
+	// silently falls back to mechanical truncation. An unknown window (0) or an
+	// unchanged model keeps the session's.
+	compactWindow := contextWindow
+	if compactModel != modelID {
+		var database *db.DB
+		if lr.Store != nil {
+			database = lr.Store.DB()
+		}
+		if bgWindow, _ := EffectiveContextWindow(lr.Registry, database, compactModel); bgWindow > 0 && (contextWindow <= 0 || bgWindow < contextWindow) {
+			compactWindow = bgWindow
+		}
+	}
+	summaryAddendum, compactedMsgs := lr.llmCompact(ctx, sessionID, compactProv, compactModel, streamReq.Messages, prevSummary, compactWindow)
 	streamReq.Messages = compactedMsgs
 	newSummary := prevSummary
 	if summaryAddendum != "" {
@@ -5403,6 +5572,9 @@ func (lr *LoopRunner) llmCompact(ctx context.Context, sessionID session.SessionI
 
 	summaryReq := provider.StreamRequest{
 		Model: modelID,
+		// Compaction is its own kind of work, so the router can pick a
+		// summarizer model for it.
+		Task: provider.TaskCompaction,
 		System: []string{
 			"You are a precise technical conversation summarizer for a coding agent. Produce a complete, " +
 				"structured summary that preserves every detail needed to continue the work without re-reading " +
@@ -5487,10 +5659,11 @@ const subagentMaxSteps = 0
 // answer. The session is deleted on completion. Called by tool.TaskTool via the
 // tool.TaskFunc contract. The sub-agent (SubagentAgent) is depth-1 — its toolset
 // omits `task`, so it cannot spawn further sub-agents.
-func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, dir, model, providerID string) (string, error) {
+func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, dir, model, providerID string, complexity provider.Complexity, workload provider.Workload) (string, error) {
 	if dir == "" {
 		dir = lr.Dir
 	}
+	model, providerID = lr.resolveBackgroundModel(model, providerID)
 	if model == "" {
 		dp := lr.Registry.DefaultUsable()
 		if dp == nil {
@@ -5518,6 +5691,8 @@ func (lr *LoopRunner) RunTaskSession(ctx context.Context, description, prompt, d
 		Model:       model,
 		Provider:    providerID,
 		Effort:      runEffortFrom(ctx),
+		Complexity:  string(complexity), // the delegating agent's prediction of this task's difficulty
+		Workload:    string(workload),   // what the delegated task mostly does
 		SessionType: "subagent",
 		CreatedAt:   session.Now(),
 		UpdatedAt:   session.Now(),
@@ -5612,6 +5787,7 @@ func (lr *LoopRunner) RunMemoryRecallSession(ctx context.Context, question, scop
 	if dir == "" {
 		dir = lr.Dir
 	}
+	model, providerID = lr.resolveBackgroundModel(model, providerID)
 	if model == "" {
 		dp := lr.Registry.DefaultUsable()
 		if dp == nil {

@@ -145,7 +145,7 @@ func TestRunLoopSendsTheSessionsEffort(t *testing.T) {
 func TestSubagentInheritsTheRunsEffort(t *testing.T) {
 	lr, mock := newEffortRunner(t)
 	ctx := withRunEffort(context.Background(), provider.EffortLow)
-	if _, err := lr.RunTaskSession(ctx, "look", "look around", t.TempDir(), "mock-model", "mock"); err != nil {
+	if _, err := lr.RunTaskSession(ctx, "look", "look around", t.TempDir(), "mock-model", "mock", "", ""); err != nil {
 		t.Fatalf("RunTaskSession: %v", err)
 	}
 	got := mock.agentEfforts()

@@ -90,3 +90,103 @@ func TestAssessCommandRiskLLMRecordsUtilityUsage(t *testing.T) {
 		t.Error("no session.updated was published after utility usage landed")
 	}
 }
+
+// bgModelProvider is the scripted risk fake plus a second, smaller model. The
+// background-model tests need a configured model the registry can actually
+// serve, and riskScriptProvider lists only the session's.
+type bgModelProvider struct{ *riskScriptProvider }
+
+func (p *bgModelProvider) Models() []provider.ModelInfo {
+	return []provider.ModelInfo{
+		{ID: "mock-model", ProviderID: "mock"},
+		{ID: "bg-haiku-model", ProviderID: "mock"},
+	}
+}
+
+func TestBackgroundModelOverridesUtilityCalls(t *testing.T) {
+	p := &bgModelProvider{riskScriptProvider: &riskScriptProvider{scripts: [][]provider.StreamEvent{
+		textVerdict("SAFE"),
+		textVerdict("SAFE"),
+	}}}
+	lr, id, _ := utilityLoopRunner(t, p)
+
+	// 1. When BackgroundModel returns a configured model on a reachable provider,
+	// behind-the-scenes calls use that model instead of the session's model.
+	lr.BackgroundModel = func() (string, string) {
+		return "bg-haiku-model", "mock"
+	}
+	if got := lr.assessCommandRiskLLM(context.Background(), id, "session-main-model", "mock", "mkdir -p internal/foo"); got != permission.RiskSafe {
+		t.Fatalf("verdict = %v, want RiskSafe", got)
+	}
+	reqs := p.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(reqs))
+	}
+	if reqs[0].Model != "bg-haiku-model" {
+		t.Fatalf("risk call model = %q, want bg-haiku-model", reqs[0].Model)
+	}
+
+	// 2. When BackgroundModel returns empty ("inherit from session"), calls use
+	// the session's model.
+	lr.BackgroundModel = func() (string, string) {
+		return "", ""
+	}
+	if got := lr.assessCommandRiskLLM(context.Background(), id, "session-main-model", "mock", "mkdir -p internal/bar"); got != permission.RiskSafe {
+		t.Fatalf("verdict = %v, want RiskSafe", got)
+	}
+	reqs = p.requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if reqs[1].Model != "session-main-model" {
+		t.Fatalf("inherited risk call model = %q, want session-main-model", reqs[1].Model)
+	}
+}
+
+// TestBackgroundModelRequiresAServedModel pins the fallback branch: a
+// configured background model that nothing serves must leave the inherited
+// (model, providerID) untouched, so the call still runs on the session's model
+// instead of failing on a misspelled or removed one. An available model wins.
+func TestBackgroundModelRequiresAServedModel(t *testing.T) {
+	p := &bgModelProvider{riskScriptProvider: &riskScriptProvider{scripts: [][]provider.StreamEvent{
+		textVerdict("SAFE"),
+	}}}
+	lr, id, _ := utilityLoopRunner(t, p)
+
+	tests := []struct {
+		name      string
+		bgModel   string
+		bgProv    string
+		wantModel string
+		wantProv  string
+	}{
+		{"served by the named provider", "bg-haiku-model", "mock", "bg-haiku-model", "mock"},
+		{"served without naming a provider", "bg-haiku-model", "", "bg-haiku-model", ""},
+		{"no provider serves it", "no-such-model", "mock", "session-main-model", "mock"},
+		{"served, but not by the named provider", "bg-haiku-model", "other", "session-main-model", "mock"},
+		{"empty model inherits", "", "", "session-main-model", "mock"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lr.BackgroundModel = func() (string, string) { return tt.bgModel, tt.bgProv }
+			gotModel, gotProv := lr.resolveBackgroundModel("session-main-model", "mock")
+			if gotModel != tt.wantModel || gotProv != tt.wantProv {
+				t.Errorf("resolveBackgroundModel = (%q, %q), want (%q, %q)", gotModel, gotProv, tt.wantModel, tt.wantProv)
+			}
+		})
+	}
+
+	// End to end: the unavailable model never reaches the wire, so the gate runs
+	// on the session's model rather than failing on it.
+	lr.BackgroundModel = func() (string, string) { return "no-such-model", "mock" }
+	if got := lr.assessCommandRiskLLM(context.Background(), id, "session-main-model", "mock", "mkdir -p internal/unavailable"); got != permission.RiskSafe {
+		t.Fatalf("verdict = %v, want RiskSafe", got)
+	}
+	reqs := p.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(reqs))
+	}
+	if reqs[0].Model != "session-main-model" {
+		t.Fatalf("risk call model = %q, want the inherited session-main-model", reqs[0].Model)
+	}
+}

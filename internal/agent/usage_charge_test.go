@@ -115,7 +115,7 @@ func TestRunTaskSessionChargesItsRunToTheParent(t *testing.T) {
 	ctx := withUsageSession(context.Background(), parent.ID)
 	done := make(chan error, 1)
 	go func() {
-		_, err := lr.RunTaskSession(ctx, "investigate", "find X and report", dir, "mock-model", "")
+		_, err := lr.RunTaskSession(ctx, "investigate", "find X and report", dir, "mock-model", "", "", "")
 		done <- err
 	}()
 	select {
@@ -152,7 +152,7 @@ func TestRunTaskSessionChargesItsRunToTheParent(t *testing.T) {
 func TestRunTaskSessionWithoutAnOwnerChargesNothing(t *testing.T) {
 	p := &toolRoundsProvider{rounds: 0, window: 200_000, inputPerCall: 1000}
 	lr, parent, dir := usageTestRunner(t, p)
-	if _, err := lr.RunTaskSession(context.Background(), "x", "y", dir, "mock-model", ""); err != nil {
+	if _, err := lr.RunTaskSession(context.Background(), "x", "y", dir, "mock-model", "", "", ""); err != nil {
 		t.Fatalf("RunTaskSession: %v", err)
 	}
 	if got := utilityOf(t, lr.Store, parent.ID); got != (session.TokenCounts{}) {

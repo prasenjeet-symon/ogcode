@@ -46,14 +46,22 @@ func newSearchEnv(t *testing.T) *searchEnv {
 // from this row, so a document without one is invisible by design.
 func (e *searchEnv) seedSession(id, title, model string) {
 	e.t.Helper()
+	e.seedSessionAs(id, title, model, "")
+}
+
+// seedSessionAs puts a conversation of a given kind in the session table, so a
+// test can seed the sub-agent and headless rows search must skip.
+func (e *searchEnv) seedSessionAs(id, title, model, sessionType string) {
+	e.t.Helper()
 	if err := e.sess.Create(&session.Session{
-		ID:        session.SessionID(id),
-		ProjectID: e.pid,
-		Directory: e.pid,
-		Title:     title,
-		Model:     model,
-		CreatedAt: session.Now(),
-		UpdatedAt: session.Now(),
+		ID:          session.SessionID(id),
+		ProjectID:   e.pid,
+		Directory:   e.pid,
+		Title:       title,
+		Model:       model,
+		SessionType: sessionType,
+		CreatedAt:   session.Now(),
+		UpdatedAt:   session.Now(),
 	}); err != nil {
 		e.t.Fatalf("seed session %s: %v", id, err)
 	}
@@ -138,6 +146,21 @@ func (e *searchEnv) indexedAt(ref string) int64 {
 		e.t.Fatalf("read indexed_at for %s: %v", ref, err)
 	}
 	return at
+}
+
+// seedBoardEdge registers a session on the project board, the way board.Open
+// registration does. Roots register with an empty spawned_by; teammates and
+// task children carry the handle that spawned them — the edges the root-chain
+// walk (rootOf) follows.
+func (e *searchEnv) seedBoardEdge(handle, sessionID, spawnedBy, kind string) {
+	e.t.Helper()
+	_, err := e.db.Exec(`INSERT INTO board_agent
+		(id, directory, handle, session_id, kind, spawned_by, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, ?)`,
+		"board_"+handle, e.pid, handle, sessionID, kind, spawnedBy, session.Now(), session.Now())
+	if err != nil {
+		e.t.Fatalf("seed board edge %s: %v", handle, err)
+	}
 }
 
 // hitFor finds a hit by session id, so an assertion does not depend on the
@@ -343,6 +366,161 @@ func TestSearchDropsGhostSessions(t *testing.T) {
 	}
 	if len(hits) != 0 {
 		t.Errorf("rankHits kept %d rows with no conversation behind them", len(hits))
+	}
+}
+
+// A spawned child's documents — its turns, its curated notes and its title —
+// are attributed to the root of its spawn chain at index time, so the person's
+// search shows one answer for the conversation they actually opened. The kinds
+// that keep them visible elsewhere (the memory corpus, result rows) are
+// unchanged: only search attribution moves.
+func TestSearchExcludesSubAgentSessions(t *testing.T) {
+	e := newSearchEnv(t)
+	e.seedSessionAs("ses_main", "Kelp loader", "ogx-deepseek-v4.1-flash", "build")
+	e.writeTurn("ses_main", "Kelp loader", "kelp", "The kelp loader reads the manifest.", time.Now())
+	e.seedBoardEdge("main", "ses_main", "", "session")
+	e.seedSessionAs("ses_child", "Task: find kelp", "ogx-deepseek-v4.1-flash", "subagent")
+	e.seedBoardEdge("task_1", "ses_child", "main", "task")
+
+	// The child's documents index while the edges above exist: attribution
+	// happens at write time, which is what survives the child's deletion.
+	e.writeTurn("ses_child", "Task: find kelp", "kelp", "Grepped for kelp across the tree.", time.Now())
+	e.writeSessionMemory("ses_child", "# Kelp child notes\n\nTopics: kelp\n\nKelp lives in the loader.\n")
+	if err := e.idx.IndexSession("ses_child", "Task: find kelp", "", e.pid, session.Now()); err != nil {
+		t.Fatalf("index child session: %v", err)
+	}
+
+	hits := e.search("kelp")
+	hit, found := hitFor(hits, "ses_main")
+	if !found {
+		t.Fatalf("root session missing from hits: %+v", hits)
+	}
+	// The child's matched turn is the root's evidence: it counts on the
+	// root's row, the way the roll-up promises.
+	if hit.MatchedTurns < 2 {
+		t.Errorf("root hit matched %d turns, want the main and child turns merged: %+v", hit.MatchedTurns, hit)
+	}
+	if child, found := hitFor(hits, "ses_child"); found {
+		t.Errorf("sub-agent session surfaced in hits: %+v", child)
+	}
+	if len(hits) != 1 {
+		t.Errorf("query found %d hits, want exactly the root conversation: %+v", len(hits), hits)
+	}
+}
+
+// A team spawned by a teammate — a chain three deep — rolls all the way to the
+// top: the session a human opened, not the middle teammate, owns the answer.
+func TestSearchRollsNestedTeamsUpToRoot(t *testing.T) {
+	e := newSearchEnv(t)
+	e.seedSession("ses_root", "Anchor repair", "ogx-deepseek-v4.1-flash")
+	e.writeTurn("ses_root", "Anchor repair", "anchor", "The anchor test flaked twice.", time.Now())
+	e.seedBoardEdge("main", "ses_root", "", "session")
+
+	e.seedSessionAs("ses_mid", "teammate: fix flake", "ogx-deepseek-v4.1-flash", "subagent")
+	e.seedBoardEdge("mid_team", "ses_mid", "main", "teammate")
+	e.writeTurn("ses_mid", "Fix flake", "anchor", "Mid teammate rewrote the retry loop.", time.Now())
+
+	e.seedSessionAs("ses_leaf", "teammate: run race", "ogx-deepseek-v4.1-flash", "subagent")
+	e.seedBoardEdge("leaf_team", "ses_leaf", "mid_team", "teammate")
+	e.writeTurn("ses_leaf", "Run race", "anchor", "Leaf teammate ran the race detector.", time.Now())
+
+	hits := e.search("anchor")
+	if len(hits) != 1 {
+		t.Fatalf("nested-team query found %d hits, want 1 at the root: %+v", len(hits), hits)
+	}
+	if hits[0].SessionID != "ses_root" {
+		t.Errorf("hit session = %q, want ses_root", hits[0].SessionID)
+	}
+	if hits[0].MatchedTurns != 3 {
+		t.Errorf("matched turns = %d, want all three levels merged: %+v", hits[0].MatchedTurns, hits[0])
+	}
+}
+
+// Ephemeral children die with their session row, but their evidence must not:
+// the roll-up already attributed the child's documents to the root, so the
+// backfill keeps them after the child's session is deleted.
+func TestSearchChildContentSurvivesChildSessionDeletion(t *testing.T) {
+	e := newSearchEnv(t)
+	e.seedSession("ses_root", "Board polish", "ogx-deepseek-v4.1-flash")
+	e.writeTurn("ses_root", "Board polish", "polish", "Polished the board claims.", time.Now())
+	e.seedBoardEdge("main", "ses_root", "", "session")
+
+	e.seedSessionAs("ses_child", "task: sweep posts", "ogx-deepseek-v4.1-flash", "subagent")
+	e.seedBoardEdge("task_9", "ses_child", "main", "task")
+	e.writeTurn("ses_child", "Sweep posts", "polish", "The sweep pruned stale claims.", time.Now())
+
+	if hits := e.search("polish"); len(hits) != 1 {
+		t.Fatalf("before delete: %d hits, want 1", len(hits))
+	}
+	if _, err := e.db.Exec(`DELETE FROM session WHERE id = ?`, "ses_child"); err != nil {
+		t.Fatalf("delete child session: %v", err)
+	}
+	stats, err := e.idx.ReindexProject(e.dir, "")
+	if err != nil {
+		t.Fatalf("reindex after child deletion: %v", err)
+	}
+	if stats.Purged != 0 {
+		t.Errorf("reindex purged %d rows, want 0: the child's evidence belongs to the root", stats.Purged)
+	}
+	hits := e.search("polish")
+	if len(hits) != 1 || hits[0].SessionID != "ses_root" {
+		t.Fatalf("after child deletion: %+v, want the root only", hits)
+	}
+}
+
+// Rows indexed before the roll-up carried the child's own id. The next sweep
+// repairs them: purge drops every child-attributed row, and reindexing the
+// same files puts the attribution where it now belongs.
+func TestSearchReindexesLegacyChildAttribution(t *testing.T) {
+	e := newSearchEnv(t)
+	e.seedSession("ses_root", "Palette ranker", "ogx-deepseek-v4.1-flash")
+	e.writeTurnFile("ses_root", "Palette ranker", "ranker", "Tuned the palette ranker weights.", time.Now())
+	e.seedBoardEdge("main", "ses_root", "", "session")
+
+	// No board edge yet: the child is indexed before registration, the
+	// legacy shape this test repairs.
+	e.seedSessionAs("ses_child", "task: rank probe", "ogx-deepseek-v4.1-flash", "subagent")
+	e.writeTurn("ses_child", "Rank probe", "ranker", "The probe measured bm25 spread.", time.Now())
+	e.seedBoardEdge("task_5", "ses_child", "main", "task")
+
+	stats, err := e.idx.ReindexProject(e.dir, "")
+	if err != nil {
+		t.Fatalf("reindex: %v", err)
+	}
+	if stats.Purged < 1 {
+		t.Errorf("reindex purged %d rows, want the legacy child-attributed row", stats.Purged)
+	}
+	hits := e.search("ranker")
+	if len(hits) != 1 || hits[0].SessionID != "ses_root" {
+		t.Fatalf("after repair: %+v, want one root hit", hits)
+	}
+}
+
+// Headless housekeeping sessions are not conversations either: an index run
+// must not answer a content search. The ordinary session is the positive
+// control — without it a search that returned nothing at all would pass.
+func TestSearchExcludesHeadlessSessionTypes(t *testing.T) {
+	e := newSearchEnv(t)
+	e.seedSessionAs("ses_main", "Kelp loader", "ogx-deepseek-v4.1-flash", "build")
+	e.writeTurn("ses_main", "Kelp loader", "kelp", "The kelp loader reads the manifest.", time.Now())
+
+	for i, sessionType := range []string{"note", "index", "search", "memory-recall"} {
+		id := "ses_headless_" + string(rune('a'+i))
+		e.seedSessionAs(id, "Housekeeping", "ogx-deepseek-v4.1-flash", sessionType)
+		e.writeTurn(id, "Housekeeping", sessionType, "A kelp note from housekeeping.", time.Now())
+	}
+
+	hits := e.search("kelp")
+	if _, found := hitFor(hits, "ses_main"); !found {
+		t.Fatalf("the ordinary session is missing from hits, so the exclusion below proves nothing: %+v", hits)
+	}
+	if len(hits) != 1 {
+		t.Errorf("query found %d hits, want only the ordinary session: %+v", len(hits), hits)
+	}
+	for _, h := range hits {
+		if h.SessionID != "ses_main" {
+			t.Errorf("headless session %q surfaced in hits: %+v", h.SessionID, h)
+		}
 	}
 }
 

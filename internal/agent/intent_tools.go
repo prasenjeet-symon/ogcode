@@ -90,11 +90,11 @@ type lazyTool struct {
 // must also sit in the agent's allowlist — the wire narrows, the allowlist does
 // not, so executeTool still accepts a call once the tool is offered.
 var documentTools = []lazyTool{
-	{ID: "docx_index", Description: "Open or inspect an existing Word document (.docx, a Word doc): list its pages with topic labels so you can pick which page to read. Covers specs, contracts, reports, proposals, resumes and any Word file a step needs to summarize, search or pull content from.", PairsWith: []string{"read_docx_page"}},
+	{ID: "docx_index", Description: "Open or inspect an existing Word document (a .docx, .docm or .dotx file, a Word doc): list its pages with topic labels so you can pick which page to read. Covers specs, contracts, reports, proposals, resumes and any Word file a step needs to summarize, search or pull content from.", PairsWith: []string{"read_docx_page"}},
 	{ID: "latex_to_pdf", Description: "Compile LaTeX source (.tex) into a PDF with pdflatex: reports, papers, resumes, letters, invoices, certificates, any document a step must produce as a PDF. Use it when a step mentions building, rendering, compiling, typesetting or exporting a LaTeX or PDF document."},
 	{ID: "pdf_index", Description: "Open or inspect an existing PDF (.pdf): list its pages with topic labels so you can pick which page to read. Covers papers, reports, invoices, contracts, manuals, forms, scanned documents and slide exports when a step needs their structure or content; producing a PDF is latex_to_pdf.", PairsWith: []string{"read_pdf_page"}},
 	{ID: "query_sheet", Description: "Answer questions about the data in a spreadsheet — a .csv, .tsv, .xlsx or .xlsm file, Excel workbook, single sheet, data table or CSV export — by running read-only SQL, one table per sheet. Use it when a step needs to open, inspect, profile, summarize, filter, count, aggregate, compare or chart the file's rows, including when the step writes code around the file and first needs to know what the rows hold; writing code that only reads or writes the format is not a match."},
-	{ID: "read_docx_page", Description: "Read the text of a single page out of a Word document (.docx): its requirements, clauses, tables or prose. Use it when a step needs what is inside a Word file, a named or numbered page, or the content behind a page docx_index already located.", PairsWith: []string{"docx_index"}},
+	{ID: "read_docx_page", Description: "Read the text of a single page out of a Word document (a .docx, .docm or .dotx file): its requirements, clauses, tables or prose. Use it when a step needs what is inside a Word file, a named or numbered page, or the content behind a page docx_index already located.", PairsWith: []string{"docx_index"}},
 	{ID: "read_pdf_page", Description: "Read a single PDF page: its extracted text, or a rendered image when the page is a scan, chart, diagram or figure. Use it when a step needs the content of a PDF — quotes, tables, terms, line items, any page or figure of a report, or a named or numbered page — whether a page number is already known or pdf_index still has to find it.", PairsWith: []string{"pdf_index"}},
 }
 
@@ -410,6 +410,8 @@ func (lr *LoopRunner) suggestIntentTools(ctx context.Context, sessionID session.
 		return "", nil
 	}
 
+	model, providerID = lr.resolveBackgroundModel(model, providerID)
+
 	var p provider.Provider
 	if lr.Registry != nil {
 		p = lr.Registry.ResolveProviderFor(model, providerID)
@@ -439,6 +441,7 @@ func (lr *LoopRunner) suggestIntentTools(ctx context.Context, sessionID session.
 		Model:    model,
 		System:   []string{intentRouteSystem},
 		Messages: []provider.ModelMessage{{Role: "user", Content: userContent}},
+		Task:     provider.TaskIntent,
 	})
 	if err != nil {
 		slog.Warn("intent tool finder failed", "err", err)
