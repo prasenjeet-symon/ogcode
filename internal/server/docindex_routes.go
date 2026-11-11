@@ -78,7 +78,13 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 
 	patterns := s.excludePatternsFor(dir)
 
-	s.runIndexerInBackground(dir, patterns, input.Model, input.Provider)
+	// An explicitly requested model wins; the machine-wide background model
+	// replaces only a model the caller left to inherit.
+	model, providerID := input.Model, input.Provider
+	if model == "" {
+		model, providerID = s.resolveBackgroundModel(model, providerID)
+	}
+	s.runIndexerInBackground(dir, patterns, model, providerID)
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"running": true})
 }
@@ -146,6 +152,10 @@ func (s *Server) autoIndexDir(dir, model, provider string) {
 	s.docindexRunning = true
 	s.docindexMu.Unlock()
 
+	// The turn's endpoint is an inherited one, so the machine-wide background
+	// model replaces it when configured. A manual build that names its own model
+	// keeps it (see handleBuildDocIndex).
+	model, provider = s.resolveBackgroundModel(model, provider)
 	s.runIndexerInBackground(dir, patterns, model, provider)
 }
 
@@ -155,7 +165,9 @@ func (s *Server) autoIndexDir(dir, model, provider string) {
 // auto-index — end here, so they report progress to the same tracker and
 // publish the same docindex.built event the UI listens for. model and provider
 // are the endpoint the index sessions run on; empty leaves the indexer on the
-// runner's default, which is the manual path when the caller names no model.
+// runner's default. Resolving the machine-wide background model is the caller's
+// decision, because only the caller knows whether its model was requested or
+// inherited.
 func (s *Server) runIndexerInBackground(dir string, excludePatterns []string, model, provider string) {
 	go func() {
 		defer func() {

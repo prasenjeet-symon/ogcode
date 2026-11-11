@@ -69,10 +69,16 @@ func (ReadPdfPageTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 	defer f.Close()
 
 	numPages := reader.NumPage()
+	if numPages == 0 {
+		return Result{
+			Title:  fmt.Sprintf("PDF / %s", filepath.Base(path)),
+			Output: "the document has no extractable text",
+		}, nil
+	}
 	if params.Page > numPages {
 		return Result{
-			Title:  fmt.Sprintf("PDF Page %d", params.Page),
-			Output: fmt.Sprintf("page %d out of range (document has %d pages)", params.Page, numPages),
+			Title:  fmt.Sprintf("PDF Page %d of %d / %s", params.Page, numPages, filepath.Base(path)),
+			Output: fmt.Sprintf("page %d out of range (document has %d pages) — call pdf_index to list the pages", params.Page, numPages),
 		}, nil
 	}
 

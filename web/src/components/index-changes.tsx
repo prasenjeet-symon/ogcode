@@ -31,18 +31,40 @@ export function createGitChanges(directory: () => string | undefined) {
   const [changeDiff] = createResource(selectedChange, (sel) => getGitFileDiff(sel.path, sel.staged, directory()));
   const [commitDiff] = createResource(selectedCommit, (c) => getGitCommitDiff(c.sha, directory()));
 
+  // Staging, committing and the page's own refresh can overlap; only the
+  // newest request may write, or an older list lands last and undoes it.
+  let statusSeq = 0;
+
+  // A staging change moves a file to the other list; keeping the old
+  // selection would show the diff of the side it just left.
+  const resyncSelection = () => {
+    const sel = selectedChange();
+    if (!sel) return;
+    const hit = files().find((f) => f.path === sel.path);
+    if (!hit) setSelectedChange(null);
+    else if (hit.staged !== sel.staged) setSelectedChange({ path: hit.path, staged: hit.staged });
+  };
+
   const refreshStatus = async () => {
+    const seq = ++statusSeq;
     setLoading(true);
     try {
       const res = await getGitStatus(directory());
+      if (seq !== statusSeq) return;
       setIsRepo(res.isRepo);
       setFiles(res.files || []);
+      resyncSelection();
+      setError('');
     } catch {
-      setIsRepo(false);
-      setFiles([]);
+      // A transport blip is not evidence that the workspace stopped being a
+      // repository: keep the list and say the read failed.
+      if (seq !== statusSeq) return;
+      setError('Could not read git status.');
     } finally {
-      setLoading(false);
-      setChecked(true);
+      if (seq === statusSeq) {
+        setLoading(false);
+        setChecked(true);
+      }
     }
   };
 

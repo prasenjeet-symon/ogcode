@@ -1,17 +1,28 @@
 package indexer
 
 import (
+	"archive/zip"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/prasenjeet-symon/ogcode/internal/agent"
+	"github.com/prasenjeet-symon/ogcode/internal/bus"
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 	"github.com/prasenjeet-symon/ogcode/internal/docindex"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
+	"github.com/prasenjeet-symon/ogcode/internal/session"
+	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
 
 func TestAssembleBatches_PDFSeparation(t *testing.T) {
@@ -705,6 +716,44 @@ func TestIndexer_ReadsGitignoreFreshPerRun(t *testing.T) {
 	}
 }
 
+// TestWordExtensionsAreIndexable pins the pipeline-level half of Defect G: the
+// walk and the preview treat every Word extension as a document — .docx, .docm
+// and .dotx are the same OOXML ZIP — while .doc, which no reader can open,
+// stays invisible to both.
+func TestWordExtensionsAreIndexable(t *testing.T) {
+	root := indexTree(t, map[string]string{
+		"spec.docx":     "zip",
+		"macro.docm":    "zip",
+		"template.dotx": "zip",
+		"legacy.doc":    "ole",
+		"notes.md":      "# notes\n",
+	})
+
+	got := collected(t, New(root, nil, nil), root)
+	for _, want := range []string{"macro.docm", "spec.docx", "template.dotx"} {
+		if !slicesContains(got, want) {
+			t.Errorf("collectFiles missed %q: %v", want, got)
+		}
+	}
+	if slicesContains(got, "legacy.doc") {
+		t.Errorf("collectFiles picked up a .doc, which no reader handles: %v", got)
+	}
+
+	plan, err := New(root, nil, nil).Preview()
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if plan.Docx != 3 {
+		t.Errorf("plan.Docx = %d, want 3 Word documents", plan.Docx)
+	}
+	if plan.PendingDocx != 3 {
+		t.Errorf("plan.PendingDocx = %d, want 3", plan.PendingDocx)
+	}
+	if plan.Total != 4 {
+		t.Errorf("plan.Total = %d, want 4 (three Word documents and notes.md)", plan.Total)
+	}
+}
+
 func TestPreviewCountsWork(t *testing.T) {
 	dir := t.TempDir()
 	write := func(rel string) string {
@@ -897,6 +946,79 @@ func TestFilesToIndex_PicksUpModifiedFile(t *testing.T) {
 	}
 }
 
+// A file whose mtime moved backwards — git checkout, cp -p, rsync -a, a
+// restored backup — must count as changed: the doc_index tool refuses a row set
+// whose recorded time is not the file's own. With a strict ">" the two
+// disagreed, so the index stayed stale forever while the tool told the user to
+// re-run a command that skipped the file every time.
+func TestFileChangedSinceTreatsBackwardsModTimeAsChanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fileChangedSince(path, info.ModTime().UnixMilli()) {
+		t.Error("fileChangedSince = true for an unchanged file, want false")
+	}
+
+	past := info.ModTime().Add(-time.Hour)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+	if !fileChangedSince(path, info.ModTime().UnixMilli()) {
+		t.Error("fileChangedSince = false for a file whose mtime moved backwards, want true")
+	}
+
+	// A stat that fails is still "unchanged": there is no mtime to compare.
+	if fileChangedSince(filepath.Join(t.TempDir(), "missing.go"), 0) {
+		t.Error("fileChangedSince = true for a missing file, want false")
+	}
+}
+
+// The selection path uses the same predicate, so a backwards mtime is re-indexed
+// and its rows are dropped before the new run, like any other change.
+func TestFilesToIndex_PicksUpBackwardsModTime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := newTestDocStore(t)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(&docindex.PageEntry{
+		DocPath: path, PageNum: 1, Keywords: []string{"kw"}, Labels: []string{"L"},
+		ModTime: info.ModTime().UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	past := info.ModTime().Add(-time.Hour)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	toIndex, changed, err := New(dir, store, nil).filesToIndex(context.Background(), []string{path})
+	if err != nil {
+		t.Fatalf("filesToIndex: %v", err)
+	}
+	if len(toIndex) != 1 || toIndex[0] != path {
+		t.Fatalf("file with a backwards mtime was not selected for re-indexing: %v", toIndex)
+	}
+	if changed != 1 {
+		t.Errorf("changed count = %d, want 1", changed)
+	}
+	if indexed, _ := store.IsDocIndexed(path); indexed {
+		t.Error("stale rows survived; the re-index would land on top of them")
+	}
+}
+
 // An untouched indexed file is still skipped, and a brand-new file is still
 // taken: the modification-time check must not turn every run into a full one.
 func TestFilesToIndex_SkipsUnchangedAndTakesNew(t *testing.T) {
@@ -1024,5 +1146,900 @@ func TestIndexableCount(t *testing.T) {
 	// A limit above the count returns the true count.
 	if n, err := idx.IndexableCount(50); err != nil || n != 12 {
 		t.Fatalf("IndexableCount(50) = %d, %v; want 12, nil", n, err)
+	}
+}
+
+// pageCorpora builds the expected-page list a batch carries, one entry per page.
+func pageCorpora(nums ...int) []PageCorpus {
+	out := make([]PageCorpus, len(nums))
+	for i, n := range nums {
+		out[i] = PageCorpus{PageNum: n}
+	}
+	return out
+}
+
+// storedPages builds what the store returns for a document: one row per page.
+func storedPages(docPath string, nums ...int) []*docindex.PageEntry {
+	out := make([]*docindex.PageEntry, len(nums))
+	for i, n := range nums {
+		out[i] = &docindex.PageEntry{DocPath: docPath, PageNum: n}
+	}
+	return out
+}
+
+// upsertPages writes len(item.corpora) page rows for item, as a completed
+// batch of that document would have left them.
+func upsertPages(t *testing.T, store *docindex.Store, path string, nums ...int) {
+	t.Helper()
+	for _, n := range nums {
+		if err := store.Upsert(&docindex.PageEntry{DocPath: path, PageNum: n, Keywords: []string{"k"}, Labels: []string{"L"}}); err != nil {
+			t.Fatalf("upsert %s page %d: %v", path, n, err)
+		}
+	}
+}
+
+// TestMissingPageNums pins the set comparison a batch's validation rests on:
+// only the pages the run expected can be missing, and a stored page the run did
+// not expect is not a failure.
+func TestMissingPageNums(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected []PageCorpus
+		got      []*docindex.PageEntry
+		want     []int
+	}{
+		{name: "every expected page stored", expected: pageCorpora(1, 2, 3), got: storedPages("/proj/a.pdf", 1, 2, 3)},
+		{name: "middle page missing", expected: pageCorpora(1, 2, 3), got: storedPages("/proj/a.pdf", 1, 3), want: []int{2}},
+		{name: "nothing stored", expected: pageCorpora(4, 5), got: nil, want: []int{4, 5}},
+		{name: "extra stored pages are ignored", expected: pageCorpora(1), got: storedPages("/proj/a.pdf", 1, 2, 99)},
+		{name: "no expected pages", expected: nil, got: storedPages("/proj/a.pdf", 1)},
+		{name: "nil stored entry is skipped", expected: pageCorpora(1, 2), got: []*docindex.PageEntry{nil, {PageNum: 2}}, want: []int{1}},
+		{name: "duplicate expected page counted once", expected: pageCorpora(1, 1), got: storedPages("/proj/a.pdf", 1)},
+		{name: "tail of a split document missing", expected: pageCorpora(101, 102), got: storedPages("/proj/a.pdf", 101), want: []int{102}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := missingPageNums(tc.expected, tc.got)
+			if len(got) != len(tc.want) {
+				t.Fatalf("missingPageNums = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("missingPageNums[%d] = %d, want %d", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFormatPageNums(t *testing.T) {
+	tests := []struct {
+		nums []int
+		want string
+	}{
+		{nil, ""},
+		{[]int{4}, "4"},
+		{[]int{5, 6}, "5-6"},
+		{[]int{1, 2, 3, 7, 9, 10}, "1-3,7,9-10"},
+	}
+	for _, tc := range tests {
+		if got := formatPageNums(tc.nums); got != tc.want {
+			t.Errorf("formatPageNums(%v) = %q, want %q", tc.nums, got, tc.want)
+		}
+	}
+}
+
+func TestBatchFailureError(t *testing.T) {
+	if err := batchFailureError(0, 5); err != nil {
+		t.Fatalf("batchFailureError(0, 5) = %v, want nil", err)
+	}
+	err := batchFailureError(2, 5)
+	if err == nil {
+		t.Fatal("batchFailureError(2, 5) = nil, want an error")
+	}
+	want := "2 of 5 index batches failed; affected documents were dropped from the index and will be retried on the next run"
+	if err.Error() != want {
+		t.Errorf("batchFailureError(2, 5) = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestFinishDocumentDropsPartialDocument is the regression for the run that
+// printed "Indexing complete" over 100 of 137 pages: pages 1-2 of a three-page
+// document arrived, page 3 never did, and the whole document must go so the
+// next run re-indexes it instead of skipping it as already done.
+func TestFinishDocumentDropsPartialDocument(t *testing.T) {
+	const path = "/workspace/spec.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, nil)
+	item := docItem{path: path, corpora: pageCorpora(1, 2, 3), isDocx: true}
+	upsertPages(t, store, path, 1, 2)
+
+	err := idx.finishDocument(item, nil)
+	if err == nil {
+		t.Fatal("finishDocument = nil, want a missing-pages error")
+	}
+	if want := "missing pages 3"; !strings.Contains(err.Error(), want) {
+		t.Errorf("finishDocument error = %q, want it to name %q", err, want)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("finishDocument error = %q, want it to name the document %q", err, path)
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1", got)
+	}
+	if got := idx.progress.Completed.Load(); got != 0 {
+		t.Errorf("progress.Completed = %d, want 0 for a failed document", got)
+	}
+	rows, err := store.GetByDoc(path)
+	if err != nil {
+		t.Fatalf("GetByDoc: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("document still has %d stored rows after a failed batch, want 0", len(rows))
+	}
+}
+
+func TestFinishDocumentCompletesFullyStoredDocument(t *testing.T) {
+	const path = "/workspace/spec.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, nil)
+	item := docItem{path: path, corpora: pageCorpora(1, 2, 3), isDocx: true}
+	upsertPages(t, store, path, 1, 2, 3)
+
+	if err := idx.finishDocument(item, nil); err != nil {
+		t.Fatalf("finishDocument = %v, want nil", err)
+	}
+	if got := idx.progress.Completed.Load(); got != 1 {
+		t.Errorf("progress.Completed = %d, want 1", got)
+	}
+	if got := idx.progress.Failed.Load(); got != 0 {
+		t.Errorf("progress.Failed = %d, want 0", got)
+	}
+	rows, err := store.GetByDoc(path)
+	if err != nil {
+		t.Fatalf("GetByDoc: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Errorf("document has %d stored rows, want 3 kept", len(rows))
+	}
+}
+
+// TestFinishDocumentLoopErrorDropsWholeDocument: a loop error fails the
+// document even when every expected page happens to be stored — the pages came
+// from an earlier batch of the same document, and keeping them would make the
+// next run skip the document the failed batch was supposed to finish.
+func TestFinishDocumentLoopErrorDropsWholeDocument(t *testing.T) {
+	const path = "/workspace/spec.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, nil)
+	item := docItem{path: path, corpora: pageCorpora(1, 2, 3), isDocx: true}
+	upsertPages(t, store, path, 1, 2, 3)
+
+	err := idx.finishDocument(item, errors.New("provider exploded"))
+	if err == nil || !strings.Contains(err.Error(), "provider exploded") {
+		t.Fatalf("finishDocument = %v, want the loop error", err)
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1", got)
+	}
+	rows, err := store.GetByDoc(path)
+	if err != nil {
+		t.Fatalf("GetByDoc: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("document still has %d stored rows after a loop error, want 0", len(rows))
+	}
+}
+
+// TestFinishDocumentNilStore pins the contract the existing tests rely on: an
+// Indexer built without a store still reports per-file progress and never
+// touches a database.
+func TestFinishDocumentNilStore(t *testing.T) {
+	idx := New("/workspace", nil, nil)
+	item := docItem{path: "/workspace/a.go", corpora: pageCorpora(1), keywordCount: 1}
+
+	if err := idx.finishDocument(item, nil); err != nil {
+		t.Fatalf("finishDocument(nil store) = %v, want nil", err)
+	}
+	if got := idx.progress.Completed.Load(); got != 1 {
+		t.Errorf("progress.Completed = %d, want 1", got)
+	}
+	if err := idx.finishDocument(item, errors.New("loop failed")); err == nil {
+		t.Fatal("finishDocument(nil store, loop error) = nil, want the loop error")
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1", got)
+	}
+
+	// The post-run sweep must be a no-op rather than a panic without a store.
+	idx.dropIncompleteDocuments([]docItem{item})
+}
+
+// TestDropIncompleteDocumentsSweepsRacingBatches pins the sweep that closes the
+// split-document race: batch 1 (pages 1-100) completed, batch 2 (page 101)
+// failed and deleted the document, but a straggler from batch 1 wrote its pages
+// back afterwards. The sweep runs once every batch has finished, so the partial
+// document cannot survive the run.
+func TestDropIncompleteDocumentsSweepsRacingBatches(t *testing.T) {
+	const spec = "/workspace/spec.docx"
+	const notes = "/workspace/notes.md"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, nil)
+
+	full := docItem{path: spec, isDocx: true}
+	for n := 1; n <= 100; n++ {
+		full.corpora = append(full.corpora, PageCorpus{PageNum: n})
+	}
+	full.corpora = append(full.corpora, PageCorpus{PageNum: 101})
+	upsertPages(t, store, spec, 1, 2, 3)
+
+	done := docItem{path: notes, corpora: pageCorpora(1)}
+	upsertPages(t, store, notes, 1)
+
+	idx.dropIncompleteDocuments([]docItem{full, done})
+
+	specRows, err := store.GetByDoc(spec)
+	if err != nil {
+		t.Fatalf("GetByDoc(spec): %v", err)
+	}
+	if len(specRows) != 0 {
+		t.Errorf("partial document kept %d rows, want it dropped entirely", len(specRows))
+	}
+	noteRows, err := store.GetByDoc(notes)
+	if err != nil {
+		t.Fatalf("GetByDoc(notes): %v", err)
+	}
+	if len(noteRows) != 1 {
+		t.Errorf("complete document lost its row: %d stored, want 1", len(noteRows))
+	}
+}
+
+// TestSettleBatchesSweepsBeforeReportingCancellation pins the ordering that
+// makes the drop-on-failure guarantee hold on a cancelled run: a batch failed
+// and the run was cancelled, and the sweep still has to remove the partially
+// stored document (a sibling batch of the same long document can have written
+// pages after the failing batch's delete). The complete document must survive,
+// and the caller still learns the run was cancelled.
+func TestSettleBatchesSweepsBeforeReportingCancellation(t *testing.T) {
+	const partial = "/workspace/partial.docx"
+	const complete = "/workspace/complete.md"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, &agent.LoopRunner{})
+
+	partialItem := docItem{path: partial, corpora: pageCorpora(1, 2, 3), isDocx: true}
+	completeItem := docItem{path: complete, corpora: pageCorpora(1)}
+	upsertPages(t, store, partial, 1, 2)
+	upsertPages(t, store, complete, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := idx.settleBatches(ctx, []docItem{partialItem, completeItem}, 2, 1, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("settleBatches = %v, want context.Canceled", err)
+	}
+	if got := storedRowCount(t, store, partial); got != 0 {
+		t.Errorf("partial document kept %d rows on a cancelled run, want it dropped", got)
+	}
+	if got := storedRowCount(t, store, complete); got != 1 {
+		t.Errorf("complete document lost its row: %d stored, want 1", got)
+	}
+}
+
+// TestSettleBatchesCancelledWithoutFailuresDeletesNothing pins the other half
+// of the ordering: cancellation alone is not a reason to drop documents. The
+// sweep is driven by a failed batch, so an incomplete document survives a run
+// that failed nothing and was cancelled before it could finish.
+func TestSettleBatchesCancelledWithoutFailuresDeletesNothing(t *testing.T) {
+	const path = "/workspace/spec.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, &agent.LoopRunner{})
+	item := docItem{path: path, corpora: pageCorpora(1, 2), isDocx: true}
+	upsertPages(t, store, path, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := idx.settleBatches(ctx, []docItem{item}, 1, 0, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("settleBatches = %v, want context.Canceled", err)
+	}
+	if got := storedRowCount(t, store, path); got != 1 {
+		t.Errorf("cancelled run without a failed batch deleted rows: %d stored, want 1 kept", got)
+	}
+}
+
+// TestSettleBatchesDropsPartialDocumentOnFailure pins the uncancelled failure
+// path: the partial document goes, the complete one stays, and the run reports
+// its batch failure so the caller exits non-zero instead of printing
+// "Indexing complete".
+func TestSettleBatchesDropsPartialDocumentOnFailure(t *testing.T) {
+	const partial = "/workspace/partial.docx"
+	const complete = "/workspace/complete.md"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, &agent.LoopRunner{})
+
+	partialItem := docItem{path: partial, corpora: pageCorpora(1, 2, 3), isDocx: true}
+	completeItem := docItem{path: complete, corpora: pageCorpora(1)}
+	upsertPages(t, store, partial, 1, 2)
+	upsertPages(t, store, complete, 1)
+
+	err := idx.settleBatches(context.Background(), []docItem{partialItem, completeItem}, 2, 1, nil)
+	if err == nil {
+		t.Fatal("settleBatches = nil, want a batch failure error")
+	}
+	if !strings.Contains(err.Error(), "index batches failed") {
+		t.Errorf("settleBatches error = %q, want it to mention %q", err, "index batches failed")
+	}
+	if got := storedRowCount(t, store, partial); got != 0 {
+		t.Errorf("partial document kept %d rows after a failed batch, want it dropped", got)
+	}
+	if got := storedRowCount(t, store, complete); got != 1 {
+		t.Errorf("complete document lost its row: %d stored, want 1", got)
+	}
+}
+
+// TestSettleBatchesSweepsOnlyFailedDocuments pins the narrowing of the sweep: a
+// failed batch names the documents it touched, and only those are re-read and
+// dropped. A document whose batch succeeded was written whole — an incomplete
+// one had its batch fail, so it is named — and re-reading every page row of the
+// run would only be a slower way to reach the same index.
+func TestSettleBatchesSweepsOnlyFailedDocuments(t *testing.T) {
+	const failedDoc = "/workspace/failed.docx"
+	const untouched = "/workspace/untouched.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, &agent.LoopRunner{})
+
+	failedItem := docItem{path: failedDoc, corpora: pageCorpora(1, 2, 3), isDocx: true}
+	untouchedItem := docItem{path: untouched, corpora: pageCorpora(1, 2), isDocx: true}
+	upsertPages(t, store, failedDoc, 1)
+	upsertPages(t, store, untouched, 1)
+
+	err := idx.settleBatches(context.Background(), []docItem{failedItem, untouchedItem}, 2, 1,
+		map[string]struct{}{failedDoc: {}})
+	if err == nil {
+		t.Fatal("settleBatches = nil, want a batch failure error")
+	}
+	if got := storedRowCount(t, store, failedDoc); got != 0 {
+		t.Errorf("failed document kept %d rows, want it dropped", got)
+	}
+	if got := storedRowCount(t, store, untouched); got != 1 {
+		t.Errorf("document outside the failed batches has %d rows, want its row untouched", got)
+	}
+}
+
+// storedRowCount reports how many page rows the store holds for docPath.
+func storedRowCount(t *testing.T, store *docindex.Store, docPath string) int {
+	t.Helper()
+	rows, err := store.GetByDoc(docPath)
+	if err != nil {
+		t.Fatalf("GetByDoc(%s): %v", docPath, err)
+	}
+	return len(rows)
+}
+
+// TestIsDocxExt pins the indexer's Word gate to the shared list: the three
+// OOXML containers pass, and the two formats no reader handles do not.
+func TestIsDocxExt(t *testing.T) {
+	for _, ext := range []string{".docx", ".docm", ".dotx", ".DOCX", ".Docm"} {
+		if !isDocxExt(ext) {
+			t.Errorf("isDocxExt(%q) = false, want true", ext)
+		}
+	}
+	for _, ext := range []string{".doc", ".dotm", ".pdf", "", ".docxx"} {
+		if isDocxExt(ext) {
+			t.Errorf("isDocxExt(%q) = true, want false", ext)
+		}
+	}
+}
+
+// TestIsPDFExt pins the indexer's PDF gate to the shared list, so the store and
+// the extractor cannot disagree about what a PDF is.
+func TestIsPDFExt(t *testing.T) {
+	for _, ext := range []string{".pdf", ".PDF"} {
+		if !isPDFExt(ext) {
+			t.Errorf("isPDFExt(%q) = false, want true", ext)
+		}
+	}
+	for _, ext := range []string{".docx", ".doc", "", ".pdfx", ".pxdf"} {
+		if isPDFExt(ext) {
+			t.Errorf("isPDFExt(%q) = true, want false", ext)
+		}
+	}
+}
+
+// writeTestDocx writes a minimal DOCX archive whose word/document.xml holds
+// body as the contents of <w:body>. An empty body yields a document with no
+// paragraphs, and therefore no pages.
+func writeTestDocx(t *testing.T, docxPath, body string) {
+	t.Helper()
+	f, err := os.Create(docxPath)
+	if err != nil {
+		t.Fatalf("create %s: %v", docxPath, err)
+	}
+	zw := zip.NewWriter(f)
+	w, err := zw.Create("word/document.xml")
+	if err != nil {
+		t.Fatalf("create document.xml: %v", err)
+	}
+	doc := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+		`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		body + `</w:body></w:document>`
+	if _, err := w.Write([]byte(doc)); err != nil {
+		t.Fatalf("write document.xml: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close docx archive: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close %s: %v", docxPath, err)
+	}
+}
+
+// indexFakeProvider stands in for a model in the run tests: it answers every
+// step with one text delta and a "stop" finish, and writes the page rows the
+// run expects to find, so a document's validation succeeds without a real
+// indexing agent. It never emits a tool call.
+type indexFakeProvider struct {
+	mu    sync.Mutex
+	store *docindex.Store
+	pages map[string][]int // doc path -> page numbers to store on each step
+}
+
+func (p *indexFakeProvider) ID() string { return "mock" }
+
+func (p *indexFakeProvider) Models() []provider.ModelInfo {
+	return []provider.ModelInfo{{ID: "mock-model", ProviderID: "mock"}}
+}
+
+func (p *indexFakeProvider) StreamChat(ctx context.Context, req provider.StreamRequest) (<-chan provider.StreamEvent, error) {
+	p.mu.Lock()
+	for docPath, nums := range p.pages {
+		for _, n := range nums {
+			if err := p.store.Upsert(&docindex.PageEntry{
+				DocPath: docPath, PageNum: n, Keywords: []string{"k"}, Labels: []string{"L"},
+			}); err != nil {
+				slog.Error("fake provider upsert failed", "path", docPath, "page", n, "err", err)
+			}
+		}
+	}
+	p.mu.Unlock()
+
+	ch := make(chan provider.StreamEvent, 4)
+	go func() {
+		defer close(ch)
+		ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "done"}
+		fr := "stop"
+		ch <- provider.StreamEvent{Type: provider.EventFinish, FinishReason: &fr}
+	}()
+	return ch, nil
+}
+
+// newIndexRunFixture builds an Indexer whose loop runner is backed by
+// indexFakeProvider, so Run can be exercised end to end against a temp dir.
+// pages says which page rows the fake model stores when a batch runs.
+func newIndexRunFixture(t *testing.T, dir string, pages map[string][]int) (*Indexer, *docindex.Store) {
+	t.Helper()
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	if err := session.SetModelCapability(database, &session.ModelCapability{
+		ModelID: "mock-model", SupportsImages: false, ProbedAt: session.Now(),
+	}); err != nil {
+		t.Fatalf("set model capability: %v", err)
+	}
+
+	docStore := docindex.NewStore(database)
+	reg := provider.NewRegistry()
+	reg.Register(&indexFakeProvider{store: docStore, pages: pages})
+	lr := &agent.LoopRunner{
+		Store:    session.NewStore(database),
+		Bus:      bus.New(64),
+		Registry: reg,
+		Tools:    tool.NewRegistry(),
+		Dir:      dir,
+		MaxSteps: 4,
+	}
+	return New(dir, docStore, lr).WithModel("mock-model"), docStore
+}
+
+// TestRunReportsUnreadableDocument is the regression for a run whose only
+// candidate could not be read: it must fail loudly, naming the file, instead of
+// printing "Indexing complete" over an index the run has already emptied.
+func TestRunReportsUnreadableDocument(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := filepath.Join(dir, "broken.docx")
+	if err := os.WriteFile(corrupt, []byte("not a zip"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", corrupt, err)
+	}
+
+	idx := New(dir, newTestDocStore(t), &agent.LoopRunner{})
+	err := idx.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run = nil, want an error naming the unreadable document")
+	}
+	if !strings.Contains(err.Error(), corrupt) {
+		t.Errorf("Run error = %q, want it to name %q", err, corrupt)
+	}
+	if got := idx.progress.Total.Load(); got != 1 {
+		t.Errorf("progress.Total = %d, want 1: the selected file counts even though it failed", got)
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1", got)
+	}
+	if got := idx.progress.Completed.Load(); got != 0 {
+		t.Errorf("progress.Completed = %d, want 0", got)
+	}
+}
+
+// TestRunCountsZeroPageDocumentAsFailed pins the other silent drop: a document
+// that parses but yields no pages was selected and cannot be indexed, so the
+// run fails and the counters show it.
+func TestRunCountsZeroPageDocumentAsFailed(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.docx")
+	writeTestDocx(t, empty, "")
+
+	idx := New(dir, newTestDocStore(t), &agent.LoopRunner{})
+	err := idx.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run = nil, want an error naming the zero-page document")
+	}
+	if !strings.Contains(err.Error(), empty) {
+		t.Errorf("Run error = %q, want it to name %q", err, empty)
+	}
+	if !strings.Contains(err.Error(), "no extractable pages") {
+		t.Errorf("Run error = %q, want it to report the document had no pages", err)
+	}
+	if got := idx.progress.Total.Load(); got != 1 {
+		t.Errorf("progress.Total = %d, want 1", got)
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1", got)
+	}
+	if got := idx.progress.Completed.Load(); got != 0 {
+		t.Errorf("progress.Completed = %d, want 0", got)
+	}
+}
+
+// TestRunReportsUnreadableDocumentAlongsideIndexedOnes pins the partial run:
+// the readable document is indexed and counted, and the run still fails naming
+// the one it could not read.
+func TestRunReportsUnreadableDocumentAlongsideIndexedOnes(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := filepath.Join(dir, "broken.docx")
+	if err := os.WriteFile(corrupt, []byte("not a zip"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", corrupt, err)
+	}
+	good := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(good, []byte("index me\n"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", good, err)
+	}
+
+	idx, store := newIndexRunFixture(t, dir, map[string][]int{good: {1}})
+	err := idx.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run = nil, want an error naming the unreadable document")
+	}
+	if !strings.Contains(err.Error(), corrupt) {
+		t.Errorf("Run error = %q, want it to name %q", err, corrupt)
+	}
+	if got := idx.progress.Total.Load(); got != 2 {
+		t.Errorf("progress.Total = %d, want 2", got)
+	}
+	if got := idx.progress.Completed.Load(); got != 1 {
+		t.Errorf("progress.Completed = %d, want 1 for the readable document", got)
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1 for the unreadable document", got)
+	}
+	if got := storedRowCount(t, store, good); got != 1 {
+		t.Errorf("readable document has %d stored rows, want 1", got)
+	}
+	if got := storedRowCount(t, store, corrupt); got != 0 {
+		t.Errorf("unreadable document has %d stored rows, want 0", got)
+	}
+}
+
+// lastProgressPhase drains events and reports the phase of the last
+// docindex.progress event on it, or "" when the channel holds none. Run
+// publishes synchronously into the bus's subscriber buffers, so draining after
+// Run returns sees every event of a small run.
+func lastProgressPhase(t *testing.T, events <-chan bus.Event) string {
+	t.Helper()
+	phase := ""
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type != "docindex.progress" {
+				continue
+			}
+			var props struct {
+				Phase string `json:"phase"`
+			}
+			if err := json.Unmarshal(evt.Properties, &props); err != nil {
+				t.Fatalf("decode %s properties: %v", evt.Type, err)
+			}
+			phase = props.Phase
+		default:
+			return phase
+		}
+	}
+}
+
+// TestRunPublishesTerminalPhaseOnEveryExit pins the contract a phase-driven
+// consumer relies on: whichever path Run leaves by — success, a document that
+// cannot be read, or a cancelled context — its last progress event carries the
+// terminal "done" phase. Only the success path used to publish it, so a
+// consumer waiting for the run to finish waited forever on a failed one.
+func TestRunPublishesTerminalPhaseOnEveryExit(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		dir := t.TempDir()
+		good := filepath.Join(dir, "notes.txt")
+		if err := os.WriteFile(good, []byte("index me\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", good, err)
+		}
+		idx, _ := newIndexRunFixture(t, dir, map[string][]int{good: {1}})
+		events := idx.loopRunner.Bus.SubscribeAll()
+		if err := idx.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if got := lastProgressPhase(t, events); got != "done" {
+			t.Errorf("last progress phase = %q, want %q", got, "done")
+		}
+	})
+
+	t.Run("unreadable document", func(t *testing.T) {
+		dir := t.TempDir()
+		corrupt := filepath.Join(dir, "broken.docx")
+		if err := os.WriteFile(corrupt, []byte("not a zip"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", corrupt, err)
+		}
+		idx, _ := newIndexRunFixture(t, dir, nil)
+		events := idx.loopRunner.Bus.SubscribeAll()
+		if err := idx.Run(context.Background()); err == nil {
+			t.Fatal("Run = nil, want the unreadable document reported")
+		}
+		if got := lastProgressPhase(t, events); got != "done" {
+			t.Errorf("last progress phase = %q, want %q", got, "done")
+		}
+	})
+
+	t.Run("cancelled context", func(t *testing.T) {
+		dir := t.TempDir()
+		doc := filepath.Join(dir, "notes.docx")
+		writeTestDocx(t, doc, `<w:p><w:r><w:t>Page one body.</w:t></w:r></w:p>`)
+		idx, _ := newIndexRunFixture(t, dir, map[string][]int{doc: {1}})
+		events := idx.loopRunner.Bus.SubscribeAll()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := idx.Run(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run = %v, want context.Canceled", err)
+		}
+		if got := lastProgressPhase(t, events); got != "done" {
+			t.Errorf("last progress phase = %q, want %q", got, "done")
+		}
+	})
+}
+
+// TestRunDropsDocumentWhenAChunkFails exercises the whole run over a document
+// large enough to split into three batches: the fake model stores only the
+// first chunk's pages, so the other two fail validation, and the document must
+// leave the index empty rather than keeping the one chunk that landed.
+func TestRunDropsDocumentWhenAChunkFails(t *testing.T) {
+	dir := t.TempDir()
+	doc := filepath.Join(dir, "long.docx")
+	var body strings.Builder
+	for n := 1; n <= 2*batchSize+50; n++ {
+		if n > 1 {
+			body.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
+		}
+		fmt.Fprintf(&body, `<w:p><w:r><w:t>Page %d body.</w:t></w:r></w:p>`, n)
+	}
+	writeTestDocx(t, doc, body.String())
+
+	// The model stores pages 1..batchSize on every batch it runs, so only the
+	// chunk that expects exactly those pages validates.
+	firstChunk := make([]int, batchSize)
+	for n := range firstChunk {
+		firstChunk[n] = n + 1
+	}
+	idx, store := newIndexRunFixture(t, dir, map[string][]int{doc: firstChunk})
+
+	err := idx.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run = nil, want the failed chunks reported")
+	}
+	if !strings.Contains(err.Error(), "2 of 3 index batches failed") {
+		t.Errorf("Run error = %q, want it to report 2 of 3 batches failed", err)
+	}
+	if got := storedRowCount(t, store, doc); got != 0 {
+		t.Errorf("document has %d stored rows, want 0: a partially indexed document must be dropped", got)
+	}
+	if got := idx.progress.Total.Load(); got != 1 {
+		t.Errorf("progress.Total = %d, want 1", got)
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1", got)
+	}
+	if got := idx.progress.Completed.Load(); got != 0 {
+		t.Errorf("progress.Completed = %d, want 0", got)
+	}
+}
+
+// splitDocItem builds a DOCX item carrying 2*batchSize+50 pages — 250 at the
+// current batch size — which assembleBatches splits into three chunks of one
+// document.
+func splitDocItem(docPath string) docItem {
+	nums := make([]int, 0, 2*batchSize+50)
+	for n := 1; n <= 2*batchSize+50; n++ {
+		nums = append(nums, n)
+	}
+	return docItem{path: docPath, corpora: pageCorpora(nums...), isDocx: true}
+}
+
+// TestDocSettlerCountsSplitDocumentOnce pins the progress unit: Total counts
+// documents, so a document split across three chunks is counted once, and only
+// after its last chunk has settled.
+func TestDocSettlerCountsSplitDocumentOnce(t *testing.T) {
+	const path = "/workspace/long.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, nil)
+
+	item := splitDocItem(path)
+	nums := make([]int, 0, len(item.corpora))
+	for _, c := range item.corpora {
+		nums = append(nums, c.PageNum)
+	}
+	upsertPages(t, store, path, nums...)
+
+	batches := idx.assembleBatches([]docItem{item})
+	if len(batches) != 3 {
+		t.Fatalf("assembled %d batches, want 3", len(batches))
+	}
+	idx.settler = newDocSettler(batches, idx.progress)
+	t.Cleanup(func() { idx.settler = nil })
+	// Total comes from the settler's own document count, the unit Run uses
+	// (len(toIndex)); a hard-coded 1 asserted nothing but itself.
+	idx.progress.Total.Store(int32(len(idx.settler.remaining)))
+	if got := idx.progress.Total.Load(); got != 1 {
+		t.Fatalf("progress.Total = %d derived from the settler, want 1 document for %d chunks", got, len(batches))
+	}
+
+	for i, b := range batches {
+		if err := idx.finishDocument(b.items[0], nil); err != nil {
+			t.Fatalf("chunk %d: %v", i+1, err)
+		}
+		if i < len(batches)-1 {
+			if got := idx.progress.Completed.Load(); got != 0 {
+				t.Errorf("progress.Completed = %d after chunk %d, want 0 until the last chunk settles", got, i+1)
+			}
+			if got := idx.progress.Failed.Load(); got != 0 {
+				t.Errorf("progress.Failed = %d after chunk %d, want 0", got, i+1)
+			}
+		}
+	}
+	if got := idx.progress.Completed.Load(); got != 1 {
+		t.Errorf("progress.Completed = %d, want 1 for one fully indexed document", got)
+	}
+	if got := idx.progress.Failed.Load(); got != 0 {
+		t.Errorf("progress.Failed = %d, want 0", got)
+	}
+	if got := idx.progress.Total.Load(); got != 1 {
+		t.Errorf("progress.Total = %d, want 1", got)
+	}
+}
+
+// TestDocSettlerCountsSplitDocumentFailedOnce pins the other half: a chunk
+// succeeding is not the document succeeding. One failed chunk fails the whole
+// document once, and its surviving pages are dropped.
+func TestDocSettlerCountsSplitDocumentFailedOnce(t *testing.T) {
+	const path = "/workspace/long.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, nil)
+
+	item := splitDocItem(path)
+	// Only the first chunk's pages land, so chunks 2 and 3 fail validation.
+	for n := 1; n <= batchSize; n++ {
+		upsertPages(t, store, path, n)
+	}
+
+	batches := idx.assembleBatches([]docItem{item})
+	if len(batches) != 3 {
+		t.Fatalf("assembled %d batches, want 3", len(batches))
+	}
+	idx.settler = newDocSettler(batches, idx.progress)
+	t.Cleanup(func() { idx.settler = nil })
+	// Total comes from the settler's own document count, the unit Run uses
+	// (len(toIndex)); a hard-coded 1 asserted nothing but itself.
+	idx.progress.Total.Store(int32(len(idx.settler.remaining)))
+	if got := idx.progress.Total.Load(); got != 1 {
+		t.Fatalf("progress.Total = %d derived from the settler, want 1 document for %d chunks", got, len(batches))
+	}
+
+	for i, b := range batches {
+		err := idx.finishDocument(b.items[0], nil)
+		if i == 0 {
+			if err != nil {
+				t.Fatalf("chunk 1: %v", err)
+			}
+			if got := idx.progress.Completed.Load(); got != 0 {
+				t.Errorf("progress.Completed = %d after a successful chunk of a split document, want 0", got)
+			}
+			continue
+		}
+		if err == nil {
+			t.Fatalf("chunk %d: finishDocument = nil, want a missing-pages error", i+1)
+		}
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1 for one failed document", got)
+	}
+	if got := idx.progress.Completed.Load(); got != 0 {
+		t.Errorf("progress.Completed = %d, want 0", got)
+	}
+	if got := idx.progress.Total.Load(); got != 1 {
+		t.Errorf("progress.Total = %d, want 1", got)
+	}
+	if got := storedRowCount(t, store, path); got != 0 {
+		t.Errorf("failed split document kept %d rows, want it dropped entirely", got)
+	}
+}
+
+// closedIndexerStore returns a store and an Indexer over it whose database has
+// been closed, so every read and delete through the store fails.
+func closedIndexerStore(t *testing.T) *Indexer {
+	t.Helper()
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+	store := docindex.NewStore(database)
+	idx := New("/workspace", store, &agent.LoopRunner{})
+	if err := database.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	return idx
+}
+
+// TestDropIncompleteDocumentsReportsDeleteFailure pins B3: a partial document
+// the sweep cannot drop must be reported, naming the file, so the run does not
+// claim the index is consistent while a row keeps the document "complete"
+// forever.
+func TestDropIncompleteDocumentsReportsDeleteFailure(t *testing.T) {
+	const path = "/workspace/spec.docx"
+	idx := closedIndexerStore(t)
+
+	err := idx.dropIncompleteDocuments([]docItem{{path: path, corpora: pageCorpora(1, 2), isDocx: true}})
+	if err == nil {
+		t.Fatal("dropIncompleteDocuments = nil, want the delete failure reported")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("dropIncompleteDocuments error = %q, want it to name %q", err, path)
+	}
+	if !strings.Contains(err.Error(), "drop incomplete document") {
+		t.Errorf("dropIncompleteDocuments error = %q, want it to describe the failed drop", err)
+	}
+}
+
+// TestSettleBatchesJoinsSweepFailure pins that the sweep failure reaches the
+// caller alongside the batch failure, rather than only being logged.
+func TestSettleBatchesJoinsSweepFailure(t *testing.T) {
+	const path = "/workspace/spec.docx"
+	idx := closedIndexerStore(t)
+
+	err := idx.settleBatches(context.Background(), []docItem{{path: path, corpora: pageCorpora(1, 2), isDocx: true}}, 1, 1, nil)
+	if err == nil {
+		t.Fatal("settleBatches = nil, want the batch and sweep failures reported")
+	}
+	if !strings.Contains(err.Error(), "index batches failed") {
+		t.Errorf("settleBatches error = %q, want it to mention %q", err, "index batches failed")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("settleBatches error = %q, want it to name %q", err, path)
 	}
 }

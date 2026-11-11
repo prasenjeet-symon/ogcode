@@ -120,6 +120,9 @@ export const DocIndexProvider: ParentComponent = (props) => {
       setExcludes((prev) => [...prev, entry].sort((a, b) => a.pattern.localeCompare(b.pattern)));
     } catch (e) {
       console.error('add exclude failed:', e);
+      // The dialog clears its input only when this resolves, so the failure
+      // has to be visible to it rather than swallowed here.
+      throw e;
     }
   }
 

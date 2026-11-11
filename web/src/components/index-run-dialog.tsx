@@ -58,7 +58,7 @@ export default function IndexRunDialog(props: {
   const isNoop = () =>
     !props.rebuild && !plan.loading && !plan.error && !!plan() && workCount() === 0 && staleCount() === 0;
 
-  const canRun = () => !!docIndex.selectedModel() && !isNoop() && !plan.loading;
+  const canRun = () => !!docIndex.selectedModel() && !isNoop() && !plan.loading && !docIndex.building();
 
   // The breakdown has to describe the same files the headline counts, or it
   // reads as a second, larger answer to the same question.

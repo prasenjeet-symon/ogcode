@@ -174,15 +174,24 @@ export default function DocIndexPage() {
   const rows = createMemo(() => {
     const open = expanded();
     const all = filtering();
-    rowEls.clear();
     // While filtering, every surviving folder opens so matches are always visible.
     return flattenTree(viewTree().root, (id) => all || open.has(id));
   });
 
+  // A whole-repo tree (Expand all, or a one-character filter) can be tens of
+  // thousands of rows, and building that many DOM nodes locks the page for
+  // seconds. Render a window and say how much is left; the filter is the way
+  // to reach the rest.
+  const ROW_LIMIT = 400;
+  const visibleRows = createMemo(() => rows().slice(0, ROW_LIMIT));
+
   let treeEl: HTMLDivElement | undefined;
-  const revealRow = (id: string, block: 'nearest' | 'center' = 'nearest') => {
+  const revealRow = (id: string, block: 'nearest' | 'center' = 'nearest', tries = 10) => {
     const el = rowEls.get(id);
-    if (el && treeEl) revealWithin(treeEl, el, { block, margin: 4 });
+    if (el && treeEl) { revealWithin(treeEl, el, { block, margin: 4 }); return; }
+    // The row may only mount once a just-expanded folder has rendered; retry
+    // across a few frames rather than giving up on the first miss.
+    if (tries > 0 && rowEls.size < ROW_LIMIT) requestAnimationFrame(() => revealRow(id, block, tries - 1));
   };
 
   const toggle = (id: string) => {
@@ -248,7 +257,7 @@ export default function DocIndexPage() {
   // ---- keyboard navigation ---------------------------------------------
 
   const move = (delta: number) => {
-    const list = rows();
+    const list = visibleRows();
     if (!list.length) return;
     const idx = list.findIndex((r) => r.node.id === selected()?.id);
     const next = idx < 0
@@ -258,7 +267,7 @@ export default function DocIndexPage() {
   };
 
   const moveToParent = () => {
-    const list = rows();
+    const list = visibleRows();
     const idx = list.findIndex((r) => r.node.id === selected()?.id);
     if (idx <= 0) return;
     const depth = list[idx].depth;
@@ -289,8 +298,8 @@ export default function DocIndexPage() {
         if (node.kind === 'dir') toggle(node.id);
         else select(node);
         break;
-      case 'Home': e.preventDefault(); if (rows().length) select(rows()[0].node, true); break;
-      case 'End': e.preventDefault(); if (rows().length) select(rows()[rows().length - 1].node, true); break;
+      case 'Home': e.preventDefault(); if (visibleRows().length) select(visibleRows()[0].node, true); break;
+      case 'End': e.preventDefault(); if (visibleRows().length) select(visibleRows()[visibleRows().length - 1].node, true); break;
     }
   };
 
@@ -730,7 +739,7 @@ export default function DocIndexPage() {
                     tabindex="0"
                     onKeyDown={onTreeKeyDown}
                   >
-                    <Show when={rows().length > 0} fallback={
+                    <Show when={visibleRows().length > 0} fallback={
                       <div class="flex flex-col items-center gap-2 text-center py-10 px-4">
                         <p class="text-meta text-[color:var(--text-muted)]">
                           <Show when={search().trim()} fallback="Every file is indexed.">
@@ -746,7 +755,7 @@ export default function DocIndexPage() {
                         </button>
                       </div>
                     }>
-                      <For each={rows()}>
+                      <For each={visibleRows()}>
                         {(row) => (
                           <TreeRow
                             node={row.node}
@@ -762,6 +771,12 @@ export default function DocIndexPage() {
                       </For>
                     </Show>
                   </div>
+
+                  <Show when={rows().length > visibleRows().length}>
+                    <div class="shrink-0 px-3 py-1.5 border-t border-[color:var(--border-subtle)] text-[0.625rem] text-[color:var(--text-muted)]">
+                      Showing the first {ROW_LIMIT.toLocaleString()} of {rows().length.toLocaleString()} rows — narrow the filter or collapse folders.
+                    </div>
+                  </Show>
 
                   {/* Tree footer */}
                   <div class="shrink-0 px-3 h-7 flex items-center gap-2 border-t border-[color:var(--border-subtle)] text-[0.625rem] text-[color:var(--text-muted)] tabular-nums">

@@ -145,22 +145,45 @@ func (s *Store) ListDocsSummary(dirPrefix string) ([]*DocSummary, error) {
 	return summaries, rows.Err()
 }
 
+// pathExclusionConditions returns one "AND LOWER(doc_path) NOT LIKE '%.ext'"
+// clause per extension, space-joined so the result slots directly into a
+// WHERE clause after another predicate. The extensions come from the
+// *Extensions slices that own each format (PDF, Word, sheets), and every one
+// is a compile-time literal, so the assembled SQL cannot inject anything.
+func pathExclusionConditions(extensions []string) string {
+	clauses := make([]string, len(extensions))
+	for i, ext := range extensions {
+		clauses[i] = fmt.Sprintf("AND LOWER(doc_path) NOT LIKE '%%%s'", ext)
+	}
+	return strings.Join(clauses, " ")
+}
+
 // ListTextFiles returns all indexed entries that belong to a single-entry
 // text/code file whose doc_path is under dirPrefix (the boundary is the
 // directory separator, so a sibling folder sharing the prefix never matches),
 // ordered by path. Each text/code file has exactly one entry (page 1).
-// Multi-page documents — PDF, DOCX and spreadsheets (one page per sheet, see
-// internal/sheet) — are excluded here by extension, and the page_num = 1
-// filter keeps a future multi-page kind that is not yet excluded from leaking
-// its later pages in as files: only a first page can be a single-entry file.
-// Callers of the multi-page queries must group pages by DocPath rather than
-// count rows as files.
+//
+// Every known multi-page kind is excluded wholesale by extension, from the
+// list that owns it: PDF (PDFExtensions), Word documents (DocxExtensions) and
+// spreadsheets (SheetExtensions, so .csv/.tsv are excluded too — a text file
+// here means something like notes.md). No page of those kinds belongs to this
+// listing, whatever its page number.
+//
+// The page_num = 1 filter is the backstop for a multi-page kind added later
+// whose extension has no exclusion clause yet: only its first page can leak
+// in as a file, never its later pages.
+//
+// This listing is for files, not pages: a caller that needs per-page detail
+// for a multi-page document must use ListPDFFiles, ListDocxFiles or
+// ListSheetFiles and group by DocPath, never count rows as files.
 func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, doc_path, page_num, keywords, labels, indexed_at, mod_time
 		 FROM doc_page_index
 		 WHERE doc_path LIKE ? ESCAPE '\'
 		   AND page_num = 1
+		   `+pdfPathExclusionConditions()+`
+		   `+docxPathExclusionConditions()+`
 		   `+sheetPathExclusionConditions()+`
 		 ORDER BY doc_path ASC`,
 		dirPrefixFilter(dirPrefix),
@@ -183,13 +206,14 @@ func (s *Store) ListTextFiles(dirPrefix string) ([]*PageEntry, error) {
 
 // ListPDFFiles returns all indexed PDF entries (page-level) whose doc_path is
 // under dirPrefix (directory-boundary semantics, see dirPrefixFilter), ordered
-// by path then page number. Each PDF document
-// will have one entry per page; callers group them by DocPath.
+// by path then page number. Each PDF document will have one entry per page;
+// callers group them by DocPath. The extensions come from PDFExtensions.
 func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, doc_path, page_num, keywords, labels, indexed_at, mod_time
 		 FROM doc_page_index
-		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) LIKE '%.pdf'
+		 WHERE doc_path LIKE ? ESCAPE '\'
+		   AND `+pdfPathMatchConditions()+`
 		 ORDER BY doc_path ASC, page_num ASC`,
 		dirPrefixFilter(dirPrefix),
 	)
@@ -209,15 +233,18 @@ func (s *Store) ListPDFFiles(dirPrefix string) ([]*PageEntry, error) {
 	return entries, rows.Err()
 }
 
-// ListDocxFiles returns all indexed DOCX entries (page-level) whose doc_path
-// is under dirPrefix (directory-boundary semantics, see dirPrefixFilter),
-// ordered by path then page number. Each DOCX document
-// will have one entry per pseudo-page; callers group them by DocPath.
+// ListDocxFiles returns all indexed Word-document entries (page-level) whose
+// doc_path is under dirPrefix (directory-boundary semantics, see
+// dirPrefixFilter), ordered by path then page number. Each Word document
+// will have one entry per pseudo-page; callers group them by DocPath. The
+// extensions come from DocxExtensions (.docx/.docm/.dotx — the same OOXML
+// container); .doc/.dotm are in no list and are indexed by neither.
 func (s *Store) ListDocxFiles(dirPrefix string) ([]*PageEntry, error) {
 	rows, err := s.db.Query(
 		`SELECT id, doc_path, page_num, keywords, labels, indexed_at, mod_time
 		 FROM doc_page_index
-		 WHERE doc_path LIKE ? ESCAPE '\' AND LOWER(doc_path) LIKE '%.docx'
+		 WHERE doc_path LIKE ? ESCAPE '\'
+		   AND `+docxPathMatchConditions()+`
 		 ORDER BY doc_path ASC, page_num ASC`,
 		dirPrefixFilter(dirPrefix),
 	)

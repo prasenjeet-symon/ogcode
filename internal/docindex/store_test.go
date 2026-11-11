@@ -216,25 +216,83 @@ func TestListSheetFilesEveryPage(t *testing.T) {
 	}
 }
 
-// TestListTextFilesOnlyFirstPages pins the page_num = 1 filter the sheet
-// listing already relies on: a multi-page document kind whose extension
-// carries no exclusion clause yet (a kind added after this one) can only ever
-// contribute its first page to the text listing, never its later pages —
-// otherwise a caller counting rows as files resurrects the last-write-wins
-// bug across pages.
+// TestListPDFFilesEveryPage pins the pair of listings against each other:
+// every page (not just the first) of a document with a PDF extension lands in
+// the PDF listing, and none of its pages — including page 1 — leaks into the
+// text listing.
+func TestListPDFFilesEveryPage(t *testing.T) {
+	s := newTestStore(t)
+
+	var entries []*PageEntry
+	for i, ext := range PDFExtensions {
+		path := fmt.Sprintf("/proj/paper%d%s", i, ext)
+		entries = append(entries,
+			&PageEntry{DocPath: path, PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+			&PageEntry{DocPath: path, PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
+		)
+	}
+	entries = append(entries,
+		&PageEntry{DocPath: "/proj/notes.md", PageNum: 1, Keywords: []string{"notes"}, Labels: []string{"L"}},
+	)
+	for _, e := range entries {
+		if err := s.Upsert(e); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	pdfs, err := s.ListPDFFiles("/proj")
+	if err != nil {
+		t.Fatalf("ListPDFFiles: %v", err)
+	}
+	if len(pdfs) != 2*len(PDFExtensions) {
+		t.Fatalf("ListPDFFiles returned %d rows, want one per page of every PDF extension (=%d): %v",
+			len(pdfs), 2*len(PDFExtensions), pdfs)
+	}
+
+	text, err := s.ListTextFiles("/proj")
+	if err != nil {
+		t.Fatalf("ListTextFiles: %v", err)
+	}
+	if len(text) != 1 || text[0].DocPath != "/proj/notes.md" {
+		t.Fatalf("ListTextFiles returned %v, want only the text file /proj/notes.md", text)
+	}
+}
+
+// TestListTextFilesOnlyFirstPages pins the two halves of the text listing's
+// contract: every known multi-page kind (PDF, Word, spreadsheet) is excluded
+// by extension wholesale — page 1 included — while a hypothetical future kind
+// with no exclusion clause yet can still leak only its first page into the
+// listing, never its later pages.
 func TestListTextFilesOnlyFirstPages(t *testing.T) {
 	s := newTestStore(t)
 
+	// .csv/.tsv are sheet extensions, so a text file here has to be something
+	// the index treats as single-entry, like notes.md.
 	entries := []*PageEntry{
 		{DocPath: "/proj/notes.md", PageNum: 1, Keywords: []string{"notes"}, Labels: []string{"L"}},
-		// The known four are excluded by extension wholesale: no page appears.
-		{DocPath: "/proj/book.xlsx", PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
-		{DocPath: "/proj/book.xlsx", PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
 		// A hypothetical future multi-page kind with no exclusion clause: page
 		// 1 is indistinguishable from a single-entry file and stays listed;
 		// page 2 must not leak in.
 		{DocPath: "/proj/fut.parquet", PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
 		{DocPath: "/proj/fut.parquet", PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
+	}
+	// The known multi-page kinds are excluded by extension wholesale: no page
+	// of any of them appears, whatever its page number.
+	for _, kind := range []struct {
+		name string
+		exts []string
+	}{
+		{"paper", PDFExtensions},
+		{"spec", DocxExtensions},
+		{"book", SheetExtensions},
+	} {
+		for i, ext := range kind.exts {
+			path := fmt.Sprintf("/proj/%s%d%s", kind.name, i, ext)
+			entries = append(entries,
+				&PageEntry{DocPath: path, PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+				&PageEntry{DocPath: path, PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
+			)
+		}
 	}
 	for _, e := range entries {
 		if err := s.Upsert(e); err != nil {
@@ -256,6 +314,95 @@ func TestListTextFilesOnlyFirstPages(t *testing.T) {
 	for _, e := range got {
 		if want[e.DocPath] != e.PageNum {
 			t.Errorf("ListTextFiles returned %q page %d, only first pages are allowed", e.DocPath, e.PageNum)
+		}
+	}
+}
+
+// TestPDFExtensionsPinned keeps the PDF extension list exactly what the
+// store's match and exclusion clauses agree on: .pdf is the only PDF
+// extension the document index knows.
+func TestPDFExtensionsPinned(t *testing.T) {
+	want := []string{".pdf"}
+	if len(PDFExtensions) != len(want) {
+		t.Fatalf("PDFExtensions = %v, want %v", PDFExtensions, want)
+	}
+	for i := range want {
+		if PDFExtensions[i] != want[i] {
+			t.Errorf("PDFExtensions[%d] = %q, want %q", i, PDFExtensions[i], want[i])
+		}
+	}
+}
+
+// TestDocxExtensionsPinned keeps the shared Word extension list exactly what
+// the whole pipeline (indexer dispatch, store queries, internal/docx reader)
+// agrees on. .doc is OLE/BIFF rather than an OOXML ZIP and .dotm is out of
+// scope, so both belong to no list at all.
+func TestDocxExtensionsPinned(t *testing.T) {
+	want := []string{".docx", ".docm", ".dotx"}
+	if len(DocxExtensions) != len(want) {
+		t.Fatalf("DocxExtensions = %v, want %v", DocxExtensions, want)
+	}
+	for i := range want {
+		if DocxExtensions[i] != want[i] {
+			t.Errorf("DocxExtensions[%d] = %q, want %q", i, DocxExtensions[i], want[i])
+		}
+	}
+	for _, absent := range []string{".doc", ".dotm"} {
+		for _, ext := range DocxExtensions {
+			if ext == absent {
+				t.Errorf("%q must stay out of DocxExtensions", absent)
+			}
+		}
+	}
+}
+
+// TestListDocxFilesEveryExtension pins the listing to the shared list: every
+// page of every Word extension lands in the Word listing, and a .doc or .dotm —
+// which no reader can open — contributes nothing.
+func TestListDocxFilesEveryExtension(t *testing.T) {
+	s := newTestStore(t)
+
+	var entries []*PageEntry
+	wordPaths := make(map[string]struct{})
+	for i, ext := range DocxExtensions {
+		path := fmt.Sprintf("/proj/spec%d%s", i, ext)
+		wordPaths[path] = struct{}{}
+		entries = append(entries,
+			&PageEntry{DocPath: path, PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+			&PageEntry{DocPath: path, PageNum: 2, Keywords: []string{"k"}, Labels: []string{"L"}},
+		)
+	}
+	entries = append(entries,
+		&PageEntry{DocPath: "/proj/legacy.doc", PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+		&PageEntry{DocPath: "/proj/template.dotm", PageNum: 1, Keywords: []string{"k"}, Labels: []string{"L"}},
+	)
+	for _, e := range entries {
+		if err := s.Upsert(e); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	docxEntries, err := s.ListDocxFiles("/proj")
+	if err != nil {
+		t.Fatalf("ListDocxFiles: %v", err)
+	}
+	if len(docxEntries) != 2*len(DocxExtensions) {
+		t.Fatalf("ListDocxFiles returned %d rows, want one per page of every Word extension (=%d): %v",
+			len(docxEntries), 2*len(DocxExtensions), docxEntries)
+	}
+	for _, e := range docxEntries {
+		if e.DocPath == "/proj/legacy.doc" || e.DocPath == "/proj/template.dotm" {
+			t.Errorf("ListDocxFiles listed a page of %q, which is not a Word extension", e.DocPath)
+		}
+	}
+
+	text, err := s.ListTextFiles("/proj")
+	if err != nil {
+		t.Fatalf("ListTextFiles: %v", err)
+	}
+	for _, e := range text {
+		if _, isWord := wordPaths[e.DocPath]; isWord {
+			t.Errorf("ListTextFiles leaked Word page %q (page %d)", e.DocPath, e.PageNum)
 		}
 	}
 }

@@ -104,6 +104,20 @@ func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ C
 	if len(params.Pages) == 0 {
 		return Result{Title: "Submit Doc Index", Output: "pages array is empty"}, nil
 	}
+	// Pages are 1-based pseudo-pages, so a page 0 (or a negative number) is a
+	// hallucination that must never reach the store: docx_index would advertise
+	// it and read_docx_page would refuse it. Every page is checked before
+	// anything is written, so a rejected call leaves the store untouched. Pages
+	// above the document's total are NOT checked here — one call carries only its
+	// own chunk of pages, and the rest may belong to a sibling batch.
+	for _, p := range params.Pages {
+		if p.PageNum < 1 {
+			return Result{
+				Title:  "Submit Doc Index",
+				Output: fmt.Sprintf("page_num must be >= 1 (got %d); pages are 1-based pseudo-pages", p.PageNum),
+			}, nil
+		}
+	}
 
 	var updated int
 	now := time.Now().UnixMilli()

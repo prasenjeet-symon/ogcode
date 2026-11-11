@@ -62,7 +62,7 @@ var serveCmd = &cobra.Command{
 
 var indexCmd = &cobra.Command{
 	Use:   "index",
-	Short: "Scan workspace for PDF files and index them with semantic labels",
+	Short: "Scan workspace for PDF, Word, spreadsheet and text files and index them with semantic labels",
 	RunE:  runIndex,
 }
 

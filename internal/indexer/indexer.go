@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
@@ -38,6 +40,11 @@ type Indexer struct {
 	maxConcurrent    int // number of parallel indexing sessions (Solution 2)
 	maxKeywordsBatch int // max keyword count per LLM batch (Solution 1)
 	progress         *ProgressTracker
+	// settler holds this run's per-document chunk counts so a document split
+	// across several batches is counted once, when its last chunk settles. It
+	// is per-run state, created after the batches are assembled and cleared
+	// when Run returns, so a reused Indexer starts every run from scratch.
+	settler *docSettler
 }
 
 // ProgressTracker tracks indexing progress and publishes events via the bus.
@@ -169,12 +176,18 @@ func (idx *Indexer) Progress() *ProgressTracker {
 // to tell whether the file moved, and treating an unreadable file as changed
 // would re-index it on every run — a transient permission or IO error turned
 // into unbounded repeated model calls. Leaving a stale row is the cheaper err.
+//
+// Any difference counts, not only a newer time. The doc_index tool refuses a
+// row set whose recorded time does not equal the file's own, so a file whose
+// mtime moved backwards — git checkout, cp -p, rsync -a, a restored backup —
+// would otherwise be permanently stale: the tool would keep telling the user to
+// re-run `ogcode index` while this filter skipped the file every time.
 func fileChangedSince(path string, recordedModTime int64) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		return false
 	}
-	return info.ModTime().UnixMilli() > recordedModTime
+	return info.ModTime().UnixMilli() != recordedModTime
 }
 
 // StateDirName is ogcode's own runtime-state directory. It is created inside a
@@ -269,7 +282,7 @@ func (idx *Indexer) collectFilesLimited(max int) ([]string, error) {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
-		if ext == ".pdf" || ext == ".docx" || isSheetExt(ext) || IsTextFile(ext) {
+		if isPDFExt(ext) || isDocxExt(ext) || isSheetExt(ext) || IsTextFile(ext) {
 			allFiles = append(allFiles, path)
 			if max > 0 && len(allFiles) >= max {
 				return filepath.SkipAll
@@ -310,6 +323,17 @@ type docItem struct {
 // It groups small text files into batches (Solution 1), runs batches in parallel
 // (Solution 2), and publishes progress events (Solution 5).
 func (idx *Indexer) Run(ctx context.Context) error {
+	idx.settler = nil
+
+	// Every path out of a run announces the terminal phase. A consumer that
+	// drives its progress view off the phase would otherwise wait forever on a
+	// run that failed or was cancelled, because only the success path used to
+	// publish it. "done" is the only terminal phase this package has: a failed
+	// or cancelled run is distinguished by the failed counter and by the error
+	// Run returns, not by a phase name no consumer knows. publishProgress reads
+	// the counters and ignores ctx, so a cancelled context still gets the event.
+	defer func() { idx.publishProgress(ctx, "done") }()
+
 	// Phase 1: Walk, filter, dedup, and extract text.
 	allFiles, walkErr := idx.collectFiles()
 	if walkErr != nil {
@@ -332,9 +356,9 @@ func (idx *Indexer) Run(ctx context.Context) error {
 	for _, f := range allFiles {
 		ext := strings.ToLower(filepath.Ext(f))
 		switch {
-		case ext == ".pdf":
+		case isPDFExt(ext):
 			pdfCount++
-		case ext == ".docx":
+		case isDocxExt(ext):
 			docxCount++
 		case isSheetExt(ext):
 			sheetCount++
@@ -366,14 +390,20 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		slog.Info("re-indexing modified documents", "count", changed)
 	}
 
-	// Extract text and build corpora for all files to index.
+	// Extract text and build corpora for all files to index. Total counts the
+	// files this run selected, not the ones that came through extraction: a
+	// document that cannot be read is a failed document, and the UI computes
+	// percent over completed+failed, which needs the failures counted here.
 	var items []docItem
+	var extractionFailures []error
+	idx.progress.Total.Store(int32(len(toIndex)))
+	idx.publishProgress(ctx, "indexing")
 	for _, filePath := range toIndex {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		isPDF := strings.ToLower(filepath.Ext(filePath)) == ".pdf"
-		isDocx := strings.ToLower(filepath.Ext(filePath)) == ".docx"
+		isPDF := isPDFExt(strings.ToLower(filepath.Ext(filePath)))
+		isDocx := isDocxExt(strings.ToLower(filepath.Ext(filePath)))
 		isSheet := isSheetExt(strings.ToLower(filepath.Ext(filePath)))
 		fileType := "text"
 		if isPDF {
@@ -396,10 +426,14 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		}
 		if err != nil {
 			slog.Warn("failed to extract text, skipping", "path", filePath, "type", fileType, "err", err)
+			extractionFailures = append(extractionFailures, fmt.Errorf("%s: extract %s text: %w", filePath, fileType, err))
+			idx.progress.Failed.Add(1)
 			continue
 		}
 		if len(pages) == 0 {
 			slog.Info("no pages found, skipping", "path", filePath, "type", fileType)
+			extractionFailures = append(extractionFailures, fmt.Errorf("%s: no extractable pages", filePath))
+			idx.progress.Failed.Add(1)
 			continue
 		}
 		slog.Info("extracted pages", "path", filePath, "type", fileType, "pages", len(pages))
@@ -418,34 +452,167 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		})
 	}
 
+	// A run with no readable document still reports why: the files were
+	// selected, their rows (for modified files) are already deleted, and
+	// silence here is what let a corrupt document vanish from the index while
+	// the command printed success.
+	extractionErr := errors.Join(extractionFailures...)
 	if len(items) == 0 {
-		return nil
+		return extractionErr
 	}
 
 	// Phase 2: Assemble batches and run in parallel.
-	idx.progress.Total.Store(int32(len(items)))
-	idx.publishProgress(ctx, "indexing")
-
 	batches := idx.assembleBatches(items)
+	idx.settler = newDocSettler(batches, idx.progress)
+	defer func() { idx.settler = nil }()
 	slog.Info("assembled batches", "totalFiles", len(items), "batches", len(batches))
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(idx.maxConcurrent)
 
+	// A failing batch must not cancel its siblings: every other batch can still
+	// land, and the failed documents are settled by the batch that ran them.
+	// The count is recorded per batch and reported once the group has drained.
+	var failedBatches atomic.Int32
+	// failedDocs names the documents the failed batches touched, so the sweep
+	// after the group drains re-reads their rows only. A document that lives in
+	// one successful batch was written whole; one whose batch failed has already
+	// been dropped by that batch. Only a document spread over several batches can
+	// still have pages arriving after its drop, so only those need sweeping.
+	var failedMu sync.Mutex
+	failedDocs := make(map[string]struct{})
 	for _, batch := range batches {
 		batch := batch // capture
 		g.Go(func() error {
-			return idx.processBatch(gCtx, batch)
+			if err := idx.processBatch(gCtx, batch); err != nil {
+				slog.Warn("index batch failed", "files", len(batch.items), "err", err)
+				failedBatches.Add(1)
+				failedMu.Lock()
+				for _, item := range batch.items {
+					failedDocs[item.path] = struct{}{}
+				}
+				failedMu.Unlock()
+			}
+			return nil
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("parallel indexing: %w", err)
+	// A failing batch records itself in failedBatches and never cancels its
+	// siblings, so there is no goroutine error to report: Wait is here to
+	// synchronize with the last batch still writing.
+	g.Wait()
+	// Every batch has returned, so failedDocs is no longer being written.
+	settleErr := idx.settleBatches(ctx, items, len(batches), int(failedBatches.Load()), failedDocs)
+	// A batch that returned before finishing its documents (a session it could
+	// not create, say) would otherwise leave Total short of completed+failed.
+	idx.settler.settleRemaining()
+	if err := errors.Join(extractionErr, settleErr); err != nil {
+		return err
 	}
 
-	idx.publishProgress(ctx, "done")
+	// The terminal "done" phase comes from the defer at the top of Run, so the
+	// success and failure paths announce it exactly once each.
 	slog.Info("indexing complete", "dir", idx.dir, "total", len(items))
 	return nil
+}
+
+// docSettler counts a run's documents in the unit ProgressTracker.Total uses:
+// one per document path. A multi-page document split across several batches is
+// held back until its last chunk settles, so it is never counted while a
+// sibling chunk is still running, and it counts as failed if any one of its
+// chunks failed — a chunk succeeding is not the document succeeding.
+type docSettler struct {
+	mu        sync.Mutex
+	remaining map[string]int  // chunks of a document still to settle
+	failed    map[string]bool // a chunk of this document failed
+	progress  *ProgressTracker
+}
+
+// newDocSettler derives one entry per document path from the run's batches.
+func newDocSettler(batches []*batch, progress *ProgressTracker) *docSettler {
+	s := &docSettler{
+		remaining: make(map[string]int),
+		failed:    make(map[string]bool),
+		progress:  progress,
+	}
+	for _, b := range batches {
+		for _, item := range b.items {
+			s.remaining[item.path]++
+		}
+	}
+	return s
+}
+
+// settle records one chunk's outcome for a document and counts the document
+// only when its last chunk has settled.
+func (s *docSettler) settle(path string, failure error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if failure != nil {
+		s.failed[path] = true
+	}
+	s.remaining[path]--
+	if s.remaining[path] > 0 {
+		return
+	}
+	delete(s.remaining, path)
+	if s.failed[path] {
+		delete(s.failed, path)
+		s.progress.Failed.Add(1)
+		return
+	}
+	s.progress.Completed.Add(1)
+}
+
+// settleRemaining counts every document whose chunks never settled as failed.
+// A batch can return before it reaches its documents (a session it could not
+// create, for one), and a document nobody counted would leave the progress
+// counters short of Total for the rest of the run.
+func (s *docSettler) settleRemaining() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for range s.remaining {
+		s.progress.Failed.Add(1)
+	}
+	s.remaining = map[string]int{}
+	s.failed = map[string]bool{}
+}
+
+// settleBatches is what a run does once every batch has finished: it closes the
+// split-document race and reports the run's outcome, then hands a cancelled
+// context back to the caller.
+//
+// The sweep runs BEFORE the cancellation check on purpose. When a batch failed
+// and the run was also cancelled, returning the context error first would skip
+// the sweep: the failed batch has already dropped its documents, but a sibling
+// batch of the same long document could have written pages after that delete,
+// and filesToIndex would then treat the partial document as complete forever
+// (it holds the file's current mod time). Sweeping first keeps the
+// drop-on-failure guarantee unconditional.
+//
+// failedDocs names the documents a failed batch touched. Only those can still
+// be partial once every batch has finished, so the sweep is scoped to them
+// instead of re-reading every page row of the run. A nil map means the caller
+// cannot say which documents failed and every item is swept.
+func (idx *Indexer) settleBatches(ctx context.Context, items []docItem, batchCount, failed int, failedDocs map[string]struct{}) error {
+	var sweepErr error
+	if failed > 0 {
+		// A failing batch already dropped its own documents, but a sibling batch
+		// of the same long document can still be writing while that delete runs.
+		// Sweep once every batch has finished so no partial document survives.
+		sweepErr = idx.dropIncompleteDocuments(failedDocumentItems(items, failedDocs))
+		idx.publishProgress(ctx, "indexing")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return errors.Join(err, sweepErr)
+	}
+
+	if failed > 0 {
+		slog.Error("indexing incomplete", "dir", idx.dir, "failedBatches", failed, "batches", batchCount, "total", len(items))
+		return errors.Join(batchFailureError(failed, batchCount), sweepErr)
+	}
+	return sweepErr
 }
 
 // filesToIndex works out which of the files on disk an incremental run must
@@ -714,19 +881,29 @@ func (idx *Indexer) processBatch(ctx context.Context, b *batch) error {
 	// to the user's: they start only into room the user's work leaves, one at a
 	// time while a turn is running.
 	runCtx := provider.AsIndexSession(ctx)
-	if err := idx.loopRunner.RunLoop(runCtx, sess.ID, "index", 0, 0); err != nil {
-		// Log but don't fail the entire indexing run — other batches can still succeed.
-		slog.Warn("index agent loop failed", "title", title, "err", err)
-		for range b.items {
-			idx.progress.Failed.Add(1)
+	loopErr := idx.loopRunner.RunLoop(runCtx, sess.ID, "index", 0, 0)
+	if loopErr != nil {
+		slog.Warn("index agent loop failed", "title", title, "err", loopErr)
+	}
+
+	// A nil loop result is not proof the batch landed: the agent can end its turn
+	// having submitted nothing, or only some of the pages. Each document is
+	// checked against the store, and one that did not land completely is dropped
+	// so the next run retries it instead of trusting a partial index.
+	var failures []error
+	for _, item := range b.items {
+		if err := idx.finishDocument(item, loopErr); err != nil {
+			slog.Warn("document not indexed", "path", item.path, "err", err)
+			failures = append(failures, err)
 		}
-	} else {
-		completed := idx.progress.Completed.Add(int32(len(b.items)))
-		slog.Info("batch completed", "title", title, "files", len(b.items),
-			"totalCompleted", completed)
 	}
 
 	idx.publishProgress(ctx, "indexing")
+	if len(failures) > 0 {
+		return fmt.Errorf("index batch %q: %w", title, errors.Join(failures...))
+	}
+	slog.Info("batch completed", "title", title, "files", len(b.items),
+		"totalCompleted", idx.progress.Completed.Load())
 	return nil
 }
 
@@ -748,61 +925,168 @@ func (idx *Indexer) publishProgress(ctx context.Context, phase string) {
 // Compact keyword format keeps each batch well under 50KB.
 const batchSize = 100
 
-// IndexDocument extracts text from a PDF, DOCX, or text/code file, builds keyword
-// corpora, then runs the IndexAgent in batches to produce labels.
-// This is the single-file entry point — it delegates to the batch infrastructure.
-func (idx *Indexer) IndexDocument(ctx context.Context, filePath string) error {
-	slog.Info("indexing document", "path", filePath)
+// missingPageNums returns the page numbers the run expected to store but the
+// index does not hold, in the order they appear in expected. The comparison is
+// by set, not by row: a stored page the run did not expect (an older run's
+// leftover) is ignored, and a document with no expected pages is missing
+// nothing.
+func missingPageNums(expected []PageCorpus, got []*docindex.PageEntry) []int {
+	stored := make(map[int]struct{}, len(got))
+	for _, e := range got {
+		if e == nil {
+			continue
+		}
+		stored[e.PageNum] = struct{}{}
+	}
+	seen := make(map[int]struct{}, len(expected))
+	var missing []int
+	for _, c := range expected {
+		if _, dup := seen[c.PageNum]; dup {
+			continue
+		}
+		seen[c.PageNum] = struct{}{}
+		if _, ok := stored[c.PageNum]; !ok {
+			missing = append(missing, c.PageNum)
+		}
+	}
+	return missing
+}
 
-	var pages []PageText
-	var err error
-	isPDF := strings.ToLower(filepath.Ext(filePath)) == ".pdf"
-	isDocx := strings.ToLower(filepath.Ext(filePath)) == ".docx"
-	isSheet := isSheetExt(strings.ToLower(filepath.Ext(filePath)))
-	if isPDF {
-		pages, err = ExtractPages(filePath)
-	} else if isDocx {
-		pages, err = ExtractDocxPages(filePath)
-	} else if isSheet {
-		pages, err = ExtractSheetPages(filePath)
-	} else {
-		pages, err = ExtractTextFile(filePath)
+// formatPageNums renders page numbers compactly for an error message, folding
+// consecutive runs: [1 2 3 7 9 10] is "1-3,7,9-10".
+func formatPageNums(nums []int) string {
+	var parts []string
+	for i := 0; i < len(nums); {
+		j := i
+		for j+1 < len(nums) && nums[j+1] == nums[j]+1 {
+			j++
+		}
+		if j > i {
+			parts = append(parts, fmt.Sprintf("%d-%d", nums[i], nums[j]))
+		} else {
+			parts = append(parts, strconv.Itoa(nums[i]))
+		}
+		i = j + 1
 	}
-	if err != nil {
-		return fmt.Errorf("extract pages: %w", err)
-	}
-	if len(pages) == 0 {
-		slog.Info("no pages found", "path", filePath)
+	return strings.Join(parts, ",")
+}
+
+// batchFailureError is the summary a run reports when batches failed. It names
+// no single document because the failure spans several, and it says what the
+// run did about them: every affected document was dropped from the index, so
+// the next run retries it instead of skipping a partial one.
+func batchFailureError(failed, total int) error {
+	if failed == 0 {
 		return nil
 	}
+	return fmt.Errorf("%d of %d index batches failed; affected documents were dropped from the index and will be retried on the next run", failed, total)
+}
 
-	corpora := BuildCorpora(pages)
-	kwCount := 0
-	for _, c := range corpora {
-		kwCount += len(c.Keywords)
+// documentFailure reports why item did not land completely in the index: the
+// loop error when the batch failed outright, or the page numbers still missing
+// after it. A nil error means every expected page was stored. Validation is
+// skipped without a store — callers that build an Indexer with no docStore only
+// run the loop, and cannot read back what it wrote.
+func (idx *Indexer) documentFailure(item docItem, loopErr error) error {
+	if loopErr != nil {
+		return loopErr
 	}
-
-	item := docItem{
-		path:         filePath,
-		corpora:      corpora,
-		isPDF:        isPDF,
-		isDocx:       isDocx,
-		isSheet:      isSheet,
-		keywordCount: kwCount,
+	if idx.docStore == nil {
+		return nil
 	}
-
-	batches := idx.assembleBatches([]docItem{item})
-	for _, b := range batches {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := idx.processBatch(ctx, b); err != nil {
-			slog.Warn("batch failed", "doc", filePath, "err", err)
-		}
+	got, err := idx.docStore.GetByDoc(item.path)
+	if err != nil {
+		return fmt.Errorf("read stored pages: %w", err)
 	}
-
-	slog.Info("document indexed", "path", filePath)
+	if missing := missingPageNums(item.corpora, got); len(missing) > 0 {
+		return fmt.Errorf("missing pages %s (%d of %d pages not stored)",
+			formatPageNums(missing), len(missing), len(item.corpora))
+	}
 	return nil
+}
+
+// finishDocument settles one document's outcome after its batch ran: it counts
+// the document as completed or failed, and on failure deletes every row the
+// document has — including pages an earlier batch of the same long document
+// already delivered. Dropping the whole document is what makes the next run
+// retry it: filesToIndex treats any stored row as complete, so one surviving
+// page would hide the missing ones forever.
+func (idx *Indexer) finishDocument(item docItem, loopErr error) error {
+	failure := idx.documentFailure(item, loopErr)
+	if failure == nil {
+		idx.settleDocument(item.path, nil)
+		return nil
+	}
+	if idx.docStore != nil {
+		if err := idx.docStore.DeleteByDoc(item.path); err != nil {
+			idx.settleDocument(item.path, failure)
+			return fmt.Errorf("%s: %w (drop incomplete document failed: %v)", item.path, failure, err)
+		}
+	}
+	idx.settleDocument(item.path, failure)
+	return fmt.Errorf("%s: %w", item.path, failure)
+}
+
+// settleDocument counts one chunk's outcome for path. During a run the per-run
+// settler holds the count until every chunk of a split document has settled;
+// without one (a direct finishDocument call) the document is a single chunk and
+// counts immediately.
+func (idx *Indexer) settleDocument(path string, failure error) {
+	if idx.settler != nil {
+		idx.settler.settle(path, failure)
+		return
+	}
+	if failure != nil {
+		idx.progress.Failed.Add(1)
+		return
+	}
+	idx.progress.Completed.Add(1)
+}
+
+// failedDocumentItems narrows items to the documents a failed batch touched. A
+// nil failedDocs means "any of them may be partial" and returns items as they
+// are.
+func failedDocumentItems(items []docItem, failedDocs map[string]struct{}) []docItem {
+	if failedDocs == nil {
+		return items
+	}
+	narrowed := make([]docItem, 0, len(failedDocs))
+	for _, item := range items {
+		if _, failed := failedDocs[item.path]; failed {
+			narrowed = append(narrowed, item)
+		}
+	}
+	return narrowed
+}
+
+// dropIncompleteDocuments drops every document in items whose stored pages do
+// not match the pages the run extracted, once every batch has finished. A
+// failing batch drops its own documents, but a sibling batch of the same long
+// document may still be writing when that delete runs; this sweep closes that
+// window so no partial document outlives the run.
+func (idx *Indexer) dropIncompleteDocuments(items []docItem) error {
+	if idx.docStore == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	var failures []error
+	for _, item := range items {
+		if _, dup := seen[item.path]; dup {
+			continue
+		}
+		seen[item.path] = struct{}{}
+		if err := idx.documentFailure(item, nil); err == nil {
+			continue
+		}
+		if err := idx.docStore.DeleteByDoc(item.path); err != nil {
+			// A surviving row would make the next run treat this partial
+			// document as complete and never retry it, so the failure is reported
+			// rather than only logged.
+			slog.Warn("drop incomplete document failed", "path", item.path, "err", err)
+			failures = append(failures, fmt.Errorf("%s: drop incomplete document: %w", item.path, err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // Plan is what a run would do, worked out without doing any of it.
@@ -848,9 +1132,9 @@ func (idx *Indexer) Preview() (*Plan, error) {
 		onDisk[path] = struct{}{}
 		ext := strings.ToLower(filepath.Ext(path))
 		switch {
-		case ext == ".pdf":
+		case isPDFExt(ext):
 			plan.PDF++
-		case ext == ".docx":
+		case isDocxExt(ext):
 			plan.Docx++
 		case isSheetExt(ext):
 			plan.Sheet++
@@ -885,9 +1169,9 @@ func (idx *Indexer) Preview() (*Plan, error) {
 			continue
 		}
 		switch ext := strings.ToLower(filepath.Ext(path)); {
-		case ext == ".pdf":
+		case isPDFExt(ext):
 			plan.PendingPDF++
-		case ext == ".docx":
+		case isDocxExt(ext):
 			plan.PendingDocx++
 		case isSheetExt(ext):
 			plan.PendingSheet++

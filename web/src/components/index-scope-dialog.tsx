@@ -87,6 +87,7 @@ export default function IndexScopeDialog(props: {
   const [tab, setTab] = createSignal<'gitignore' | 'patterns'>('gitignore');
   const [newPattern, setNewPattern] = createSignal('');
   const [adding, setAdding] = createSignal(false);
+  const [addError, setAddError] = createSignal('');
   const [copied, setCopied] = createSignal<string | null>(null);
   let patternInput: HTMLInputElement | undefined;
 
@@ -132,10 +133,14 @@ export default function IndexScopeDialog(props: {
     const p = newPattern().trim();
     if (!p || problem() || adding()) return;
     setAdding(true);
+    setAddError('');
     try {
       await docIndex.addExclude(p);
       setNewPattern('');
       patternInput?.focus();
+    } catch {
+      // Keep what was typed: retyping it is the worst part of a failed add.
+      setAddError(`Couldn't add “${p}” — try again.`);
     } finally {
       setAdding(false);
     }
@@ -460,7 +465,7 @@ export default function IndexScopeDialog(props: {
                     type="text"
                     placeholder="e.g. fixtures, *.snap, coverage"
                     value={newPattern()}
-                    onInput={(e) => setNewPattern(e.currentTarget.value)}
+                    onInput={(e) => { setNewPattern(e.currentTarget.value); setAddError(''); }}
                     aria-label="New exclude pattern"
                     aria-invalid={!!problem()}
                     spellcheck={false}
@@ -482,6 +487,9 @@ export default function IndexScopeDialog(props: {
               </form>
               <Show when={problem()}>
                 <p class="mt-1.5 px-0.5 text-micro text-[color:var(--warning)] leading-relaxed">{problem()}</p>
+              </Show>
+              <Show when={addError()}>
+                <p class="mt-1.5 px-0.5 text-micro text-[color:var(--warning)] leading-relaxed" role="alert">{addError()}</p>
               </Show>
             </div>
 

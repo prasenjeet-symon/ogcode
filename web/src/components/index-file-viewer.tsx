@@ -59,8 +59,17 @@ export default function FileViewer(props: {
   /** Phones only: back to the tree. */
   onBack?: () => void;
 }) {
+  // Following the tree with the arrow keys changes the open file on every
+  // step; waiting for the selection to settle avoids a full content fetch per
+  // row (and the stale one landing after the one the reader is looking at).
+  const [contentPath, setContentPath] = createSignal(props.file.path);
+  createEffect(on(() => props.file.path, (path) => {
+    const t = setTimeout(() => setContentPath(path), 120);
+    onCleanup(() => clearTimeout(t));
+  }, { defer: true }));
+
   const [content] = createResource(
-    () => props.file.path,
+    contentPath,
     (path) => getDocContent(path, props.directory || undefined),
   );
 

@@ -38,9 +38,5 @@ func sheetPathMatchConditions() string {
 // clause per extension in SheetExtensions, for queries that must not count
 // any sheet page as a text file.
 func sheetPathExclusionConditions() string {
-	clauses := make([]string, len(SheetExtensions))
-	for i, ext := range SheetExtensions {
-		clauses[i] = fmt.Sprintf("AND LOWER(doc_path) NOT LIKE '%%%s'", ext)
-	}
-	return strings.Join(clauses, " ")
+	return pathExclusionConditions(SheetExtensions)
 }

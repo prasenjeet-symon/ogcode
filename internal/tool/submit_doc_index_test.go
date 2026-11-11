@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -81,6 +82,39 @@ func TestSubmitDocIndex_AcceptsSiblingPathSpelling(t *testing.T) {
 	}
 	if entries, err := store.GetByDoc("/proj/b.go"); err != nil || len(entries) != 1 {
 		t.Fatalf("the both-spellings call must not have touched b.go's row: entries=%d err=%v", len(entries), err)
+	}
+}
+
+// A page number below 1 is a hallucination, and it must never reach the store: a
+// stored page 0 would be advertised by docx_index and refused by
+// read_docx_page. The whole call is refused, so nothing from the batch lands.
+func TestSubmitDocIndex_RejectsPagesBelowOne(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	store := docindex.NewStore(database)
+	tool := NewSubmitDocIndexTool(store)
+
+	for _, bad := range []int{0, -2} {
+		args, _ := json.Marshal(map[string]any{
+			"doc_path": "/proj/a.docx",
+			"pages": []map[string]any{
+				{"page_num": 1, "labels": []string{"kept out"}},
+				{"page_num": bad, "labels": []string{"rejected"}},
+			},
+		})
+		res, err := tool.Execute(context.Background(), args, Context{})
+		if err != nil {
+			t.Fatalf("execute with page_num %d: %v", bad, err)
+		}
+		want := fmt.Sprintf("page_num must be >= 1 (got %d); pages are 1-based pseudo-pages", bad)
+		if res.Output != want {
+			t.Errorf("page_num %d output = %q, want %q", bad, res.Output, want)
+		}
+		if entries, err := store.GetByDoc("/proj/a.docx"); err != nil || len(entries) != 0 {
+			t.Fatalf("a rejected call (page_num %d) wrote %d rows (err=%v), want 0", bad, len(entries), err)
+		}
 	}
 }
 
