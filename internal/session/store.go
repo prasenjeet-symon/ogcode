@@ -23,16 +23,16 @@ func (s *Store) DB() *db.DB { return s.db }
 
 func (s *Store) Create(session *Session) error {
 	_, err := s.db.Exec(
-		`INSERT INTO session (id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary, time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.ID, session.ProjectID, session.Directory, session.Title, session.Model, session.Provider, session.Effort, session.SessionType, session.Permission, session.CompactionSummary, session.CreatedAt, session.UpdatedAt,
+		`INSERT INTO session (id, project_id, directory, title, model, provider, effort, complexity, workload, session_type, permission, compaction_summary, time_created, time_updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		session.ID, session.ProjectID, session.Directory, session.Title, session.Model, session.Provider, session.Effort, session.Complexity, session.Workload, session.SessionType, session.Permission, session.CompactionSummary, session.CreatedAt, session.UpdatedAt,
 	)
 	return err
 }
 
 func (s *Store) Get(id SessionID) (*Session, error) {
 	row := s.db.QueryRow(
-		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
+		`SELECT id, project_id, directory, title, model, provider, effort, complexity, workload, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
 		        time_created, time_updated, status, intent
 		 FROM session WHERE id = ?`, id,
@@ -40,7 +40,7 @@ func (s *Store) Get(id SessionID) (*Session, error) {
 	var sess Session
 	var uIn, uOut, uReason, uCacheRead, uCacheWrite int
 	var intentRaw string
-	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
+	err := row.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.Complexity, &sess.Workload, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
 		&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status, &intentRaw)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -55,7 +55,7 @@ func (s *Store) Get(id SessionID) (*Session, error) {
 
 func (s *Store) List(directory string) ([]*Session, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
+		`SELECT id, project_id, directory, title, model, provider, effort, complexity, workload, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
 		        time_created, time_updated, status, intent
 		 FROM session WHERE directory = ? AND session_type NOT IN ('note', 'index', 'search') ORDER BY time_updated DESC`, directory,
@@ -70,7 +70,7 @@ func (s *Store) List(directory string) ([]*Session, error) {
 		var sess Session
 		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
 		var intentRaw string
-		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
+		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.Complexity, &sess.Workload, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
 			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status, &intentRaw); err != nil {
 			return nil, err
 		}
@@ -86,7 +86,7 @@ func (s *Store) List(directory string) ([]*Session, error) {
 // project identity onto nodes written before that column existed.
 func (s *Store) ListAll() ([]*Session, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, directory, title, model, provider, effort, session_type, permission, compaction_summary,
+		`SELECT id, project_id, directory, title, model, provider, effort, complexity, workload, session_type, permission, compaction_summary,
 		        utility_input, utility_output, utility_reasoning, utility_cache_read, utility_cache_write,
 		        time_created, time_updated, status, intent
 		 FROM session ORDER BY time_updated DESC`,
@@ -101,7 +101,7 @@ func (s *Store) ListAll() ([]*Session, error) {
 		var sess Session
 		var uIn, uOut, uReason, uCacheRead, uCacheWrite int
 		var intentRaw string
-		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
+		if err := rows.Scan(&sess.ID, &sess.ProjectID, &sess.Directory, &sess.Title, &sess.Model, &sess.Provider, &sess.Effort, &sess.Complexity, &sess.Workload, &sess.SessionType, &sess.Permission, &sess.CompactionSummary,
 			&uIn, &uOut, &uReason, &uCacheRead, &uCacheWrite, &sess.CreatedAt, &sess.UpdatedAt, &sess.Status, &intentRaw); err != nil {
 			return nil, err
 		}
@@ -118,8 +118,8 @@ func (s *Store) ListAll() ([]*Session, error) {
 // clobber an increment that landed between the caller's Get and this Update.
 func (s *Store) Update(session *Session) error {
 	_, err := s.db.Exec(
-		`UPDATE session SET title = ?, model = ?, provider = ?, effort = ?, session_type = ?, permission = ?, compaction_summary = ?, time_updated = ? WHERE id = ?`,
-		session.Title, session.Model, session.Provider, session.Effort, session.SessionType, session.Permission, session.CompactionSummary, session.UpdatedAt, session.ID,
+		`UPDATE session SET title = ?, model = ?, provider = ?, effort = ?, complexity = ?, workload = ?, session_type = ?, permission = ?, compaction_summary = ?, time_updated = ? WHERE id = ?`,
+		session.Title, session.Model, session.Provider, session.Effort, session.Complexity, session.Workload, session.SessionType, session.Permission, session.CompactionSummary, session.UpdatedAt, session.ID,
 	)
 	return err
 }

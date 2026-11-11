@@ -11,6 +11,7 @@ import (
 
 	"github.com/prasenjeet-symon/ogcode/internal/agent"
 	"github.com/prasenjeet-symon/ogcode/internal/board"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 	"github.com/prasenjeet-symon/ogcode/internal/tool"
 )
@@ -510,6 +511,8 @@ func (s *Server) spawnTeammate(ctx context.Context, parent *session.Session, par
 		Model:       parent.Model,
 		Provider:    parent.Provider,
 		Effort:      parent.Effort,
+		Complexity:  string(req.Complexity), // the spawner's prediction of this task; never inherited
+		Workload:    string(req.Workload),   // what it mostly does; never inherited
 		SessionType: "build",
 		// Inherited, not reset: a teammate works in the same tree under the same
 		// rules as the agent that spawned it.
@@ -520,7 +523,6 @@ func (s *Server) spawnTeammate(ctx context.Context, parent *session.Session, par
 	if err := s.store.Create(child); err != nil {
 		return tool.TeammateResult{}, err
 	}
-	s.bus.Publish("session.created", child)
 
 	userMsg := &session.MessageInfo{
 		ID:        session.NewMessageID(),
@@ -583,6 +585,10 @@ func (s *Server) spawnTeammate(ctx context.Context, parent *session.Session, par
 		return tool.TeammateResult{}, regErr
 	}
 	s.publishBoardAgent(h)
+	// Published after the board write, never before: a listener that inserts
+	// the child into the session list can only nest it under its parent once
+	// the board knows the edge — and the roster it reads is this same write.
+	s.bus.Publish("session.created", child)
 	s.startSessionLoop(childID, "build", 0, 0, "")
 	slog.Info("board: spawned teammate", "handle", handle, "session", childID, "parent", parentHandle.Handle)
 
@@ -617,7 +623,7 @@ func teammatePrompt(handle, parent, dir, prompt string) string {
 // parent's next turn start) and can be collected early with teammate wait.
 // As with teammates only the build agent may spawn, and no ceiling is put on
 // how many run at once.
-func (s *Server) spawnBackgroundTask(cctx context.Context, sessionID, title, prompt string) (tool.BackgroundTaskResult, error) {
+func (s *Server) spawnBackgroundTask(cctx context.Context, sessionID, title, prompt string, complexity provider.Complexity, workload provider.Workload) (tool.BackgroundTaskResult, error) {
 	if s.board == nil {
 		return tool.BackgroundTaskResult{Notice: "Background tasks are not available in this environment (no agent board)."}, nil
 	}
@@ -657,15 +663,18 @@ func (s *Server) spawnBackgroundTask(cctx context.Context, sessionID, title, pro
 	}
 	handle := claimed.Handle
 
+	taskModel, taskProvider := s.resolveBackgroundModel(parent.Model, parent.Provider)
 	childID := session.NewSessionID()
 	child := &session.Session{
 		ID:          childID,
 		ProjectID:   parent.Directory,
 		Directory:   parent.Directory,
 		Title:       "Task: " + truncateTitle(title, 60),
-		Model:       parent.Model,
-		Provider:    parent.Provider,
+		Model:       taskModel,
+		Provider:    taskProvider,
 		Effort:      parent.Effort,
+		Complexity:  string(complexity), // the spawner's prediction; empty leaves the calls unclassified
+		Workload:    string(workload),   // what the task mostly does; empty leaves the calls unclassified
 		SessionType: "subagent",
 		// Inherited, not reset: the child reads the same tree under the same
 		// rules. Its loop is ungated (startSessionLoop skips the flag for a
@@ -677,7 +686,6 @@ func (s *Server) spawnBackgroundTask(cctx context.Context, sessionID, title, pro
 	if err := s.store.Create(child); err != nil {
 		return tool.BackgroundTaskResult{}, err
 	}
-	s.bus.Publish("session.created", child)
 
 	userMsg := &session.MessageInfo{
 		ID:        session.NewMessageID(),
@@ -725,6 +733,9 @@ func (s *Server) spawnBackgroundTask(cctx context.Context, sessionID, title, pro
 		return tool.BackgroundTaskResult{}, err
 	}
 	s.publishBoardAgent(h)
+	// Published after the board write, for the same reason as the teammate
+	// path above: the listener needs the spawnedBy edge to nest the child.
+	s.bus.Publish("session.created", child)
 	s.startSessionLoop(childID, "subagent", 0, 0, "")
 	slog.Info("board: spawned background task", "handle", handle, "session", childID, "parent", parentHandle.Handle)
 

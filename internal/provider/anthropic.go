@@ -467,6 +467,9 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 
 	// buildRequest renders the request from the still-in-memory body: a send
 	// consumes it, so a retry needs a request of its own.
+	task := req.Task
+	complexity := req.Complexity
+	workload := req.Workload
 	buildRequest := func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(reqCtx, "POST", strings.TrimRight(p.baseURL, "/")+"/messages", bytes.NewReader(jsonBody))
 		if err != nil {
@@ -478,6 +481,9 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 		if p.usesExtendedCacheTTL() {
 			req.Header.Set("anthropic-beta", extendedCacheTTLBeta)
 		}
+		setTaskHeader(req, task)
+		setComplexityHeader(req, complexity)
+		setWorkloadHeader(req, workload)
 		return req, nil
 	}
 
@@ -499,6 +505,14 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req StreamRequest) (
 	}
 
 	ch := make(chan StreamEvent, 256)
+	// A gateway in front of an Anthropic-shaped endpoint may still name the
+	// engine that served the request, so report it first, before any stream
+	// delta: a caller that keys per-response state on it (the Auto-mode risk
+	// gate's cache) must see it before content arrives. When nobody sets the
+	// header no event is emitted and the caller keeps its fail-safe behaviour.
+	if engine := reportedEngine(resp.Header.Get(engineHeader)); engine != "" {
+		ch <- StreamEvent{Type: EventEngine, Engine: engine}
+	}
 	streamStarted = true
 	// The reservation is released when this body is closed, at the end of the
 	// stream rather than at the first byte: the generation still holds the

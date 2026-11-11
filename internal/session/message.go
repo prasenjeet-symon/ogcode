@@ -12,7 +12,9 @@ type Session struct {
 	Title             string       `json:"title"`
 	Model             string       `json:"model,omitempty"`
 	Provider          string       `json:"provider,omitempty"`
-	Effort            string       `json:"effort,omitempty"` // reasoning effort the loop requests (internal/provider/effort.go); empty = the vendor's default
+	Effort            string       `json:"effort,omitempty"`     // reasoning effort the loop requests (internal/provider/effort.go); empty = the vendor's default
+	Complexity        string       `json:"complexity,omitempty"` // spawner's prediction — easy, medium or hard (internal/provider/complexity.go); empty = not delegated
+	Workload          string       `json:"workload,omitempty"`   // spawner's prediction — read-heavy or write-heavy (internal/provider/workload.go); empty = not delegated
 	SessionType       string       `json:"sessionType,omitempty"`
 	Permission        string       `json:"permission,omitempty"`
 	CompactionSummary string       `json:"compactionSummary,omitempty"`

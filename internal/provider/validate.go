@@ -19,6 +19,19 @@ func ValidateCredentials(ctx context.Context, providerID, apiKey, baseURL string
 
 	models := p.Models()
 	if len(models) == 0 {
+		// A provider whose catalogue is only what its own endpoint serves
+		// (Ollama, OGX) reads empty until the first fetch, and Models() never
+		// touches the network — so a cold start would fail validation before
+		// the endpoint was ever asked. Fetch once with the credentials under
+		// test, then look again.
+		if refresher, ok := p.(interface {
+			RefreshCatalog(context.Context) []ModelInfo
+		}); ok {
+			refresher.RefreshCatalog(ctx)
+			models = p.Models()
+		}
+	}
+	if len(models) == 0 {
 		return fmt.Errorf("no models available for %s — check your API key or base URL", providerID)
 	}
 
@@ -27,6 +40,7 @@ func ValidateCredentials(ctx context.Context, providerID, apiKey, baseURL string
 		Model:     models[0].ID,
 		Messages:  []ModelMessage{{Role: "user", Content: prompt}},
 		MaxTokens: 1,
+		Task:      TaskValidate,
 	}
 
 	ch, startErr := p.StreamChat(ctx, req)

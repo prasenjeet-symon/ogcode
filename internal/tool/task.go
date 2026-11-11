@@ -5,12 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 )
 
 // TaskFunc runs a read-only sub-agent session for a delegated investigation and
 // returns its final written answer. Implemented by agent.LoopRunner.RunTaskSession
 // and wired in from server.go/cli to avoid the tool→agent import cycle.
-type TaskFunc func(ctx context.Context, description, prompt, dir, model, provider string) (string, error)
+// complexity is the spawning agent's prediction of how hard the task is; it
+// travels on the child's model calls as a routing hint, empty when unclassified.
+// workload is its prediction of read-heavy versus write-heavy, carried on the
+// same calls as a second hint, empty when unclassified too.
+type TaskFunc func(ctx context.Context, description, prompt, dir, model, providerID string, complexity provider.Complexity, workload provider.Workload) (string, error)
 
 // BackgroundTaskFunc starts the same shape of investigation as a persistent
 // child on the agent board and returns at once, instead of blocking until the
@@ -19,7 +25,7 @@ type TaskFunc func(ctx context.Context, description, prompt, dir, model, provide
 // or handed over at its next turn start — and can be collected early with
 // `teammate wait`. Implemented by server.spawnBackgroundTask; nil in
 // environments with no board (CLI), where background mode is refused with a note.
-type BackgroundTaskFunc func(ctx context.Context, sessionID, description, prompt string) (BackgroundTaskResult, error)
+type BackgroundTaskFunc func(ctx context.Context, sessionID, description, prompt string, complexity provider.Complexity, workload provider.Workload) (BackgroundTaskResult, error)
 
 // BackgroundTaskResult is what starting a background task hands back: where the
 // child runs and how the caller will hear about it.
@@ -65,7 +71,8 @@ func (TaskTool) Description() string {
 		"Prefer it for read-heavy exploration that would otherwise fill your own context; do NOT use it for changes (make edits yourself). " +
 		"By default the call is SYNCHRONOUS: it blocks your turn until the child's whole investigation is done, so batch it only with work that can wait that long. " +
 		"Add \"background\": true instead when the investigation is long-running and does not gate your next step: the call returns a board handle at once and you keep working; " +
-		"the child's answer is delivered as a completion report when it finishes (or collect it up front by waiting with the teammate tool), and if your turn ends first it waits for your next one."
+		"the child's answer is delivered as a completion report when it finishes (or collect it up front by waiting with the teammate tool), and if your turn ends first it waits for your next one. " +
+		"Classify the task you hand over in \"complexity\" — easy, medium or hard — and in \"workload\" — read-heavy or write-heavy — because both ride the sub-agent's model calls as routing hints."
 }
 
 func (TaskTool) Parameters() json.RawMessage {
@@ -80,6 +87,16 @@ func (TaskTool) Parameters() json.RawMessage {
 				"type": "string",
 				"description": "The complete, standalone task for the sub-agent. It cannot see this conversation, so include all needed context: what to investigate, where to look, and exactly what to report back."
 			},
+			"complexity": {
+				"type": "string",
+				"enum": ["easy", "medium", "hard"],
+				"description": "Your prediction of how hard the task you hand over is: \"easy\" for a lookup or a one-file rename, \"medium\" for ordinary work across a couple of files, \"hard\" for work that spans packages or needs a design decision. It rides the sub-agent's model calls as a routing hint. Omit it to spawn without a classification."
+			},
+			"workload": {
+				"type": "string",
+				"enum": ["read-heavy", "write-heavy"],
+				"description": "Your prediction of whether the task you hand over is read-heavy or write-heavy: \"read-heavy\" for exploration, reading and questions answered from what is already there, \"write-heavy\" for implementation across files, refactors and edits. It rides the sub-agent's model calls as a second routing hint. Omit it to spawn without a classification."
+			},
 			"background": {
 				"type": "boolean",
 				"description": "Run it as a background child instead of blocking: this call returns its handle at once, you keep working, and the child's answer arrives later as a completion report. Default false (synchronous, blocking)."
@@ -93,6 +110,8 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 	var input struct {
 		Description string `json:"description"`
 		Prompt      string `json:"prompt"`
+		Complexity  string `json:"complexity"`
+		Workload    string `json:"workload"`
 		Background  bool   `json:"background"`
 	}
 	if err := DecodeArgs(args, &input); err != nil {
@@ -101,6 +120,14 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 	if input.Prompt == "" {
 		return Result{Output: "prompt is required — give the sub-agent a complete, standalone task description"}, nil
 	}
+	complexity, ok := parseComplexity(input.Complexity)
+	if !ok {
+		return Result{Output: complexityNotice}, nil
+	}
+	workload, ok := parseWorkload(input.Workload)
+	if !ok {
+		return Result{Output: workloadNotice}, nil
+	}
 
 	title := input.Description
 	if title == "" {
@@ -108,7 +135,7 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 	}
 
 	if input.Background {
-		return t.executeBackground(ctx, title, input.Prompt, string(tctx.SessionID))
+		return t.executeBackground(ctx, title, input.Prompt, string(tctx.SessionID), complexity, workload)
 	}
 
 	if t.Run == nil {
@@ -129,7 +156,7 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 	}
 	defer cancel()
 
-	answer, err := t.Run(taskCtx, input.Description, input.Prompt, tctx.SessionDir, tctx.Model, tctx.Provider)
+	answer, err := t.Run(taskCtx, input.Description, input.Prompt, tctx.SessionDir, tctx.Model, tctx.Provider, complexity, workload)
 	if err != nil {
 		return Result{Title: title, Output: fmt.Sprintf("Sub-agent error: %s", err)}, nil
 	}
@@ -142,11 +169,11 @@ func (t TaskTool) Execute(ctx context.Context, args json.RawMessage, tctx Contex
 // executeBackground starts the investigation as a board child and answers at
 // once: the tool result is the launch report, not the child's answer — the
 // answer arrives later through the board's completion report.
-func (t TaskTool) executeBackground(ctx context.Context, title, prompt, sessionID string) (Result, error) {
+func (t TaskTool) executeBackground(ctx context.Context, title, prompt, sessionID string, complexity provider.Complexity, workload provider.Workload) (Result, error) {
 	if t.Spawn == nil {
 		return Result{Title: title, Output: "Background tasks are not available in this environment (no agent board). Run it synchronously by omitting \"background\"."}, nil
 	}
-	res, err := t.Spawn(ctx, sessionID, title, prompt)
+	res, err := t.Spawn(ctx, sessionID, title, prompt, complexity, workload)
 	if err != nil {
 		return Result{Title: title, Output: fmt.Sprintf("Background task failed to start: %s", err)}, nil
 	}

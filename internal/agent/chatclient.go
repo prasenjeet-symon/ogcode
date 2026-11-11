@@ -40,6 +40,7 @@ func (c *synthClient) Chat(ctx context.Context, system, prompt string) (string, 
 		Model:    model,
 		System:   []string{system},
 		Messages: []provider.ModelMessage{{Role: "user", Content: json.RawMessage(fmt.Sprintf("%q", prompt))}},
+		Task:     provider.TaskMemory,
 	}
 	ch, err := c.provider.StreamChat(ctx, req)
 	if err != nil {

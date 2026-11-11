@@ -248,6 +248,104 @@ func TestSpawnTeammateAllowsNestingAndCapsNothing(t *testing.T) {
 	}
 }
 
+// assertEdgeAtCreated drains the bus until the session.created carrying id and
+// checks the roster already answers with the spawnedBy edge the sidebar nests
+// by. Reading the board at delivery is the real invariant: the client inserts
+// the row on the event and nests it from the roster.
+func assertEdgeAtCreated(t *testing.T, ctx context.Context, srv *Server, events <-chan bus.Event, id, parent, kind string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type != "session.created" {
+				continue
+			}
+			var created session.Session
+			if err := json.Unmarshal(evt.Properties, &created); err != nil {
+				t.Fatalf("%s: decode session.created: %v", kind, err)
+			}
+			if string(created.ID) != id {
+				continue
+			}
+			h, err := srv.board.BySession(ctx, id)
+			if err != nil {
+				t.Fatalf("%s: board row at session.created: %v", kind, err)
+			}
+			if h.SpawnedBy != parent {
+				t.Fatalf("%s: session.created arrived with spawnedBy %q, want %q — the sidebar cannot nest it", kind, h.SpawnedBy, parent)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("%s: no session.created published for %s", kind, id)
+		}
+	}
+}
+
+// TestSpawnPublishesSessionCreatedAfterTheBoardEdge pins the order the web
+// sidebar depends on: it inserts a child's row from session.created and nests
+// that row from the board roster, so the spawnedBy edge has to be readable by
+// the time the event is delivered. Both spawn paths used to publish before the
+// register, which left the child flattened at the top level for one roster read.
+func TestSpawnPublishesSessionCreatedAfterTheBoardEdge(t *testing.T) {
+	srv := boardTestServer(t)
+	srv.store = session.NewStore(srv.db)
+	srv.mu.Lock()
+	srv.running = map[session.SessionID]context.CancelFunc{}
+	srv.runningToken = map[session.SessionID]uint64{}
+	srv.runningDone = map[session.SessionID]chan struct{}{}
+	srv.loopControls = map[session.SessionID]*agent.LoopControl{}
+	srv.mu.Unlock()
+	// The loops are not what this test watches: the registry is empty, so each
+	// child exits on its first resolve instead of reaching a model.
+	srv.loopRunner = &agent.LoopRunner{Store: srv.store, Bus: srv.bus, Registry: srv.registry}
+
+	ctx := context.Background()
+	parent := &session.Session{
+		ID:          session.NewSessionID(),
+		ProjectID:   srv.dir,
+		Directory:   srv.dir,
+		SessionType: "build",
+		CreatedAt:   session.Now(),
+		UpdatedAt:   session.Now(),
+	}
+	if err := srv.store.Create(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	parentHandle, err := srv.joinBoard(ctx, parent.ID, "build")
+	if err != nil {
+		t.Fatalf("join parent: %v", err)
+	}
+
+	events := srv.bus.SubscribeAll()
+	defer srv.bus.Unsubscribe(events)
+
+	teammate, err := srv.spawnTeammate(ctx, parent, parentHandle, tool.TeammateRequest{
+		Op: "spawn", Name: "ordered", Prompt: "check one file",
+	})
+	if err != nil {
+		t.Fatalf("spawn teammate: %v", err)
+	}
+	assertEdgeAtCreated(t, ctx, srv, events, teammate.SessionID, parentHandle.Handle, "teammate")
+
+	task, err := srv.spawnBackgroundTask(ctx, string(parent.ID), "ordered task", "check one file", "", "")
+	if err != nil {
+		t.Fatalf("spawn background task: %v", err)
+	}
+	assertEdgeAtCreated(t, ctx, srv, events, task.SessionID, parentHandle.Handle, "task")
+
+	// Let the loop goroutines finish before the temp DBs are closed under them.
+	for _, id := range []string{teammate.SessionID, task.SessionID} {
+		deadline := time.Now().Add(10 * time.Second)
+		for srv.sessionRunning(session.SessionID(id)) {
+			if time.Now().After(deadline) {
+				t.Fatal("a loop started by a spawn did not exit")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 // TestBoardTurnStartKeepsAnExistingHandle pins the second-turn path: a session
 // that is already on the roster keeps its handle, and the turn is recorded as
 // running. Registering again would fail UNIQUE(board_agent.session_id), and
@@ -754,7 +852,7 @@ func TestSpawnBackgroundTaskRegistersATaskChild(t *testing.T) {
 		t.Fatalf("create parent: %v", err)
 	}
 
-	res, err := srv.spawnBackgroundTask(ctx, string(parent.ID), "trace auth middleware", "find every middleware")
+	res, err := srv.spawnBackgroundTask(ctx, string(parent.ID), "trace auth middleware", "find every middleware", "", "")
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}

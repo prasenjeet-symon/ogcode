@@ -62,6 +62,8 @@ func (s *Server) routes() http.Handler {
 		r.Post("/models/preference", s.handleSetModelPreference)
 		r.Delete("/models/preference/{id}", s.handleDeleteModelPreference)
 		r.Post("/models/capability/clear", s.handleClearModelCapability)
+		r.Get("/models/background", s.handleGetBackgroundModel)
+		r.Post("/models/background", s.handleSetBackgroundModel)
 
 		r.Get("/theme", s.handleGetTheme)
 		r.Post("/theme", s.handleSetTheme)

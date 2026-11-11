@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/prasenjeet-symon/ogcode/internal/board"
+	"github.com/prasenjeet-symon/ogcode/internal/provider"
 )
 
 // TeammateFunc carries out one teammate operation for the calling session.
@@ -22,6 +23,14 @@ type TeammateRequest struct {
 	// reserved one (user, system, board), is refused rather than renamed.
 	Name   string
 	Prompt string
+	// Complexity is the spawner's prediction of how hard the teammate's task
+	// is — easy, medium or hard. It rides the teammate's model calls as a
+	// routing hint and is empty when the spawner made no prediction.
+	Complexity provider.Complexity
+	// Workload is the spawner's prediction of whether the teammate's task is
+	// read-heavy or write-heavy. It rides the same calls as a second routing
+	// hint, and is empty when the spawner made no prediction.
+	Workload provider.Workload
 	// Handles is who a wait is watching; empty means every teammate this
 	// session spawned.
 	Handles []string
@@ -72,7 +81,8 @@ func (TeammateTool) Description() string {
 		"A teammate reports back by finishing — its last message is its result and is handed to you when its turn ends, whether or not you called `wait`. " +
 		"`status` shows one teammate's row and last message; `stop` cancels its session and cascades to the teammates it spawned. " +
 		"Give it a slug name so the tree stays readable. Two agents editing the same file see a refusal and have to re-read, so split the work by file. " +
-		"A teammate can spawn teammates of its own, and there is no limit on how many run at once; spawning costs money and is asked of the user when permissions require it."
+		"A teammate can spawn teammates of its own, and there is no limit on how many run at once; spawning costs money and is asked of the user when permissions require it. " +
+		"Classify the task you hand over in \"complexity\" — easy, medium or hard — and in \"workload\" — read-heavy or write-heavy — because both ride the teammate's model calls as routing hints."
 }
 
 func (TeammateTool) Parameters() json.RawMessage {
@@ -91,6 +101,16 @@ func (TeammateTool) Parameters() json.RawMessage {
 			"prompt": {
 				"type": "string",
 				"description": "spawn: the complete, standalone task, required for that op. The teammate does not see this conversation, so include the files, the goal and what to report back."
+			},
+			"complexity": {
+				"type": "string",
+				"enum": ["easy", "medium", "hard"],
+				"description": "spawn: your prediction of how hard the task you hand over is: \"easy\" for a lookup or a one-file rename, \"medium\" for ordinary work across a couple of files, \"hard\" for work that spans packages or needs a design decision. It rides the teammate's model calls as a routing hint. Omit it to spawn without a classification."
+			},
+			"workload": {
+				"type": "string",
+				"enum": ["read-heavy", "write-heavy"],
+				"description": "spawn: your prediction of whether the task you hand over is read-heavy or write-heavy: \"read-heavy\" for exploration, reading and questions answered from what is already there, \"write-heavy\" for implementation across files, refactors and edits. It rides the teammate's model calls as a second routing hint. Omit it to spawn without a classification."
 			},
 			"handles": {
 				"type": "array",
@@ -117,12 +137,14 @@ func (TeammateTool) Parameters() json.RawMessage {
 
 func (t TeammateTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	var input struct {
-		Op      string   `json:"op"`
-		Name    string   `json:"name"`
-		Prompt  string   `json:"prompt"`
-		Handles []string `json:"handles"`
-		Handle  string   `json:"handle"`
-		Timeout int      `json:"timeout"`
+		Op         string   `json:"op"`
+		Name       string   `json:"name"`
+		Prompt     string   `json:"prompt"`
+		Complexity string   `json:"complexity"`
+		Workload   string   `json:"workload"`
+		Handles    []string `json:"handles"`
+		Handle     string   `json:"handle"`
+		Timeout    int      `json:"timeout"`
 	}
 	if err := DecodeArgs(args, &input); err != nil {
 		return Result{}, fmt.Errorf("parse args: %w", err)
@@ -149,6 +171,16 @@ func (t TeammateTool) Execute(ctx context.Context, args json.RawMessage, tctx Co
 		if strings.TrimSpace(req.Prompt) == "" {
 			return Result{Output: "prompt is required — give the teammate a complete, standalone task"}, nil
 		}
+		complexity, ok := parseComplexity(input.Complexity)
+		if !ok {
+			return Result{Output: complexityNotice}, nil
+		}
+		req.Complexity = complexity
+		workload, ok := parseWorkload(input.Workload)
+		if !ok {
+			return Result{Output: workloadNotice}, nil
+		}
+		req.Workload = workload
 	case "wait":
 	case "stop", "status":
 		if strings.TrimSpace(req.Handle) == "" {

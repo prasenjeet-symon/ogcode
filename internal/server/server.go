@@ -712,6 +712,15 @@ func (s *Server) serve(ctx context.Context) error {
 		// A teammate's permission prompt is surfaced in the session that spawned
 		// it too, so the human sees it where they are working.
 		ParentSessionOf: s.parentSessionOf,
+		// Behind-the-scenes LLM tasks consult the machine-wide background model
+		// preference when set, falling back to the active session's model.
+		BackgroundModel: func() (string, string) {
+			pref, err := session.GetBackgroundModel(s.globalDB)
+			if err != nil {
+				return "", ""
+			}
+			return pref.Model, pref.ProviderID
+		},
 	}
 
 	// Index whatever the memory corpus already holds, once per project per boot,

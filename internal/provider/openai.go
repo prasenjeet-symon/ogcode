@@ -1072,6 +1072,9 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	// consumes the body, so every attempt that must reach the wire again — a
 	// rate-limit retry, or the fresh-connection retry on a locally rejected
 	// write — needs a request of its own.
+	task := req.Task
+	complexity := req.Complexity
+	workload := req.Workload
 	buildRequest := func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(jsonBody))
 		if err != nil {
@@ -1079,6 +1082,9 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 		}
 		req.ContentLength = int64(len(jsonBody))
 		p.setChatHeaders(req)
+		setTaskHeader(req, task)
+		setComplexityHeader(req, complexity)
+		setWorkloadHeader(req, workload)
 		return req, nil
 	}
 
@@ -1166,12 +1172,32 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req StreamRequest) (<-c
 	slog.Info("stream connected", "provider", p.id, "model", model)
 
 	ch := make(chan StreamEvent, 256)
+	// The router names the engine that served the request. Report it first, so a
+	// caller that keeps state per response (the Auto-mode risk gate's cache) can
+	// see it before any content arrives. Absent from providers that do not send
+	// it, in which case no event is emitted at all.
+	if engine := reportedEngine(resp.Header.Get(engineHeader)); engine != "" {
+		ch <- StreamEvent{Type: EventEngine, Engine: engine}
+	}
 	streamStarted = true
 	// The reservation is released when this body is closed, at the end of the
 	// stream rather than at the first byte: the generation still holds the
 	// endpoint's attention while the body is being drained.
 	go p.streamEvents(&budgetBody{ReadCloser: resp.Body, release: release}, ch, reqCancel, toolNames)
 	return ch, nil
+}
+
+// engineHeader is the response header a router in front of the provider uses to
+// name the engine that served the completion. It rides beside the client
+// assertion headers (appassertion.go), which the same gateway reads.
+const engineHeader = "X-Ogx-Engine"
+
+// reportedEngine normalises an engine header value into what an EventEngine
+// carries: trimmed and lower-cased, so "  CLEF " and "clef" are the same engine
+// to a caller that keys on it. "" means nobody reported one; no event is
+// emitted then, and a caller keeps whatever fail-safe it has.
+func reportedEngine(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }
 
 // isOGX reports whether this provider reaches OG Lab's gateway, by id or by

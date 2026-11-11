@@ -515,6 +515,10 @@ const (
 	EventFinish            StreamEventType = "finish"
 	EventUsage             StreamEventType = "usage"
 	EventError             StreamEventType = "error"
+	// EventEngine names the engine the gateway reports as having served the
+	// completion (the router's X-Ogx-Engine header). It carries no content and
+	// is for the caller's own accounting, never for display.
+	EventEngine StreamEventType = "engine"
 )
 
 // TokenUsage carries per-message token accounting from a provider.
@@ -530,6 +534,7 @@ type TokenUsage struct {
 type StreamEvent struct {
 	Type         StreamEventType `json:"type"`
 	Text         string          `json:"text,omitempty"`
+	Engine       string          `json:"engine,omitempty"`
 	Signature    string          `json:"signature,omitempty"`
 	RedactedData string          `json:"redactedData,omitempty"`
 	ToolCallID   string          `json:"toolCallId,omitempty"`
@@ -663,6 +668,27 @@ type StreamRequest struct {
 	// provider that places guidance places these too; everyone else gets them
 	// appended at the tail of the conversation by the caller.
 	Notices string `json:"notices,omitempty"`
+	// Task names the kind of work this request is for — the main turn, an
+	// index pass, intent matching, a memory summary — so a router in front of
+	// the provider can send it to a model suited to that kind. It travels in
+	// the X-Client-Task header, never in the body, so it changes nothing about
+	// the prompt or its cache. The agent loop derives it from the agent name;
+	// the utility calls set it themselves.
+	Task Task `json:"-"`
+	// Complexity is the spawning agent's prediction of how hard the task this
+	// request carries is — easy, medium or hard. It applies to a child agent's
+	// own turns (a teammate, a task sub-agent), which is where the class was
+	// declared at spawn time; a user's turn has none. It travels in the
+	// X-Client-Complexity header, never in the body, so it changes nothing
+	// about the prompt or its cache.
+	Complexity Complexity `json:"-"`
+	// Workload is the spawning agent's prediction of what the task this request
+	// carries mostly does — reads and searches, or edits and creates files. Like
+	// Complexity it applies to a child agent's own turns, where the class was
+	// declared at spawn time; a user's turn has none. It travels in the
+	// X-Client-Workload header, never in the body, so it changes nothing about
+	// the prompt or its cache.
+	Workload Workload `json:"-"`
 }
 
 // GuidancePlacer is implemented by providers that position
@@ -1195,6 +1221,47 @@ func (r *Registry) ResolveProviderFor(modelID, providerID string) Provider {
 		return ps[0]
 	}
 	return nil
+}
+
+// ModelAvailable reports whether modelID is a model the registry can actually
+// serve — a custom-model registration, or a provider that lists it. It is the
+// existence check ResolveProviderFor is not: that one falls back to the
+// highest-priority registered provider, so it answers non-nil for any model id
+// whenever any provider is registered. A stored preference validated with it
+// would accept a misspelled, removed or disabled-provider model and then fail
+// every call made with it.
+//
+// With a non-empty providerID the model must be served by that provider
+// specifically — its custom-model routing or its own Models() listing — so a
+// preference naming a provider is only accepted where that provider can run it.
+// With an empty providerID any registered provider listing the model counts. A
+// nil receiver has no models and answers false, as does an empty modelID.
+func (r *Registry) ModelAvailable(modelID, providerID string) bool {
+	if r == nil || modelID == "" {
+		return false
+	}
+	r.customMu.RLock()
+	customInfo, customOk := r.customModels[modelID]
+	r.customMu.RUnlock()
+	if customOk && (providerID == "" || customInfo.ProviderID == providerID) {
+		if r.Get(customInfo.ProviderID) != nil {
+			return true
+		}
+	}
+	if providerID != "" {
+		p := r.Get(providerID)
+		if p == nil {
+			return false
+		}
+		for _, m := range p.Models() {
+			if m.ID == modelID {
+				return true
+			}
+		}
+		return false
+	}
+	_, _, ok := r.lookupModel(modelID)
+	return ok
 }
 
 // NewProviderWithConfig creates a Provider with explicit credentials, used when

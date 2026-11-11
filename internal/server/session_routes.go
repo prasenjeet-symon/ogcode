@@ -827,6 +827,8 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 		content = content[:500]
 	}
 
+	model, providerID = s.resolveBackgroundModel(model, providerID)
+
 	// Resolve the provider for the session's model
 	var p provider.Provider
 	if model != "" {
@@ -840,12 +842,13 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 		return
 	}
 
-	// Title generation runs on the session's own model, the way the risk check,
-	// compaction and the memory summary do. A substring "fast model" heuristic
-	// (haiku/mini/flash) picked the first model whose id contained "mini" —
-	// minimax-m3 for every ollama session — instead of the model the user chose.
-	// Fall back to the provider's default only when the session names no model,
-	// and to its first model when even that is empty.
+	// Title generation runs on the machine-wide background model when one is
+	// configured, and on the session's own model otherwise — the way the risk
+	// check, compaction and the memory summary do. A substring "fast model"
+	// heuristic (haiku/mini/flash) picked the first model whose id contained
+	// "mini" — minimax-m3 for every ollama session — instead of the model the
+	// user chose. Fall back to the provider's default only when the session names
+	// no model, and to its first model when even that is empty.
 	titleModel := model
 	if titleModel == "" {
 		for _, m := range p.Models() {
@@ -874,6 +877,7 @@ func (s *Server) generateTitle(sessionID session.SessionID, firstMessage string,
 		Model:    titleModel,
 		System:   []string{"You generate concise, descriptive titles. Respond with only the title text, nothing else."},
 		Messages: []provider.ModelMessage{{Role: "user", Content: promptContent}},
+		Task:     provider.TaskTitle,
 	}
 
 	ch, err := p.StreamChat(ctx, req)
