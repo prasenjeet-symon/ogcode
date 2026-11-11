@@ -1,3 +1,96 @@
+# Release Notes — v0.59.0
+
+## Major: One background model for everything that is not the conversation
+
+Titles, turn-memory summaries, compaction, command risk assessment, intent tool
+matching, auto-indexing, deep search, memory recall and the `task` sub-agents all
+run on a model you never picked. They now share one machine-wide choice under
+**Settings → General → Background tasks**, stored on the server and reachable at
+`GET`/`POST /api/models/background`. The default, **Inherit from active session**,
+changes nothing: each call keeps using the model of the session doing the work.
+Pin a model and it serves every background call; a model named explicitly by a
+caller still wins, a pinned model that is later removed falls back to inheriting
+rather than failing, and a model that is not being served is refused when you
+save it instead of at the first summary. Because a verdict belongs to the model
+that gave it, the command-risk cache is keyed by model and command, and compaction
+now sizes its request to the smaller of the session window and the background
+model's window instead of overrunning a smaller summarizer. A new guide,
+**Background model**, covers what counts as background work and where the line
+sits.
+
+## Major: Word documents and PDFs are read page by page
+
+A `.docx` is now parsed from its own XML parts rather than flattened: paragraph
+styles resolve through the `basedOn` chain, text boxes and footnotes stay in
+document order, and a page boundary comes from an explicit break, a style's
+`pageBreakBefore` or a `sectPr` page start, so pagination matches what Word shows.
+Tracked changes no longer leak a reverted style or break into the live document,
+and a break inside a table cell no longer swallows the row. Encoding is handled
+by charset labels and UTF-16 BOMs, every part is bounded against zip bombs, and
+unspaced scripts such as Chinese or Japanese paginate by volume instead of piling
+into one enormous page. A corrupt or empty `document.xml` is an error, not an
+empty document.
+
+Reading follows the same page model. `doc_index` replaces the listing-only
+`docx_index` and `pdf_index` and returns the page catalogue a step can choose
+from; `read_docx_page` and `read_pdf_page` accept an `end_page` range and mark each
+page with `--- page N ---`, so a long contract costs only the pages actually read.
+A listing whose file changed, vanished or now carries an older timestamp than the
+index is labelled stale and points at the index tool, and the indexer itself
+reports per-document progress, publishes a terminal phase even when a run fails,
+sweeps only the documents whose chunks failed, and makes `ogcode index` exit
+non-zero instead of printing a success it did not have.
+
+## Major: Every model call says what it is for
+
+Each provider request now carries `X-Client-Task`, naming one of fourteen call
+kinds: the turn, a sub-agent, indexing, a note, search, recall, intent matching,
+turn memory, compaction, a title, the risk gate, a rewrite, a probe or credential
+validation. A delegated child adds what its spawner predicted about the work —
+`X-Client-Complexity` as easy, medium or hard, and `X-Client-Workload` as
+read-heavy or write-heavy — so a router can serve a child that only reads from a
+cheaper model than one that edits. Both predictions persist on the session and are
+read once per turn, so a resumed or restarted child still sends what it was
+briefed with. `task` and `teammate` accept both as arguments and bounce a
+misspelling rather than silently sending nothing. The fields never enter the
+request body, so prompts and their cached prefixes are unchanged.
+
+## Minor: A child's memory stays under its parent
+
+Session recall used to index a sub-agent's turn summaries against the child, so
+what a teammate learned disappeared from the conversation that asked for it. A
+child's memory now rolls up to the root session that started the work, resolved
+through the board's spawn edges, and the command palette hides the child's own
+row instead of listing it beside the parent's. The board also publishes a new
+session only after its spawn edge exists, and the sidebar merges a refreshed
+roster into a new array, so a hard reload nests running teammates instead of
+painting them flat.
+
+## Minor: The client survives the state it was opened under
+
+An audit pass over the web client fixed eleven high-severity issues and a long
+tail of smaller ones. Escape now closes only the topmost overlay and returns
+focus where it came from; a failed configuration fetch no longer wipes a stored
+API key; a note poll stops after three misses instead of running forever; a
+device iframe survives a status blip; and switching sessions can no longer land an
+older page of messages on the newer session. Diffs keep `---` and `+++` lines that
+are content rather than headers, the HTML preview loses `allow-same-origin`, the
+sidebar mounts once per page, and the model picker on first run reloads instead of
+reading a stale list. Smaller hardening covers pointer capture on the resize grip,
+a debounced colour picker, a windowed project tree for very large repositories, and
+client-side pageview tracking.
+
+## Patch: Deep search falls back instead of ranking a chain of thought
+
+The ranker's output budget rises from 256 to 1024 tokens. Probing showed a
+reasoning model spending the whole 256 on its thinking and returning no numbers
+with `finish_reason: length`, so the cap now fits an answer; it remains a bound,
+not an allocation. When an empty answer does end because the budget ran out, the
+search falls back to the pages it found instead of parsing the unfinished
+reasoning for digits, which had been ranking sources by line numbers quoted in
+the model's own thoughts. A model that answers as reasoning and stops normally is
+still accepted.
+
 # Release Notes — v0.58.4
 
 ## Major: Memory files are opened when they matter, not pasted into every request
