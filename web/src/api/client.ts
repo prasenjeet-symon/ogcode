@@ -973,6 +973,24 @@ export function deleteModelPreference(id: string, providerId: string): Promise<v
   });
 }
 
+// Background-tasks model override (machine-wide). Empty model means inherit
+// from the active session.
+export interface BackgroundModelPref {
+  model: string;
+  providerId: string;
+}
+
+export function getBackgroundModel(): Promise<BackgroundModelPref> {
+  return fetchAPI('/models/background');
+}
+
+export function setBackgroundModel(pref: BackgroundModelPref): Promise<BackgroundModelPref> {
+  return fetchAPI('/models/background', {
+    method: 'POST',
+    body: JSON.stringify(pref),
+  });
+}
+
 // Theme API
 export interface Theme {
   directory: string;

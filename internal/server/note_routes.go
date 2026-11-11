@@ -283,6 +283,12 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An explicitly requested model wins; the machine-wide background model
+	// replaces only a model the caller left to inherit.
+	if input.Model == "" {
+		input.Model, input.Provider = s.resolveBackgroundModel(input.Model, input.Provider)
+	}
+
 	var p provider.Provider
 	if input.Model != "" {
 		p = s.registry.ResolveProviderFor(input.Model, input.Provider)
@@ -310,6 +316,7 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 		Model:    model,
 		System:   []string{systemPrompt},
 		Messages: []provider.ModelMessage{{Role: "user", Content: promptContent}},
+		Task:     provider.TaskNote,
 	}
 
 	ch, err := p.StreamChat(ctx, req)
@@ -399,7 +406,11 @@ func (s *Server) rewriteNoteQuery(sourceSessionID, originalQuery, model, provide
 		contextText, originalQuery,
 	)
 
-	// Resolve provider for the LLM call — use the same model as the Note Agent
+	// Resolve provider for the LLM call — the Note Agent's model here is
+	// inherited, so the machine-wide background model replaces it when
+	// configured. A model the request named explicitly is never overridden this
+	// way (see handleTransformText).
+	model, providerID = s.resolveBackgroundModel(model, providerID)
 	var p provider.Provider
 	if model != "" {
 		p = s.registry.ResolveProviderFor(model, providerID)
@@ -427,6 +438,7 @@ func (s *Server) rewriteNoteQuery(sourceSessionID, originalQuery, model, provide
 		Model:    rewriteModel,
 		System:   []string{"You rewrite short user queries into detailed, self-contained descriptions for a note-taking agent. Respond with only the rewritten text."},
 		Messages: []provider.ModelMessage{{Role: "user", Content: promptContent}},
+		Task:     provider.TaskRewrite,
 	}
 
 	ch, err := p.StreamChat(ctx, req)

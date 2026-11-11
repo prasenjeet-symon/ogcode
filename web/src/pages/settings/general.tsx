@@ -1,9 +1,13 @@
-import { Show, For, createMemo, createSignal, createEffect, type JSX } from 'solid-js';
+import { Show, For, createMemo, createSignal, createEffect, onCleanup, onMount, type JSX } from 'solid-js';
 import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { useTheme } from '../../context/theme';
 import { useDocIndex } from '../../context/docindex';
-import type { ThemeMode } from '../../api/client';
+import {
+  getBackgroundModel,
+  setBackgroundModel,
+  type ThemeMode,
+} from '../../api/client';
 import {
   Group,
   Row,
@@ -26,6 +30,7 @@ const ICONS = {
   keyboard: 'M6.75 3.75h.008v.008H6.75v-.008zM6.75 7.5h.008v.008H6.75V7.5zm0 3.75h.008v.008H6.75v-.008zM10.5 3.75h.008v.008H10.5v-.008zM10.5 7.5h.008v.008H10.5V7.5zm0 3.75h.008v.008H10.5v-.008zM14.25 3.75h.008v.008h-.008v-.008zM14.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM17.25 3.75h.008v.008h-.008v-.008zM17.25 7.5h.008v.008h-.008V7.5zm0 3.75h.008v.008h-.008v-.008zM4.5 18.75h15a.75.75 0 00.75-.75v-1.5a.75.75 0 00-.75-.75h-15a.75.75 0 00-.75.75v1.5a.75.75 0 00.75.75z',
   hotkey: 'M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zM12 15.75V18m3.75-3.75V18M4.5 4.5h15a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18V6a1.5 1.5 0 011.5-1.5z',
   index: 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z',
+  background: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z',
 };
 
 // Defaults, matching session.SearchConfig in Go.
@@ -67,6 +72,8 @@ export default function GeneralSettings() {
       </Group>
 
       <ThemeGroup hide={hide} />
+
+      <BackgroundModelGroup hide={hide} />
 
       <Group id="index" title="Project index" icon={ICONS.index}>
         <Row
@@ -190,6 +197,15 @@ function ThemeGroup(props: { hide: Hide }) {
   const isValidHex = (s: string) => /^#[0-9a-fA-F]{6}$/.test(s) || /^#[0-9a-fA-F]{3}$/.test(s);
   const current = () => draft() ?? themeCtx.primaryColor();
 
+  // Every save takes a ticket, and only the newest may touch the UI when it
+  // settles — a slow earlier request must not clear the draft or the spinner
+  // under a later one.
+  let applySeq = 0;
+  // The native colour picker fires `input` continuously while the user drags.
+  // Show the value at once, save once the drag settles.
+  let colorTimer: number | undefined;
+  onCleanup(() => clearTimeout(colorTimer));
+
   const apply = async (hex: string) => {
     setDraft(hex);
     setError('');
@@ -198,14 +214,24 @@ function ThemeGroup(props: { hide: Hide }) {
       return;
     }
     setSaving(true);
+    const seq = ++applySeq;
     try {
       await themeCtx.setPrimaryColor(hex);
+      if (seq !== applySeq) return;
       setDraft(null);
+      setSaving(false);
     } catch {
+      if (seq !== applySeq) return;
       setError('Could not save the theme.');
-    } finally {
       setSaving(false);
     }
+  };
+
+  const pickColour = (hex: string) => {
+    setDraft(hex);
+    setError('');
+    clearTimeout(colorTimer);
+    colorTimer = window.setTimeout(() => apply(hex), 150);
   };
 
   return (
@@ -265,8 +291,7 @@ function ThemeGroup(props: { hide: Hide }) {
             <input
               type="color"
               value={current()}
-              onInput={(e) => apply(e.currentTarget.value)}
-              disabled={saving()}
+              onInput={(e) => pickColour(e.currentTarget.value)}
               aria-label="Pick an accent colour"
               class="absolute -inset-2 w-[calc(100%+1rem)] h-[calc(100%+1rem)] cursor-pointer bg-transparent appearance-none border-0 p-0"
             />
@@ -329,6 +354,158 @@ function ThemeGroup(props: { hide: Hide }) {
           </For>
         </div>
 
+        <Show when={error()}>
+          <p class="mt-2 text-meta" style={{ color: 'var(--danger)' }}>{error()}</p>
+        </Show>
+      </Row>
+    </Group>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Background tasks model — machine-wide override for behind-the-scenes LLM calls.
+// ---------------------------------------------------------------------------
+
+function encodeModelKey(providerId: string, modelId: string): string {
+  if (!modelId) return '';
+  return `${providerId}\t${modelId}`;
+}
+
+function decodeModelKey(key: string): { providerId: string; model: string } {
+  if (!key) return { providerId: '', model: '' };
+  const idx = key.indexOf('\t');
+  if (idx === -1) return { providerId: '', model: key };
+  return {
+    providerId: key.slice(0, idx),
+    model: key.slice(idx + 1),
+  };
+}
+
+function BackgroundModelGroup(props: { hide: Hide }) {
+  const session = useSession();
+  const [model, setModel] = createSignal('');
+  const [providerId, setProviderId] = createSignal('');
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+
+  onMount(() => {
+    getBackgroundModel()
+      .then((pref) => {
+        setModel(pref.model || '');
+        setProviderId(pref.providerId || '');
+      })
+      .catch(() => {
+        // Leave default ("Inherit from active session") on initial load failure.
+      });
+  });
+
+  const enabledModels = createMemo(() =>
+    session
+      .models()
+      .filter((m) => m.enabled)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  );
+
+  // Detect duplicate display names across providers so we can disambiguate them.
+  const duplicateNames = createMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of enabledModels()) {
+      counts.set(m.name, (counts.get(m.name) ?? 0) + 1);
+    }
+    return counts;
+  });
+
+  const selectedKey = createMemo(() => {
+    const m = model();
+    if (!m) return '';
+    const p = providerId();
+    const list = enabledModels();
+    const exact = list.find((item) => item.id === m && (!p || item.providerId === p));
+    if (exact) return encodeModelKey(exact.providerId, exact.id);
+    return encodeModelKey(p, m);
+  });
+
+  const options = createMemo(() => {
+    const list = enabledModels();
+    const dups = duplicateNames();
+    const items = [
+      { value: '', label: 'Inherit from active session' },
+      ...list.map((m) => ({
+        value: encodeModelKey(m.providerId, m.id),
+        label: (dups.get(m.name) ?? 0) > 1 && m.providerId ? `${m.name} (${m.providerId})` : m.name,
+      })),
+    ];
+    const currentKey = selectedKey();
+    if (currentKey && !items.some((item) => item.value === currentKey)) {
+      const known = session.models().find((item) => item.id === model() && (!providerId() || item.providerId === providerId()));
+      items.push({
+        value: currentKey,
+        label: known ? known.name : model(),
+      });
+    }
+    return items;
+  });
+
+  const selectedLabel = createMemo(() => {
+    const m = model();
+    if (!m) return 'Inherit from active session';
+    const known = session.models().find((item) => item.id === m && (!providerId() || item.providerId === providerId()));
+    return known?.name ?? m;
+  });
+
+  const apply = async (nextKey: string) => {
+    const prevModel = model();
+    const prevProvider = providerId();
+    const next = decodeModelKey(nextKey);
+    setModel(next.model);
+    setProviderId(next.providerId);
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await setBackgroundModel({
+        model: next.model,
+        providerId: next.providerId,
+      });
+      setModel(saved.model || '');
+      setProviderId(saved.providerId || '');
+    } catch (e: any) {
+      setModel(prevModel);
+      setProviderId(prevProvider);
+      setError(e?.message || 'Failed to save background model');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Group
+      id="background-tasks"
+      title="Background tasks"
+      icon={ICONS.background}
+    >
+      <Row
+        label="Background model"
+        helper="Choose a dedicated model for behind-the-scenes tasks, or inherit the active session's model."
+        hidden={props.hide(
+          'Background tasks',
+          'Background model',
+          'behind the scenes llm model',
+          'auxiliary utility subagent title compaction memory summary indexing',
+          selectedLabel(),
+        )}
+      >
+        <div class="flex items-center gap-2">
+          <Show when={saving()}>
+            <Spinner class="w-4 h-4 text-[color:var(--text-muted)]" />
+          </Show>
+          <Select
+            value={selectedKey()}
+            options={options()}
+            ariaLabel="Model for background tasks"
+            disabled={saving()}
+            onChange={(val) => apply(val)}
+          />
+        </div>
         <Show when={error()}>
           <p class="mt-2 text-meta" style={{ color: 'var(--danger)' }}>{error()}</p>
         </Show>

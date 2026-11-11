@@ -63,6 +63,11 @@ const nav: DocGroup[] = [
         description: 'How a session runs, and steering it mid-turn.',
       },
       {
+        title: 'Background model',
+        slug: '/background-model',
+        description: 'One machine-wide model for titles, summaries, compaction, recall and sub-agents.',
+      },
+      {
         title: 'Agents & teammates',
         slug: '/agents-and-teammates',
         description: 'Teammates, task sub-agents and the Agents page, plus the file change gate and custom OpenAI-compatible providers.',

@@ -144,24 +144,34 @@ func (m *Manager) loadGrants() {
 	m.global = grants
 }
 
-// CachedRisk returns a previously-computed Auto-mode risk verdict for a command.
-func (m *Manager) CachedRisk(command string) (Risk, bool) {
+// riskKey keys a risk verdict by the model that judged the command as well as
+// the command itself. A verdict is that model's judgement, and the model serving
+// the gate can change (the machine-wide background model), so the command alone
+// would let an old model's SAFE answer for the new one.
+func riskKey(command, model string) string {
+	return model + "\x00" + command
+}
+
+// CachedRisk returns a previously-computed Auto-mode risk verdict for a command,
+// as judged by model.
+func (m *Manager) CachedRisk(command, model string) (Risk, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	r, ok := m.riskCache[command]
+	r, ok := m.riskCache[riskKey(command, model)]
 	return r, ok
 }
 
-// CacheRisk records an Auto-mode risk verdict for a command. Command risk is
-// context-independent, so the cache is process-global. It is capped so a long
-// session with many distinct commands can't grow it without bound.
-func (m *Manager) CacheRisk(command string, r Risk) {
+// CacheRisk records an Auto-mode risk verdict for a command, keyed by the model
+// that produced it. Command risk is context-independent, so the cache is
+// process-global. It is capped so a long session with many distinct commands
+// can't grow it without bound.
+func (m *Manager) CacheRisk(command, model string, r Risk) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.riskCache) >= 1000 {
 		m.riskCache = make(map[string]Risk)
 	}
-	m.riskCache[command] = r
+	m.riskCache[riskKey(command, model)] = r
 }
 
 func (m *Manager) Create(req Request) *PendingRequest {

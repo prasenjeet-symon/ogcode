@@ -167,3 +167,64 @@ func (s *Server) handleClearModelCapability(w http.ResponseWriter, r *http.Reque
 	slog.Info("cleared cached model capability", "model", input.ModelID)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleGetBackgroundModel returns the machine-wide model override for
+// behind-the-scenes LLM tasks. Empty model means "inherit from active session".
+func (s *Server) handleGetBackgroundModel(w http.ResponseWriter, r *http.Request) {
+	pref, err := session.GetBackgroundModel(s.globalDB)
+	if err != nil {
+		slog.Error("get background model", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read background model"})
+		return
+	}
+	writeJSON(w, http.StatusOK, pref)
+}
+
+// handleSetBackgroundModel updates the machine-wide model override for
+// behind-the-scenes LLM tasks. An empty model clears the override so tasks
+// inherit from the active session.
+func (s *Server) handleSetBackgroundModel(w http.ResponseWriter, r *http.Request) {
+	var req session.BackgroundModelPref
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	// Reject a model nothing serves rather than persisting it: every
+	// behind-the-scenes call stamped with it would fail, and the feature is
+	// meant to degrade to the session's model, not to break those calls.
+	if req.Model != "" && s.registry != nil && !s.registry.ModelAvailable(req.Model, req.ProviderID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model not available"})
+		return
+	}
+	if err := session.SetBackgroundModel(s.globalDB, req.Model, req.ProviderID); err != nil {
+		slog.Error("set background model", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save background model"})
+		return
+	}
+	pref, err := session.GetBackgroundModel(s.globalDB)
+	if err != nil {
+		slog.Error("get background model after save", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read background model"})
+		return
+	}
+	slog.Info("updated background model preference", "model", pref.Model, "provider", pref.ProviderID)
+	writeJSON(w, http.StatusOK, pref)
+}
+
+// resolveBackgroundModel returns the (model, providerID) to use for a
+// behind-the-scenes LLM call: when the user has configured a background model
+// that a registered provider actually serves, that choice overrides the
+// inherited session model; otherwise the inherited (model, providerID) is used.
+// A model nothing serves is treated as unset — the feature degrades to the
+// session's model instead of failing every call it was stamped onto.
+func (s *Server) resolveBackgroundModel(inheritedModel, inheritedProvider string) (string, string) {
+	if s.globalDB != nil {
+		if pref, err := session.GetBackgroundModel(s.globalDB); err == nil && pref.Model != "" {
+			if s.registry == nil || s.registry.ModelAvailable(pref.Model, pref.ProviderID) {
+				return pref.Model, pref.ProviderID
+			}
+		}
+	}
+	return inheritedModel, inheritedProvider
+}
+
