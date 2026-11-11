@@ -57,6 +57,12 @@ manifests/
 # nested agent/ folder is swallowed.
 /agent/
 
+# Manual smoke-run artifacts — `ogcode index`/serve write their log beside the
+# binary, and a background run leaves a pid file. Root-anchored so a fixture
+# named *.log under a package stays trackable.
+/*.log
+/pids.txt
+
 # Demo media — screen recordings and extracted frames kept machine-local;
 # nothing in README/docs references them, so they must never land in the repo.
 ogcode-demo.mp4
