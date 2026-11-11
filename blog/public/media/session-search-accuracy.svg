@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="468" viewBox="0 0 960 468" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Where the right session ranks, by query style</title>
+<desc id="dsc">Grouped horizontal bars, measured on 446 sessions and 1,554 turn notes. First place ranges from 56.8 percent for a query built only from topic labels to 95.0 percent when the answer is spread across turns. The right session is in the top five at least 86.4 percent of the time, and always for body-word, plural and cross-turn questions.</desc>
+<rect width="960" height="468" fill="#151414"/>
+<text x="40.0" y="34.0" fill="#fffbf5" font-size="14" font-weight="600">Where the right session ranks</text>
+<text x="40.0" y="56.0" fill="#9a9390" font-size="12">446 sessions &#183; 1,554 turn notes &#183; six kinds of query</text>
+<rect x="712" y="24" width="11" height="11" rx="2" fill="#ff5e1f"/>
+<text x="730.0" y="34.0" fill="#9a9390" font-size="11.5">rank 1</text>
+<rect x="798" y="24" width="11" height="11" rx="2" fill="#7d8fb3"/>
+<text x="816.0" y="34.0" fill="#9a9390" font-size="11.5">top 5</text>
+<line x1="250.0" y1="78.0" x2="250.0" y2="414.0" stroke="#2a2726" stroke-width="1"/>
+<text x="250.0" y="434.0" fill="#9a9390" font-size="11.5" text-anchor="middle">0%</text>
+<line x1="387.5" y1="78.0" x2="387.5" y2="414.0" stroke="#2a2726" stroke-width="1"/>
+<text x="387.5" y="434.0" fill="#9a9390" font-size="11.5" text-anchor="middle">25%</text>
+<line x1="525.0" y1="78.0" x2="525.0" y2="414.0" stroke="#2a2726" stroke-width="1"/>
+<text x="525.0" y="434.0" fill="#9a9390" font-size="11.5" text-anchor="middle">50%</text>
+<line x1="662.5" y1="78.0" x2="662.5" y2="414.0" stroke="#2a2726" stroke-width="1"/>
+<text x="662.5" y="434.0" fill="#9a9390" font-size="11.5" text-anchor="middle">75%</text>
+<line x1="800.0" y1="78.0" x2="800.0" y2="414.0" stroke="#2a2726" stroke-width="1"/>
+<text x="800.0" y="434.0" fill="#9a9390" font-size="11.5" text-anchor="middle">100%</text>
+<text x="525.0" y="454.0" fill="#9a9390" font-size="11.5" text-anchor="middle">share of queries where the right session landed there</text>
+<text x="24.0" y="124.0" fill="#fffbf5" font-size="12.5" font-weight="600">Body words</text>
+<rect x="250.0" y="102.0" width="436.1" height="13" rx="2" fill="#ff5e1f"/>
+<rect x="692.1" y="101" width="36.5" height="15" fill="#151414"/>
+<text x="696.1" y="112.0" fill="#9a9390" font-size="11.5">79.3</text>
+<rect x="250.0" y="121.0" width="550.0" height="13" rx="2" fill="#7d8fb3"/>
+<rect x="806.0" y="120" width="43.6" height="15" fill="#151414"/>
+<text x="810.0" y="131.0" fill="#fffbf5" font-size="11.5">100.0</text>
+<text x="24.0" y="180.0" fill="#fffbf5" font-size="12.5" font-weight="600">Session title</text>
+<rect x="250.0" y="158.0" width="434.5" height="13" rx="2" fill="#ff5e1f"/>
+<rect x="690.5" y="157" width="36.5" height="15" fill="#151414"/>
+<text x="694.5" y="168.0" fill="#9a9390" font-size="11.5">79.0</text>
+<rect x="250.0" y="177.0" width="528.0" height="13" rx="2" fill="#7d8fb3"/>
+<rect x="784.0" y="176" width="36.5" height="15" fill="#151414"/>
+<text x="788.0" y="187.0" fill="#9a9390" font-size="11.5">96.0</text>
+<text x="24.0" y="236.0" fill="#fffbf5" font-size="12.5" font-weight="600">Answer spans turns</text>
+<rect x="250.0" y="214.0" width="522.5" height="13" rx="2" fill="#ff5e1f"/>
+<rect x="778.5" y="213" width="36.5" height="15" fill="#151414"/>
+<text x="782.5" y="224.0" fill="#9a9390" font-size="11.5">95.0</text>
+<rect x="250.0" y="233.0" width="550.0" height="13" rx="2" fill="#7d8fb3"/>
+<rect x="806.0" y="232" width="43.6" height="15" fill="#151414"/>
+<text x="810.0" y="243.0" fill="#fffbf5" font-size="11.5">100.0</text>
+<text x="24.0" y="292.0" fill="#fffbf5" font-size="12.5" font-weight="600">Plural query</text>
+<rect x="250.0" y="270.0" width="403.1" height="13" rx="2" fill="#ff5e1f"/>
+<rect x="659.1" y="269" width="36.5" height="15" fill="#151414"/>
+<text x="663.1" y="280.0" fill="#9a9390" font-size="11.5">73.3</text>
+<rect x="250.0" y="289.0" width="550.0" height="13" rx="2" fill="#7d8fb3"/>
+<rect x="806.0" y="288" width="43.6" height="15" fill="#151414"/>
+<text x="810.0" y="299.0" fill="#fffbf5" font-size="11.5">100.0</text>
+<text x="24.0" y="348.0" fill="#fffbf5" font-size="12.5" font-weight="600">Mixed query</text>
+<rect x="250.0" y="326.0" width="391.0" height="13" rx="2" fill="#ff5e1f"/>
+<rect x="647.0" y="325" width="36.5" height="15" fill="#151414"/>
+<text x="651.0" y="336.0" fill="#9a9390" font-size="11.5">71.1</text>
+<rect x="250.0" y="345.0" width="516.5" height="13" rx="2" fill="#7d8fb3"/>
+<rect x="772.5" y="344" width="36.5" height="15" fill="#151414"/>
+<text x="776.5" y="355.0" fill="#9a9390" font-size="11.5">93.9</text>
+<text x="24.0" y="404.0" fill="#fffbf5" font-size="12.5" font-weight="600">Topic labels</text>
+<rect x="250.0" y="382.0" width="312.4" height="13" rx="2" fill="#ff5e1f"/>
+<rect x="568.4" y="381" width="36.5" height="15" fill="#151414"/>
+<text x="572.4" y="392.0" fill="#9a9390" font-size="11.5">56.8</text>
+<rect x="250.0" y="401.0" width="475.2" height="13" rx="2" fill="#7d8fb3"/>
+<rect x="731.2" y="400" width="36.5" height="15" fill="#151414"/>
+<text x="735.2" y="411.0" fill="#9a9390" font-size="11.5">86.4</text>
+</svg>
