@@ -1331,6 +1331,53 @@ func TestFinishDocumentLoopErrorDropsWholeDocument(t *testing.T) {
 	}
 }
 
+// TestFinishDocumentDefersDropWhileSiblingChunkRuns is the other half of the
+// split-document race: a chunk that fails while a sibling is still to settle
+// must not delete the document out from under it, or the sibling's stored pages
+// vanish before it validates and the run reports a failure that never happened.
+func TestFinishDocumentDefersDropWhileSiblingChunkRuns(t *testing.T) {
+	const path = "/workspace/long.docx"
+	store := newTestDocStore(t)
+	idx := New("/workspace", store, nil)
+
+	item := splitDocItem(path)
+	for n := 1; n <= batchSize; n++ {
+		upsertPages(t, store, path, n)
+	}
+	batches := idx.assembleBatches([]docItem{item})
+	if len(batches) != 3 {
+		t.Fatalf("assembled %d batches, want 3", len(batches))
+	}
+	idx.settler = newDocSettler(batches, idx.progress)
+	t.Cleanup(func() { idx.settler = nil })
+
+	// Chunk 2 fails first, while chunks 1 and 3 are still running: the pages
+	// chunk 1 stored must survive until it has validated.
+	if err := idx.finishDocument(batches[1].items[0], nil); err == nil {
+		t.Fatal("chunk 2: finishDocument = nil, want a missing-pages error")
+	}
+	if got := storedRowCount(t, store, path); got != batchSize {
+		t.Fatalf("document has %d rows after a mid-run failure, want the %d chunk 1 stored kept", got, batchSize)
+	}
+
+	if err := idx.finishDocument(batches[0].items[0], nil); err != nil {
+		t.Fatalf("chunk 1: %v", err)
+	}
+	// The document still fails as a whole, and its final chunk drops it.
+	if err := idx.finishDocument(batches[2].items[0], nil); err == nil {
+		t.Fatal("chunk 3: finishDocument = nil, want a missing-pages error")
+	}
+	if got := storedRowCount(t, store, path); got != 0 {
+		t.Errorf("failed split document kept %d rows, want it dropped entirely", got)
+	}
+	if got := idx.progress.Failed.Load(); got != 1 {
+		t.Errorf("progress.Failed = %d, want 1", got)
+	}
+	if got := idx.progress.Completed.Load(); got != 0 {
+		t.Errorf("progress.Completed = %d, want 0", got)
+	}
+}
+
 // TestFinishDocumentNilStore pins the contract the existing tests rely on: an
 // Indexer built without a store still reports per-file progress and never
 // touches a database.

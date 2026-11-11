@@ -476,9 +476,9 @@ func (idx *Indexer) Run(ctx context.Context) error {
 	var failedBatches atomic.Int32
 	// failedDocs names the documents the failed batches touched, so the sweep
 	// after the group drains re-reads their rows only. A document that lives in
-	// one successful batch was written whole; one whose batch failed has already
-	// been dropped by that batch. Only a document spread over several batches can
-	// still have pages arriving after its drop, so only those need sweeping.
+	// one successful batch was written whole; one whose batch failed is dropped
+	// by its last chunk to settle, or by this sweep when a sibling chunk was
+	// still running as the failure landed.
 	var failedMu sync.Mutex
 	failedDocs := make(map[string]struct{})
 	for _, batch := range batches {
@@ -564,6 +564,16 @@ func (s *docSettler) settle(path string, failure error) {
 	s.progress.Completed.Add(1)
 }
 
+// isFinalChunk reports whether no chunk of path is still to settle besides the
+// one asking. The last chunk to settle runs after every sibling has validated,
+// so its delete cannot race a validation; a chunk that fails earlier leaves the
+// drop to the post-run sweep.
+func (s *docSettler) isFinalChunk(path string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.remaining[path] <= 1
+}
+
 // settleRemaining counts every document whose chunks never settled as failed.
 // A batch can return before it reaches its documents (a session it could not
 // create, for one), and a document nobody counted would leave the progress
@@ -584,11 +594,10 @@ func (s *docSettler) settleRemaining() {
 //
 // The sweep runs BEFORE the cancellation check on purpose. When a batch failed
 // and the run was also cancelled, returning the context error first would skip
-// the sweep: the failed batch has already dropped its documents, but a sibling
-// batch of the same long document could have written pages after that delete,
-// and filesToIndex would then treat the partial document as complete forever
-// (it holds the file's current mod time). Sweeping first keeps the
-// drop-on-failure guarantee unconditional.
+// the sweep: a chunk that failed while siblings were still running leaves its
+// document in place for the sweep, and filesToIndex would then treat the partial
+// document as complete forever (it holds the file's current mod time). Sweeping
+// first keeps the drop-on-failure guarantee unconditional.
 //
 // failedDocs names the documents a failed batch touched. Only those can still
 // be partial once every batch has finished, so the sweep is scoped to them
@@ -597,9 +606,9 @@ func (s *docSettler) settleRemaining() {
 func (idx *Indexer) settleBatches(ctx context.Context, items []docItem, batchCount, failed int, failedDocs map[string]struct{}) error {
 	var sweepErr error
 	if failed > 0 {
-		// A failing batch already dropped its own documents, but a sibling batch
-		// of the same long document can still be writing while that delete runs.
-		// Sweep once every batch has finished so no partial document survives.
+		// A failing batch's last chunk drops its own documents, but a chunk that
+		// failed while a sibling was still running defers to this sweep. Sweep
+		// once every batch has finished so no partial document survives.
 		sweepErr = idx.dropIncompleteDocuments(failedDocumentItems(items, failedDocs))
 		idx.publishProgress(ctx, "indexing")
 	}
@@ -1017,7 +1026,11 @@ func (idx *Indexer) finishDocument(item docItem, loopErr error) error {
 		idx.settleDocument(item.path, nil)
 		return nil
 	}
-	if idx.docStore != nil {
+	// Deleting while a sibling chunk of the same document is still to settle
+	// would wipe pages it has stored but not yet validated, turning its success
+	// into a failure that never happened. Only the document's final chunk drops
+	// it here; the post-run sweep drops it otherwise.
+	if idx.docStore != nil && idx.mayDropDocument(item.path) {
 		if err := idx.docStore.DeleteByDoc(item.path); err != nil {
 			idx.settleDocument(item.path, failure)
 			return fmt.Errorf("%s: %w (drop incomplete document failed: %v)", item.path, failure, err)
@@ -1025,6 +1038,17 @@ func (idx *Indexer) finishDocument(item docItem, loopErr error) error {
 	}
 	idx.settleDocument(item.path, failure)
 	return fmt.Errorf("%s: %w", item.path, failure)
+}
+
+// mayDropDocument reports whether the caller may delete the document's rows
+// while the run is still going: only its last chunk to settle may, because
+// every sibling has validated by then. With no settler — a direct call outside
+// a run — there are no sibling chunks, so it may.
+func (idx *Indexer) mayDropDocument(path string) bool {
+	if idx.settler == nil {
+		return true
+	}
+	return idx.settler.isFinalChunk(path)
 }
 
 // settleDocument counts one chunk's outcome for path. During a run the per-run
@@ -1061,9 +1085,9 @@ func failedDocumentItems(items []docItem, failedDocs map[string]struct{}) []docI
 
 // dropIncompleteDocuments drops every document in items whose stored pages do
 // not match the pages the run extracted, once every batch has finished. A
-// failing batch drops its own documents, but a sibling batch of the same long
-// document may still be writing when that delete runs; this sweep closes that
-// window so no partial document outlives the run.
+// failing batch's last chunk drops its own documents; a chunk that failed while
+// a sibling was still running leaves the drop here, where no batch can write
+// after it, so no partial document outlives the run.
 func (idx *Indexer) dropIncompleteDocuments(items []docItem) error {
 	if idx.docStore == nil {
 		return nil
