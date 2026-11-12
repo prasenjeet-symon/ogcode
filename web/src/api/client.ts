@@ -1194,15 +1194,6 @@ export interface VersionInfo {
   goVersion: string;
 }
 
-export interface UpdateInfo {
-  latestVersion: string;
-  updateAvailable: boolean;
-  releaseUrl: string;
-  publishedAt: string;
-  releaseNotes: string;
-  installCommand: string;
-}
-
 export interface VersionResponse {
   version: string;
   commit: string;
@@ -1211,16 +1202,21 @@ export interface VersionResponse {
   latestVersion: string;
   updateAvailable: boolean;
   releaseUrl: string;
-  publishedAt: string;
+  publishedAt?: string;
   releaseNotes: string;
   installCommand: string;
+  /** Why the update check failed; absent when it succeeded. The update fields
+   *  then hold the last release fetched successfully, if any. */
+  updateError?: string;
 }
 
 export function getVersion(): Promise<VersionResponse> {
   return fetchAPI('/version');
 }
 
-export function checkForUpdate(): Promise<UpdateInfo> {
+/** Forces a fresh check against GitHub. Rejects (503) when the check fails;
+ *  a successful response can still carry updateError. */
+export function checkForUpdate(): Promise<VersionResponse> {
   return fetchAPI('/version/check', { method: 'POST' });
 }
 

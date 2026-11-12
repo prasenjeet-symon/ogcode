@@ -169,8 +169,11 @@ export default function AboutSettings() {
 
   onMount(async () => {
     try {
-      setInfo(await getVersion());
-      setError(null);
+      const response = await getVersion();
+      setInfo(response);
+      // The endpoint answers 200 even when the check failed, so "Up to date"
+      // must not be claimed on the strength of a failed check.
+      setError(response.updateError ? 'Update check failed. Are you online?' : null);
     } catch (err) {
       console.error('Failed to fetch version:', err);
       setError('Could not reach the ogcode server.');
@@ -181,8 +184,12 @@ export default function AboutSettings() {
     setChecking(true);
     setError(null);
     try {
-      await checkForUpdate();
-      setInfo(await getVersion());
+      const response = await checkForUpdate();
+      setInfo(response);
+      if (response.updateError) {
+        console.error('Failed to check for updates:', response.updateError);
+        setError('Update check failed. Are you online?');
+      }
     } catch (err) {
       console.error('Failed to check for updates:', err);
       setError('Update check failed. Are you online?');

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -17,7 +18,7 @@ This command queries the GitHub API to check for the latest release.
 It will compare your current version with the latest release and
 provide instructions on how to update if available.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return checkForUpdates()
+		return checkForUpdates(cmd.Context())
 	},
 }
 
@@ -25,13 +26,13 @@ func init() {
 	rootCmd.AddCommand(checkUpdatesCmd)
 }
 
-func checkForUpdates() error {
+func checkForUpdates(ctx context.Context) error {
 	mgr := verpkg.New()
 
 	fmt.Println("Checking for updates...")
 	fmt.Println()
 
-	updateInfo, err := mgr.CheckUpdate()
+	updateInfo, err := mgr.CheckUpdate(ctx)
 	if err != nil {
 		// Still show current version info
 		response := &verpkg.Response{
@@ -63,7 +64,7 @@ func checkForUpdates() error {
 	fmt.Printf("  Latest:   %s\n", updateInfo.LatestVersion)
 	fmt.Println()
 
-	if !updateInfo.PublishedAt.IsZero() {
+	if updateInfo.PublishedAt != nil {
 		fmt.Printf("  Published: %s\n", updateInfo.PublishedAt.Format("2006-01-02"))
 		fmt.Println()
 	}

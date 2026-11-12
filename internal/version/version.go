@@ -2,6 +2,7 @@
 package version
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Build info set via ldflags during build.
@@ -25,7 +27,17 @@ const (
 	githubOwner = "prasenjeet-symon"
 	githubRepo  = "ogcode"
 	cacheTTL    = 1 * time.Hour
+	// failedCheckTTL is how long a failed check is remembered before GitHub is
+	// asked again. The web UI asks for the version on every page load, so
+	// without it an offline or rate-limited client would walk into the client
+	// timeout once per page.
+	failedCheckTTL = 1 * time.Minute
+	// releaseNotesLimit caps the release-notes excerpt returned to clients.
+	releaseNotesLimit = 500
 )
+
+// defaultAPIBase is the GitHub API root. Tests point a Manager elsewhere.
+const defaultAPIBase = "https://api.github.com"
 
 // Info holds current version information.
 type Info struct {
@@ -37,18 +49,22 @@ type Info struct {
 
 // UpdateInfo holds information about available updates.
 type UpdateInfo struct {
-	LatestVersion   string    `json:"latestVersion"`
-	UpdateAvailable bool      `json:"updateAvailable"`
-	ReleaseURL      string    `json:"releaseUrl"`
-	PublishedAt     time.Time `json:"publishedAt,omitempty"`
-	ReleaseNotes    string    `json:"releaseNotes,omitempty"`
-	InstallCommand  string    `json:"installCommand,omitempty"`
+	LatestVersion   string     `json:"latestVersion"`
+	UpdateAvailable bool       `json:"updateAvailable"`
+	ReleaseURL      string     `json:"releaseUrl"`
+	PublishedAt     *time.Time `json:"publishedAt,omitempty"`
+	ReleaseNotes    string     `json:"releaseNotes,omitempty"`
+	InstallCommand  string     `json:"installCommand,omitempty"`
 }
 
 // Combined version and update response.
 type Response struct {
 	Info
 	UpdateInfo
+	// UpdateError explains why the update check failed. When it is set the
+	// update fields hold the last release fetched successfully, or are empty
+	// if none ever was. It is omitted when the check succeeded.
+	UpdateError string `json:"updateError,omitempty"`
 }
 
 // Manager handles version checking with caching.
@@ -56,7 +72,24 @@ type Manager struct {
 	mu       sync.RWMutex
 	cached   *githubRelease
 	cachedAt time.Time
+	lastErr  error
+	failedAt time.Time
 	http     *http.Client
+	apiBase  string
+}
+
+// Option configures a Manager. The defaults talk to GitHub; the options exist
+// so tests can point a Manager at a fake server.
+type Option func(*Manager)
+
+// WithAPIBase overrides the GitHub API root the update check reads (for tests).
+func WithAPIBase(base string) Option {
+	return func(m *Manager) { m.apiBase = strings.TrimSuffix(base, "/") }
+}
+
+// WithHTTPClient overrides the HTTP client used for the update check.
+func WithHTTPClient(client *http.Client) Option {
+	return func(m *Manager) { m.http = client }
 }
 
 // githubRelease represents a GitHub release API response.
@@ -71,12 +104,17 @@ type githubRelease struct {
 }
 
 // New creates a new version manager.
-func New() *Manager {
-	return &Manager{
+func New(opts ...Option) *Manager {
+	m := &Manager{
 		http: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		apiBase: defaultAPIBase,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // GetInfo returns current version information.
@@ -89,10 +127,12 @@ func GetInfo() Info {
 	}
 }
 
-// CheckUpdate checks for available updates from GitHub releases.
-func (m *Manager) CheckUpdate() (*UpdateInfo, error) {
-	release, err := m.fetchLatestRelease()
-	if err != nil {
+// CheckUpdate checks for available updates from GitHub releases. When the
+// fetch fails it still returns the last release it knows about — however old —
+// alongside the error, so callers can show stale data and say why it is stale.
+func (m *Manager) CheckUpdate(ctx context.Context) (*UpdateInfo, error) {
+	release, err := m.fetchLatestRelease(ctx)
+	if release == nil {
 		return nil, err
 	}
 
@@ -102,57 +142,94 @@ func (m *Manager) CheckUpdate() (*UpdateInfo, error) {
 
 	updateAvailable := compareVersions(latest, current) > 0
 
-	return &UpdateInfo{
+	info := &UpdateInfo{
 		LatestVersion:   release.TagName,
 		UpdateAvailable: updateAvailable,
 		ReleaseURL:      release.HTMLURL,
-		PublishedAt:     release.PublishedAt,
 		ReleaseNotes:    summarizeReleaseNotes(release.Body),
 		InstallCommand:  detectInstallCommand(),
-	}, nil
-}
-
-// GetResponse returns combined version and update info.
-func (m *Manager) GetResponse() (*Response, error) {
-	info := GetInfo()
-	update, err := m.CheckUpdate()
-	if err != nil {
-		// Return version info even if update check fails
-		return &Response{Info: info}, nil
 	}
-	return &Response{
-		Info:       info,
-		UpdateInfo: *update,
-	}, nil
+	if !release.PublishedAt.IsZero() {
+		info.PublishedAt = &release.PublishedAt
+	}
+	return info, err
 }
 
-// ClearCache invalidates the cached version info.
+// GetResponse returns combined version and update info. The response is never
+// nil: the installed version is local, so a failed update check is reported in
+// UpdateError (and in the returned error) rather than by dropping the fields
+// the caller can still answer for.
+func (m *Manager) GetResponse(ctx context.Context) (*Response, error) {
+	response := &Response{Info: GetInfo()}
+
+	update, err := m.CheckUpdate(ctx)
+	if update != nil {
+		response.UpdateInfo = *update
+	}
+	if err != nil {
+		response.UpdateError = err.Error()
+		return response, err
+	}
+	return response, nil
+}
+
+// ClearCache marks the cached release stale, so the next check fetches from
+// GitHub. The release itself is kept as the fallback a failed check serves.
 func (m *Manager) ClearCache() {
 	m.mu.Lock()
-	m.cached = nil
 	m.cachedAt = time.Time{}
+	m.lastErr = nil
+	m.failedAt = time.Time{}
 	m.mu.Unlock()
 }
 
-// GetResponseFallback returns basic version info without update check.
-func (m *Manager) GetResponseFallback() *Response {
-	return &Response{Info: GetInfo()}
-}
-
-// fetchLatestRelease gets the latest release from GitHub API with caching.
-func (m *Manager) fetchLatestRelease() (*githubRelease, error) {
-	// Check cache
+// fetchLatestRelease gets the latest release from GitHub API with caching. On
+// failure it returns the last release fetched successfully, which may be nil
+// when none ever was.
+func (m *Manager) fetchLatestRelease(ctx context.Context) (*githubRelease, error) {
 	m.mu.RLock()
-	if m.cached != nil && time.Since(m.cachedAt) < cacheTTL {
-		cached := m.cached
-		m.mu.RUnlock()
-		return cached, nil
-	}
+	cached := m.cached
+	fresh := cached != nil && time.Since(m.cachedAt) < cacheTTL
+	lastErr, failedAt := m.lastErr, m.failedAt
 	m.mu.RUnlock()
 
-	// Fetch from GitHub
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", githubOwner, githubRepo)
-	req, err := http.NewRequest("GET", url, nil)
+	if fresh {
+		return cached, nil
+	}
+	// A check that just failed is retried at most once per failedCheckTTL, so
+	// an offline or rate-limited client does not pay the timeout on every
+	// request.
+	if lastErr != nil && time.Since(failedAt) < failedCheckTTL {
+		return cached, lastErr
+	}
+
+	release, err := m.fetchRemote(ctx)
+	if err != nil {
+		// A cancelled context says nothing about GitHub, so it is not
+		// remembered as the outcome of a check.
+		if ctx.Err() == nil {
+			m.mu.Lock()
+			m.lastErr = err
+			m.failedAt = time.Now()
+			m.mu.Unlock()
+		}
+		return cached, err
+	}
+
+	m.mu.Lock()
+	m.cached = release
+	m.cachedAt = time.Now()
+	m.lastErr = nil
+	m.failedAt = time.Time{}
+	m.mu.Unlock()
+
+	return release, nil
+}
+
+// fetchRemote performs the GitHub API request, bypassing the cache.
+func (m *Manager) fetchRemote(ctx context.Context) (*githubRelease, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", m.apiBase, githubOwner, githubRepo)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -173,12 +250,6 @@ func (m *Manager) fetchLatestRelease() (*githubRelease, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return nil, fmt.Errorf("failed to parse release info: %w", err)
 	}
-
-	// Update cache
-	m.mu.Lock()
-	m.cached = &release
-	m.cachedAt = time.Now()
-	m.mu.Unlock()
 
 	return &release, nil
 }
@@ -233,13 +304,14 @@ func parseVersionPart(s string) int {
 	return num
 }
 
-// summarizeReleaseNotes creates a brief summary of release notes.
+// summarizeReleaseNotes creates a brief summary of release notes. The cut is
+// made on rune boundaries, so a note with an em dash or emoji does not end in a
+// split UTF-8 sequence (which JSON encoding would replace with U+FFFD).
 func summarizeReleaseNotes(notes string) string {
-	// Limit length
-	if len(notes) > 500 {
-		return notes[:500] + "..."
+	if utf8.RuneCountInString(notes) <= releaseNotesLimit {
+		return notes
 	}
-	return notes
+	return string([]rune(notes)[:releaseNotesLimit]) + "..."
 }
 
 // detectInstallCommand attempts to detect the best update command for the current installation.
