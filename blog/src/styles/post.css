@@ -180,7 +180,7 @@
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
-  text-decoration-color: rgba(255,112,56,.5);
+  text-decoration-color: currentColor;
   overflow-wrap: anywhere;
   transition: text-decoration-color .2s;
 }

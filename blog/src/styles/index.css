@@ -35,13 +35,13 @@
   font-weight: 500;
   letter-spacing: -0.035em;
   line-height: 1.02;
-  color: #fffbf5;
+  color: var(--slab-ink);
   max-width: 22ch;
   margin: 28px auto 0;
 }
 .bi-lede {
   font-size: 18px; line-height: 1.55;
-  color: rgba(255,255,255,.86);
+  color: rgba(26,13,7,.85);
   max-width: 600px;
   margin: 20px auto 0;
   text-wrap: pretty;

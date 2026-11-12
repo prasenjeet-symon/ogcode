@@ -209,8 +209,8 @@
     .btn-light { background: #fffbf5; color: #1f1f1f; }
     .btn-light:hover { background: #fff; transform: translateY(-1px); }
     /* A lighter fill than the spec's .14: keeps the pill close to the slab's own tone. */
-    .btn-glass { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.36); color: #fff; }
-    .btn-glass:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.46); }
+    .btn-glass { background: #151414; border-color: transparent; color: #fff; }
+    .btn-glass:hover { background: #2b1a11; border-color: rgba(255,255,255,.46); }
     .btn-line { background: transparent; border-color: var(--line-2); color: var(--text); }
     .btn-line:hover { background: rgba(255,255,255,.05); border-color: var(--line-3); }
     .btn-sm { height: 34px; padding: 0 14px; font-size: 14px; }
@@ -268,16 +268,16 @@
     .on-brand, .cells > .on-brand {
       position: relative; overflow: hidden; isolation: isolate;
       background: var(--brand);
-      color: #fff;
+      color: #2b1a11;
     }
     .on-brand::before {
       content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
       background-image: radial-gradient(rgba(255,255,255,.10) 1px, transparent 1.2px);
       background-size: 7px 7px;
     }
-    .on-brand .h3 { color: #fff; }
-    .on-brand .p { color: #fff; }
-    .on-brand .ico { color: #fff; }
+    .on-brand .h3 { color: #151414; }
+    .on-brand .p { color: #2b1a11; }
+    .on-brand .ico { color: #151414; }
 
     :where(code) {
       font-family: var(--mono); font-size: .9em;
@@ -510,20 +510,20 @@
       display: inline-flex; align-items: center; gap: 12px;
       max-width: 100%;
       min-height: 42px; padding: 0 6px 0 18px;
-      border: 1px solid rgba(255,255,255,.55); border-radius: 999px;
-      background: rgba(255,255,255,.07);
+      border: 1px solid #7d2d05; border-radius: 999px;
+      background: #7d2d05;
       color: #fff;
       font-size: 14.5px; font-weight: 500; line-height: 1;
       transition: background .2s;
     }
-    .announce:hover { background: rgba(255,255,255,.14); }
+    .announce:hover { background: #742a05; }
     #versionPill { font-variant-numeric: tabular-nums; flex-shrink: 0; }
     .announce .dot { opacity: .6; margin: 0 -4px; flex-shrink: 0; }
     /* Wraps (never truncates) on the narrowest phones and under user text spacing. */
     .announce-text { min-width: 0; padding-block: 4px; line-height: 1.2; text-align: left; text-wrap: balance; }
     .announce-go {
       width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
-      background: #fff; color: var(--brand);
+      background: #fff; color: #d1440c;
       display: grid; place-items: center;
     }
     .announce-go svg { width: 15px; height: 15px; transition: transform .25s var(--ease); }
@@ -534,7 +534,7 @@
       font-weight: 500;
       letter-spacing: -0.035em;
       line-height: 1.02;
-      color: #fffbf5;
+      color: #151414;
       max-width: 22ch;
       /* Two beats, one per line: balance keeps "Small bills." whole
          instead of stranding "bills." on a line of its own. */
@@ -543,12 +543,12 @@
     }
     .hero-sub {
       font-size: 18px; line-height: 1.55;
-      color: #fff;
+      color: #2b1a11;
       max-width: 700px;
       margin: 22px auto 0;
       text-wrap: pretty;
     }
-    .hero-sub strong { color: #fff; font-weight: 500; }
+    .hero-sub strong { color: #151414; font-weight: 500; }
     .hero-actions, .cta-actions {
       display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
       width: 100%;
@@ -638,13 +638,13 @@
     .cta-title {
       font-size: clamp(34px, 4.6vw, 60px);
       font-weight: 500; letter-spacing: -0.03em; line-height: 1.02;
-      color: #fffbf5;
+      color: #151414;
       max-width: 13em;
     }
     .cta-sub {
       margin: 20px auto 0;
       font-size: 18px; line-height: 1.55;
-      color: #fff;
+      color: #2b1a11;
       max-width: 620px;
       text-wrap: balance;
     }
@@ -680,7 +680,7 @@
       height: 52px;
       display: flex; align-items: center;
       border-top: 1px solid rgba(255,255,255,.22);
-      background: linear-gradient(180deg, rgba(150,40,4,.34), rgba(150,40,4,.46));
+      background: linear-gradient(180deg, rgba(150,40,4,.55), rgba(150,40,4,.62));
       color: #fff; font-size: 14px; font-weight: 500;
       --dur: 50s; --gap: 44px;
     }
@@ -1723,12 +1723,12 @@
 #cluster .hc-u { margin-left: 8px; font: 500 14px/1 var(--mono); letter-spacing: 0; color: var(--muted); }
 #cluster .hc-l { margin: 12px 0 0; font: 500 11.5px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--brand-ink); }
 #cluster .hc-stat .p { margin-top: 6px; font-size: 14px; }
-#cluster .hc-cta .hc-n, #cluster .hc-cta .hc-t { color: #fff; }
-#cluster .hc-cta .hc-u, #cluster .hc-cta .hc-l { color: rgba(255,255,255,.88); }
+#cluster .hc-cta .hc-n, #cluster .hc-cta .hc-t { color: #151414; }
+#cluster .hc-cta .hc-u, #cluster .hc-cta .hc-l { color: #3f2213; }
 #cluster .hc-go {
   display: inline-flex; align-items: center; gap: 6px;
   margin-top: auto; padding-top: 16px;
-  font-size: 15px; font-weight: 500; color: #fff;
+  font-size: 15px; font-weight: 500; color: #151414;
 }
 #cluster .hc-go span { transition: transform .2s var(--ease); }
 #cluster .hc-go:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
@@ -1839,7 +1839,7 @@
   text-wrap: balance;
 }
 #why .wy-chaos .wy-title { text-shadow: 0 2px 28px var(--bg), 0 0 2px var(--bg); }
-#why .wy-calm .wy-title { color: #fff; }
+#why .wy-calm .wy-title { color: #151414; }
 
 /* ─── Left: the noise of full-transcript replay ─── */
 #why .wy-chaos {
@@ -2066,7 +2066,7 @@
   border-radius: 10px;
   /* The spec's .08 white sheen, over a deep-orange glass so the glow and the
      bars behind it can't wash the white text below 4.5:1. */
-  background: linear-gradient(rgba(255, 255, 255, .08), rgba(255, 255, 255, .08)), rgba(150, 40, 4, .30);
+  background: linear-gradient(rgba(255, 255, 255, .08), rgba(255, 255, 255, .08)), rgba(150, 40, 4, .55);
   -webkit-backdrop-filter: blur(8px);
           backdrop-filter: blur(8px);
   box-shadow: 0 14px 34px rgba(110, 28, 0, .28);
@@ -2094,7 +2094,7 @@
   height: 20px;
   border-radius: 50%;
   background: #fff;
-  color: var(--brand);
+  color: #d1440c;
 }
 #why .wy-ok svg { display: block; width: 12px; height: 12px; }
 
@@ -2112,7 +2112,7 @@
   padding: 0 16px;
   font: 400 12px/1.2 var(--mono);
   letter-spacing: .04em;
-  color: #fff;
+  color: #2b1a11;
 }
 #why .wy-cap::before,
 #why .wy-cap::after {
@@ -2854,7 +2854,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
   animation: pr-flow 1.6s linear infinite;
 }
 #product .pr-mg-pill rect { fill: rgba(90, 24, 0, .45); stroke: rgba(255, 255, 255, .55); stroke-width: 1; }
-#product .pr-mg-pill text { font: 500 12.5px var(--mono); fill: #fff; }
+#product .pr-mg-pill text { font: 500 12.5px var(--mono); fill: #ffffff; }
 #product .pr-mg-node .halo {
   fill: rgba(255, 255, 255, .16);
   transform-box: fill-box;
@@ -2867,7 +2867,7 @@ html:not(.js) #cost .co-panel.co-off { visibility: visible; opacity: 1; transfor
 #product .pr-mg-node .core { fill: #fff; }
 #product .pr-mg-node text {
   font: 500 12px var(--mono);
-  fill: #fff;
+  fill: #151414;
   paint-order: stroke;
   stroke: #ff5e1f;
   stroke-width: 4px;

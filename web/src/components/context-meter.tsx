@@ -86,7 +86,7 @@ export default function ContextMeter() {
         onMouseLeave={() => setHovered(false)}
       >
         <svg class="w-3.5 h-3.5 shrink-0 -rotate-90" viewBox="0 0 14 14" aria-hidden="true">
-          <circle cx="7" cy="7" r={RING_R} fill="none" stroke="var(--border-default)" stroke-width="2" />
+          <circle cx="7" cy="7" r={RING_R} fill="none" stroke="var(--meter-track)" stroke-width="2" />
           <circle
             cx="7"
             cy="7"
@@ -123,7 +123,7 @@ export default function ContextMeter() {
           </div>
 
           {/* Usage bar, with a tick where the loop compacts. */}
-          <div class="relative h-1.5 mb-2.5 rounded-full bg-[color:var(--border-subtle)]">
+          <div class="relative h-1.5 mb-2.5 rounded-full bg-[color:var(--meter-track)]">
             <div
               class="absolute inset-y-0 left-0 rounded-full"
               style={{ width: `${percent()}%`, background: toneStroke(), transition: 'width 300ms ease' }}

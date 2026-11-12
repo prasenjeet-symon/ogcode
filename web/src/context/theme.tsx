@@ -86,7 +86,6 @@ function applyThemeCSS(t: Theme) {
   root.style.setProperty('--accent', t.accent);
   root.style.setProperty('--accent-hover', t.accentHover);
   root.style.setProperty('--accent-soft', t.accentSoft);
-  root.style.setProperty('--accent-ring', t.accentRing);
   root.style.setProperty('--on-primary', t.onPrimary);
   root.style.setProperty('--glow', t.glow);
   root.style.setProperty('--tint', t.tint);

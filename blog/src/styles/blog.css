@@ -47,6 +47,7 @@
      3.06:1, so filled brand buttons use a darker orange that clears 4.5:1. */
   --brand-btn: #d1440c;
   --brand-btn-hi: #c9410c;
+  --slab-ink: #1a0d07;
   --ok: #3ecf8e; --bad: #ef5b5b; --warn: #f2a53a; --amber: #f5b547;
   --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -94,7 +95,7 @@ button { cursor: pointer; }
 [hidden] { display: none !important; }
 ::selection { background: rgba(255,94,31,.45); color: #fff; }
 :focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
-.slab :focus-visible, .on-brand :focus-visible { outline-color: #fff; }
+.slab :focus-visible, .on-brand :focus-visible { outline-color: var(--slab-ink); }
 
 .skip {
   position: fixed; left: 12px; top: 12px; z-index: 100;
@@ -203,13 +204,13 @@ button { cursor: pointer; }
 .btn svg { width: 16px; height: 16px; }
 .btn-brand { background: var(--brand-btn); color: #fff; }
 .btn-brand:hover { background: var(--brand-btn-hi); }
-.btn-light { background: #fffbf5; color: #1f1f1f; }
+.btn-light { background: #ffffff; color: #1f1f1f; }
 .btn-light:hover { background: #fff; transform: translateY(-1px); }
 /* A lighter fill than the spec's .14: keeps the pill close to the slab's own tone. */
-.btn-glass { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.36); color: #fff; }
-.btn-glass:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.46); }
-.btn-line { background: transparent; border-color: var(--line-2); color: var(--text); }
-.btn-line:hover { background: rgba(255,255,255,.05); border-color: var(--line-3); }
+.btn-glass { background: #151414; border-color: #ffffff; color: #fffbf5; }
+.btn-glass:hover { background: #211f1e; border-color: #ffffff; }
+.btn-line { background: transparent; border-color: rgba(240,227,222,.38); color: var(--text); }
+.btn-line:hover { background: rgba(255,255,255,.05); border-color: rgba(240,227,222,.5); }
 .btn-sm { height: 34px; padding: 0 14px; font-size: 14px; }
 .btn-lg { height: 46px; padding: 0 24px; font-size: 16px; }
 .btn:active { transform: translateY(0); }
@@ -575,7 +576,7 @@ main > *:not(.guides) { position: relative; z-index: 1; }
   --glow: 60% 55%;
   position: relative; overflow: hidden; isolation: isolate;
   border-radius: var(--r-xl);
-  color: #fff;
+  color: var(--slab-ink);
   background:
     radial-gradient(var(--glow) at 50% 108%, #fffbf5 0%, #ffecd2 10%, #ffc79a 26%, rgba(255,150,90,.55) 44%, rgba(255,120,60,0) 68%),
     radial-gradient(80% 60% at 50% -10%, rgba(255,255,255,.10), transparent 60%),
@@ -600,9 +601,9 @@ main > *:not(.guides) { position: relative; z-index: 1; }
   display: inline-flex; align-items: center; gap: 12px;
   max-width: 100%;
   min-height: 42px; padding: 0 6px 0 18px;
-  border: 1px solid rgba(255,255,255,.55); border-radius: 999px;
+  border: 1px solid rgba(26,13,7,.6); border-radius: 999px;
   background: rgba(255,255,255,.07);
-  color: #fff;
+  color: var(--slab-ink);
   font-size: 14.5px; font-weight: 500; line-height: 1;
   transition: background .2s;
 }
@@ -634,13 +635,13 @@ main > *:not(.guides) { position: relative; z-index: 1; }
 .cta-title {
   font-size: clamp(34px, 4.6vw, 60px);
   font-weight: 500; letter-spacing: -0.03em; line-height: 1.02;
-  color: #fffbf5;
+  color: var(--slab-ink);
   max-width: 13em;
 }
 .cta-sub {
   margin: 20px auto 0;
   font-size: 18px; line-height: 1.55;
-  color: #fff;
+  color: var(--slab-ink);
   max-width: 620px;
   text-wrap: balance;
 }

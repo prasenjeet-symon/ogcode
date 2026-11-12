@@ -103,6 +103,12 @@
   --border-subtle:  #1e1e23;
   --border-default: #2a2a30;
   --border-strong:  #3a3a42;
+  /* --border-control: the 1px line around a control whose only affordance is
+     that line (code-block copy, latex toggles, diagram zoom). The
+     --border-default/-subtle hairlines stay for dividers and chrome, where
+     boundary strength is not the affordance. #70707a = 3.99:1 on --bg-surface,
+     3.54:1 on --bg-hover — over the 3:1 non-text floor. */
+  --border-control: #70707a;
 
   /* Text: warm-cool zinc progression — every step clears WCAG AA (>= 4.5:1)
      on the LIGHTEST surface it can sit on (--bg-hover #222226), because a row
@@ -114,12 +120,21 @@
   /* --text-label: the legible floor for small UI text (group labels, timestamps,
      inactive nav rows) — 4.63:1 on --bg-hover, ~6.1:1 on --bg-surface. */
   --text-label:     #8a8a93;
+  /* --meter-track: the unfilled rail behind a progress/meter fill. A meter's
+     track IS its boundary, so it has to clear the 3:1 non-text floor on every
+     surface the meter sits on: #70707a = 3.69:1 on --bg-elevated, 3.51:1 on
+     --bg-overlay. */
+  --meter-track:    #70707a;
 
   /* Accent: ogcode brand orange (#FF5E1F) — the single saturated color */
   --accent:         #ff5e1f;
   --accent-hover:   #f54500;
   --accent-soft:    rgba(255, 94, 31, 0.12);
-  --accent-ring:    rgba(255, 94, 31, 0.35);
+  /* --accent-ring: the focus indicator, drawn OPAQUE. A 35% tint measured
+     1.69:1 against the dark surfaces under it — under the 3:1 non-text floor,
+     so the ring was not perceivable. The ring rides the accent-ink walk
+     (>= 4.5:1 on every surface) and clears 3:1 by construction. */
+  --accent-ring:    var(--accent-ink);
   --on-primary:     #0a0a0b;
   /* Accent ink: the accent as legible TEXT. One token cannot be both a fill and
      an ink — the fill is fine beside the surfaces it lights up, the ink has to
@@ -132,7 +147,9 @@
 
   --success:        #17c284;
   --warning:        #f5a623;
-  --danger:         #e5484d;
+  /* #e5484d measured 4.06:1 on --bg-hover; #ef6b70 = 5.30:1 there and 5.77:1
+     on --bg-overlay. */
+  --danger:         #ef6b70;
   --reasoning:      #a78bfa;
   --match-skill:    #a78bfa;
   --match-mcp:      #38bdf8;
@@ -213,32 +230,42 @@
   --border-subtle:  #ededf0;
   --border-default: #dedee4;
   --border-strong:  #c5c5cd;
+  /* Same floor in light mode: #82828c = 3.14:1 on --bg-hover. */
+  --border-control: #82828c;
 
   --text-primary:   #16161a;
   --text-secondary: #494952;
   --text-tertiary:  #67676f;
   --text-muted:     #67676f;
   --text-label:     #67676f;
+  /* Same floor in light mode: #82828c = 3.80:1 on --bg-elevated, 3.34:1 on
+     --bg-overlay. */
+  --meter-track:    #82828c;
 
   /* Accent stays brand orange; only the derived tints soften. */
   --accent-hover:   #e14a00;
   --accent-soft:    rgba(255, 94, 31, 0.12);
-  --accent-ring:    rgba(255, 94, 31, 0.30);
+  /* Per-mode like the ink below: the dark-mode orange ink was only ~2.5:1 on
+     --bg-hover, so light mode takes its own ink as the ring. */
+  --accent-ring:    var(--accent-ink);
   --accent-ink:     var(--accent-ink-light, #ab3000);
   --glow:           rgba(255, 94, 31, 0.10);
   --tint:           rgba(255, 94, 31, 0.04);
 
-  --success:        #0f7a52;
-  --warning:        #b45309;
-  --danger:         #d1242f;
+  /* Each of these failed AA on --bg-hover #e9e9ee (the lightest surface a
+     hovered row sits on) at 4.0-4.4:1. The swaps hold >= 4.5 there and on
+     every lighter surface: success #0c6a47, warning #9a4a08, danger #c11e29. */
+  --success:        #0c6a47;
+  --warning:        #9a4a08;
+  --danger:         #c11e29;
   --reasoning:      #6d28d9;
   --match-skill:    #6d28d9;
   --match-mcp:      #0369a1;
 
-  --status-pending:    #6b7280;
-  --status-progress:   #a16207;
+  --status-pending:    #5f6067; /* 5.25:1 on #e9e9ee (was 4.00) */
+  --status-progress:   #8a5206; /* 5.29:1 on #e9e9ee (was 4.07) */
   --status-completed:  #b83800;
-  --status-failed:     #d1242f;
+  --status-failed:     #c11e29; /* tracks --danger */
   --status-pending-soft:    rgba(107, 114, 128, 0.12);
   --status-progress-soft:   rgba(161, 98, 7, 0.14);
   --status-completed-soft:  rgba(225, 74, 0, 0.14);
@@ -254,7 +281,7 @@
   --code-bg:        #f4f4f6;
   --code-fg:        #24292f;
   --doc-fg:         #3f3f46;
-  --link:           #c2410c;
+  --link:           #a35200; /* 4.62:1 on #e9e9ee — was 4.28:1 */
   --link-hover:     #9a3412;
 
   /* Zinc ramp inverted: the app's utilities assume light-on-dark steps, so on
@@ -789,7 +816,7 @@ textarea.auto-resize {
   align-items: center;
   height: 1.375rem;
   padding-inline: 0.5rem;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--text-secondary);
@@ -1078,7 +1105,7 @@ textarea.auto-resize {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-tertiary);
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-control);
   cursor: pointer;
   transition: all var(--spring-sm);
 }
@@ -1108,7 +1135,7 @@ textarea.auto-resize {
 .latex-src-toggle.active {
   background: var(--accent-soft);
   color: var(--accent-ink);
-  border-color: rgba(255, 94, 31, 0.3);
+  border-color: var(--accent-ring);
 }
 .latex-download-btn {
   display: inline-flex;

@@ -170,9 +170,9 @@
 
 .abg-btn-stop.abg-armed,
 .abg-btn-stop:hover {
-  border-color: #f87171;
-  color: #f87171;
-  background: color-mix(in srgb, #f87171 12%, var(--bg-base));
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-base));
 }
 
 .abg-btn-stop:disabled {

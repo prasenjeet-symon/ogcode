@@ -31,7 +31,7 @@ h2 { font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .5px
 
 .card {
   background: #1d2026;
-  border: 1px solid #2a2e36;
+  border: 1px solid #6a707c;
   border-radius: 8px;
   padding: 10px 12px 12px;
   margin-bottom: 10px;
@@ -105,7 +105,7 @@ li.granted { background: #21252d; border-radius: 6px; }
 .hint { color: #9aa0aa; font-size: 11px; margin: 6px 0 0; }
 
 footer {
-  color: #767c87;
+  color: #828894;
   font-size: 11px;
   text-align: center;
   padding: 2px 0 10px;

@@ -41,9 +41,9 @@ export interface RoughSpec {
 }
 
 /* ---- Default palette that works on dark backgrounds ---- */
-const DEFAULT_STROKE = '#a1a1aa'; // --text-secondary
+const DEFAULT_STROKE = 'var(--text-secondary)';
 const DEFAULT_FILL = 'transparent';
-const DEFAULT_TEXT_FILL = '#f4f4f5'; // --text-primary
+const DEFAULT_TEXT_FILL = 'var(--text-primary)';
 const ARROW_HEAD_SIZE = 10;
 
 function buildOptions(el: RoughElement, globalOpts: Options): Options {
