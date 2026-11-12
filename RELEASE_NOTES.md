@@ -1,3 +1,56 @@
+# Release Notes — v0.59.1
+
+## Minor: An update check that fails says so instead of claiming you are current
+
+`GET /api/version` used to answer 500 when GitHub could not be reached, so the
+installed version — which is local and always knowable — disappeared with the
+release it could not fetch, and the About screen fell back to a card that still
+read **Up to date**. The endpoint now always answers 200 with the local version
+and carries an `updateError` naming the failure; the release fields still hold
+the last release fetched successfully, so the card keeps its last known version
+while saying the check failed. The forced check behind the About screen's button
+(`POST /api/version/check`) answers **503** with the same body, because a caller
+that asked to reach GitHub did not get there. A failed fetch is remembered for a
+minute, so an offline or rate-limited client walks into the 10-second timeout
+once a minute rather than once per page load, and a forced check still falls
+back to the last known release rather than blanking the card. `publishedAt` is
+now optional, so a release whose date is unknown omits the field instead of
+dating itself `0001-01-01T00:00:00Z`, and the release-notes excerpt is cut at
+500 runes on a character boundary rather than mid-way through an em dash or
+emoji. The About screen renders its "Update check failed. Are you online?"
+banner from `updateError` and never shows the up-to-date chip on a failed check;
+`ogcode check-updates` prints a published date only when there is one. Tests
+point the version manager at a fake GitHub (`version.WithAPIBase`,
+`version.WithHTTPClient`), so the whole contract is pinned without a network.
+
+## Minor: Text, controls and meters reach WCAG AA contrast in both themes
+
+A colour-only pass fixed the places where the interface's own colours were the
+reason something could not be read. The dark focus ring was a 35% accent tint
+measuring 1.69:1 against the surfaces drawn under it, so it is now the opaque
+accent ink per mode and clears the 3:1 non-text floor by construction; the light
+ring takes its own ink for the same reason. Two new tokens carry the boundary
+floors: `--border-control` (dark `#70707a`, light `#82828c`) outlines the
+controls whose only affordance is their 1px line — code-block copy, LaTeX
+toggles, diagram zoom — at 3.5:1 or better on every surface they sit on, while
+the hairline `--border-default`/`-subtle` stay for dividers and chrome;
+`--meter-track` gives the unfilled rail behind the context meter and its usage
+bar the same 3:1 treatment. The dark danger red moves from 4.06:1 on a hovered
+row to 5.30:1, and light mode darkens success, warning, danger, the pending and
+progress status colours and links until each holds 4.5:1 on the lightest surface
+a hovered row can be. The context meter and the default rough-diagram palette
+read those tokens instead of hardcoded literals, `theme.tsx` no longer writes
+`--accent-ring` inline, and the stop button takes `var(--danger)`. The
+marketing, blog, docs and browser-extension stylesheets follow the same palette,
+and the OGX page's three highlighted elements get distinct colours. Nothing
+moves: no layout, structure or behaviour changes.
+
+## Patch: A new post on why long sessions beat fresh ones
+
+`blog/src/content/posts/long-session-beats-fresh.md` is published with its
+search-accuracy chart, covering what a long session actually buys and where a
+fresh one wins.
+
 # Release Notes — v0.59.0
 
 ## Major: One background model for everything that is not the conversation
