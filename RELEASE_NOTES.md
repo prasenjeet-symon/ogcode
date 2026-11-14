@@ -1,3 +1,70 @@
+# Release Notes — v0.59.2
+
+## Minor: Logs and shipped events stop carrying what you typed
+
+The log file and the PostHog stream are diagnostic surfaces, and they were
+recording content. The ⌘K session search wrote its whole query into a log line.
+The access log wrote the full request URI, so every `?q=…`, `?prompt=…` and
+`?directory=…` value landed on disk. Shipped records carried absolute source
+paths in `code.filepath`. A redaction layer now runs on every record on its way
+to the file and to the wire: attributes named like secrets (`token`, `secret`,
+`password`, `api_key`, `authorization`, `cookie`, `credential`, and their
+prefixed or camel-case spellings) are blanked outright; free text is scrubbed of
+credential shapes — `scheme://user:pass@host`, `Bearer`/`Basic` values,
+`key=value` pairs, JSON fields, `Cookie`/`Set-Cookie` lines, and provider key
+formats such as `sk-…`, `ghp_…`, `AKIA…` and JWTs; and grouped attributes are
+walked member by member instead of being stringified past the filter.
+Content-bearing query parameters (`q`, `prompt`, `text`, `path`, `directory`,
+`url` and their spelling variants) are redacted too, because they are user
+content even when they are not credentials. The access log keeps the path and
+the *names* of the query parameters, the session-search route logs the query's
+length instead of its text, and shipped records name only the source file, not
+the directory it lives in. The doc site's privacy and deployment pages state the
+rule.
+
+## Minor: Every process writes a log, and every dropped record is counted
+
+Four things were true of logging before this release: some processes kept no log
+file at all, the terminal was quieter than the work asked for, several failures
+were recorded at a level nobody ever saw, and anything that went wrong inside
+the logging path itself went nowhere. Each command now has its own rotated file
+under `~/.ogcode/logs/<project>/` — `ogcode.log` for `ogcode` and `serve`,
+`run.log`, `index.log`, and a root-level `worker.log` for a worker that hosts
+many workspaces — while the browser-launched native host writes
+`nativehost.log` and the control plane writes
+`~/.ogcode/logs/controlplane.log` beside its stderr. The terminal default moves
+from errors-only to **warnings** (`OGCODE_LOG_CONSOLE` overrides it, `off`
+silences it), so a warning the user must act on is actually visible, and the
+native host pins its console side to warnings because its stdout is Chrome's
+message pipe. A logger is now closed on every exit path, so records queued
+behind a rotation are flushed instead of lost. Rotation itself syncs to disk
+every five seconds and at close, retries a failed rename for a minute before
+falling back to truncating the live file behind a "tail dropped" warning, and
+reports its own maintenance failures to the terminal and to shipping rather than
+writing them back into the file that is failing. Coverage reaches what used to
+be silent: goose's per-migration lines (which need `WithVerbose`, not just a
+logger), MCP connect/disconnect and OAuth-token persistence, keepawake
+refusals, worker and native-host failures, yamux keepalive and reset
+diagnostics, a server-sent-event drop warning on the bus (at most one a second),
+and the cause behind every 5xx response that used to return a bare
+`http.Error`. PostHog shipping now counts what it loses — queued, encode,
+request, transport, status and unflushed — and logs one summary at shutdown,
+at Warn when anything was dropped and Info when nothing was, so "are my logs
+arriving" is answerable from the log itself. `OGCODE_LOG_LEVEL=off` now stops
+shipping as well as the file, and `DO_NOT_TRACK` still stops shipping on its
+own. Finally, a project's log folder is deleted once nothing in it has been
+written for 90 days (`OGCODE_LOG_PROJECT_MAX_AGE_DAYS`; `0` keeps them
+forever) — a folder still being written to never is.
+
+## Patch: The transcript opens with every tool row collapsed
+
+A tool row used to unfold itself while running and fold again when it finished,
+so the transcript reflowed under the reader on every tool call. Every row now
+starts closed and opens only when clicked. Nothing else about the row changes:
+the title, summary, status glyph and elapsed clock still say what the tool is
+doing, so a running command reads as working while the agent's own text stays
+in view.
+
 # Release Notes — v0.59.1
 
 ## Minor: An update check that fails says so instead of claiming you are current
