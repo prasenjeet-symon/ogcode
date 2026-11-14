@@ -115,9 +115,12 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     tool() === 'update_intent' ||
     tool() === 'deep_search';
 
-  // A running tool opens its input so the user can see what is happening, but
-  // a housekeeping row has nothing to show: it stays shut from the first frame.
-  const [expanded, setExpanded] = createSignal(state().status === 'running' && !isAgentNavTool());
+  // Every row starts shut, running or not: the transcript opens with nothing
+  // expanded, and a disclosure only opens when the user clicks it. A running
+  // tool still reads as working from its status glyph, sweep, summary and
+  // elapsed clock, so it has no reason to unfold itself over what the agent
+  // is actually saying.
+  const [expanded, setExpanded] = createSignal(false);
   const status = () => state().status;
   // bash, grep and glob hand back Result.Title = their own input, so the
   // collapsed row would print the command/pattern twice — once as the title
@@ -227,13 +230,6 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
       preexisting: !!meta.syntaxPreexisting,
       note: at >= 0 ? output.slice(at).trim() : '',
     };
-  });
-
-  // Auto-collapse when tool finishes (running/completed -> completed/error/denied).
-  // A housekeeping row has nothing to open, so it is shut in every state.
-  createEffect(() => {
-    const s = status();
-    if (s === 'completed' || s === 'error' || s === 'denied') setExpanded(false);
   });
 
   // Elapsed-time readout. Any tool that is still running ticks a signal every
