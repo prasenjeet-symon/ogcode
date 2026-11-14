@@ -79,7 +79,7 @@ func (s *Server) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
-		slog.Error("search sessions", "query", q, "err", err)
+		slog.Error("search sessions", "queryLen", len(q), "err", err)
 		writeError(w, http.StatusInternalServerError, "search failed")
 		return
 	}

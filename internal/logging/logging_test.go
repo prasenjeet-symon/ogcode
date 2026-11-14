@@ -200,7 +200,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	o := FromEnv("/logs/app-1a2b3c4d", "ogcode.log")
-	if o.Level != slog.LevelInfo || o.Format != "text" || o.Console != slog.LevelError || o.Dir != "/logs/app-1a2b3c4d" {
+	if o.Level != slog.LevelInfo || o.Format != "text" || o.Console != slog.LevelWarn || o.Dir != "/logs/app-1a2b3c4d" {
 		t.Errorf("defaults wrong: %+v", o)
 	}
 	want := RotateOptions{MaxSize: 10 << 20, MaxBackups: 5, MaxAge: 14 * 24 * time.Hour, Compress: true}
@@ -254,5 +254,22 @@ func TestFromEnvWarnsOnUnparseable(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("warning lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// The file carries file:line at every level, not only debug: it is what makes
+// a log shared across processes and restarts readable.
+func TestFileAlwaysRecordsSource(t *testing.T) {
+	t.Setenv(posthogLogsFlagEnv, "off")
+	dir := t.TempDir()
+	l := New(testOptions(dir, &bytes.Buffer{}))
+	l.Info("where did this come from")
+	l.Close()
+	b, err := os.ReadFile(filepath.Join(dir, "ogcode.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "logging_test.go") {
+		t.Errorf("info record lacks its source:\n%s", b)
 	}
 }

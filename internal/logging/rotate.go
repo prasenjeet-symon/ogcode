@@ -32,6 +32,18 @@ const followInterval = time.Second
 // under that writer would drop those lines.
 const compressGrace = 3 * time.Second
 
+// syncEvery is how often the mill goroutine flushes unsynced writes to disk,
+// so a crash or power loss costs at most one tick of tail. A var so tests can
+// tick faster.
+var syncEvery = 5 * time.Second
+
+// renameFile and syncFile stand in for os.Rename and (*os.File).Sync, which
+// tests cannot otherwise make fail on demand.
+var (
+	renameFile = os.Rename
+	syncFile   = (*os.File).Sync
+)
+
 // RotateOptions bound how much disk a log file may take.
 type RotateOptions struct {
 	// MaxSize is the size in bytes at which the active file is rotated.
@@ -67,10 +79,16 @@ type RotatingFile struct {
 	mu        sync.Mutex
 	f         *os.File
 	size      int64
+	dirty     bool // r.f holds writes not yet flushed by Sync
 	checkAt   time.Time
 	retryAt   time.Time
 	closed    bool
 	millTimer *time.Timer
+
+	// report() runs with or without r.mu held — from Write under it, from the
+	// mill goroutine without — so the handler is guarded by its own lock.
+	errMu   sync.Mutex
+	onError func(op string, err error)
 
 	millCh   chan struct{}
 	millDone chan struct{}
@@ -112,6 +130,33 @@ func openRotating(path string, opts RotateOptions, now func() time.Time, grace t
 // Path is the active log file.
 func (r *RotatingFile) Path() string { return r.path }
 
+// SetErrorHandler installs fn as the sink for every failure of this file's
+// background work — rotation, reopening, pruning, compressing, listing the
+// backups, syncing — as a short operation name plus the error. It never gates
+// logging: each report is guarded against a panicking handler, and the failing
+// operation carries on. The default handler writes one Scrubbed line to
+// stderr.
+func (r *RotatingFile) SetErrorHandler(fn func(op string, err error)) {
+	r.errMu.Lock()
+	defer r.errMu.Unlock()
+	r.onError = fn
+}
+
+// report hands one failure to the error handler, defaulting to a line on
+// stderr keyed like ogcode's other stderr notes. It never panics and never
+// stops logging: a handler that panics costs that report, nothing more.
+func (r *RotatingFile) report(op string, err error) {
+	r.errMu.Lock()
+	fn := r.onError
+	r.errMu.Unlock()
+	defer func() { _ = recover() }() // a handler bug must not take logging down
+	if fn != nil {
+		fn(op, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "ogcode: could not %s: %s\n", op, Scrub(err.Error()))
+}
+
 // Write appends p, rotating first when p would take the file past MaxSize. A
 // single record larger than MaxSize is still written whole, to a fresh file.
 func (r *RotatingFile) Write(p []byte) (int, error) {
@@ -135,6 +180,9 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 	}
 	n, err := r.f.Write(p)
 	r.size += int64(n)
+	if n > 0 {
+		r.dirty = true
+	}
 	return n, err
 }
 
@@ -151,6 +199,7 @@ func (r *RotatingFile) Close() error {
 	}
 	close(r.millCh)
 	var err error
+	r.syncLocked() // a sync failure is reported to the error handler, not fatal
 	if r.f != nil {
 		err = r.f.Close()
 		r.f = nil
@@ -158,6 +207,30 @@ func (r *RotatingFile) Close() error {
 	r.mu.Unlock()
 	<-r.millDone
 	return err
+}
+
+// Sync flushes unsynced writes to the active file. It is a no-op once the
+// file is clean — the mill goroutine's timer and Close flush too — and a sync
+// failure is reported to the error handler and returned, but never fatal.
+func (r *RotatingFile) Sync() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.syncLocked()
+}
+
+// syncLocked flushes the active file when it has unsynced writes. Called with
+// r.mu held. It reports its own failure and only then returns the error.
+func (r *RotatingFile) syncLocked() error {
+	if r.f == nil || !r.dirty {
+		return nil
+	}
+	err := syncFile(r.f)
+	if err != nil {
+		r.report("sync", err)
+		return err
+	}
+	r.dirty = false
+	return nil
 }
 
 func (r *RotatingFile) open() error {
@@ -175,7 +248,7 @@ func (r *RotatingFile) open() error {
 	if info.Mode().Perm()&0o077 != 0 {
 		_ = f.Chmod(0o600)
 	}
-	r.f, r.size = f, info.Size()
+	r.f, r.size, r.dirty = f, info.Size(), false
 	return nil
 }
 
@@ -194,12 +267,18 @@ func (r *RotatingFile) follow() {
 	}
 	r.f.Close()
 	r.f = nil
-	_ = r.open()
+	if err := r.open(); err != nil {
+		r.report("reopen", fmt.Errorf("log file %s: %w", r.path, err))
+	}
 }
 
 // rotate moves the active file aside and opens a fresh one. incoming is the
 // size of the write that triggered it. Called with r.mu held; on return r.f is
 // open, or nil if reopening failed (Write retries the open).
+//
+// A rename that keeps failing is bounded rather than endured: once the live
+// file would pass twice MaxSize, it is truncated in place (truncateLive), so
+// an unrenamable file cannot grow forever.
 func (r *RotatingFile) rotate(incoming int64) {
 	// Another process may already have rotated the path: follow it, and rotate
 	// only if the file it now names is itself full.
@@ -208,17 +287,38 @@ func (r *RotatingFile) rotate(incoming int64) {
 		return
 	}
 
+	r.syncLocked() // flush the full file, so the backup holds every line
 	r.f.Close()
 	r.f = nil
-	if err := os.Rename(r.path, r.backupPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		// Keep appending to the oversized file and try again later.
+	if err := renameFile(r.path, r.backupPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		// Keep appending to the oversized file and try again later — but a
+		// rename that never succeeds would grow the live file past MaxSize
+		// forever, so once it is past twice the limit, bound the disk by
+		// truncating it in place and dropping the tail: losing the tail beats
+		// filling the disk.
 		r.retryAt = r.now().Add(rotationRetry)
-		fmt.Fprintf(os.Stderr, "ogcode: could not rotate log file %s: %v\n", Scrub(r.path), Scrub(err.Error()))
+		r.report("rotate", fmt.Errorf("log file %s: %w", r.path, err))
+		if r.size+incoming > 2*r.opts.MaxSize {
+			r.truncateLive()
+		}
 	}
 	if err := r.open(); err != nil {
+		r.report("reopen", fmt.Errorf("log file %s: %w", r.path, err))
 		return
 	}
 	r.signalMill()
+}
+
+// truncateLive resets an oversized live file in place after a rotation whose
+// rename failed, so the disk stays bounded even though the file could not be
+// moved aside and the tail is dropped. Called with r.mu held, with r.f closed.
+func (r *RotatingFile) truncateLive() {
+	if err := os.Truncate(r.path, 0); err != nil {
+		r.report("rotate", fmt.Errorf("log file %s: %w", r.path, err))
+		return
+	}
+	r.size = 0
+	r.report("rotate", fmt.Errorf("log file %s: rename keeps failing past twice MaxSize: truncated in place, disk bounded, log tail dropped", r.path))
 }
 
 // backupPath names a rotated file, suffixing a counter in the unlikely case
@@ -256,10 +356,25 @@ func (r *RotatingFile) signalMill() {
 	}
 }
 
+// millLoop runs a retention pass whenever millCh is signalled, and flushes
+// unsynced writes on a timer in between, so a crash costs at most one tick of
+// tail.
 func (r *RotatingFile) millLoop() {
 	defer close(r.millDone)
-	for range r.millCh {
-		r.mill()
+	ticker := time.NewTicker(syncEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case _, ok := <-r.millCh:
+			if !ok {
+				return // Close signalled the last pass
+			}
+			r.mill()
+		case <-ticker.C:
+			r.mu.Lock()
+			r.syncLocked()
+			r.mu.Unlock()
+		}
 	}
 }
 
@@ -271,10 +386,12 @@ type backup struct {
 }
 
 // mill enforces retention, then compresses what is kept. Errors are reported
-// to stderr and otherwise ignored: a pruning failure must never stop logging.
+// to the error handler and otherwise ignored: a pruning failure must never
+// stop logging.
 func (r *RotatingFile) mill() {
 	backups, err := r.backups()
 	if err != nil {
+		r.report("list", err)
 		return
 	}
 	var keep []backup
@@ -286,7 +403,9 @@ func (r *RotatingFile) mill() {
 		tooMany := r.opts.MaxBackups > 0 && i >= r.opts.MaxBackups
 		tooOld := !cutoff.IsZero() && b.when.Before(cutoff)
 		if tooMany || tooOld {
-			_ = os.Remove(b.path)
+			if err := os.Remove(b.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				r.report("prune", fmt.Errorf("log file %s: %w", b.path, err))
+			}
 			continue
 		}
 		keep = append(keep, b)
@@ -299,12 +418,15 @@ func (r *RotatingFile) mill() {
 		if b.gz {
 			continue
 		}
-		if info, err := os.Stat(b.path); err == nil && time.Since(info.ModTime()) < r.grace {
+		info, err := os.Stat(b.path)
+		if err != nil {
+			r.report("compress", fmt.Errorf("log file %s: %w", b.path, err))
+		} else if time.Since(info.ModTime()) < r.grace {
 			pending = true // still settling; see compressGrace
 			continue
 		}
 		if err := compressFile(b.path); err != nil {
-			fmt.Fprintf(os.Stderr, "ogcode: could not compress log file %s: %v\n", Scrub(b.path), Scrub(err.Error()))
+			r.report("compress", fmt.Errorf("log file %s: %w", b.path, err))
 		}
 	}
 	if pending {

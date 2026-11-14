@@ -326,7 +326,7 @@ func (w *Worker) resumeStoredToken() {
 		return
 	}
 	if exp.Before(time.Now()) {
-		w.logger.Debug("stored worker token expired; will re-pair")
+		w.logger.Warn("stored worker token expired; will re-pair")
 		return
 	}
 	w.setToken(token, exp)
@@ -380,7 +380,7 @@ func (w *Worker) heartbeatLoop(ctx context.Context, onReauth func()) {
 			}
 			if rotated := resp.Msg.GetWorkerToken(); rotated != "" {
 				w.setToken(rotated, time.Unix(resp.Msg.GetTokenExpiresUnix(), 0))
-				w.logger.Debug("worker token rotated")
+				w.logger.Info("worker token rotated")
 			}
 		}
 	}

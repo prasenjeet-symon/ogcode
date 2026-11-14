@@ -224,12 +224,12 @@ func DedupeExtensionIDs(ids []string) []string {
 // untouched.
 func EnsureRegistered(projectDir string) error {
 	if DisabledByEnv() {
-		slog.Debug("native host: registration skipped", "reason", installEnv+" is falsey")
+		slog.Info("native host: registration skipped", "reason", installEnv+" is falsey")
 		return nil
 	}
 	ids := CandidatesFor(projectDir)
 	if len(ids) == 0 {
-		slog.Debug("native host: no extension id to allowlist; no manifest written",
+		slog.Info("native host: no extension id to allowlist; no manifest written",
 			"expected", filepath.Join(projectDir, UnpackedExtensionDir, "manifest.json"),
 			"or_env", ExtensionIDsEnv)
 		return nil

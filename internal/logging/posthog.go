@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prasenjeet-symon/ogcode/internal/version"
@@ -40,6 +44,8 @@ const (
 	posthogQueueSize     = 512
 	posthogBatchMax      = 100
 	posthogFlushInterval = 5 * time.Second
+
+	posthogQueueWarnEvery = time.Minute // rate limit of the stderr queue-full warning
 )
 
 // posthogLogsEnabled reads OGCODE_POSTHOG_LOGS. Shipping is on by default: only
@@ -93,17 +99,26 @@ func posthogLogsDistinctID() string {
 	return "ogcode-server"
 }
 
-func posthogResource() []otlpAttribute {
+func posthogResource(o Options) []otlpAttribute {
+	cmd := strings.TrimSuffix(o.Name, ".log")
+	if cmd == "" {
+		cmd = "ogcode"
+	}
+	pid := os.Getpid()
 	return []otlpAttribute{
 		strAttr("service.name", "ogcode"),
 		strAttr("service.version", version.Version),
+		strAttr("process.command", cmd),
+		otlpAttribute{Key: "process.pid", Value: intValue(int64(pid))},
+		strAttr("service.instance.id", hostName()+"-"+strconv.Itoa(pid)),
 		strAttr("posthogDistinctId", posthogLogsDistinctID()),
 	}
 }
 
 // posthogSink buffers shipped records and POSTs them in batches. It is
-// best-effort: a failed send is dropped, never retried, never surfaced — the
-// file log remains the durable record.
+// best-effort: a failed send is dropped, never retried — but counted, and a
+// rate-limited stderr warning says when the queue is overflowing. The file
+// log remains the durable record.
 type posthogSink struct {
 	level    slog.Level
 	endpoint string
@@ -115,6 +130,12 @@ type posthogSink struct {
 	done     chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
+
+	stats   shipCounters
+	stopped atomic.Bool
+	// lastQueueWarn is the unixnano time of the last stderr queue-full
+	// warning, rate limited to posthogQueueWarnEvery.
+	lastQueueWarn atomic.Int64
 }
 
 type posthogRecord struct {
@@ -122,13 +143,69 @@ type posthogRecord struct {
 	attrs []slog.Attr
 }
 
-func newPostHogSink(level slog.Level, endpoint, token string, client *http.Client, flush time.Duration) *posthogSink {
+// shipCounters is the sink's tallies, one field per way a batch or a record
+// can be lost. Everything is atomic: Handle, the runner and stop() bump them
+// from different goroutines, and Close reads them for the summary.
+type shipCounters struct {
+	sent             atomic.Int64 // batches the endpoint answered 2xx
+	droppedEncode    atomic.Int64 // batches json.Marshal refused
+	droppedRequest   atomic.Int64 // batches whose http.Request could not be built
+	droppedTransport atomic.Int64 // batches client.Do failed on
+	droppedStatus    atomic.Int64 // batches answered with a non-2xx status
+	droppedQueue     atomic.Int64 // records dropped for a full queue or a stopped sink
+	unflushed        atomic.Int64 // records still queued when the sink stopped
+}
+
+// ShipStats is what a run of the shipping sink did. The Dropped* fields count
+// batches (or, for DroppedQueue, records) by the failure that lost them;
+// Unflushed counts records still queued when the sink was stopped. This is
+// what tells a support engineer "PostHog is dropping everything" from "a
+// quiet day".
+type ShipStats struct {
+	Enabled          bool
+	Queued           int64
+	Sent             int64
+	DroppedQueue     int64
+	DroppedEncode    int64
+	DroppedRequest   int64
+	DroppedTransport int64
+	DroppedStatus    int64
+	Unflushed        int64
+}
+
+// snapshot reads the sink's tallies out in one pass. Reading a channel's
+// length is safe against concurrent sends.
+func (s *posthogSink) snapshot() ShipStats {
+	return ShipStats{
+		Enabled:          true,
+		Queued:           int64(len(s.queue)),
+		Sent:             s.stats.sent.Load(),
+		DroppedQueue:     s.stats.droppedQueue.Load(),
+		DroppedEncode:    s.stats.droppedEncode.Load(),
+		DroppedRequest:   s.stats.droppedRequest.Load(),
+		DroppedTransport: s.stats.droppedTransport.Load(),
+		DroppedStatus:    s.stats.droppedStatus.Load(),
+		Unflushed:        s.stats.unflushed.Load(),
+	}
+}
+
+// posthogWarnWriter is where queue-full warnings go — written directly, never
+// through slog, which from Handle would re-enter this sink. A var so a test
+// can capture the line.
+var posthogWarnWriter io.Writer = os.Stderr
+
+// posthogDrainDeadline bounds how long stop() waits for the runner to flush
+// the queue. Emptying a full queue at the request timeout can take a minute;
+// process exit must not hang behind it. A var so a test can shrink it.
+var posthogDrainDeadline = 5 * time.Second
+
+func newPostHogSink(level slog.Level, endpoint, token string, client *http.Client, flush time.Duration, o Options) *posthogSink {
 	s := &posthogSink{
 		level:    level,
 		endpoint: endpoint,
 		token:    token,
 		client:   client,
-		resource: posthogResource(),
+		resource: posthogResource(o),
 		queue:    make(chan posthogRecord, posthogQueueSize),
 		done:     make(chan struct{}),
 	}
@@ -137,9 +214,27 @@ func newPostHogSink(level slog.Level, endpoint, token string, client *http.Clien
 	return s
 }
 
+// stop closes the sink: after it, Handle counts records as dropped rather
+// than park them in a dead queue. The runner gets posthogDrainDeadline to
+// flush what it can; whatever is still queued when that fires counts as
+// unflushed instead of hanging process exit.
 func (s *posthogSink) stop() {
-	s.stopOnce.Do(func() { close(s.done) })
-	s.wg.Wait()
+	s.stopOnce.Do(func() {
+		s.stopped.Store(true)
+		close(s.done)
+	})
+	drained := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(posthogDrainDeadline):
+	}
+	if left := len(s.queue); left > 0 {
+		s.stats.unflushed.Add(int64(left))
+	}
 }
 
 func (s *posthogSink) run(interval time.Duration) {
@@ -180,6 +275,10 @@ func (s *posthogSink) run(interval time.Duration) {
 	}
 }
 
+// send POSTs one batch of records. It is best-effort: any failure drops the
+// batch, never retried — but counted, so a rotated token (401) or a failing
+// endpoint (413/429/5xx) shows up in ShipStats and the Close summary instead
+// of vanishing.
 func (s *posthogSink) send(batch []posthogRecord) {
 	payload := otlpLogsRequest{
 		ResourceLogs: []otlpResourceLogs{{
@@ -192,19 +291,30 @@ func (s *posthogSink) send(batch []posthogRecord) {
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
+		s.stats.droppedEncode.Add(1)
 		return
 	}
 	req, err := http.NewRequest(http.MethodPost, s.endpoint, bytes.NewReader(body))
 	if err != nil {
+		s.stats.droppedRequest.Add(1)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.token)
 	resp, err := s.client.Do(req)
 	if err != nil {
+		s.stats.droppedTransport.Add(1)
 		return
 	}
+	// Drain the body before closing so the connection can be reused,
+	// whatever the status turned out to be.
+	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		s.stats.droppedStatus.Add(1)
+		return
+	}
+	s.stats.sent.Add(1)
 }
 
 // posthogHandler is the slog.Handler wrapper around a sink. It carries only the
@@ -220,10 +330,28 @@ func (h *posthogHandler) Handle(_ context.Context, r slog.Record) error {
 	if h.sink.level > r.Level {
 		return nil
 	}
+	s := h.sink
+	if s.stopped.Load() {
+		// Nothing will drain the queue after Close; count the record rather
+		// than park it in a dead channel.
+		s.stats.droppedQueue.Add(1)
+		return nil
+	}
 	select {
-	case h.sink.queue <- posthogRecord{rec: r.Clone(), attrs: h.attrs}:
+	case s.queue <- posthogRecord{rec: r.Clone(), attrs: h.attrs}:
 	default:
-		// queue full — drop, as the analytics client does
+		s.stats.droppedQueue.Add(1)
+		// Warn on stderr, rate limited to once a minute: silent loss is how
+		// this sink was found broken in the first place. Written directly —
+		// slog from here would re-enter the sink.
+		now := time.Now().UnixNano()
+		if last := s.lastQueueWarn.Load(); last == 0 || now-last >= int64(posthogQueueWarnEvery) {
+			if s.lastQueueWarn.CompareAndSwap(last, now) {
+				fmt.Fprintf(posthogWarnWriter,
+					"ogcode: posthog log shipping queue full; %d records dropped so far (queue size %d)\n",
+					s.stats.droppedQueue.Load(), len(s.queue))
+			}
+		}
 	}
 	return nil
 }
@@ -265,8 +393,10 @@ func buildLogRecords(batch []posthogRecord) []otlpLogRecord {
 		})
 		if r.PC != 0 {
 			if fr, _ := runtime.CallersFrames([]uintptr{r.PC}).Next(); fr.File != "" {
+				// The basename only: a user's home or build directory must not
+				// leave the machine on every record. code.lineno still does.
 				attrs = append(attrs,
-					strAttr("code.filepath", fr.File),
+					strAttr("code.filepath", filepath.Base(fr.File)),
 					otlpAttribute{Key: "code.lineno", Value: intValue(int64(fr.Line))},
 				)
 			}
@@ -396,6 +526,12 @@ func attrValue(a slog.Attr) otlpValue {
 		return uintValue(v.Uint64())
 	case slog.KindFloat64:
 		f := v.Float64()
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			// NaN and ±Inf cannot ride as doubles: proto3 JSON cannot encode
+			// them, so json.Marshal would fail and silently discard the whole
+			// batch. The string form survives instead.
+			return stringValue(strconv.FormatFloat(f, 'g', -1, 64))
+		}
 		return otlpValue{DoubleValue: &f}
 	case slog.KindBool:
 		b := v.Bool()

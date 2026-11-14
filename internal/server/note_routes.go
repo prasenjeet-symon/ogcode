@@ -37,6 +37,7 @@ func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	}
 	notes, err := s.noteStore.List(directory)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list notes", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -89,6 +90,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt: note.Now(),
 		}
 		if err := s.noteStore.Create(n); err != nil {
+			slog.ErrorContext(r.Context(), "create manual note", "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -126,6 +128,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   session.Now(),
 	}
 	if err := s.store.Create(sess); err != nil {
+		slog.ErrorContext(r.Context(), "create note session", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -144,6 +147,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: note.Now(),
 	}
 	if err := s.noteStore.Create(n); err != nil {
+		slog.ErrorContext(r.Context(), "create note record", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -219,16 +223,25 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := s.noteStore.Get(noteID)
 	if err != nil || n == nil {
+		if err != nil {
+			// A store failure here is internal, not a missing note; keep the
+			// 404 but leave the cause recoverable.
+			slog.WarnContext(r.Context(), "get note", "err", err)
+		}
 		http.Error(w, "note not found", http.StatusNotFound)
 		return
 	}
 	title := noteTitle(input.Title, input.Content, n.Query)
 	if err := s.noteStore.SaveContent(noteID, title, input.Content); err != nil {
+		slog.ErrorContext(r.Context(), "save note content", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	updated, err := s.noteStore.Get(noteID)
 	if err != nil || updated == nil {
+		if err != nil {
+			slog.ErrorContext(r.Context(), "retrieve updated note", "err", err)
+		}
 		http.Error(w, "failed to retrieve updated note", http.StatusInternalServerError)
 		return
 	}
@@ -321,6 +334,7 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 
 	ch, err := p.StreamChat(ctx, req)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "start transform stream", "err", err)
 		http.Error(w, fmt.Sprintf("stream error: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -331,6 +345,7 @@ func (s *Server) handleTransformText(w http.ResponseWriter, r *http.Request) {
 			result.WriteString(evt.Text)
 		}
 		if evt.Type == provider.EventError {
+			slog.ErrorContext(r.Context(), "transform stream error", "err", evt.Error)
 			http.Error(w, fmt.Sprintf("LLM error: %s", evt.Error), http.StatusInternalServerError)
 			return
 		}
@@ -470,6 +485,7 @@ func (s *Server) handleGetNote(w http.ResponseWriter, r *http.Request) {
 	noteID := chi.URLParam(r, "noteID")
 	n, err := s.noteStore.Get(noteID)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "get note", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -487,6 +503,7 @@ func (s *Server) handleListNoteVersions(w http.ResponseWriter, r *http.Request) 
 	noteID := chi.URLParam(r, "noteID")
 	versions, err := s.noteStore.ListVersions(noteID)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list note versions", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -503,6 +520,7 @@ func (s *Server) handleExportNote(w http.ResponseWriter, r *http.Request) {
 	noteID := chi.URLParam(r, "noteID")
 	n, err := s.noteStore.Get(noteID)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "get note for export", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -537,6 +555,7 @@ func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 	}
 	noteID := chi.URLParam(r, "noteID")
 	if err := s.noteStore.Delete(noteID); err != nil {
+		slog.ErrorContext(r.Context(), "delete note", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

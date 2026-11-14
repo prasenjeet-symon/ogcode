@@ -71,6 +71,7 @@ func (s *Server) handleBuildDocIndex(w http.ResponseWriter, r *http.Request) {
 			s.docindexMu.Lock()
 			s.docindexRunning = false
 			s.docindexMu.Unlock()
+			slog.ErrorContext(r.Context(), "delete doc index", "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -213,6 +214,7 @@ func (s *Server) handleDocIndexPreview(w http.ResponseWriter, r *http.Request) {
 
 	plan, err := indexer.New(dir, s.docindexStore, s.loopRunner).WithExcludes(patterns).Preview()
 	if err != nil {
+		slog.ErrorContext(r.Context(), "preview doc index", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -226,6 +228,7 @@ func (s *Server) handleListIndexedDocs(w http.ResponseWriter, r *http.Request) {
 	}
 	docs, err := s.docindexStore.ListDocsSummary(dir)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list indexed docs", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -249,6 +252,7 @@ func (s *Server) handleListIndexFiles(w http.ResponseWriter, r *http.Request) {
 
 	files, err := indexer.New(dir, s.docindexStore, s.loopRunner).WithExcludes(patterns).FileList()
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list index files", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -278,6 +282,7 @@ func (s *Server) handleGetIndexConsent(w http.ResponseWriter, r *http.Request) {
 	}
 	allowed, err := s.docindexStore.AutoIndexAllowed(dir)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "get index consent", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -299,6 +304,7 @@ func (s *Server) handleSetIndexConsent(w http.ResponseWriter, r *http.Request) {
 		input.Directory = s.dir
 	}
 	if err := s.docindexStore.SetAutoIndexAllowed(input.Directory, input.Allowed); err != nil {
+		slog.ErrorContext(r.Context(), "set index consent", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -333,6 +339,7 @@ func (s *Server) handleReadDocContent(w http.ResponseWriter, r *http.Request) {
 
 	f, err := os.Open(resolved)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "open doc content", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -342,6 +349,7 @@ func (s *Server) handleReadDocContent(w http.ResponseWriter, r *http.Request) {
 	// reported as truncated.
 	data, err := io.ReadAll(io.LimitReader(f, maxDocContentBytes+1))
 	if err != nil {
+		slog.ErrorContext(r.Context(), "read doc content", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -372,6 +380,9 @@ func (s *Server) handleReadDocContent(w http.ResponseWriter, r *http.Request) {
 func resolveWorkspaceFile(dir, docPath string) (string, os.FileInfo, int, string) {
 	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
+		// Answering 500 with a static body would hide why the workspace is
+		// unavailable; log the filesystem cause.
+		slog.Error("resolve workspace file", "dir", dir, "err", err)
 		return "", nil, http.StatusInternalServerError, "workspace unavailable"
 	}
 	resolved, err := filepath.EvalSymlinks(filepath.Clean(docPath))
@@ -440,6 +451,7 @@ func (s *Server) handleReadDocAsset(w http.ResponseWriter, r *http.Request) {
 
 	f, err := os.Open(resolved)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "open doc asset", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -467,6 +479,7 @@ func (s *Server) handleGetIndexedDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	pages, err := s.docindexStore.GetByDoc(docPath)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "get indexed doc", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -523,6 +536,7 @@ func (s *Server) handleListExcludes(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := s.docindexStore.ListExcludes(dir)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list excludes", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -550,6 +564,7 @@ func (s *Server) handleAddExclude(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := s.docindexStore.AddExclude(input.Directory, input.Pattern)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "add exclude", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -558,6 +573,7 @@ func (s *Server) handleAddExclude(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteExclude(w http.ResponseWriter, r *http.Request) {
 	if err := s.docindexStore.DeleteExclude(chi.URLParam(r, "id")); err != nil {
+		slog.ErrorContext(r.Context(), "delete exclude", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

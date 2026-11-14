@@ -218,7 +218,7 @@ Pick a **dedicated** domain for this: everything under it is treated as preview-
 
 ## Logs and diagnostics
 
-By default the terminal shows only errors; full logs go to a rotated file:
+By default the terminal shows warnings and errors; full logs go to a rotated file:
 
 - `<project>` server: `~/.ogcode/logs/<project>-<hash>/ogcode.log`
 
@@ -227,19 +227,20 @@ Directories are `0700`, files `0600`, and secrets are redacted. Useful environme
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `OGCODE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `OGCODE_LOG_CONSOLE` | `error` | What also prints to the terminal |
+| `OGCODE_LOG_CONSOLE` | `warn` | What also prints to the terminal |
 | `OGCODE_LOG_FORMAT` | `text` | `text` or `json` |
 | `OGCODE_LOG_DIR` | `~/.ogcode/logs` | Where logs are written |
 | `OGCODE_LOG_MAX_SIZE_MB` | `10` | Rotation size |
 | `OGCODE_LOG_MAX_FILES` | `5` | Files kept |
 | `OGCODE_LOG_MAX_AGE_DAYS` | `14` | Age limit |
 | `OGCODE_LOG_COMPRESS` | `on` | Compress rotated files |
+| `OGCODE_LOG_PROJECT_MAX_AGE_DAYS` | `90` | Prune per-project log directories this old (`0` keeps them forever) |
 | `OGCODE_POSTHOG_LOGS` | `on` | Opt out of shipping logs to PostHog |
 | `OGCODE_POSTHOG_LOGS_LEVEL` | `warn` | Severity floor for shipped logs |
 
 To watch what the server is doing, run with `OGCODE_LOG_CONSOLE=info`.
 
-Log shipping is **on by default**. Records at or above `OGCODE_POSTHOG_LOGS_LEVEL` are sent (redacted) to PostHog Logs, so the ogcode maintainers can see crashes and errors across installs; set `OGCODE_POSTHOG_LOGS` to `off`, or set `DO_NOT_TRACK` to anything other than `0`, `false`, `no`, or `off`, to turn it off.
+Log shipping is **on by default**. Records at or above `OGCODE_POSTHOG_LOGS_LEVEL` are sent (redacted) to PostHog Logs, so the ogcode maintainers can see crashes and errors across installs; set `OGCODE_POSTHOG_LOGS` to `off`, or set `DO_NOT_TRACK` to anything other than `0`, `false`, `no`, or `off`, to turn it off. Setting `OGCODE_LOG_LEVEL` to `off` stops log shipping as well as file logging.
 
 
 ## Checklist

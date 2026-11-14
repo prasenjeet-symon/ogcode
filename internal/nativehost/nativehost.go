@@ -124,24 +124,24 @@ func httpProber(client *http.Client, base func(port int) string) prober {
 		}
 		resp, err := client.Get(origin + "/api/browser/pair")
 		if err != nil {
-			slog.Debug("native host: pair probe failed", "port", port, "err", err)
+			slog.Warn("native host: pair probe failed", "port", port, "err", err)
 			return pair{}, false
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			// A server without the bridge wired, rotating its token, or
 			// refusing the request — none of those is pairable.
-			slog.Debug("native host: pair probe refused", "port", port, "status", resp.StatusCode)
+			slog.Warn("native host: pair probe refused", "port", port, "status", resp.StatusCode)
 			return pair{}, false
 		}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, pairBodyLimit))
 		if err != nil {
-			slog.Debug("native host: pair probe body", "port", port, "err", err)
+			slog.Warn("native host: pair probe body unreadable", "port", port, "err", err)
 			return pair{}, false
 		}
 		token, url, ok := pairFromBody(body)
 		if !ok {
-			slog.Debug("native host: pair probe response unusable", "port", port)
+			slog.Warn("native host: pair probe response unusable", "port", port)
 			return pair{}, false
 		}
 		return pair{token: token, url: url}, true
@@ -203,7 +203,7 @@ func runWith(in io.Reader, out io.Writer, probe prober) error {
 func dispatch(body []byte, probe prober) any {
 	var req request
 	if err := json.Unmarshal(body, &req); err != nil {
-		slog.Debug("native host: undecodable request", "err", err)
+		slog.Warn("native host: undecodable request", "err", err)
 		return map[string]any{"ok": false, "error": "undecodable request"}
 	}
 	typ := req.Type
@@ -216,7 +216,7 @@ func dispatch(body []byte, probe prober) any {
 	case "pair":
 		return buildPairReply(probe)
 	default:
-		slog.Debug("native host: unknown request type", "type", typ)
+		slog.Warn("native host: unknown request type", "type", typ)
 		return map[string]any{"ok": false, "error": fmt.Sprintf("unknown request type %q", typ)}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -110,6 +111,7 @@ func New(ctx context.Context, cfg *config.Config) (*Manager, error) {
 				// A listener failure does not block startup: servers requiring
 				// OAuth will fail to connect and contribute no tools, like any
 				// other unreachable server.
+				slog.Warn("mcp: oauth callback listener unavailable", "err", err)
 				break
 			}
 			receiver = r
@@ -177,6 +179,7 @@ func (m *Manager) Connect(ctx context.Context) ([]tool.ToolDef, error) {
 	for range enabled {
 		res := <-results
 		if res.err != nil {
+			slog.Warn("mcp: server connect failed", "server", res.name, "err", res.err)
 			m.servers[res.name] = &serverConn{err: res.err.Error()}
 			errs = append(errs, fmt.Sprintf("mcp server %q: %v", res.name, res.err))
 			continue
@@ -200,6 +203,7 @@ func (m *Manager) Connect(ctx context.Context) ([]tool.ToolDef, error) {
 			newTools = append(newTools, tl)
 		}
 		m.servers[res.name] = conn
+		slog.Info("mcp: server connected", "server", res.name, "tools", len(conn.tools))
 	}
 	m.mu.Unlock()
 
@@ -275,6 +279,7 @@ func (m *Manager) SetServerEnabled(ctx context.Context, name string, sc config.M
 		if conn.proc != nil {
 			killProcessTree(conn.proc)
 		}
+		slog.Info("mcp: server disconnected", "server", name)
 		return nil, removed, nil
 	}
 
@@ -292,6 +297,7 @@ func (m *Manager) SetServerEnabled(ctx context.Context, name string, sc config.M
 
 	session, tools, proc, dialErr := connect(ctx, name, sc, m.receiver)
 	if dialErr != nil {
+		slog.Warn("mcp: server connect failed", "server", name, "err", dialErr)
 		m.mu.Lock()
 		m.servers[name] = &serverConn{err: dialErr.Error()}
 		m.mu.Unlock()
@@ -322,6 +328,7 @@ func (m *Manager) SetServerEnabled(ctx context.Context, name string, sc config.M
 	}
 	m.servers[name] = conn
 	m.mu.Unlock()
+	slog.Info("mcp: server connected", "server", name, "tools", len(added))
 	return added, nil, nil
 }
 
@@ -350,8 +357,10 @@ func (m *Manager) Close() error {
 	m.closeOnce.Do(func() {
 		m.mu.Lock()
 		m.closed = true
+		names := make([]string, 0, len(m.servers))
 		conns := make([]*serverConn, 0, len(m.servers))
-		for _, c := range m.servers {
+		for name, c := range m.servers {
+			names = append(names, name)
 			conns = append(conns, c)
 		}
 		m.servers = map[string]*serverConn{}
@@ -366,9 +375,9 @@ func (m *Manager) Close() error {
 			errMu sync.Mutex
 			wg    sync.WaitGroup
 		)
-		for _, c := range conns {
+		for i, c := range conns {
 			wg.Add(1)
-			go func(c *serverConn) {
+			go func(name string, c *serverConn) {
 				defer wg.Done()
 				if c.session != nil {
 					if err := c.session.Close(); err != nil {
@@ -380,7 +389,8 @@ func (m *Manager) Close() error {
 				if c.proc != nil {
 					killProcessTree(c.proc)
 				}
-			}(c)
+				slog.Info("mcp: server disconnected", "server", name)
+			}(names[i], c)
 		}
 		wg.Wait()
 		receiver.close()

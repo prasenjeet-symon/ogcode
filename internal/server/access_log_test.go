@@ -42,7 +42,7 @@ func TestAccessLogLevels(t *testing.T) {
 			}))
 			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/session?id=1", nil))
 			out := buf.String()
-			if !strings.Contains(out, tc.want) || !strings.Contains(out, `uri="/api/session?id=1"`) || !strings.Contains(out, "bytes=4") {
+			if !strings.Contains(out, tc.want) || !strings.Contains(out, `path=/api/session`) || !strings.Contains(out, `queryKeys=id`) || !strings.Contains(out, "bytes=4") {
 				t.Errorf("want %s access line, got:\n%s", tc.want, out)
 			}
 		})
@@ -80,4 +80,60 @@ func TestRecovererRepanicsAbort(t *testing.T) {
 		}
 	}()
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+}
+
+// The query values are user content — the ⌘K palette's search text, a
+// directory path shipped as a parameter — so the request record carries the
+// path and the parameter names only. Both records log at Warn and ship to the
+// remote sink, where nothing can be recalled.
+func TestAccessLogDoesNotLeakQueryValues(t *testing.T) {
+	buf := captureLogs(t)
+	h := accessLog(slog.LevelInfo)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(),
+		httptest.NewRequest("GET", "/api/session/search?q=private-search-text&directory=/home/someone/private", nil))
+	out := buf.String()
+	for _, want := range []string{"path=/api/session/search", "queryKeys="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("access record lacks %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "directory,q") {
+		t.Errorf("access record lacks the queryKeys \"directory,q\":\n%s", out)
+	}
+	for _, leak := range []string{"private-search-text", "/home/someone/private", "uri="} {
+		if strings.Contains(out, leak) {
+			t.Errorf("access record leaks %q:\n%s", leak, out)
+		}
+	}
+}
+
+// The panic record shows the stack and the request shape, never the query
+// values: same rule as above at Error level.
+func TestRecovererDoesNotLeakQueryValues(t *testing.T) {
+	buf := captureLogs(t)
+	h := recoverer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("synthetic boom")
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec,
+		httptest.NewRequest("GET", "/api/session/search?q=private-search-text&directory=/home/someone/private", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+	out := buf.String()
+	for _, want := range []string{"http handler panic", "path=/api/session/search", "stack=", "goroutine"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("panic record lacks %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "directory,q") {
+		t.Errorf("panic record lacks the queryKeys \"directory,q\":\n%s", out)
+	}
+	for _, leak := range []string{"private-search-text", "/home/someone/private", "uri="} {
+		if strings.Contains(out, leak) {
+			t.Errorf("panic record leaks %q:\n%s", leak, out)
+		}
+	}
 }

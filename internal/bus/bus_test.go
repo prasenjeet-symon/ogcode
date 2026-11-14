@@ -1,6 +1,11 @@
 package bus
 
-import "testing"
+import (
+	"bytes"
+	"log/slog"
+	"strings"
+	"testing"
+)
 
 func TestPublishAssignsMonotonicSeq(t *testing.T) {
 	b := New(8)
@@ -53,5 +58,31 @@ func TestMultipleSubscribersEachGetSeq(t *testing.T) {
 	ec := <-c
 	if ea.Seq != ec.Seq {
 		t.Errorf("subscribers saw different seqs for the same event: %d vs %d", ea.Seq, ec.Seq)
+	}
+}
+
+// TestDropWarnIsRateLimited captures slog output and verifies a dropped event
+// warns once with the cumulative count, and that a second drop immediately
+// after stays quiet (the warning rate-limits to one per second bus-wide).
+func TestDropWarnIsRateLimited(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	b := New(2) // tiny buffer: two events fill it
+	b.SubscribeAll()
+
+	b.Publish("note.created", nil)    // seq 1 → buffered
+	b.Publish("note.created", nil)    // seq 2 → buffered (now full)
+	b.Publish("session.updated", nil) // seq 3 → dropped: the warn fires
+	b.Publish("session.updated", nil) // seq 4 → dropped, but rate-limited
+
+	out := buf.String()
+	if n := strings.Count(out, "sse event dropped: subscriber buffer full"); n != 1 {
+		t.Fatalf("drop warn lines = %d, want 1\nlog:\n%s", n, out)
+	}
+	if !strings.Contains(out, "dropped=1") {
+		t.Errorf("cumulative drop count missing from warn\nlog:\n%s", out)
 	}
 }

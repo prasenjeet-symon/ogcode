@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -285,9 +287,9 @@ func logTarget(cmd *cobra.Command) (dir, name string) {
 }
 
 // startLogging replaces the bootstrap logger with the command's own. Logs go
-// to a rotated file; the terminal shows errors only (OGCODE_LOG_CONSOLE), never
-// stdout — `run --output-format json` writes one JSON document there that a
-// caller parses. See package logging for the knobs.
+// to a rotated file; the terminal shows warnings and worse by default
+// (OGCODE_LOG_CONSOLE), never stdout — `run --output-format json` writes one
+// JSON document there that a caller parses. See package logging for the knobs.
 func startLogging(cmd *cobra.Command) {
 	dir, name := logTarget(cmd)
 	opts := logging.FromEnv(dir, name)
@@ -302,6 +304,24 @@ func startLogging(cmd *cobra.Command) {
 	if logger.Path() != "" {
 		cwd, _ := os.Getwd()
 		logger.Started(context.Background(), cmd.CommandPath(), cwd, version.Version, opts)
+	}
+	// A project's rotation bounds that project's disk; this bounds the
+	// collection. Folders nobody has written to in OGCODE_LOG_PROJECT_MAX_AGE_DAYS
+	// (90 by default, 0 keeps them forever) are removed — a folder still being
+	// written to never is, so another running ogcode is safe. Logging off means
+	// no log maintenance at all, and a root that does not exist yet (first run
+	// or a custom OGCODE_LOG_DIR) has nothing to prune and is not a failure.
+	if opts.Level != logging.LevelOff {
+		if home, err := os.UserHomeDir(); err == nil {
+			removed, err := logging.PruneProjects(logging.Root(home), logging.ProjectMaxAge())
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+			case err != nil:
+				slog.Warn("could not prune stale project logs", "removed", removed, "err", err)
+			case removed > 0:
+				slog.Info("pruned stale project logs", "removed", removed)
+			}
+		}
 	}
 }
 
@@ -375,6 +395,14 @@ func serve(cmd *cobra.Command, args []string) error {
 
 func Execute() error {
 	_ = godotenv.Load()
+	// Whatever way Execute returns — an error, a normal return, a panic in a
+	// command — the records queued behind rotation must make it to disk, so
+	// closing the logger is unconditional.
+	defer func() {
+		if logger != nil {
+			logger.Close()
+		}
+	}()
 	// Until the command is known (and with it, where its log file goes),
 	// warnings — a malformed ogcode.json, say — go to the terminal.
 	slog.SetDefault(logging.New(logging.Options{Console: slog.LevelWarn}).Logger)
@@ -387,11 +415,23 @@ func Execute() error {
 	// that form straight to the host: cobra would otherwise answer "unknown
 	// command" and exit before the extension gets a reply.
 	if IsBrowserLaunched(os.Args[1:]) {
+		// Chrome launches the binary directly, never through a cobra command,
+		// so startLogging never runs for it: without this the host keeps the
+		// throwaway bootstrap logger and every pairing diagnostic vanishes.
+		// Give it its own log at the global root; failure to learn the home
+		// directory keeps today's file-less behavior.
+		if home, err := os.UserHomeDir(); err == nil {
+			opts := logging.FromEnv(logging.Root(home), "nativehost.log")
+			// stdout is the native-messaging pipe Chrome reads, so the
+			// terminal side of the logger must stay quiet: warnings only.
+			opts.Console = min(opts.Console, slog.LevelWarn)
+			logger = logging.Setup(opts)
+			if logger.Path() != "" {
+				cwd, _ := os.Getwd()
+				logger.Started(context.Background(), "native-host", cwd, version.Version, opts)
+			}
+		}
 		return nativehost.Run(os.Stdin, os.Stdout)
 	}
-	err := rootCmd.Execute()
-	if logger != nil {
-		logger.Close()
-	}
-	return err
+	return rootCmd.Execute()
 }

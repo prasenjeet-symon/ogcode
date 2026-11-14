@@ -111,7 +111,10 @@ func config() *yamux.Config {
 	cfg.EnableKeepAlive = true
 	cfg.KeepAliveInterval = 20 * time.Second
 	cfg.ConnectionWriteTimeout = 10 * time.Second
-	cfg.LogOutput = io.Discard
+	// yamux's keepalive / reset / error diagnostics are plain text on
+	// LogOutput. Route them into the process log at Debug rather than
+	// discarding them — a dead or dropped tunnel shows up there first.
+	cfg.LogOutput = newYamuxLogWriter(nil)
 	return cfg
 }
 

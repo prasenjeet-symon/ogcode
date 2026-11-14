@@ -57,7 +57,7 @@ func Acquire(reason string) (release func()) {
 			slog.Debug("keepawake: assertion held", "reason", reason)
 		} else {
 			// Leave held=false; a later Acquire will try again on the next 0->1.
-			slog.Debug("keepawake: could not hold power assertion", "reason", reason)
+			slog.Warn("keepawake: could not hold power assertion", "reason", reason)
 		}
 	}
 	mu.Unlock()

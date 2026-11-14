@@ -9,10 +9,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -62,7 +64,24 @@ func serveCmd() *cobra.Command {
 }
 
 func serve(ctx context.Context, configPath string) error {
+	// Logging: stderr as before, plus ~/.ogcode/logs/controlplane.log so DB
+	// corruption and registry failures survive when the daemon runs under a
+	// supervisor that throws stderr away. File rotation is deliberately left
+	// to the operator (logrotate/journald): this is a self-hosted service
+	// with one owner, not a fleet daemon.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if f, path, err := controlPlaneLog(); err == nil {
+		logger = slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, f), &slog.HandlerOptions{Level: slog.LevelInfo}))
+		defer func() { f.Close() }()
+		logger.Info("control-plane starting",
+			"binary", filepath.Base(os.Args[0]), "pid", os.Getpid(), "config", configPath, "log", path)
+	} else {
+		// Never fail to boot over the log file: stderr keeps carrying the
+		// records, and the operator is told why the file is missing.
+		logger.Warn("control-plane log file unavailable; logging to stderr only", "err", err)
+		logger.Info("control-plane starting",
+			"binary", filepath.Base(os.Args[0]), "pid", os.Getpid(), "config", configPath)
+	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -281,6 +300,26 @@ func serve(ctx context.Context, configPath string) error {
 		eventBus.Close()
 		return nil
 	}
+}
+
+// controlPlaneLog opens the daemon's log file, ~/.ogcode/logs/controlplane.log.
+// The directory is created 0700 and the file opened append-only 0600; an
+// existing file is appended to, never recreated, and never rotated here.
+func controlPlaneLog() (*os.File, string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("find the home directory: %w", err)
+	}
+	dir := filepath.Join(home, ".ogcode", "logs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, "", fmt.Errorf("create %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, "controlplane.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, "", fmt.Errorf("open %s: %w", path, err)
+	}
+	return f, path, nil
 }
 
 // moveAside renames a corrupt DB file aside so a fresh one can be created in

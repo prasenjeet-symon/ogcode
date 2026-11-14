@@ -1,12 +1,13 @@
 // Package logging sets up ogcode's process-wide slog logger: a size-rotated,
-// owner-only log file that receives everything at the configured level, and a
-// terminal that sees only what the user must act on (errors, by default).
+// owner-only log file that receives everything at the configured level — with
+// file:line on every record — and a terminal that sees only what the user must
+// act on (warnings, by default).
 //
 // Configuration is by environment, like the rest of ogcode's runtime knobs:
 //
-//	OGCODE_LOG_LEVEL        debug | info (default) | warn | error — the file's threshold
+//	OGCODE_LOG_LEVEL        debug | info (default) | warn | error | off — the file's threshold; off disables the file and log shipping alike
 //	OGCODE_LOG_FORMAT       text (default) | json — the file's format
-//	OGCODE_LOG_CONSOLE      off | error (default) | warn | info | debug — the terminal's threshold
+//	OGCODE_LOG_CONSOLE      off | warn (default) | info | debug | error — the terminal's threshold
 //	OGCODE_LOG_DIR          root for log files (default ~/.ogcode/logs; each project gets a folder inside)
 //	OGCODE_LOG_MAX_SIZE_MB  rotate the file past this size (default 10)
 //	OGCODE_LOG_MAX_FILES    rotated files kept (default 5)
@@ -16,10 +17,13 @@
 // Records are also shipped to PostHog Logs, on by default:
 //
 //	OGCODE_POSTHOG_LOGS       on (default) | off — ship records to PostHog Logs
-//	OGCODE_POSTHOG_LOGS_LEVEL severity floor for shipped records (default warn)
+//	OGCODE_POSTHOG_LOGS_LEVEL severity floor for shipped records (default warn); off stops shipping
 //
-// Shipping is on by default and honours DO_NOT_TRACK; records are redacted before
-// they leave the process.
+// Shipping honours DO_NOT_TRACK and follows the file: a logger whose file
+// level is off (OGCODE_LOG_LEVEL=off) ships nothing. Records are redacted
+// before they leave the process, ship without absolute paths, and every loss
+// is counted — ShipStats and the summary logged at Close say what reached the
+// endpoint and what did not.
 package logging
 
 import (
@@ -77,11 +81,14 @@ type Options struct {
 // apply OGCODE_LOG_DIR).
 func FromEnv(dir, name string) Options {
 	o := Options{
-		Dir:     dir,
-		Name:    name,
-		Level:   slog.LevelInfo,
-		Format:  "text",
-		Console: slog.LevelError,
+		Dir:    dir,
+		Name:   name,
+		Level:  slog.LevelInfo,
+		Format: "text",
+		// The terminal default is warn, not error: a warning that never
+		// reaches the user is a warning the user cannot act on. Override with
+		// OGCODE_LOG_CONSOLE; off silences the terminal entirely.
+		Console: slog.LevelWarn,
 		Rotate: RotateOptions{
 			MaxSize:    DefaultMaxSizeMB << 20,
 			MaxBackups: DefaultMaxFiles,
@@ -181,16 +188,42 @@ func (l *Logger) Path() string {
 	return l.file.Path()
 }
 
-// Close stops the PostHog sink (flushing any buffered records), closes the file
-// and waits for pending rotation housekeeping.
+// Close stops the PostHog sink (flushing any buffered records), closes the
+// file and waits for pending rotation housekeeping. Before the file goes it
+// logs one summary of what shipping did — Info on a quiet day, Warn when
+// anything was dropped — so the logger itself carries the evidence of whether
+// its records were reaching PostHog.
 func (l *Logger) Close() error {
 	if l.ship != nil {
 		l.ship.stop()
+		st := l.ShipStats()
+		args := []any{
+			"queued", st.Queued, "sent", st.Sent,
+			"droppedQueue", st.DroppedQueue, "droppedEncode", st.DroppedEncode,
+			"droppedRequest", st.DroppedRequest, "droppedTransport", st.DroppedTransport,
+			"droppedStatus", st.DroppedStatus, "unflushed", st.Unflushed,
+		}
+		if dropped := st.DroppedQueue + st.DroppedEncode + st.DroppedRequest +
+			st.DroppedTransport + st.DroppedStatus + st.Unflushed; dropped > 0 {
+			l.Warn("posthog log shipping summary", args...)
+		} else {
+			l.Info("posthog log shipping summary", args...)
+		}
 	}
 	if l.file == nil {
 		return nil
 	}
 	return l.file.Close()
+}
+
+// ShipStats reports what the PostHog shipping sink has done so far: how many
+// batches were accepted, where batches and records were lost, and — Enabled
+// false — that this logger ships nothing at all.
+func (l *Logger) ShipStats() ShipStats {
+	if l.ship == nil {
+		return ShipStats{}
+	}
+	return l.ship.snapshot()
 }
 
 // New builds a logger from o. It never fails: if the file cannot be opened
@@ -222,7 +255,7 @@ func New(o Options) *Logger {
 		handlers = append(handlers, consoleHandler(stderr, o.Console))
 	}
 	if o.shipsLogs() {
-		l.ship = newPostHogSink(posthogShipLevel(), posthogLogsEndpoint, posthogLogsToken, posthogLogsClient, posthogFlushInterval)
+		l.ship = newPostHogSink(posthogShipLevel(), posthogLogsEndpoint, posthogLogsToken, posthogLogsClient, posthogFlushInterval, o)
 		handlers = append(handlers, &posthogHandler{sink: l.ship})
 	}
 	switch len(handlers) {
@@ -232,6 +265,28 @@ func New(o Options) *Logger {
 		l.Logger = slog.New(handlers[0])
 	default:
 		l.Logger = slog.New(slog.NewMultiHandler(handlers...))
+	}
+	if l.file != nil {
+		// The file's own maintenance failures (rotation, reopening, pruning,
+		// compression, sync) go everywhere except back into the file: another
+		// record in a file that cannot be rotated helps nobody, and reporting
+		// it from under the writer's lock would deadlock. The terminal and the
+		// shipping sink still hear it.
+		alerts := make([]slog.Handler, 0, 2)
+		if o.Console != LevelOff {
+			// A file that cannot rotate or flush is worth the user's attention
+			// whatever the terminal's usual threshold is.
+			alerts = append(alerts, consoleHandler(stderr, min(o.Console, slog.LevelWarn)))
+		}
+		if l.ship != nil {
+			alerts = append(alerts, &posthogHandler{sink: l.ship})
+		}
+		if len(alerts) > 0 {
+			alert := slog.New(slog.NewMultiHandler(alerts...))
+			l.file.SetErrorHandler(func(op string, err error) {
+				alert.Warn("log file maintenance failed", "op", op, "err", err)
+			})
+		}
 	}
 	if openErr != nil {
 		l.Warn("file logging unavailable; logging to the terminal instead", "err", openErr)
@@ -250,8 +305,10 @@ func Setup(o Options) *Logger {
 
 func fileHandler(w io.Writer, o Options) slog.Handler {
 	opts := &slog.HandlerOptions{
-		Level:       o.Level,
-		AddSource:   o.Level <= slog.LevelDebug,
+		Level: o.Level,
+		// The file always records source: file:line is what makes a log
+		// shared across processes and restarts readable, at every level.
+		AddSource:   true,
 		ReplaceAttr: redactAttr,
 	}
 	if o.Format == "json" {
@@ -293,12 +350,14 @@ func isTerminalWriter(w io.Writer) bool {
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
-// shipsLogs reports whether this logger forwards records to PostHog Logs. It is
-// on by default, but only for a logger with a file behind it — a real command, not
-// the throwaway bootstrap that has no Name — and only while OGCODE_POSTHOG_LOGS
-// has not turned it off and the floor admits some level.
+// shipsLogs reports whether this logger forwards records to PostHog Logs. It
+// is on by default, but only for a logger with a file behind it — a real
+// command, not the throwaway bootstrap that has no Name — and only while the
+// file level is not off (OGCODE_LOG_LEVEL=off turned logging off; it must not
+// keep shipping), OGCODE_POSTHOG_LOGS has not turned it off, and the floor
+// admits some level.
 func (o Options) shipsLogs() bool {
-	return o.Name != "" && posthogLogsEnabled() && posthogShipLevel() != LevelOff
+	return o.Name != "" && o.Level != LevelOff && posthogLogsEnabled() && posthogShipLevel() != LevelOff
 }
 
 // posthogShipLevel is the severity floor for shipped records: the configured

@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -78,7 +79,17 @@ func newCodeReceiver() (*codeReceiver, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", r.handleCallback)
 	r.server = &http.Server{Handler: mux}
-	go func() { _ = r.server.Serve(listener) }()
+	go func() {
+		err := r.server.Serve(listener)
+		if err == nil || errors.Is(err, http.ErrServerClosed) {
+			// Both are the receiver being closed intentionally (Manager.Close).
+			// Anything else is the callback server dying under an in-flight
+			// authorization flow, which leaves the flow hanging.
+			slog.Debug("mcp oauth callback server stopped")
+		} else {
+			slog.Warn("mcp oauth callback server stopped", "err", err)
+		}
+	}()
 	return r, nil
 }
 
@@ -331,7 +342,11 @@ func newOAuthHandler(ctx context.Context, name string, sc config.MCPServerConfig
 
 	// Persist every access-token change (the initial grant and each refresh).
 	cfg.NewTokenSource = func(c context.Context, oc *oauth2.Config, tok *oauth2.Token) (oauth2.TokenSource, error) {
-		_ = saveToken(name, tokenToStored(tok, oc)) // best-effort; refresh still works
+		// Best-effort; refresh still works, but a failed persist means the user
+		// is silently re-prompted for auth on the next run.
+		if err := saveToken(name, tokenToStored(tok, oc)); err != nil {
+			slog.Warn("mcp: save oauth token failed", "server", name, "err", err)
+		}
 		return newSavingTokenSource(oc.TokenSource(c, tok), tok, func(persisted *oauth2.Token) error {
 			return saveToken(name, tokenToStored(persisted, oc))
 		}), nil

@@ -28,6 +28,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 	sessions, err := s.store.List(directory)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list sessions", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -76,6 +77,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.Create(sess); err != nil {
+		slog.ErrorContext(r.Context(), "create session", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -96,6 +98,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	id := session.SessionID(chi.URLParam(r, "sessionID"))
 	sess, err := s.store.Get(id)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "get session", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -110,6 +113,7 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	id := session.SessionID(chi.URLParam(r, "sessionID"))
 	sess, err := s.store.Get(id)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "get session for update", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -158,6 +162,7 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	sess.UpdatedAt = session.Now()
 
 	if err := s.store.Update(sess); err != nil {
+		slog.ErrorContext(r.Context(), "update session", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -228,6 +233,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.Delete(id); err != nil {
+		slog.ErrorContext(r.Context(), "delete session", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -491,6 +497,7 @@ func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 
 	messages, hasOlder, err := s.store.GetMessagesPage(sessionID, before, transcriptLimit(r))
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list messages", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -572,6 +579,7 @@ func (s *Server) handleSessionTokens(w http.ResponseWriter, r *http.Request) {
 	id := session.SessionID(chi.URLParam(r, "sessionID"))
 	sess, err := s.store.Get(id)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "get session for tokens", "err", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -581,6 +589,7 @@ func (s *Server) handleSessionTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	counts, utility, err := sessionTokenTotals(s.store, sess)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "sum session tokens", "err", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -589,6 +598,7 @@ func (s *Server) handleSessionTokens(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	handles, err := s.spawnedTeammates(ctx, id)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list session teammates", "err", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -672,6 +682,11 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 
 	sess, err := s.store.Get(sessionID)
 	if err != nil || sess == nil {
+		if err != nil {
+			// A store failure here is internal, not a missing session; keep
+			// the 404 but leave the cause recoverable.
+			slog.WarnContext(r.Context(), "get session", "session", sessionID, "err", err)
+		}
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -718,6 +733,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: session.Now(),
 	}
 	if err := s.store.CreateMessage(userMsg); err != nil {
+		slog.ErrorContext(r.Context(), "create user message", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -734,6 +750,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: session.Now(),
 	}
 	if err := s.store.CreatePart(userPart); err != nil {
+		slog.ErrorContext(r.Context(), "create user text part", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

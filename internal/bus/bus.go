@@ -2,8 +2,10 @@ package bus
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Event struct {
@@ -25,7 +27,10 @@ type Bus struct {
 	closed  bool
 	bufSize int
 	seq     atomic.Int64
-	dropped atomic.Int64 // total events dropped to full subscriber buffers
+	// lastWarnUnixNano rate-limits the drop warning from warnDropped below:
+	// nanos of the last warn, guarded by compare-and-swap.
+	lastWarnUnixNano atomic.Int64
+	dropped          atomic.Int64 // total events dropped to full subscriber buffers
 }
 
 func New(bufSize int) *Bus {
@@ -50,10 +55,33 @@ func (b *Bus) Publish(eventType string, properties any) {
 		default:
 			// Buffer full — drop rather than block the publisher (often the agent
 			// loop's hot path). The seq gap lets the client detect and resync.
-			b.dropped.Add(1)
+			total := b.dropped.Add(1)
+			b.warnDropped(evt.Type, evt.Seq, total)
 		}
 	}
 	b.mu.RUnlock()
+}
+
+// dropWarnInterval rate-limits warnDropped.
+const dropWarnInterval = time.Second
+
+// warnDropped reports an event lost to a full subscriber buffer at most once
+// per interval across the whole bus: Publish sits on the agent loop's hot
+// path, and a full buffer can shed events faster than anyone should hear
+// about it. The last-warned timestamp is guarded by a compare-and-swap, so
+// concurrent publishers racing on the window cannot each log — a loser
+// observes the winner's fresh stamp and stays quiet. eventType is a bounded
+// constant, never user content, and the event's properties are not logged.
+func (b *Bus) warnDropped(eventType string, seq, total int64) {
+	now := time.Now().UnixNano()
+	last := b.lastWarnUnixNano.Load()
+	if now-last < int64(dropWarnInterval) {
+		return
+	}
+	if !b.lastWarnUnixNano.CompareAndSwap(last, now) {
+		return
+	}
+	slog.Warn("sse event dropped: subscriber buffer full", "type", eventType, "seq", seq, "dropped", total)
 }
 
 // Dropped returns the cumulative number of events dropped to full subscriber

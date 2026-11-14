@@ -49,7 +49,7 @@ var secretPatterns = []struct {
 	// Authorization header values.
 	{regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}`), "${1} " + Redacted},
 	// name=value for a name that is always a secret, in a query string or prose.
-	{regexp.MustCompile(`(?i)\b((?:x[_-]?)?api[_-]?key|(?:access|refresh|id|auth)[_-]?token|client[_-]?secret|token|secret|password|passwd)=[^\s&"',;]+`), "${1}=" + Redacted},
+	{regexp.MustCompile(`(?i)\b((?:x[_-]?)?api[_-]?key|(?:access|refresh|id|auth)[_-]?token|client[_-]?secret|token|secret|password|passwd|pass|pwd|sessionid|session[_-]?id|session|sid|csrf|xsrf|jwt)=[^\s&"',;]+`), "${1}=" + Redacted},
 	// Short query parameters that are secrets only inside a URL (?key= is how
 	// Gemini takes its API key; code= is an OAuth authorization code).
 	{regexp.MustCompile(`(?i)([?&](?:key|code|sig|signature)=)[^\s&"'#]+`), "${1}" + Redacted},
@@ -57,6 +57,27 @@ var secretPatterns = []struct {
 	{regexp.MustCompile(`(?i)("(?:(?:x[_-]?)?api[_-]?key|(?:access|refresh|id|auth)[_-]?token|client[_-]?secret|token|secret|password|authorization)"\s*:\s*")[^"]*"`), "${1}" + Redacted + `"`},
 	// Well-known credential shapes, wherever they appear.
 	{regexp.MustCompile(`\b(?:sk-ant-[A-Za-z0-9_-]{8,}|sk-(?:proj-|or-v1-|svcacct-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|tvly-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})`), Redacted},
+	// A Cookie or Set-Cookie header anywhere: the whole header line is a
+	// secret — session ids, CSRF tokens, tracking values — up to the newline.
+	{regexp.MustCompile(`(?i)\b((?:set-)?cookie)\s*:[^\n]*`), "${1}: " + Redacted},
+	// A secret-named key and colon inside a formatted value: %+v stringifies
+	// KindAny maps and structs as map[token:abc user:x] or {APIKey:abc}, and
+	// the key-based redaction never sees a name in there. Blank the value —
+	// one non-space token, so map[...] and {...} keep their closing brackets —
+	// and never a count: a plural key such as "tokens: 5" or "inputTokens:
+	// 120" holds a number and stays. The value may not contain brackets: that
+	// keeps a "[REDACTED]" marker an earlier pattern produced from being
+	// matched again and its closing "]" doubled. The separator is captured so
+	// "key:value" and "key: value" keep their original spacing. Authorization
+	// is deliberately absent: an "Authorization: Bearer …" header is redacted
+	// by the pattern above, and blanking the scheme's word here would corrupt
+	// it.
+	{regexp.MustCompile(`(?i)\b(api[_-]?key|(?:access|refresh|id|auth)[_-]?token|client[_-]?secret|token|secret|password|passwd|pass|pwd|credential|cookie|auth|jwt|session[_-]?id)(\s*:\s*)[^\s\]\}[]+`), "${1}${2}" + Redacted},
+	// Content-bearing query parameters: these carry user content — the Cmd-K
+	// search text, a directory path, a prompt — so their value never leaves
+	// the process. They are not credential-shaped, which is why this pattern
+	// runs after every secret one above and those keep their own redaction.
+	{regexp.MustCompile(`(?i)([?&](?:q|query|prompt|text|content|message|body|title|note|search|directory|dir|path|file|filename|url|uri)=)[^\s&"'#]+`), "${1}" + Redacted},
 }
 
 // Scrub removes secrets from free text.
@@ -87,6 +108,21 @@ func redactAttr(groups []string, a slog.Attr) slog.Attr {
 		if c := Scrub(s); c != s {
 			return slog.String(a.Key, c)
 		}
+	case slog.KindGroup:
+		// A group reaches here when a caller hands one over directly; the
+		// built-in handlers expand one into its members and call ReplaceAttr
+		// per member before this sees them, but a custom handler may not,
+		// so walk the group: keep the key and the group-ness, redact every
+		// member with the group key added to the prefix.
+		attrs := a.Value.Group()
+		inner := make([]slog.Attr, 0, len(attrs))
+		for _, ga := range attrs {
+			inner = append(inner, redactAttr(append(append([]string{}, groups...), a.Key), ga))
+		}
+		if a.Key == "" { // A keyless group inlines into its parent.
+			return slog.Attr{Value: slog.GroupValue(inner...)}
+		}
+		return slog.Attr{Key: a.Key, Value: slog.GroupValue(inner...)}
 	case slog.KindAny:
 		var s string
 		switch v := a.Value.Any().(type) {

@@ -2,6 +2,7 @@ package logging
 
 import (
 	"compress/gzip"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -330,4 +331,242 @@ func TestWriteAfterCloseFails(t *testing.T) {
 	if _, err := r.Write([]byte("late\n")); err == nil {
 		t.Error("write after Close succeeded")
 	}
+}
+
+// A rotation whose rename fails is reported to the error handler, and logging
+// carries on into the oversized file.
+func TestRenameFailureIsReportedAndWritingContinues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ogcode.log")
+	origRename := renameFile
+	replaced := errors.New("rename blocked")
+	renameFile = func(from, to string) error { return replaced }
+	t.Cleanup(func() { renameFile = origRename })
+
+	var mu sync.Mutex
+	var ops []string
+	r := openAt(t, path, RotateOptions{MaxSize: 30}, time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC))
+	r.SetErrorHandler(func(op string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		ops = append(ops, op)
+	})
+	line := strings.Repeat("a", 29) + "\n"
+	writeLines(t, r, 3, line)
+	r.Close()
+
+	mu.Lock()
+	got := append([]string(nil), ops...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != "rotate" {
+		t.Errorf("error handler saw %v, want [rotate]", got)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != strings.Repeat(line, 3) {
+		t.Errorf("file holds %d bytes after a failed rotation, want all 3 lines", len(b))
+	}
+}
+
+// When the rename keeps failing and the live file has grown past twice
+// MaxSize, it is truncated in place: disk use is bounded and the tail is
+// dropped, and logging continues from a fresh file.
+func TestTruncatesLiveFileWhenRotationKeepsFailing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ogcode.log")
+	origRename := renameFile
+	renameFile = func(from, to string) error { return errors.New("rename blocked") }
+	t.Cleanup(func() { renameFile = origRename })
+
+	var mu sync.Mutex
+	var bounded string
+	r := openAt(t, path, RotateOptions{MaxSize: 40}, time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC))
+	r.SetErrorHandler(func(op string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if op == "rotate" && strings.Contains(err.Error(), "truncated in place") && strings.Contains(err.Error(), "tail dropped") {
+			bounded = err.Error()
+		}
+	})
+	line := strings.Repeat("a", 39) + "\n"
+	// rotationRetry is a minute away on the fake clock (one second per call),
+	// so keep writing until a retry of the rename grows past twice MaxSize and
+	// gets truncated.
+	for i := 0; i < 200; i++ {
+		if _, err := r.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		boundedYet := bounded != ""
+		mu.Unlock()
+		if boundedYet {
+			break
+		}
+	}
+	r.Close()
+
+	if bounded == "" {
+		t.Error("no report that the disk was bounded by truncation")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != line {
+		t.Errorf("file holds %d bytes, want only the post-truncation line", len(b))
+	}
+	files := logFiles(t, dir)
+	if len(files) != 1 || files[0] != "ogcode.log" {
+		t.Errorf("directory holds %v, want only the live file", files)
+	}
+}
+
+// A handler that panics costs its one report, not the log.
+func TestErrorHandlerPanicDoesNotStopLogging(t *testing.T) {
+	origRename := renameFile
+	renameFile = func(from, to string) error { return errors.New("rename blocked") }
+	t.Cleanup(func() { renameFile = origRename })
+
+	r, dir := openTest(t, RotateOptions{MaxSize: 30})
+	r.SetErrorHandler(func(op string, err error) { panic("handler bug") })
+	line := strings.Repeat("a", 29) + "\n"
+	writeLines(t, r, 2, line) // the second write rotates and reports
+	r.Close()
+	b, err := os.ReadFile(filepath.Join(dir, "ogcode.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != strings.Repeat(line, 2) {
+		t.Errorf("file holds %d bytes, want both lines", len(b))
+	}
+}
+
+// A reopen that fails (the log directory went read-only out from under the
+// live line) is reported, not swallowed.
+func TestReopenFailureIsReported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ogcode.log")
+	r := openAt(t, path, RotateOptions{MaxSize: 1 << 20}, time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC))
+	writeLines(t, r, 1, "first\n")
+	// The live line is deleted while the directory still lets us delete it,
+	// then the directory is made read-only so reopening cannot recreate it.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	var mu sync.Mutex
+	var ops []string
+	r.SetErrorHandler(func(op string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		ops = append(ops, op)
+	})
+	_, _ = r.Write([]byte("second\n")) // the reopen fails; Write returns the error
+	// Restore the directory before anything cleans up, so leftovers can go.
+	os.Chmod(dir, 0o700)
+
+	mu.Lock()
+	got := append([]string(nil), ops...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != "reopen" {
+		t.Errorf("error handler saw %v, want [reopen]", got)
+	}
+}
+
+// Sync flushes only unsynced writes: a clean file is a no-op, a written one
+// flushes once and then counts as clean, and Close flushes what is left.
+func TestSyncFlushesUnsyncedWritesOnly(t *testing.T) {
+	r, _ := openTest(t, RotateOptions{MaxSize: 1 << 20})
+	origSync := syncFile
+	var mu sync.Mutex
+	flushes := 0
+	syncFile = func(f *os.File) error {
+		mu.Lock()
+		flushes++
+		mu.Unlock()
+		return f.Sync()
+	}
+	t.Cleanup(func() { syncFile = origSync })
+
+	if err := r.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if flushes != 0 {
+		t.Errorf("Sync with no writes flushed %d times, want 0", flushes)
+	}
+	mu.Unlock()
+
+	writeLines(t, r, 1, "x\n")
+	if err := r.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if flushes != 1 {
+		t.Errorf("Sync after a write flushed %d times, want 1", flushes)
+	}
+	mu.Unlock()
+
+	if err := r.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if flushes != 1 {
+		t.Errorf("a second Sync flushed again: %d flushes, want 1", flushes)
+	}
+	mu.Unlock()
+
+	writeLines(t, r, 1, "y\n")
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if flushes != 2 {
+		t.Errorf("Close flushed %d times total, want the one dirty write", flushes)
+	}
+	mu.Unlock()
+}
+
+// The mill goroutine flushes unsynced writes on its timer, so a crash cannot
+// lose more than one tick of tail.
+func TestMillLoopFlushesPeriodically(t *testing.T) {
+	origEvery := syncEvery
+	syncEvery = 20 * time.Millisecond
+	t.Cleanup(func() { syncEvery = origEvery })
+	origSync := syncFile
+	var mu sync.Mutex
+	flushes := 0
+	syncFile = func(f *os.File) error {
+		mu.Lock()
+		flushes++
+		mu.Unlock()
+		return f.Sync()
+	}
+	t.Cleanup(func() { syncFile = origSync })
+
+	r, _ := openTest(t, RotateOptions{MaxSize: 1 << 20})
+	writeLines(t, r, 1, "periodic\n")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := flushes
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the mill goroutine never flushed the unsynced write")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.Close()
 }

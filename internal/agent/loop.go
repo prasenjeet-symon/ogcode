@@ -3478,12 +3478,12 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 			outcome = toolOutcomeCompleted
 		}
 		took := time.Since(start)
-		slog.Info("tool call finished", "session", sessionID, "agent", agent.ID,
-			"tool", tc.Name, "status", outcome, "duration_ms", took.Milliseconds())
 		errText := ""
 		if err != nil {
 			errText = err.Error()
 		}
+		slog.Info("tool call finished", "session", sessionID, "agent", agent.ID,
+			"tool", tc.Name, "status", outcome, "duration_ms", took.Milliseconds(), "err", errText)
 		auditToolCall(workDir, string(sessionID), agent.ID, tc.Name, tc.Input, outcome, start, took, modelID, providerID, errText)
 	})
 

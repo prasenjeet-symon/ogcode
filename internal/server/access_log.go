@@ -3,11 +3,31 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"net/url"
 	"runtime/debug"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 )
+
+// queryParamNames lists the distinct parameter names of a query string,
+// sorted and comma-joined ("directory,q"), "" when there are none. The names
+// say what a caller asked with and are content-free; the values are the
+// content (search text, directory paths) and never reach a log line.
+func queryParamNames(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	values, _ := url.ParseQuery(rawQuery) // a malformed query still yields the names it could read
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
+}
 
 // accessLog records each request through slog, so it lands in the log file
 // (with the file's redaction) rather than on the terminal, where chi's
@@ -44,7 +64,8 @@ func accessLog(floor slog.Level) func(http.Handler) http.Handler {
 				slog.LogAttrs(ctx, level, "http request",
 					slog.String("method", r.Method),
 					slog.String("host", r.Host),
-					slog.String("uri", r.URL.RequestURI()),
+					slog.String("path", r.URL.Path), // the path only: query values are content
+					slog.String("queryKeys", queryParamNames(r.URL.RawQuery)),
 					slog.Int("status", status),
 					slog.Int("bytes", ww.BytesWritten()),
 					slog.Duration("duration", time.Since(start)),
@@ -74,7 +95,8 @@ func recoverer(next http.Handler) http.Handler {
 			}
 			slog.ErrorContext(r.Context(), "http handler panic",
 				"method", r.Method,
-				"uri", r.URL.RequestURI(),
+				"path", r.URL.Path, // the path only: query values are content
+				"queryKeys", queryParamNames(r.URL.RawQuery),
 				"requestId", middleware.GetReqID(r.Context()),
 				"panic", rvr,
 				"stack", string(debug.Stack()),

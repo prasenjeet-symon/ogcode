@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	files, err := git.Status(dir)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "git status", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -54,6 +56,7 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 	staged := r.URL.Query().Has("staged")
 	out, err := git.DiffFile(dir, path, staged)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "git diff", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -75,6 +78,7 @@ func (s *Server) handleGitCommits(w http.ResponseWriter, r *http.Request) {
 	}
 	commits, err := git.RecentCommits(dir, n)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "git commits", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -95,6 +99,7 @@ func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := git.ShowCommit(dir, sha)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "git show commit", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -119,6 +124,7 @@ func (s *Server) handleGitStage(w http.ResponseWriter, r *http.Request) {
 	s.gitMu.Lock()
 	defer s.gitMu.Unlock()
 	if err := git.Stage(dir, body.Paths); err != nil {
+		slog.ErrorContext(r.Context(), "git stage", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -143,6 +149,7 @@ func (s *Server) handleGitUnstage(w http.ResponseWriter, r *http.Request) {
 	s.gitMu.Lock()
 	defer s.gitMu.Unlock()
 	if err := git.Unstage(dir, body.Paths); err != nil {
+		slog.ErrorContext(r.Context(), "git unstage", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -177,6 +184,7 @@ func (s *Server) handleGitCommitCreate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		slog.ErrorContext(r.Context(), "git commit", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
