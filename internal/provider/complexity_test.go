@@ -128,3 +128,29 @@ func TestSetComplexityHeaderLeavesAnUnpredictedTaskAlone(t *testing.T) {
 		t.Errorf("%s = %q, want %q", headerComplexity, got, ComplexityHard)
 	}
 }
+
+// TestComplexityForEffortNamesOnlyTheThreeDepths pins the inverse of the
+// router's ladder: a level the router maps back onto itself names its class,
+// and every other level names none — the router replaces a body level with the
+// class's level, so an invented class would move a call the caller placed.
+func TestComplexityForEffortNamesOnlyTheThreeDepths(t *testing.T) {
+	for _, tc := range []struct {
+		effort string
+		want   Complexity
+	}{
+		{EffortLow, ComplexityEasy},
+		{EffortMedium, ComplexityMedium},
+		{EffortHigh, ComplexityHard},
+		{"", ""},
+		{EffortNone, ""},
+		{EffortOn, ""},
+		{EffortMinimal, ""},
+		{EffortXHigh, ""},
+		{EffortMax, ""},
+		{"trivial", ""},
+	} {
+		if got := ComplexityForEffort(tc.effort); got != tc.want {
+			t.Errorf("ComplexityForEffort(%q) = %q, want %q", tc.effort, got, tc.want)
+		}
+	}
+}

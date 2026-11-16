@@ -31,11 +31,13 @@ const (
 	searchMaxCandidates = 24 // cap on unique results fed to the ranker
 	// searchRankMaxTokens is the ranker's whole output budget, and a reasoning
 	// model spends it on its chain of thought before it writes the numbers:
-	// beam@low used 481 of a 512-token cap on one probe. A cap sized for "a few
-	// line-separated numbers" therefore returns no numbers at all, with
+	// beam@low used 481 of a 512-token cap on one probe, and a later run still
+	// hit the raised 1024 cap while 4.5k characters of reasoning were all it had
+	// produced, so the ranker fell back to unranked results. A cap sized for "a
+	// few line-separated numbers" therefore returns no numbers at all, with
 	// finish=length. The number is a bound, not an allocation — nothing is billed
 	// or waited for that the model does not write.
-	searchRankMaxTokens  = 1024
+	searchRankMaxTokens  = 4096
 	searchSynthMaxTokens = 4096 // output budget for the final synthesis call
 
 	// searchFetchTimeout bounds Stage 3 as a whole so a single wedged host or

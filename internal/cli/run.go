@@ -109,6 +109,12 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open global config database: %w", err)
 	}
 
+	// The provider request ceiling is machine-wide: apply the stored preference
+	// (the environment variable still wins) before any request is made.
+	if _, err := session.ApplyProviderConcurrency(globalDatabase); err != nil {
+		slog.Warn("apply provider concurrency", "err", err)
+	}
+
 	// Match the server: notes off means no notes text reaches an agent prompt.
 	// The decision is read once at startup — the whole life of a one-shot run —
 	// with a short timeout so a slow PostHog cannot stall the run.
@@ -393,6 +399,15 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 			}
 			return len(paths)
 		},
+		// Image analysis (analyze_image) consults the machine-wide image model
+		// preference when set, falling back to the active session's model.
+		ImageModel: func() (string, string) {
+			pref, err := session.GetImageModel(globalDatabase)
+			if err != nil {
+				return "", ""
+			}
+			return pref.Model, pref.ProviderID
+		},
 	}
 	lr.NotesEnabled = new(atomic.Bool)
 	lr.NotesEnabled.Store(notesEnabled)
@@ -405,6 +420,13 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if searchBridge != nil {
 		toolRegistry.Register(tool.DeepSearchTool{Run: lr.RunSearchSession, Cache: webCache})
 	}
+	// analyze_image is a one-shot vision call, not a search pipeline: it has no
+	// bridge to gate on, and the cache is optional (nil webCache skips caching).
+	toolRegistry.Register(tool.AnalyzeImageTool{
+		Run:          lr.RunVisionSession,
+		ResolveModel: lr.ResolveVisionModel,
+		Cache:        webCache,
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

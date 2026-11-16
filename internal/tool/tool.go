@@ -51,6 +51,11 @@ type Context struct {
 	// than one provider (a plan model by both OGX and an OpenAI-compatible
 	// endpoint), so the id alone does not identify one.
 	Provider string
+	// Effort is the reasoning effort the run resolved for its model — the
+	// session's choice when that model takes it, otherwise empty. A tool that
+	// makes its own model call (analyze_image) reads it so the call inherits
+	// the depth the user asked for instead of always running flat.
+	Effort string
 	// IntentMatcher is true when this turn runs the plan matcher: the steps the
 	// agent states with update_intent are matched against the skills and MCP
 	// tools it holds, and the result names the ones that fit. A tool that would

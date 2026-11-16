@@ -271,7 +271,8 @@ func (p *lazyDocProvider) StreamChat(_ context.Context, req provider.StreamReque
 // TestRunLoop_PDFPairOfferedByMatcher is the end-to-end proof: a plan step that
 // reads a PDF puts the PDF pair on the next provider request, while the rest of
 // the document tools and schedule stay off it. The offer follows the step, not a
-// fixed group.
+// fixed group. analyze_image is the counter-example — not a lazy tool, it rides
+// the first request like deep_search does.
 func TestRunLoop_PDFPairOfferedByMatcher(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
 	if err != nil {
@@ -296,6 +297,7 @@ func TestRunLoop_PDFPairOfferedByMatcher(t *testing.T) {
 		tools.Register(fakeCatalogTool{id: id, desc: "document tool (test)"})
 	}
 	tools.Register(fakeCatalogTool{id: "schedule", desc: "reminder (test)"})
+	tools.Register(fakeCatalogTool{id: "analyze_image", desc: "vision (test)"})
 
 	lr := &LoopRunner{
 		Store:    store,
@@ -365,6 +367,9 @@ func TestRunLoop_PDFPairOfferedByMatcher(t *testing.T) {
 		if has(first, id) {
 			t.Errorf("lazy tool %q rode the wire before a plan step named one", id)
 		}
+	}
+	if !has(first, "analyze_image") {
+		t.Errorf("analyze_image is not a lazy tool and must ride the first build request; wire = %v", first)
 	}
 
 	second := names[1]

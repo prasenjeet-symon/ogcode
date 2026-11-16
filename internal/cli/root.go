@@ -111,6 +111,12 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 	defer globalDatabase.Close()
 
+	// The provider request ceiling is machine-wide: apply the stored preference
+	// (the environment variable still wins) before any request is made.
+	if _, err := session.ApplyProviderConcurrency(globalDatabase); err != nil {
+		slog.Warn("apply provider concurrency", "err", err)
+	}
+
 	// Match the server: notes off means no notes text reaches an agent prompt.
 	// The decision is read once at startup — the whole life of a one-shot run —
 	// with a short timeout so a slow PostHog cannot stall the run.

@@ -41,6 +41,12 @@ import (
 // open one, and pointing the rest at pdf_index sends them after a call they
 // will never be offered. They are told the documents exist and that they
 // cannot read them, which is the part that changes what they do next.
+//
+// Inside that paragraph only the lazy-arrival sentence is build-only — an
+// agent holding its document tools from the first request must not be
+// promised a later arrival. The analyze_image sentence rides every
+// hasDocTools prompt: the tool is never withheld on the wire, and note and
+// subagent hold both picture tools, so they get it too.
 func projectIndexPrompt(role string, hasBash, hasDocTools bool) string {
 	// The final workflow step differs by role: write-capable agents make changes,
 	// read-only agents produce their note instead.
@@ -57,12 +63,21 @@ func projectIndexPrompt(role string, hasBash, hasDocTools bool) string {
 	docRule := `Documents are indexed too, but a PDF or DOCX leaf carries labels aggregated across the whole file, not a per-page breakdown, so it tells you which document is relevant but not which page: call "pdf_index" (or "docx_index") on that file for its per-page labels, then "read_pdf_page" (or "read_docx_page") for the page itself. Spreadsheets are indexed as well: call "query_sheet" on a CSV, TSV or XLSX/XLSM file to run one read-only SQL query against its sheets — each sheet becomes a SQLite table, so "SELECT * FROM Sheet1 LIMIT 20" is the cheapest way to see what the file holds.`
 	if !hasDocTools {
 		docRule = `Documents are indexed too, so PDF and DOCX files appear in the tree with labels aggregated across the whole file. You have no tool to open one. If the work depends on what is inside a document, say so explicitly rather than guessing at its contents.`
-	} else if role == "build" {
-		// The interactive build agent's wire withholds these tools until the
-		// intent matcher names each one for a plan step (see lazyTools), so the
-		// rule that sends it to pdf_index has to say how the tool arrives —
-		// otherwise the first step of a document turn looks like a dead end.
-		docRule += ` These tools, and "latex_to_pdf" with them, arrive on the wire on demand: a tool is offered once a plan step describes what it does, so state that step first rather than giving up because the tool is not offered yet.`
+	} else {
+		if role == "build" {
+			// The interactive build agent's wire withholds these tools until
+			// the intent matcher names each one for a plan step (see
+			// lazyTools), so the rule that sends it to pdf_index has to say
+			// how the tool arrives — otherwise the first step of a document
+			// turn looks like a dead end.
+			docRule += ` These tools, along with "latex_to_pdf", arrive on the wire on demand: a tool is offered once a plan step describes what it does, so state that step first rather than giving up because the tool is not offered yet.`
+		}
+		// analyze_image is not one of the on-demand tools: it rides every
+		// request, so a step about a picture can call it without a plan step
+		// naming it first. Not gated on role — every hasDocTools agent holds
+		// both picture tools, so note and subagent prompts carry the sentence
+		// too, reading as the next sentence of the same paragraph.
+		docRule += ` "analyze_image" is the exception among the picture tools: it is on the wire from the first request, so when the work turns on what a screenshot, PNG or JPEG file, scanned page, chart, diagram or photo shows — including a debugging inquiry about the failure one of them shows — call it directly and ask it the question; its answer names the visible evidence, what that indicates and what to check next. "view_image" only attaches the picture for a model that can see images.`
 	}
 
 	// Only the build role arrives with write access; every other agent is

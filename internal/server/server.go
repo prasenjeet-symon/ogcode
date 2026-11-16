@@ -328,6 +328,12 @@ func (s *Server) serve(ctx context.Context) error {
 	}
 	s.globalDB = globalDatabase
 
+	// The provider request ceiling is machine-wide: apply the stored preference
+	// (the environment variable still wins) before any request is made.
+	if _, err := session.ApplyProviderConcurrency(globalDatabase); err != nil {
+		slog.Warn("apply provider concurrency", "err", err)
+	}
+
 	s.bus = bus.New(256)
 
 	// 2s cadence, 120 samples retained — a four-minute window, which is long
@@ -721,6 +727,15 @@ func (s *Server) serve(ctx context.Context) error {
 			}
 			return pref.Model, pref.ProviderID
 		},
+		// Image analysis (analyze_image) consults the machine-wide image model
+		// preference when set, falling back to the active session's model.
+		ImageModel: func() (string, string) {
+			pref, err := session.GetImageModel(s.globalDB)
+			if err != nil {
+				return "", ""
+			}
+			return pref.Model, pref.ProviderID
+		},
 	}
 
 	// Index whatever the memory corpus already holds, once per project per boot,
@@ -748,6 +763,16 @@ func (s *Server) serve(ctx context.Context) error {
 		toolRegistry.Register(tool.DeepSearchTool{Run: s.loopRunner.RunSearchSession, Cache: s.webCache})
 		slog.Info("deep_search tool registered")
 	}
+
+	// Register analyze_image after loopRunner is built (needs RunVisionSession).
+	// Available regardless of the search bridge — it is a one-shot LLM call, not
+	// a search pipeline, and the cache is optional (nil webCache skips caching).
+	toolRegistry.Register(tool.AnalyzeImageTool{
+		Run:          s.loopRunner.RunVisionSession,
+		ResolveModel: s.loopRunner.ResolveVisionModel,
+		Cache:        s.webCache,
+	})
+	slog.Info("analyze_image tool registered")
 
 	// Register the task sub-agent tool (needs RunTaskSession). Available
 	// regardless of the search bridge — the sub-agent is a read-only codebase

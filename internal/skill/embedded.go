@@ -48,7 +48,7 @@ func Embedded() ([]Skill, []error) {
 // AGENT.md explaining what AGENT.md is for.
 const ogcodeKnowledgeSkill = `---
 name: ogcode-knowledge
-description: Ogcode's own knowledge base — how ogcode works and where everything lives. Load it to configure ogcode (ogcode.json providers, MCP servers, skills, AGENT.md, MEMORY.md), to author a skill, to find ogcode's runtime state (.ogcode/ session database, ~/.ogcode/ config.db, ports.json), to inspect the tool-call audit log at .ogcode/tool_calls.csv — its columns, statuses, and how to query it with query_sheet — or to give a tour of the web UI: the sidebar and ⌘K session search, the chat composer's model / effort / approval-mode controls and expandable tool cards, the Agents, Preview and Project Index pages, and what every Settings tab edits.
+description: Ogcode's own knowledge base — how ogcode works and where everything lives. Load it to configure ogcode (ogcode.json providers, MCP servers, skills, AGENT.md, MEMORY.md), to author a skill, to find ogcode's runtime state (.ogcode/ session database, ~/.ogcode/ config.db, ports.json), to inspect the tool-call audit log at .ogcode/tool_calls.csv — its columns, statuses, and how to query it with query_sheet — or to give a tour of the web UI: the sidebar and ⌘K session search, the chat composer's model / effort / approval-mode controls and expandable tool cards, the Agents, Preview and Source pages, and what every Settings tab edits.
 ---
 
 # Ogcode knowledge
@@ -279,7 +279,7 @@ separate dashboard to launch.
 - The left sidebar has ` + "`New session`" + ` at the top and a ` + "`Search sessions`" + ` field.
   Each session row carries a status dot while its task is running or failed, and
   pin, rename, and delete actions. The bottom of the rail links ` + "`Notes`" + `,
-  ` + "`Project Index`" + `, ` + "`Agents`" + `, and ` + "`Settings`" + `, with a connection dot beside them.
+  ` + "`Source`" + `, ` + "`Agents`" + `, and ` + "`Settings`" + `, with a connection dot beside them.
 - ` + "`⌘K`" + ` opens the session palette from anywhere: full-text search over this
   project's past sessions — titles, memory files, and past turns — ranked by
   relevance. It searches ogcode's own memory, not the project's source.
@@ -313,7 +313,7 @@ separate dashboard to launch.
 - ` + "`/preview`" + ` — tiles for the loopback services the agent announced (a dev
   server, a built site), one per port, each opening the service through this
   server at a ` + "`<port>.preview.<host>`" + ` hostname.
-- ` + "`/docindex`" + ` — the project index: project documents (PDF, DOCX, spreadsheets)
+- ` + "`/docindex`" + ` — the source page: project documents (PDF, DOCX, spreadsheets)
   with per-page topic labels the indexer wrote, plus manual index runs and
   scoping.
 - ` + "`/notes`" + ` and ` + "`/device`" + ` exist only behind feature flags; when a flag is off the

@@ -81,7 +81,7 @@ func (ViewImageTool) Execute(_ context.Context, args json.RawMessage, tctx Conte
 	if !tctx.ModelSupportsImages {
 		return Result{
 			Title:  title,
-			Output: fmt.Sprintf("Image found at %s (%s, %s) but the current model does not support image input.", params.Path, bounds, format),
+			Output: fmt.Sprintf("Image found at %s (%s, %s) but the current model does not support image input. Use analyze_image instead to transcribe, describe, or answer questions about it using a vision-capable model.", params.Path, bounds, format),
 		}, nil
 	}
 

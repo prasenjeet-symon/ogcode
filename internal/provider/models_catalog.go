@@ -188,24 +188,31 @@ var (
 // are multimodal. From the 4.6 generation on, the dateless ID is the pinned
 // snapshot, the default window is 1M tokens (generally available, no beta
 // header, no long-context premium) and output is capped at 128K; the 4.5 models
-// are 200K/64K. Cache prices are the 5-minute write and the read; Fable 5.1 and
-// Opus 5.5 discount reads below the usual 0.1x. Effort defaults to high on every
+// are 200K/64K. Cache prices are the 5-minute write and the read; Fable 5.1,
+// Fable 5.2 and Opus 5.5 discount reads below the usual 0.1x. Fable 5.2, Mythos
+// 5.2 and Haiku 5.5 were verified 2026-11-16. Effort defaults to high on every
 // model that takes it except Opus 5.5, whose default is medium; no Claude model
 // is given EffortNone, because turning thinking off is a 400 on the newest
 // models and invites tool calls written as prose on the rest — low effort is
 // the cheap setting instead.
 var AnthropicModels = []CatalogModel{
 	// ── Current ──────────────────────────────────────────────────────────────
-	{ID: "claude-fable-5-1", Name: "Claude Fable 5.1", ActiveByDefault: true, InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	// Fable 5.2 writes at 1.25x input ($10) and reads at $0.20.
+	{ID: "claude-fable-5-2", Name: "Claude Fable 5.2", ActiveByDefault: true, InputPricePerM: 8, OutputPricePerM: 40, CacheWritePricePerM: 10, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-opus-5-5", Name: "Claude Opus 5.5", ActiveByDefault: true, InputPricePerM: 4, OutputPricePerM: 20, CacheWritePricePerM: 5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortMedium},
 	{ID: "claude-sonnet-5-5", Name: "Claude Sonnet 5.5", ActiveByDefault: true, InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
-	{ID: "claude-haiku-4-5-20251001", Aliases: []string{"claude-haiku-4-5"}, Name: "Claude Haiku 4.5", ActiveByDefault: true, InputPricePerM: 1, OutputPricePerM: 5, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.1, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000},
-	// Invitation-only (Project Glasswing): listed so an invited account can pick it.
-	{ID: "claude-mythos-5-1", Name: "Claude Mythos 5.1", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	// Haiku 5.5 bills prompts of up to 100K tokens at $0.10 / $0.50 and longer
+	// ones at $0.50 / $2.50; the first tier is recorded here.
+	{ID: "claude-haiku-5-5", Name: "Claude Haiku 5.5", ActiveByDefault: true, InputPricePerM: 0.1, OutputPricePerM: 0.5, CacheWritePricePerM: 0.125, CacheReadPricePerM: 0.01, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	// Invitation-only (Project Glasswing), the same model and price as Fable
+	// 5.2: listed so an invited account can pick it.
+	{ID: "claude-mythos-5-2", Name: "Claude Mythos 5.2", InputPricePerM: 8, OutputPricePerM: 40, CacheWritePricePerM: 10, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 
 	// ── Legacy (still served) ────────────────────────────────────────────────
+	{ID: "claude-fable-5-1", Name: "Claude Fable 5.1", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-fable-5", Name: "Claude Fable 5", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-mythos-5", Name: "Claude Mythos 5", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 1, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
+	{ID: "claude-mythos-5-1", Name: "Claude Mythos 5.1", InputPricePerM: 10, OutputPricePerM: 50, CacheWritePricePerM: 12.5, CacheReadPricePerM: 0.25, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-opus-5", Name: "Claude Opus 5", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Thinking: "adaptive", RejectsSampling: true, Efforts: claudeEfforts, DefaultEffort: EffortHigh},
@@ -218,6 +225,7 @@ var AnthropicModels = []CatalogModel{
 	// Haiku 4.5 reject the parameter.
 	{ID: "claude-opus-4-5-20251101", Aliases: []string{"claude-opus-4-5"}, Name: "Claude Opus 4.5", InputPricePerM: 5, OutputPricePerM: 25, CacheWritePricePerM: 6.25, CacheReadPricePerM: 0.5, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000, Efforts: lowToHighEfforts, DefaultEffort: EffortHigh},
 	{ID: "claude-sonnet-4-5-20250929", Aliases: []string{"claude-sonnet-4-5"}, Name: "Claude Sonnet 4.5", InputPricePerM: 3, OutputPricePerM: 15, CacheWritePricePerM: 3.75, CacheReadPricePerM: 0.3, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000},
+	{ID: "claude-haiku-4-5-20251001", Aliases: []string{"claude-haiku-4-5"}, Name: "Claude Haiku 4.5", InputPricePerM: 1, OutputPricePerM: 5, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.1, SupportsImages: true, ContextWindow: 200_000, MaxOutputTokens: 64_000},
 }
 
 // OpenAIModels is the list of OpenAI models the OpenAI provider offers, minus
@@ -225,7 +233,8 @@ var AnthropicModels = []CatalogModel{
 // Maintained by contributors — see file header for instructions.
 //
 // Source: developers.openai.com model pages, pricing, deprecations, changelog
-// and the GPT-6 and Responses migration guides, verified 2026-09-28; effort
+// and the GPT-6 and Responses migration guides, verified 2026-09-28 (GPT-6.1
+// 2026-11-16); effort
 // ladders and defaults (the reasoning guide and model pages) 2026-10-07. The
 // ladders are what Chat Completions accepts: "max" is Responses-only on GPT-5.6
 // and GPT-6, so it is left off. GPT-5.5 and later default to medium even with
@@ -235,7 +244,15 @@ var AnthropicModels = []CatalogModel{
 // LegacyModels), as are gpt-oss (in OpenModels: OpenAI does not serve it) and
 // the chat-latest aliases, which OpenAI does not recommend for API use.
 var OpenAIModels = []CatalogModel{
-	// ── GPT-6 (current flagships) ───────────────────────────────────────────
+	// ── GPT-6.1 (current flagships) ─────────────────────────────────────────
+	// Same 1.05M-token window, 922K input cap, 128K out and long-prompt rule as
+	// GPT-6: over 272K input bills 2x input and 1.5x output, and cache writes
+	// cost 1.25x input. Tool calling needs the Responses API and neither model
+	// takes "none", so the OpenAI provider does not offer them.
+	{ID: "gpt-6.1-sol", Name: "GPT-6.1 Sol", InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2.5, CacheReadPricePerM: 0.1, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "low", ResponsesOnly: true, Efforts: lowToXHighEfforts, DefaultEffort: EffortMedium},
+	{ID: "gpt-6.1-terra", Name: "GPT-6.1 Terra", InputPricePerM: 1, OutputPricePerM: 5, CacheWritePricePerM: 1.25, CacheReadPricePerM: 0.05, SupportsImages: true, ContextWindow: 922_000, EffortFloor: "none", ResponsesOnly: true, Efforts: noneToXHighEfforts, DefaultEffort: EffortMedium},
+
+	// ── GPT-6 ─────────────────────────────────────────────────────────────
 	// 1.05M-token window with at most 922K in and 128K out. A prompt over 272K
 	// input tokens bills the whole request at 2x input and 1.5x output; the
 	// estimates here use the standard rates. Cache writes cost 1.25x input.
@@ -311,7 +328,10 @@ var OpenAIModels = []CatalogModel{
 // offered for it. Prices are the Standard paid tier for prompts up to 200K
 // tokens; 3.6–3.8 Flash are at an introductory price through 2026-12-31 ($1.50
 // in / $7.50 out / $0.15 cached after), and Gemini 4 Argon rises to $4 in /
-// $20 out / $0.20 cached on 2026-12-01. The 2.5 models are limited to projects
+// $20 out / $0.20 cached on 2026-12-01. Gemini 4 Hydrogen ($1.50 in / $7.50
+// out) and Carbon ($2 / $10, rising to $4 / $20 on 2026-12-01, enterprise-only
+// in select regions) shipped 2026-11-12 and 2026-11-10 and were verified
+// 2026-11-16; neither publishes a cached-input rate. The 2.5 models are limited to projects
 // that used them before; new projects should start on 3.5 Flash-Lite or 3.8
 // Flash. Gemini 3.7 Flash now answers as 3.8 Flash and 3.5 Flash as 3.6 Flash,
 // and 3.1 Flash-Lite shuts down 2027-05-07. 3.x and later deprecated sampling
@@ -325,6 +345,11 @@ var OpenAIModels = []CatalogModel{
 // thinking off; 2.5 Flash and Flash-Lite can ("none"). Gemini answers a level a
 // model lacks with a 400, which is why every level here is per model.
 var GoogleModels = []CatalogModel{
+	{ID: "gemini-4-hydrogen", Name: "Gemini 4 Hydrogen", InputPricePerM: 1.5, OutputPricePerM: 7.5, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
+	// Carbon may decode up to the full window, but the streamed path — the one
+	// ogcode uses — writes at most 65,536 tokens. Its introductory price runs
+	// through 2026-11-30.
+	{ID: "gemini-4-carbon", Name: "Gemini 4 Carbon", InputPricePerM: 2, OutputPricePerM: 10, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 65_536, RejectsSampling: true, Efforts: lowToHighEfforts, DefaultEffort: EffortMedium},
 	// The flagship reasoning model. Implicit caching only, and its own API caps
 	// output at 32,768 tokens where the rest write 65,536. gemini-pro-latest
 	// points here.
@@ -426,6 +451,10 @@ var OpenModels = []CatalogModel{
 	// Sampling is fixed on the current models; another temperature is refused.
 	// K3's output defaults to 128K; K2.x may use whatever the window leaves.
 	{ID: "kimi-k3", Name: "Kimi K3", InputPricePerM: 3, OutputPricePerM: 15, CacheWritePricePerM: 3, CacheReadPricePerM: 0.3, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 131_072, RejectsSampling: true, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
+	// K3.1 Pro, served from 2026-10-23: $2 / $10, reads at $0.20 and writes at
+	// $2.00 (1h, $4.00); the highspeed variant is double.
+	{ID: "kimi-k3.1-pro", Name: "Kimi K3.1 Pro", InputPricePerM: 2, OutputPricePerM: 10, CacheWritePricePerM: 2, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 131_072, RejectsSampling: true, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
+	{ID: "kimi-k3.1-pro-highspeed", Name: "Kimi K3.1 Pro Highspeed", InputPricePerM: 4, OutputPricePerM: 20, CacheWritePricePerM: 4, CacheReadPricePerM: 0.2, SupportsImages: true, ContextWindow: 1_048_576, MaxOutputTokens: 131_072, RejectsSampling: true, Efforts: lowHighMaxEfforts, DefaultEffort: EffortMax},
 	{ID: "kimi-k2.7-code", Aliases: []string{"kimi-k2p7-code"}, Name: "Kimi K2.7 Code", InputPricePerM: 0.95, OutputPricePerM: 4, CacheReadPricePerM: 0.19, SupportsImages: true, ContextWindow: 262_144, RejectsSampling: true},
 	{ID: "kimi-k2.7-code-highspeed", Name: "Kimi K2.7 Code Highspeed", InputPricePerM: 1.9, OutputPricePerM: 8, CacheReadPricePerM: 0.38, SupportsImages: true, ContextWindow: 262_144, RejectsSampling: true},
 	{ID: "kimi-k2.6", Aliases: []string{"kimi-k2p6"}, Name: "Kimi K2.6", InputPricePerM: 0.95, OutputPricePerM: 4, CacheReadPricePerM: 0.16, SupportsImages: true, ContextWindow: 262_144, RejectsSampling: true, Efforts: onOffEfforts, DefaultEffort: EffortOn},

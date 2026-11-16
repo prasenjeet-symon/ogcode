@@ -15,12 +15,12 @@ func TestParseMaxConcurrent(t *testing.T) {
 		raw  string
 		want int
 	}{
-		{"empty keeps the default", "", defaultMaxConcurrentRequests},
-		{"whitespace keeps the default", "  ", defaultMaxConcurrentRequests},
-		{"non-numeric keeps the default", "abc", defaultMaxConcurrentRequests},
-		{"zero keeps the default", "0", defaultMaxConcurrentRequests},
-		{"negative keeps the default", "-3", defaultMaxConcurrentRequests},
-		{"one keeps the default", "1", defaultMaxConcurrentRequests},
+		{"empty keeps the default", "", DefaultMaxConcurrentRequests},
+		{"whitespace keeps the default", "  ", DefaultMaxConcurrentRequests},
+		{"non-numeric keeps the default", "abc", DefaultMaxConcurrentRequests},
+		{"zero keeps the default", "0", DefaultMaxConcurrentRequests},
+		{"negative keeps the default", "-3", DefaultMaxConcurrentRequests},
+		{"one keeps the default", "1", DefaultMaxConcurrentRequests},
 		{"an operator value is honoured", "4", 4},
 		{"surrounding space is trimmed", " 6 ", 6},
 	}
@@ -51,6 +51,38 @@ func TestNewRequestBudgetClamps(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			b := newRequestBudget(tc.capacity, tc.reserve)
+			if b.capacity != tc.wantCapacity {
+				t.Fatalf("capacity = %d, want %d", b.capacity, tc.wantCapacity)
+			}
+			if b.indexIdle != tc.wantIdle {
+				t.Fatalf("idle index share = %d, want %d", b.indexIdle, tc.wantIdle)
+			}
+			if b.indexBusy != tc.wantBusy {
+				t.Fatalf("busy index share = %d, want %d", b.indexBusy, tc.wantBusy)
+			}
+		})
+	}
+}
+
+func TestSetCapacity(t *testing.T) {
+	cases := []struct {
+		name         string
+		capacity     int
+		wantCapacity int
+		wantIdle     int
+		wantBusy     int
+	}{
+		{"a value below two is raised to two", 1, 2, 1, 1},
+		{"zero is raised to two", 0, 2, 1, 1},
+		{"a raised ceiling reshapes the index lanes", 16, 16, 14, 1},
+		{"a lowered ceiling keeps the index one slot", 3, 3, 1, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newRequestBudget(DefaultMaxConcurrentRequests, interactiveRequestReserve)
+			if got := b.setCapacity(tc.capacity); got != tc.wantCapacity {
+				t.Fatalf("setCapacity(%d) = %d, want %d", tc.capacity, got, tc.wantCapacity)
+			}
 			if b.capacity != tc.wantCapacity {
 				t.Fatalf("capacity = %d, want %d", b.capacity, tc.wantCapacity)
 			}

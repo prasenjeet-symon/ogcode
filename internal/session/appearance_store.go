@@ -122,3 +122,62 @@ func SetBackgroundModel(database *db.DB, model, providerID string) error {
 	return nil
 }
 
+// ImageModelPref holds the machine-wide model override for one-shot image
+// analysis (the analyze_image tool). The session model often cannot see
+// images at all, so this names a vision-capable model even though the call is
+// made on the session's behalf. Empty Model means inherit from the active
+// session.
+type ImageModelPref struct {
+	Model      string `json:"model"`
+	ProviderID string `json:"providerId"`
+}
+
+// GetImageModel returns the stored image-analysis model preference, or an
+// empty preference (meaning "inherit from active session") when unset. Read
+// errors are returned rather than swallowed.
+func GetImageModel(database *db.DB) (ImageModelPref, error) {
+	if database == nil {
+		return ImageModelPref{}, nil
+	}
+	var pref ImageModelPref
+	err := database.QueryRow(`SELECT image_model, image_provider FROM ui_prefs WHERE id = 1`).
+		Scan(&pref.Model, &pref.ProviderID)
+	if err == sql.ErrNoRows {
+		return ImageModelPref{}, nil
+	}
+	if err != nil {
+		return ImageModelPref{}, fmt.Errorf("get image model: %w", err)
+	}
+	pref.Model = strings.TrimSpace(pref.Model)
+	pref.ProviderID = strings.TrimSpace(pref.ProviderID)
+	if pref.Model == "" {
+		pref.ProviderID = ""
+	}
+	return pref, nil
+}
+
+// SetImageModel upserts the machine-wide image-analysis model preference on
+// the singleton ui_prefs row. Passing an empty model clears the override so
+// analyze_image inherits from the active session.
+func SetImageModel(database *db.DB, model, providerID string) error {
+	if database == nil {
+		return nil
+	}
+	model = strings.TrimSpace(model)
+	providerID = strings.TrimSpace(providerID)
+	if model == "" {
+		providerID = ""
+	}
+	_, err := database.Exec(`
+		INSERT INTO ui_prefs (id, image_model, image_provider, time_updated)
+		VALUES (1, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			image_model    = excluded.image_model,
+			image_provider = excluded.image_provider,
+			time_updated   = excluded.time_updated
+	`, model, providerID, Now())
+	if err != nil {
+		return fmt.Errorf("set image model: %w", err)
+	}
+	return nil
+}

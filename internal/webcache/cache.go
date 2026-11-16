@@ -37,6 +37,9 @@ const (
 	KindPage Kind = "page"
 	// KindAnswer is a synthesised deep-research answer.
 	KindAnswer Kind = "answer"
+	// KindImage is the text an image-analysis call extracted from an image, keyed
+	// by a hash of the image bytes themselves, so a re-rendered copy hits too.
+	KindImage Kind = "image"
 )
 
 // Default TTLs per kind. Search rankings move fastest and are the cheapest to
@@ -46,6 +49,7 @@ const (
 	DefaultSearchTTL = time.Hour
 	DefaultPageTTL   = 24 * time.Hour
 	DefaultAnswerTTL = 6 * time.Hour
+	DefaultImageTTL  = 7 * 24 * time.Hour
 )
 
 // Default capacities. Both levels are bounded — an unbounded cache in a
@@ -160,6 +164,8 @@ func defaultTTL(kind Kind) time.Duration {
 		return DefaultPageTTL
 	case KindAnswer:
 		return DefaultAnswerTTL
+	case KindImage:
+		return DefaultImageTTL
 	default:
 		return DefaultSearchTTL
 	}

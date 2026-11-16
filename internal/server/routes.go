@@ -64,6 +64,8 @@ func (s *Server) routes() http.Handler {
 		r.Post("/models/capability/clear", s.handleClearModelCapability)
 		r.Get("/models/background", s.handleGetBackgroundModel)
 		r.Post("/models/background", s.handleSetBackgroundModel)
+		r.Get("/models/image", s.handleGetImageModel)
+		r.Post("/models/image", s.handleSetImageModel)
 
 		r.Get("/theme", s.handleGetTheme)
 		r.Post("/theme", s.handleSetTheme)
@@ -87,6 +89,8 @@ func (s *Server) routes() http.Handler {
 		r.Post("/providers/config/{id}/validate", s.handleValidateProviderConfig)
 		r.Delete("/providers/config/{id}", s.handleDeleteProviderConfig)
 		r.Get("/providers/ollama/status", s.handleOllamaStatus)
+		r.Get("/providers/concurrency", s.handleGetProviderConcurrency)
+		r.Post("/providers/concurrency", s.handleSetProviderConcurrency)
 
 		// OGX: the OG Lab plan. Connect hands off to the browser; callback is
 		// the redirect target that browser comes back to (top-level

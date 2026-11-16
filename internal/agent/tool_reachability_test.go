@@ -35,6 +35,7 @@ var mandatoryPromptTools = []string{
 	"codebase_map", "file_map", "check_syntax",
 	"pdf_index", "read_pdf_page", "docx_index", "read_docx_page", "latex_to_pdf",
 	"query_sheet",
+	"analyze_image", "view_image",
 	"skill",
 }
 
@@ -73,7 +74,7 @@ func TestAgents_FileMapAccompaniesRead(t *testing.T) {
 //
 // They are listed rather than skipped so that a tool added to
 // mandatoryPromptTools has to land in one bucket or the other on purpose.
-var lateBoundTools = []string{"skill"}
+var lateBoundTools = []string{"skill", "analyze_image"}
 
 // TestRegistries_ResolvePromptMandatedTools closes the third link in the chain
 // that decides whether an instruction is followable.

@@ -44,6 +44,29 @@ func (c Complexity) Valid() bool {
 	return false
 }
 
+// ComplexityForEffort names the complexity class whose route asks for the same
+// reasoning depth as effort, or "" when the gateway's three-class ladder cannot
+// express that depth. It is the inverse of the router's own mapping
+// (easy→low, medium→medium, hard→high), so a call that names its depth both in
+// the body and on the header is served the level it chose instead of one the
+// router substituted for it.
+//
+// Every level outside those three yields no class on purpose. The router
+// REPLACES a body level with the class's level, so naming easy for minimal or
+// hard for max would quietly move the call; with no class the body's own level
+// stands untouched.
+func ComplexityForEffort(effort string) Complexity {
+	switch effort {
+	case EffortLow:
+		return ComplexityEasy
+	case EffortMedium:
+		return ComplexityMedium
+	case EffortHigh:
+		return ComplexityHard
+	}
+	return ""
+}
+
 // setComplexityHeader stamps req with the predicted complexity of the task it
 // carries. An empty complexity leaves the request untouched, so an unclassified
 // child — or any caller that has no prediction — behaves exactly as before.

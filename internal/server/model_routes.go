@@ -228,3 +228,65 @@ func (s *Server) resolveBackgroundModel(inheritedModel, inheritedProvider string
 	return inheritedModel, inheritedProvider
 }
 
+// handleGetImageModel returns the machine-wide image-analysis model override
+// for the analyze_image tool. Empty model means "inherit from active session".
+func (s *Server) handleGetImageModel(w http.ResponseWriter, r *http.Request) {
+	pref, err := session.GetImageModel(s.globalDB)
+	if err != nil {
+		slog.Error("get image model", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read image model"})
+		return
+	}
+	writeJSON(w, http.StatusOK, pref)
+}
+
+// handleSetImageModel updates the machine-wide image-analysis model override.
+// An empty model clears the override so analyze_image inherits from the active
+// session. Like the background preference, a model nothing serves is rejected
+// rather than persisted; a model that cannot accept images is rejected too —
+// the whole point of the setting is to hand the vision pipeline a
+// vision-capable model.
+func (s *Server) handleSetImageModel(w http.ResponseWriter, r *http.Request) {
+	var req session.ImageModelPref
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	// Reject a model nothing serves rather than persisting it: every image
+	// analysis stamped with it would fail, and the feature is meant to degrade
+	// to the session's model, not to break those calls.
+	if req.Model != "" && s.registry != nil && !s.registry.ModelAvailable(req.Model, req.ProviderID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model not available"})
+		return
+	}
+	// Vision capability is mandatory for the image preference: a chosen model
+	// that cannot see would turn every analyze_image call into an error deeper
+	// in the pipeline, so the settings screen refuses it up front. Check both
+	// static/override registry flags and probed model_capabilities so dynamic
+	// vision models (e.g. Ollama/OpenRouter) match /api/models.
+	if req.Model != "" && s.registry != nil {
+		supportsImages := s.registry.ModelSupportsImages(req.Model)
+		if !supportsImages && s.db != nil {
+			if cap, ok, err := session.GetModelCapability(s.db, req.Model); err == nil && ok {
+				supportsImages = cap.SupportsImages
+			}
+		}
+		if !supportsImages {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model must support images"})
+			return
+		}
+	}
+	if err := session.SetImageModel(s.globalDB, req.Model, req.ProviderID); err != nil {
+		slog.Error("set image model", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save image model"})
+		return
+	}
+	pref, err := session.GetImageModel(s.globalDB)
+	if err != nil {
+		slog.Error("get image model after save", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read image model"})
+		return
+	}
+	slog.Info("updated image model preference", "model", pref.Model, "provider", pref.ProviderID)
+	writeJSON(w, http.StatusOK, pref)
+}

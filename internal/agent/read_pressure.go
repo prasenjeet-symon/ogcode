@@ -432,6 +432,7 @@ var contentReturningTools = map[string]bool{
 	"read_docx_page":        true,
 	"query_sheet":           true,
 	"view_image":            true,
+	"analyze_image":         true,
 	"skill":                 true,
 	"task":                  true,
 }

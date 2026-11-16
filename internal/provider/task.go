@@ -25,6 +25,8 @@ const (
 	TaskNote Task = "note"
 	// TaskSearch is web search ranking and synthesis.
 	TaskSearch Task = "search"
+	// TaskVision is a one-shot image-analysis call (the analyze_image tool).
+	TaskVision Task = "vision"
 	// TaskRecall is the memory-recall agent answering a question about past
 	// work.
 	TaskRecall Task = "recall"

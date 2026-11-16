@@ -344,6 +344,10 @@ type LoopRunner struct {
 	// deep search, memory recall, and task sub-agents). Returning an empty model
 	// inherits the parent session's model and provider.
 	BackgroundModel func() (model, providerID string)
+	// ImageModel, when set, returns the machine-wide (model, providerID)
+	// override for image analysis (the analyze_image pipeline). Returning an
+	// empty model inherits the parent session's model and provider.
+	ImageModel func() (model, providerID string)
 }
 
 // resolveBackgroundModel returns the (model, providerID) to use for a
@@ -2427,7 +2431,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// model calling something it was never given, and compact_context is
 			// added per step for agents that accumulate read context. Passing the
 			// static agent here would reject every compaction as a disallowed tool.
-			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, turnTools, intentFind, workDir, modelSupportsImages, modelID, providerID, pressure, gate, descent)
+			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, turnTools, intentFind, workDir, modelSupportsImages, modelID, providerID, effort, pressure, gate, descent)
 			if aborted {
 				exitReason = "aborted"
 				return ctx.Err()
@@ -3293,7 +3297,7 @@ func (lr *LoopRunner) resolveImageSupport(ctx context.Context, p provider.Provid
 // outcome (one of the toolOutcome* statuses) and error. The outcome covers the
 // whole call — disallow-list check, permission gate, unknown tool — not just
 // the Execute call, and is what the tool-audit CSV's status column records.
-func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.SessionID, messageID session.MessageID, tc pendingToolCall, a Agent, workDir string, modelSupportsImages bool, model, providerID string) (tool.Result, string, error) {
+func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.SessionID, messageID session.MessageID, tc pendingToolCall, a Agent, workDir string, modelSupportsImages bool, model, providerID, effort string) (tool.Result, string, error) {
 	// Reject tools not in the agent's allowed list — guards against prompt injection
 	// or a misbehaving model calling tools it was never offered.
 	if !a.HasTool(tc.Name) {
@@ -3333,6 +3337,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 			ModelSupportsImages: modelSupportsImages,
 			Model:               model,
 			Provider:            providerID,
+			Effort:              effort,
 			// Derived rather than threaded through: the effective agent holds
 			// update_intent exactly when this turn runs the matcher.
 			IntentMatcher: a.HasTool("update_intent"),
@@ -3383,7 +3388,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 // executeReadyToolCalls runs every ready call and returns each one's result
 // keyed by call ID, so the caller can act on what a tool actually did rather
 // than on the fact that it was invoked.
-func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, turnTools *turnToolset, intentFind *intentFinder, workDir string, modelSupportsImages bool, modelID, providerID string, pressure *readPressure, gate *intentGate, descent *descentGate) (results map[string]tool.Result, loopAborted bool) {
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, turnTools *turnToolset, intentFind *intentFinder, workDir string, modelSupportsImages bool, modelID, providerID, effort string, pressure *readPressure, gate *intentGate, descent *descentGate) (results map[string]tool.Result, loopAborted bool) {
 	if len(readyCalls) > 1 {
 		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
 	}
@@ -3471,7 +3476,7 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 					toolOutcomePanic, start, time.Since(start), modelID, providerID, execInfos[idx].err.Error())
 			}
 		}()
-		result, outcome, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID, providerID)
+		result, outcome, err := lr.executeTool(toolCtx, sessionID, assistantID, tc, agent, workDir, modelSupportsImages, modelID, providerID, effort)
 		execInfos[idx].result = result
 		execInfos[idx].err = err
 		if outcome == "" {

@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-02T15:23:59.854501Z",
+  "generatedAt": "2026-11-16T13:43:22.409676Z",
   "models": [
     {
-      "id": "claude-fable-5-1",
-      "name": "Claude Fable 5.1",
+      "id": "claude-fable-5-2",
+      "name": "Claude Fable 5.2",
       "activeByDefault": true,
-      "inputPricePerM": 10,
-      "outputPricePerM": 50,
-      "cacheReadPricePerM": 0.25,
-      "cacheWritePricePerM": 12.5,
+      "inputPricePerM": 8,
+      "outputPricePerM": 40,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 10,
       "supportsImages": true,
       "contextWindow": 1000000,
       "maxOutputTokens": 128000,
@@ -72,24 +72,54 @@
       "collection": "anthropic"
     },
     {
-      "id": "claude-haiku-4-5-20251001",
-      "aliases": [
-        "claude-haiku-4-5"
-      ],
-      "name": "Claude Haiku 4.5",
+      "id": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
       "activeByDefault": true,
-      "inputPricePerM": 1,
-      "outputPricePerM": 5,
-      "cacheReadPricePerM": 0.1,
-      "cacheWritePricePerM": 1.25,
+      "inputPricePerM": 0.1,
+      "outputPricePerM": 0.5,
+      "cacheReadPricePerM": 0.01,
+      "cacheWritePricePerM": 0.125,
       "supportsImages": true,
-      "contextWindow": 200000,
-      "maxOutputTokens": 64000,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
       "collection": "anthropic"
     },
     {
-      "id": "claude-mythos-5-1",
-      "name": "Claude Mythos 5.1",
+      "id": "claude-mythos-5-2",
+      "name": "Claude Mythos 5.2",
+      "activeByDefault": false,
+      "inputPricePerM": 8,
+      "outputPricePerM": 40,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 10,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
       "activeByDefault": false,
       "inputPricePerM": 10,
       "outputPricePerM": 50,
@@ -140,6 +170,29 @@
       "inputPricePerM": 10,
       "outputPricePerM": 50,
       "cacheReadPricePerM": 1,
+      "cacheWritePricePerM": 12.5,
+      "supportsImages": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinking": "adaptive",
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "collection": "anthropic"
+    },
+    {
+      "id": "claude-mythos-5-1",
+      "name": "Claude Mythos 5.1",
+      "activeByDefault": false,
+      "inputPricePerM": 10,
+      "outputPricePerM": 50,
+      "cacheReadPricePerM": 0.25,
       "cacheWritePricePerM": 12.5,
       "supportsImages": true,
       "contextWindow": 1000000,
@@ -327,6 +380,67 @@
       "contextWindow": 200000,
       "maxOutputTokens": 64000,
       "collection": "anthropic"
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "aliases": [
+        "claude-haiku-4-5"
+      ],
+      "name": "Claude Haiku 4.5",
+      "activeByDefault": false,
+      "inputPricePerM": 1,
+      "outputPricePerM": 5,
+      "cacheReadPricePerM": 0.1,
+      "cacheWritePricePerM": 1.25,
+      "supportsImages": true,
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "collection": "anthropic"
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.1,
+      "cacheWritePricePerM": 2.5,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "low",
+      "responsesOnly": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "activeByDefault": false,
+      "inputPricePerM": 1,
+      "outputPricePerM": 5,
+      "cacheReadPricePerM": 0.05,
+      "cacheWritePricePerM": 1.25,
+      "supportsImages": true,
+      "contextWindow": 922000,
+      "maxOutputTokens": 0,
+      "effortFloor": "none",
+      "responsesOnly": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium",
+      "collection": "openai"
     },
     {
       "id": "gpt-6-sol",
@@ -958,6 +1072,46 @@
       "effortFloor": "low",
       "responsesOnly": true,
       "collection": "openai"
+    },
+    {
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "activeByDefault": false,
+      "inputPricePerM": 1.5,
+      "outputPricePerM": 7.5,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "google"
+    },
+    {
+      "id": "gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0,
+      "cacheWritePricePerM": 0,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "defaultEffort": "medium",
+      "collection": "google"
     },
     {
       "id": "gemini-4-argon",
@@ -1640,6 +1794,46 @@
       "outputPricePerM": 15,
       "cacheReadPricePerM": 0.3,
       "cacheWritePricePerM": 3,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 131072,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "collection": "open"
+    },
+    {
+      "id": "kimi-k3.1-pro",
+      "name": "Kimi K3.1 Pro",
+      "activeByDefault": false,
+      "inputPricePerM": 2,
+      "outputPricePerM": 10,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 2,
+      "supportsImages": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 131072,
+      "rejectsSampling": true,
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "collection": "open"
+    },
+    {
+      "id": "kimi-k3.1-pro-highspeed",
+      "name": "Kimi K3.1 Pro Highspeed",
+      "activeByDefault": false,
+      "inputPricePerM": 4,
+      "outputPricePerM": 20,
+      "cacheReadPricePerM": 0.2,
+      "cacheWritePricePerM": 4,
       "supportsImages": true,
       "contextWindow": 1048576,
       "maxOutputTokens": 131072,

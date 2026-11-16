@@ -48,13 +48,13 @@ func TestApplyUpstreamReplacesCompiledInFacts(t *testing.T) {
 	resetUpstreamCatalog(t)
 
 	before := AnthropicModels[0].InputPricePerM
-	m, ok := LookupCatalogModel("claude-fable-5-1")
-	if !ok || m.ContextWindow != 1_000_000 || m.OutputPricePerM != 50 {
-		t.Fatalf("precondition: compiled-in claude-fable-5-1 facts missing: %+v", m)
+	m, ok := LookupCatalogModel("claude-fable-5-2")
+	if !ok || m.ContextWindow != 1_000_000 || m.OutputPricePerM != 40 {
+		t.Fatalf("precondition: compiled-in claude-fable-5-2 facts missing: %+v", m)
 	}
 
 	res, err := ApplyUpstreamCatalog(upstreamPage(CatalogModel{
-		ID: "claude-fable-5-1", Name: "Claude Fable 5.1",
+		ID: "claude-fable-5-2", Name: "Claude Fable 5.2",
 		InputPricePerM: 7, OutputPricePerM: 33, ContextWindow: 900_000,
 		MaxOutputTokens: 100_000, SupportsImages: false, CacheReadPricePerM: 0.2,
 	}))
@@ -65,9 +65,9 @@ func TestApplyUpstreamReplacesCompiledInFacts(t *testing.T) {
 		t.Fatalf("result = %+v, want Updated=1 Installed=0 Skipped=0", res)
 	}
 
-	m, ok = LookupCatalogModel("claude-fable-5-1")
+	m, ok = LookupCatalogModel("claude-fable-5-2")
 	if !ok {
-		t.Fatal("merged lookup lost claude-fable-5-1")
+		t.Fatal("merged lookup lost claude-fable-5-2")
 	}
 	if m.InputPricePerM != 7 || m.OutputPricePerM != 33 || m.ContextWindow != 900_000 ||
 		m.MaxOutputTokens != 100_000 || m.SupportsImages || m.CacheReadPricePerM != 0.2 {
@@ -84,10 +84,10 @@ func TestApplyUpstreamReplacesCompiledInFacts(t *testing.T) {
 
 	// The Anthropic picker shows the replaced facts, still keyed by the
 	// compiled-in id and default state.
-	p := &AnthropicProvider{model: "claude-fable-5-1"}
+	p := &AnthropicProvider{model: "claude-fable-5-2"}
 	found := false
 	for _, mi := range p.Models() {
-		if mi.ID != "claude-fable-5-1" {
+		if mi.ID != "claude-fable-5-2" {
 			continue
 		}
 		found = true
@@ -222,13 +222,13 @@ func TestApplyUpstreamAddsNewModelsToPickers(t *testing.T) {
 func TestApplyUpstreamKeepsExistingRowDefaultsActive(t *testing.T) {
 	resetUpstreamCatalog(t)
 
-	// claude-fable-5-1 is ActiveByDefault: true; send false upstream.
+	// claude-fable-5-2 is ActiveByDefault: true; send false upstream.
 	if _, err := ApplyUpstreamCatalog(upstreamPage(CatalogModel{
-		ID: "claude-fable-5-1", ActiveByDefault: false, InputPricePerM: 1,
+		ID: "claude-fable-5-2", ActiveByDefault: false, InputPricePerM: 1,
 	})); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	if got := lookupOne("claude-fable-5-1").ActiveByDefault; !got {
+	if got := lookupOne("claude-fable-5-2").ActiveByDefault; !got {
 		t.Fatal("an upstream file must not flip an existing row's default-active state")
 	}
 }

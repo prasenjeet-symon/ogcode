@@ -89,6 +89,15 @@ func TestTaskRiskWireValue(t *testing.T) {
 	}
 }
 
+// TestTaskVisionWireValue pins the image-analysis kind's spelling, mirroring
+// TestTaskRiskWireValue: the value is a wire contract with oglab's
+// X-Client-Task reader, so the router can recognise the one-shot vision call.
+func TestTaskVisionWireValue(t *testing.T) {
+	if got := string(TaskVision); got != "vision" {
+		t.Fatalf("TaskVision = %q, want %q (the router maps on this spelling)", got, "vision")
+	}
+}
+
 // TestSetTaskHeaderLeavesAnUnsetTaskAlone covers the helper itself, which both
 // transports call unconditionally on every attempt.
 func TestSetTaskHeaderLeavesAnUnsetTaskAlone(t *testing.T) {

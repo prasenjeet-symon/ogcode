@@ -12,14 +12,20 @@ import (
 )
 
 // concurrencyEnv names the environment variable that caps how many
-// chat-completions requests may be in flight across the whole process.
+// chat-completions requests may be in flight across the whole process. When it
+// is set it outranks the ceiling stored in the settings screen.
 const concurrencyEnv = "OGCODE_PROVIDER_MAX_CONCURRENT"
 
-// defaultMaxConcurrentRequests is the process-wide in-flight ceiling when the
-// operator sets nothing. It sits just above the indexer's own per-run limit of
+// DefaultMaxConcurrentRequests is the process-wide in-flight ceiling when
+// nothing names one. It sits just above the indexer's own per-run limit of
 // five: a single index run behaves as it did before, while a second run can no
 // longer stack on top of the first.
-const defaultMaxConcurrentRequests = 8
+const DefaultMaxConcurrentRequests = 8
+
+// MinConcurrentRequests is the smallest ceiling the budget accepts. One is
+// refused deliberately: the index could never start beside even a single
+// interactive request.
+const MinConcurrentRequests = 2
 
 // interactiveRequestReserve is how many slots the index leaves free even while
 // nobody is working. Interactive requests never wait on the index's slots, so
@@ -40,10 +46,43 @@ const indexBusyShare = 1
 // index run.
 const interactiveQuietPeriod = 30 * time.Second
 
-// maxConcurrentRequests is the operator's ceiling, read and parsed once.
-var maxConcurrentRequests = sync.OnceValue(func() int {
-	return parseMaxConcurrent(os.Getenv(concurrencyEnv))
-})
+// ConcurrencyFromEnv reports whether the environment names a ceiling, in which
+// case a stored preference never applies.
+func ConcurrencyFromEnv() bool {
+	return strings.TrimSpace(os.Getenv(concurrencyEnv)) != ""
+}
+
+// MaxConcurrentRequests is the ceiling the process budget is using right now.
+func MaxConcurrentRequests() int {
+	b := requestBudgetForProcess
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.capacity
+}
+
+// SetMaxConcurrentRequests changes the process-wide ceiling and returns the
+// capacity in force afterwards. It is a no-op while the environment names one:
+// the operator's env var outranks a stored preference. Anything below two is
+// raised to two.
+func SetMaxConcurrentRequests(n int) int {
+	if ConcurrencyFromEnv() {
+		return MaxConcurrentRequests()
+	}
+	return requestBudgetForProcess.setCapacity(n)
+}
+
+// ApplyConcurrency applies a stored ceiling, where 0 means nothing is stored
+// and the default stands. The environment still wins. It returns the capacity
+// in force afterwards.
+func ApplyConcurrency(stored int) int {
+	if ConcurrencyFromEnv() {
+		return MaxConcurrentRequests()
+	}
+	if stored < MinConcurrentRequests {
+		stored = DefaultMaxConcurrentRequests
+	}
+	return requestBudgetForProcess.setCapacity(stored)
+}
 
 // requestBudget bounds how many provider requests may be in flight at once, and
 // puts the user's own work ahead of the background project index.
@@ -99,22 +138,45 @@ type requestBudget struct {
 // can always make progress: at least two slots, and an index share of at least
 // one that never covers the whole ceiling.
 func newRequestBudget(capacity, reserve int) *requestBudget {
-	if capacity < 2 {
-		capacity = 2
+	if capacity < MinConcurrentRequests {
+		capacity = MinConcurrentRequests
 	}
-	indexIdle := min(max(capacity-reserve, 1), capacity-1)
+	indexIdle, indexBusy := laneShares(capacity, reserve)
 	return &requestBudget{
 		capacity:  capacity,
 		indexIdle: indexIdle,
-		indexBusy: min(indexBusyShare, indexIdle),
+		indexBusy: indexBusy,
 		quiet:     interactiveQuietPeriod,
 		now:       time.Now,
 		changed:   make(chan struct{}),
 	}
 }
 
+// laneShares is the index's share of a ceiling: at least one slot, never all of
+// it, and only indexBusyShare of them while the user is working.
+func laneShares(capacity, reserve int) (idle, busy int) {
+	idle = min(max(capacity-reserve, 1), capacity-1)
+	return idle, min(indexBusyShare, idle)
+}
+
+// setCapacity changes the ceiling in force, reshaping the index lanes to match
+// and waking every waiter to re-check whether it may start. A request already
+// streaming is never preempted; narrowing only stops new starts. It returns the
+// capacity applied.
+func (b *requestBudget) setCapacity(capacity int) int {
+	if capacity < MinConcurrentRequests {
+		capacity = MinConcurrentRequests
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.capacity = capacity
+	b.indexIdle, b.indexBusy = laneShares(capacity, interactiveRequestReserve)
+	b.broadcastLocked()
+	return b.capacity
+}
+
 // requestBudgetForProcess is the one budget every provider request draws from.
-var requestBudgetForProcess = newRequestBudget(maxConcurrentRequests(), interactiveRequestReserve)
+var requestBudgetForProcess = newRequestBudget(parseMaxConcurrent(os.Getenv(concurrencyEnv)), interactiveRequestReserve)
 
 // acquireInteractive waits for a slot for one interactive request. Only other
 // interactive requests can make it wait: the index's requests do not count
@@ -323,13 +385,13 @@ func (b *budgetBody) Close() error {
 func parseMaxConcurrent(raw string) int {
 	v := strings.TrimSpace(raw)
 	if v == "" {
-		return defaultMaxConcurrentRequests
+		return DefaultMaxConcurrentRequests
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil || n < 2 {
+	if err != nil || n < MinConcurrentRequests {
 		slog.Warn("ignoring unusable provider concurrency, keeping the default",
-			"env", concurrencyEnv, "value", raw, "default", defaultMaxConcurrentRequests)
-		return defaultMaxConcurrentRequests
+			"env", concurrencyEnv, "value", raw, "default", DefaultMaxConcurrentRequests)
+		return DefaultMaxConcurrentRequests
 	}
 	return n
 }

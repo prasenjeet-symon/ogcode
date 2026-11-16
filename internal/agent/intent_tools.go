@@ -103,6 +103,10 @@ var documentTools = []lazyTool{
 // is left out of the catalogue rather than offered. These entries ride every
 // agent that holds them, but only the interactive build agent runs the matcher,
 // so only there do they change what the wire carries.
+//
+// analyze_image is deliberately not here: the agent needs it the moment a model
+// without image input first meets a picture, so it rides every build turn the
+// way deep_search does rather than waiting for a plan step to name it.
 var lazyTools = append(append([]lazyTool{}, documentTools...), lazyTool{
 	ID:          "schedule",
 	Description: "Arm a one-shot reminder for this conversation: a note that comes back after a delay or at a set clock time. Use it when a step says to remind, set a timer, check back later, follow up after a pause, or defer something to a later moment; it never starts a turn on its own.",

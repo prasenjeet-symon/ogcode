@@ -133,19 +133,19 @@ func resolveSubdirPrefix(sessionDir, subdir string) (string, bool) {
 
 func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx Context) (Result, error) {
 	if t.Store == nil {
-		return Result{Title: "Project Index", Output: "the document index is not available in this environment"}, nil
+		return Result{Title: "Source", Output: "the document index is not available in this environment"}, nil
 	}
 	var params struct {
 		Subdir string `json:"subdir"`
 	}
 	if len(args) > 0 {
 		if err := DecodeArgs(args, &params); err != nil {
-			return Result{Title: "Project Index", Output: fmt.Sprintf("invalid args for project_index: %v", err)}, nil
+			return Result{Title: "Source", Output: fmt.Sprintf("invalid args for project_index: %v", err)}, nil
 		}
 	}
 
 	prefix := tctx.SessionDir
-	title := "Project Index"
+	title := "Source"
 	if params.Subdir != "" {
 		scoped, ok := resolveSubdirPrefix(tctx.SessionDir, params.Subdir)
 		if !ok {
@@ -155,7 +155,7 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 			}, nil
 		}
 		prefix = scoped
-		title = fmt.Sprintf("Project Index / %s", params.Subdir)
+		title = fmt.Sprintf("Source / %s", params.Subdir)
 	}
 
 	textEntries, err := t.Store.ListTextFiles(prefix)
@@ -177,7 +177,7 @@ func (t ProjectIndexTool) Execute(_ context.Context, args json.RawMessage, tctx 
 
 	totalFiles := len(textEntries) + countDistinctDocs(pdfEntries) + countDistinctDocs(docxEntries) + countDistinctDocs(sheetEntries)
 	if totalFiles == 0 {
-		msg := "no indexed files found — run Index Docs first to build the project index"
+		msg := "no indexed files found — run Index workspace first to build the source map"
 		if params.Subdir != "" {
 			msg = fmt.Sprintf("no indexed files found under %q", params.Subdir)
 		}
