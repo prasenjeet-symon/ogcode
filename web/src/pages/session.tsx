@@ -65,7 +65,6 @@ function ChatContent() {
 
           <div class="flex items-center gap-1.5 shrink-0">
             <IntentPill />
-            <SubagentIndicator />
             <ContextMeter />
             <TokenPill />
             <ResourcePill />
@@ -85,8 +84,15 @@ function ChatContent() {
         {/* Messages */}
         <MessageList />
 
-        {/* Input (the tool-permission prompt now surfaces inside the composer) */}
-        <PromptInput />
+        {/* Input (the tool-permission prompt now surfaces inside the composer).
+            The sub-agent dock is anchored to this wrapper rather than the
+            header: it floats in the bottom-right corner just above the input,
+            so running agents never squeeze the header title, and it sits
+            outside the message scroller so it stays put while reading. */}
+        <div class="relative">
+          <SubagentIndicator />
+          <PromptInput />
+        </div>
       </main>
       </Show>
 

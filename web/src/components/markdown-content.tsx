@@ -36,11 +36,17 @@ marked.use({
       },
     },
     {
+      // Same rule as the document viewer (markdown-document.tsx), and for the
+      // same reason: chat replies quote prices too. The opening $ must hug its
+      // first character, the closing $ its last, and no digit may follow — the
+      // lax "anything up to the next $" rule paired the currency signs in
+      // "at $3/1M … at $0.05/1M" into one math span and KaTeX typeset the prose
+      // (spaces collapsed, ** shown as asterisks).
       name: 'inlineMath',
       level: 'inline' as const,
       start(src: string) { return src.indexOf('$'); },
       tokenizer(src: string) {
-        const match = /^\$(?!\$)((?:[^$\n]|\\.)+?)\$/.exec(src);
+        const match = /^\$(?=\S)((?:\\\$|[^$\n])+?)(?<=\S)\$(?!\d)/.exec(src);
         if (match) return { type: 'inlineMath', raw: match[0], text: match[1].trim() };
       },
       renderer(token: any) {

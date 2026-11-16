@@ -6,6 +6,10 @@ import { useDocIndex } from '../../context/docindex';
 import {
   getBackgroundModel,
   setBackgroundModel,
+  getImageModel,
+  setImageModel,
+  getProviderConcurrency,
+  setProviderConcurrency,
   type ThemeMode,
 } from '../../api/client';
 import {
@@ -18,6 +22,7 @@ import {
   Kbd,
   Spinner,
   CopyButton,
+  TextField,
   fieldClass,
   matches,
   useShell,
@@ -31,6 +36,7 @@ const ICONS = {
   hotkey: 'M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zM12 15.75V18m3.75-3.75V18M4.5 4.5h15a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18V6a1.5 1.5 0 011.5-1.5z',
   index: 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z',
   background: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z',
+  provider: 'M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5',
 };
 
 // Defaults, matching session.SearchConfig in Go.
@@ -75,11 +81,13 @@ export default function GeneralSettings() {
 
       <BackgroundModelGroup hide={hide} />
 
-      <Group id="index" title="Project index" icon={ICONS.index}>
+      <ProviderConcurrencyGroup hide={hide} />
+
+      <Group id="index" title="Source" icon={ICONS.index}>
         <Row
           label="Index large projects automatically"
           helper={`Projects with more than ${docIndex.consent()?.limit ?? 500} files wait for your say-so before ogcode indexes them automatically. The manual index button always runs.`}
-          hidden={hide('Index large projects automatically', 'project index automatic', 'consent index')}
+          hidden={hide('Index large projects automatically', 'source index automatic', 'project index automatic', 'consent index')}
         >
           <Switch
             checked={docIndex.consent()?.allowed ?? false}
@@ -381,7 +389,51 @@ function decodeModelKey(key: string): { providerId: string; model: string } {
   };
 }
 
-function BackgroundModelGroup(props: { hide: Hide }) {
+// Keyword phrases each row matches in the settings search, passed one phrase
+// per `matches` field so a multi-word query like "scanned pages" still matches
+// the phrase it names while single words match individually.
+const BACKGROUND_KEYWORDS = [
+  'Background tasks',
+  'Background model',
+  'behind the scenes llm model',
+  'auxiliary',
+  'utility',
+  'subagent',
+  'title',
+  'compaction',
+  'memory',
+  'summary',
+  'indexing',
+];
+
+const IMAGE_KEYWORDS = [
+  'Background tasks',
+  'Image analysis model',
+  'analyze image tool',
+  'screenshots',
+  'scanned pages',
+  'vision',
+];
+
+/** The one model-preference row, shared by the background-model and
+ *  image-analysis selects: the same control wired to different endpoints.
+ *
+ *  `visionOnly` narrows the offer to enabled models that can actually see
+ *  images — the image-analysis tool needs a model that can. */
+function ModelPrefRow(props: {
+  /** Where the stored preference comes from. */
+  load: () => Promise<{ model: string; providerId: string }>;
+  /** Where an edit is persisted; resolves to the stored value to show. */
+  save: (pref: { model: string; providerId: string }) => Promise<{ model: string; providerId: string }>;
+  visionOnly?: boolean;
+  label: string;
+  helper: string;
+  ariaLabel: string;
+  /** What a failed save reports when the thrown error carries no message. */
+  errorLabel: string;
+  keywords: readonly string[];
+  hide: Hide;
+}) {
   const session = useSession();
   const [model, setModel] = createSignal('');
   const [providerId, setProviderId] = createSignal('');
@@ -389,7 +441,8 @@ function BackgroundModelGroup(props: { hide: Hide }) {
   const [error, setError] = createSignal<string | null>(null);
 
   onMount(() => {
-    getBackgroundModel()
+    props
+      .load()
       .then((pref) => {
         setModel(pref.model || '');
         setProviderId(pref.providerId || '');
@@ -402,7 +455,7 @@ function BackgroundModelGroup(props: { hide: Hide }) {
   const enabledModels = createMemo(() =>
     session
       .models()
-      .filter((m) => m.enabled)
+      .filter((m) => m.enabled && (!props.visionOnly || m.supportsImages))
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
 
@@ -462,7 +515,7 @@ function BackgroundModelGroup(props: { hide: Hide }) {
     setSaving(true);
     setError(null);
     try {
-      const saved = await setBackgroundModel({
+      const saved = await props.save({
         model: next.model,
         providerId: next.providerId,
       });
@@ -471,41 +524,164 @@ function BackgroundModelGroup(props: { hide: Hide }) {
     } catch (e: any) {
       setModel(prevModel);
       setProviderId(prevProvider);
-      setError(e?.message || 'Failed to save background model');
+      setError(e?.message || `Failed to save ${props.errorLabel}`);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Group
-      id="background-tasks"
-      title="Background tasks"
-      icon={ICONS.background}
+    <Row
+      label={props.label}
+      helper={props.helper}
+      hidden={props.hide(...props.keywords, selectedLabel())}
     >
-      <Row
+      <div class="flex items-center gap-2">
+        <Show when={saving()}>
+          <Spinner class="w-4 h-4 text-[color:var(--text-muted)]" />
+        </Show>
+        <Select
+          value={selectedKey()}
+          options={options()}
+          ariaLabel={props.ariaLabel}
+          disabled={saving()}
+          onChange={(val) => apply(val)}
+        />
+      </div>
+      <Show when={error()}>
+        <p class="mt-2 text-meta" style={{ color: 'var(--danger)' }}>{error()}</p>
+      </Show>
+    </Row>
+  );
+}
+
+function BackgroundModelGroup(props: { hide: Hide }) {
+  return (
+    <Group id="background-tasks" title="Background tasks" icon={ICONS.background}>
+      <ModelPrefRow
+        hide={props.hide}
+        load={getBackgroundModel}
+        save={setBackgroundModel}
         label="Background model"
         helper="Choose a dedicated model for behind-the-scenes tasks, or inherit the active session's model."
-        hidden={props.hide(
-          'Background tasks',
-          'Background model',
-          'behind the scenes llm model',
-          'auxiliary utility subagent title compaction memory summary indexing',
-          selectedLabel(),
-        )}
+        ariaLabel="Model for background tasks"
+        errorLabel="background model"
+        keywords={BACKGROUND_KEYWORDS}
+      />
+
+      <ImageModelRow hide={props.hide} />
+    </Group>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Image analysis — the machine-wide model the analyze_image tool runs on.
+// ---------------------------------------------------------------------------
+
+function ImageModelRow(props: { hide: Hide }) {
+  return (
+    <ModelPrefRow
+      hide={props.hide}
+      load={getImageModel}
+      save={setImageModel}
+      visionOnly
+      label="Image analysis model"
+      helper="Model the image-analysis tool uses for screenshots and scanned pages. Inherit runs it on the active session's model, which itself must be able to see images."
+      ariaLabel="Model for image analysis"
+      errorLabel="image analysis model"
+      keywords={IMAGE_KEYWORDS}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Provider concurrency — the process-wide cap on in-flight LLM requests.
+// ---------------------------------------------------------------------------
+
+const PROVIDER_KEYWORDS = [
+  'Provider requests',
+  'Concurrent provider requests',
+  'concurrency budget',
+  'parallel requests',
+  'rate limit',
+  'throttle',
+];
+
+/** The ceiling applies to the whole ogcode process: every session, teammate
+ *  and the background index draw from the same budget. It is stored in the
+ *  machine-wide config, so one setting covers every project, and the
+ *  OGCODE_PROVIDER_MAX_CONCURRENT environment variable overrides it. */
+function ProviderConcurrencyGroup(props: { hide: Hide }) {
+  const [value, setValue] = createSignal('');
+  const [saved, setSaved] = createSignal(0);
+  const [min, setMin] = createSignal(2);
+  const [defaultValue, setDefaultValue] = createSignal(8);
+  const [envSet, setEnvSet] = createSignal(false);
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+
+  const apply = (state: { value: number; envSet: boolean; min: number; defaultValue: number }) => {
+    setSaved(state.value);
+    setValue(String(state.value));
+    setMin(state.min);
+    setDefaultValue(state.defaultValue);
+    setEnvSet(state.envSet);
+  };
+
+  onMount(() => {
+    getProviderConcurrency()
+      .then(apply)
+      .catch(() => {
+        // Leave the default in place on a failed initial load.
+      });
+  });
+
+  const save = async () => {
+    if (saving() || envSet()) return;
+    const next = Number.parseInt(value().trim(), 10);
+    if (!Number.isFinite(next) || next < min()) {
+      setError(`Use a whole number of at least ${min()}.`);
+      return;
+    }
+    if (next === saved()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      apply(await setProviderConcurrency(next));
+    } catch (e: any) {
+      setValue(String(saved()));
+      setError(e?.message || 'Failed to save concurrent provider requests');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Group id="provider" title="Provider requests" icon={ICONS.provider}>
+      <Row
+        label="Concurrent provider requests"
+        helper={`The most LLM requests ogcode sends at once. Every session, teammate and the background index share this budget. Defaults to ${defaultValue()}.`}
+        hidden={props.hide(...PROVIDER_KEYWORDS)}
       >
         <div class="flex items-center gap-2">
           <Show when={saving()}>
             <Spinner class="w-4 h-4 text-[color:var(--text-muted)]" />
           </Show>
-          <Select
-            value={selectedKey()}
-            options={options()}
-            ariaLabel="Model for background tasks"
-            disabled={saving()}
-            onChange={(val) => apply(val)}
+          <TextField
+            value={value()}
+            onInput={setValue}
+            onEnter={save}
+            onBlur={save}
+            width="w-20"
+            disabled={saving() || envSet()}
+            ariaLabel="Concurrent provider requests"
           />
         </div>
+        <Show when={envSet()}>
+          <p class="mt-2 text-meta text-[color:var(--text-muted)]">
+            Set by <span class="font-mono">OGCODE_PROVIDER_MAX_CONCURRENT</span>, which overrides this setting.
+          </p>
+        </Show>
         <Show when={error()}>
           <p class="mt-2 text-meta" style={{ color: 'var(--danger)' }}>{error()}</p>
         </Show>

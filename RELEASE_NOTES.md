@@ -1,3 +1,115 @@
+# Release Notes — v0.59.3
+
+## Major: An image is read by a model that can see, even when the chat model cannot
+
+Most coding models still cannot take a picture, so a screenshot, a scanned page
+or a chart on disk used to be a dead end for them: `read` refused a binary file
+and `view_image` was offered only to models the registry says support images.
+The new `analyze_image` tool closes that gap. It runs one fixed vision call of
+its own and returns text, so the asking model never has to see the pixels — the
+same shape as the deep-search pipeline, applied to an image. Three modes frame
+the call: `transcribe` returns every visible character in reading order without
+interpretation, `describe` gives a thorough factual account of the frame
+(diagram components and connections, chart axes and trends, interface elements
+and dialog state) and quotes on-image text verbatim, and `answer` (the default)
+answers a pointed `question` out of what the pixels contain. A `question` that
+is really a debugging inquiry — a crash dialog, a stack trace, a red build, a
+not-found page — is answered as evidence, reading and next step, with
+observation and inference kept visibly apart. The tool is offered to every agent
+that already carries the document tools, rides the first request, and the
+binary refusal in `read` and the blind-model refusal in `view_image` now both
+point at it.
+
+The file side is bounded the way image work has to be: a 20 MB read cap, a
+120-second bound on one call, and a passthrough rule that sends a JPEG or PNG
+under 4 MB to the provider byte for byte, because re-encoding softens exactly
+the text edges OCR depends on. Other formats — GIF, BMP, WebP, and oversize
+PNG/JPEG — are decoded and re-encoded. Every result is cached under a SHA-256
+of the image bytes plus the mode, question, resolved model and provider, and
+the effort, with a seven-day TTL, so a long session never re-sends the same
+picture twice; a cached answer says so in its footer. A live answer ends with
+`_Analyzed via <model> (<provider>) in Xs._` so the caller knows which eyes read
+it. `effort` — `low`, `medium` or `high` — is resolved against the vision model
+rather than the router's complexity class, and a level that model does not take
+is dropped instead of failing the call. The vision model is mandatory: when no
+vision-capable model is available the tool fails loudly and names the setting
+to fix, rather than silently answering from the filename.
+
+## Minor: The image analysis model is a machine setting, not a per-chat one
+
+Settings → General → Background tasks gains an **Image analysis model** row,
+beside the background model it now shares a picker with. Left unset, image
+analysis inherits the session's own model when that model can see images; set,
+it applies to every session on the machine. Only vision-capable models are
+listed, and the write path refuses a model the registry marks as sightless or
+one this machine cannot reach, so the setting cannot be pointed at something
+that will fail on first use. Storage is `ui_prefs.image_model` and
+`image_provider` (migration 078) behind `GET` and `POST /models/image`; an empty
+model clears the override and restores inheritance.
+
+## Minor: Provider concurrency has a ceiling you can set
+
+The process-wide in-flight limit for provider requests was a constant of eight,
+chosen to sit just above the indexer's own five. It is now a setting — Settings
+→ **Provider requests** — and it takes effect immediately: the budget reshapes
+its index lanes and wakes the waiters already queued instead of leaving them for
+the next run, and it never preempts a streaming request that is already open.
+Two is the floor, because one would leave the index unable to start beside even
+a single interactive request, and zero means "use the default" — eight. The
+`OGCODE_PROVIDER_MAX_CONCURRENT` environment variable still outranks the stored
+value; when it is set the screen shows the value read-only and says why. The
+ceiling is applied at server boot, at the start of a prompt run and at the start
+of an index run, so a CLI invocation and a served session agree. Storage is
+`ui_prefs.provider_max_concurrent` (migration 079) behind `GET` and
+`POST /providers/concurrency`.
+
+## Minor: The model catalog catches up
+
+Claude **Fable 5.2** becomes the default: $8/$40 per million tokens with cache
+write at $10 and cache read at $0.20, on a full 1M window. **Haiku 5.5**
+replaces Haiku 4.5 at $0.10/$0.50 with the same 1M window, adaptive thinking
+and a selectable effort, and **Mythos 5.2** follows at $8/$40. Fable 5.1,
+Mythos 5.1 and Haiku 4.5 move to legacy rather than disappearing, so existing
+sessions keep resolving. OpenAI gains **GPT-6.1 Sol** at $2/$10 and **GPT-6.1
+Terra** at $1/$5, both on the Responses API only with the 922K input cap.
+Google gains **Gemini 4 Hydrogen** at $1.50/$7.50 and **Gemini 4 Carbon** at
+$2/$10 on a 1M window, Carbon carrying an introductory price through
+2026-11-30 and rising to $4/$20 on 2026-12-01. Kimi gains **K3.1 Pro** at
+$2/$10 and **K3.1 Pro Highspeed** at $4/$20.
+
+## Minor: The search ranker gets room to think
+
+The deep-search ranker was capped at 1,024 output tokens, which a reasoning
+model can spend before it emits a single ranking — the call then came back
+empty and the pipeline fell back to unranked results. The budget is now 4,096,
+which is a bound rather than an allocation: nothing is charged for room left
+unused.
+
+## Minor: A subagent's work shows in a dock above the composer
+
+The subagent indicator leaves the header for a floating dock at the bottom
+right, just above the prompt box, where the work it reports happens. Each pill
+carries the subagent's title and a spinner while it runs, reveals its workload
+and elapsed time on hover, and the region is announced through `aria-live` so a
+screen reader hears a child start and finish. Five pills show at once and the
+rest fold into `+N more`, so a wide fan-out no longer pushes the header around.
+
+## Patch: "Project Index" is now "Source"
+
+The screen, the settings group, the tool's own titles (`Source`, `Source /
+<subdir>`) and the empty-index message all speak of the **source**, matching what
+the index actually is. The empty message also says what to do about it: run
+**Index workspace** first to build the source map.
+
+## Patch: Prices in a message are no longer typeset as math
+
+The inline-math rule treated a pair of dollar signs anywhere in a paragraph as a
+KaTeX span, so a model quoting `$3/1M … $0.05/1M` got its prices italicised and
+its spacing mangled. The pattern now requires a real delimiter — the opening `$`
+hugging its first character, the closing `$` hugging its last, a backslash
+escaping a literal `\$`, and no digit directly after the closing `$` — so
+currency reads as currency and formulas still render.
+
 # Release Notes — v0.59.2
 
 ## Minor: Logs and shipped events stop carrying what you typed

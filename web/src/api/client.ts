@@ -991,6 +991,44 @@ export function setBackgroundModel(pref: BackgroundModelPref): Promise<Backgroun
   });
 }
 
+// Image-analysis model override (machine-wide). Empty model means inherit
+// from the active session.
+export interface ImageModelPref {
+  model: string;
+  providerId: string;
+}
+
+export function getImageModel(): Promise<ImageModelPref> {
+  return fetchAPI('/models/image');
+}
+
+export function setImageModel(pref: ImageModelPref): Promise<ImageModelPref> {
+  return fetchAPI('/models/image', {
+    method: 'POST',
+    body: JSON.stringify(pref),
+  });
+}
+
+// Provider concurrency ceiling (machine-wide). Caps in-flight provider
+// requests for the whole process; OGCODE_PROVIDER_MAX_CONCURRENT wins when set.
+export interface ProviderConcurrency {
+  value: number;
+  envSet: boolean;
+  min: number;
+  defaultValue: number;
+}
+
+export function getProviderConcurrency(): Promise<ProviderConcurrency> {
+  return fetchAPI('/providers/concurrency');
+}
+
+export function setProviderConcurrency(value: number): Promise<ProviderConcurrency> {
+  return fetchAPI('/providers/concurrency', {
+    method: 'POST',
+    body: JSON.stringify({ value }),
+  });
+}
+
 // Theme API
 export interface Theme {
   directory: string;

@@ -7,7 +7,7 @@ import GitDiff from './git-diff';
 import { basename } from './file-tree';
 
 /**
- * The Project Index's git side panel: the working tree the agent has been
+ * The Source page's git side panel: the working tree the agent has been
  * editing, the recent commits, and a commit box. State lives in one store the
  * page owns, because it spans both panes — the list on the left and the diff in
  * the viewer on the right.

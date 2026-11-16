@@ -7,7 +7,7 @@ import DialogShell, { DialogFooter } from './dialog-shell';
  * auto-index file limit and the user has not granted consent. It exists so a
  * big project is never indexed behind the user's back: the run costs tokens,
  * and this is where that cost is agreed to. The choice is remembered for the
- * project — the same switch as the one under Settings -> Project index.
+ * project — the same switch as the one under Settings -> Source.
  *
  * A centred layout: one outlined glyph, the question, one paragraph, and the
  * two answers in the footer beside the note that the choice is remembered.
@@ -60,7 +60,7 @@ export default function IndexConsentDialog() {
             </p>
           </div>
 
-          <DialogFooter hint="Your choice is remembered for this project — you can change it under Settings → Project index.">
+          <DialogFooter hint="Your choice is remembered for this project — you can change it under Settings → Source.">
             <button type="button" onClick={close} class="dlg-btn">
               Not now
             </button>

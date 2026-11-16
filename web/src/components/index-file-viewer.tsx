@@ -6,7 +6,7 @@ import Popover from './popover';
 import { basename, fileExt, relPath, langColor, tint } from './file-tree';
 
 /**
- * The right-hand pane of the Project Index: one open file, read-only.
+ * The right-hand pane of the Source page: one open file, read-only.
  *
  * Markdown opens rendered, the way a README is read, with a Preview/Source
  * switch in the file bar (⇧⌘V, as in editors) — the choice is remembered, so

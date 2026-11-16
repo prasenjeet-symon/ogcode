@@ -249,6 +249,7 @@ export function TextField(props: {
   value: string;
   onInput: (value: string) => void;
   onEnter?: () => void;
+  onBlur?: () => void;
   placeholder?: string;
   password?: boolean;
   mono?: boolean;
@@ -268,6 +269,7 @@ export function TextField(props: {
       spellcheck={false}
       onInput={(e) => props.onInput(e.currentTarget.value)}
       onKeyDown={(e) => { if (e.key === 'Enter') props.onEnter?.(); }}
+      onBlur={() => props.onBlur?.()}
       class={`${fieldClass} ${props.width ?? 'w-full'} ${props.mono ? 'font-mono text-meta' : ''}`}
     />
   );

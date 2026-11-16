@@ -387,7 +387,7 @@ export default function DocIndexPage() {
               </svg>
             </div>
             <div class="min-w-0">
-              <h1 class="text-ui font-semibold text-[color:var(--text-primary)] leading-tight whitespace-nowrap">Project Index</h1>
+              <h1 class="text-ui font-semibold text-[color:var(--text-primary)] leading-tight whitespace-nowrap">Source</h1>
               <p class="hidden sm:block text-micro text-[color:var(--text-muted)] font-mono truncate leading-tight" title={server.directory()}>
                 {rootLabel()}
               </p>

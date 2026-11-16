@@ -1752,7 +1752,7 @@ body:has(.modal-backdrop) {
 }
 
 /* ============================================================
-   Project Index
+   Source (the index screen)
    The index screen is a workbench — a file tree, a viewer and two
    dialogs. These classes carry what utilities cannot: colour mixes
    against the runtime theme variables, the shared segmented control
