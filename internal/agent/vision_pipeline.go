@@ -38,12 +38,14 @@ const (
 	visionAnswerMaxTokens     = 2048
 )
 
-// visionThinkingHeadroom is added to a mode's output budget when the call asks
-// for reasoning. Reasoning is billed and counted as output, and every provider
-// shares one ceiling between it and the answer, so a 2048-token answer budget
-// can be spent thinking before a single word comes out — oneShotVisionLLM then
-// sees an empty result with finish=length and fails the call. The room is a
-// bound, not an allocation: nothing is charged for what goes unused.
+// visionThinkingHeadroom is added to every mode's output budget, whether or not
+// the call names a level. Reasoning is billed and counted as output, and every
+// provider shares one ceiling between it and the answer, so a 2048-token answer
+// budget can be spent thinking before a single word comes out — oneShotVisionLLM
+// then sees an empty result with finish=length and fails the call. No level
+// named does not mean no reasoning: the endpoint reasons at its own default,
+// or at the level a gateway pins for the vision class. The room is a bound, not
+// an allocation: nothing is charged for what goes unused.
 const visionThinkingHeadroom = 4096
 
 // One fixed system prompt per mode, mirroring the search pipeline's fixed
@@ -230,15 +232,17 @@ func visionPromptFor(mode, question string) (system, user string, maxTokens int)
 // replaced by the class's level — so only a depth that maps back to itself gets
 // a class, and every other level rides the body alone.
 func oneShotVisionLLM(ctx context.Context, p provider.Provider, model, system, user string, maxTokens int, mediaType string, imageBytes []byte, effort string) (string, *provider.TokenUsage, error) {
-	budget := maxTokens
-	// Thinking is asked for only when a level was named: with none the call
-	// keeps the flat utility shape it has always had, and the provider applies
-	// the model's own floor. Any level — including "none", which turns
-	// reasoning off — is the caller's explicit choice, so it rides with
-	// Thinking set, exactly as the step loop sends it.
+	budget := maxTokens + visionThinkingHeadroom
+	// A named level is the caller's explicit choice and rides with Thinking
+	// set, exactly as the step loop sends it. With none the call keeps the flat
+	// utility shape, but says "none" in the body instead of omitting the field:
+	// an omission is not off — the endpoint reasons at its own default, or at
+	// the level a gateway pins for the vision class — and that reasoning spends
+	// this same ceiling. The headroom above covers what "none" cannot: a host
+	// whose ladder does not carry the level, and one that pins a class level.
 	thinking := effort != ""
-	if thinking {
-		budget += visionThinkingHeadroom
+	if !thinking {
+		effort = provider.EffortNone
 	}
 	userJSON, err := json.Marshal(user)
 	if err != nil {

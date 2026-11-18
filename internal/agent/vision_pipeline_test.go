@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -143,8 +144,8 @@ func TestVisionPipelineCallsModelPerMode(t *testing.T) {
 			if len(last.System) != 1 || last.System[0] != tt.wantSystem {
 				t.Errorf("req.System = %v, want the %q prompt", last.System, tt.name)
 			}
-			if last.MaxTokens != tt.wantTokens {
-				t.Errorf("req.MaxTokens = %d, want %d", last.MaxTokens, tt.wantTokens)
+			if want := tt.wantTokens + visionThinkingHeadroom; last.MaxTokens != want {
+				t.Errorf("req.MaxTokens = %d, want %d (mode budget plus thinking headroom)", last.MaxTokens, want)
 			}
 		})
 	}
@@ -431,14 +432,14 @@ func TestVisionPipelineResolvesEffortAgainstVisionModel(t *testing.T) {
 			visionModeDescribe, "", "eye-model", "visiontest", provider.EffortMax); err != nil {
 			t.Fatalf("RunVisionSession: %v", err)
 		}
-		if last.Thinking || last.Effort != "" {
-			t.Errorf("req.Thinking = %v, req.Effort = %q, want the unsupported level dropped", last.Thinking, last.Effort)
+		if last.Thinking || last.Effort != provider.EffortNone {
+			t.Errorf("req.Thinking = %v, req.Effort = %q, want the unsupported level dropped and reasoning named off", last.Thinking, last.Effort)
 		}
 		if last.Complexity != "" {
 			t.Errorf("req.Complexity = %q, want no class for a level the body does not carry", last.Complexity)
 		}
-		if last.MaxTokens != visionDescribeMaxTokens {
-			t.Errorf("req.MaxTokens = %d, want the plain budget %d", last.MaxTokens, visionDescribeMaxTokens)
+		if want := visionDescribeMaxTokens + visionThinkingHeadroom; last.MaxTokens != want {
+			t.Errorf("req.MaxTokens = %d, want %d", last.MaxTokens, want)
 		}
 	})
 
@@ -459,9 +460,10 @@ func TestVisionPipelineResolvesEffortAgainstVisionModel(t *testing.T) {
 	})
 }
 
-// Asking for no effort is the shape the call has always had: no thinking, no
-// effort on the wire, the plain per-mode budget.
-func TestVisionPipelineNoEffortSendsFlatRequest(t *testing.T) {
+// Asking for no effort keeps the flat shape — no Thinking, no complexity class
+// — but names "none" in the body so the endpoint's default, or a gateway pin,
+// cannot reason inside the answer budget. The headroom rides either way.
+func TestVisionPipelineNoEffortNamesReasoningOff(t *testing.T) {
 	lr, last := visionRunner(t, effortVisionModels(),
 		[]provider.StreamEvent{{Type: provider.EventTextDelta, Text: "ok"}})
 
@@ -469,13 +471,36 @@ func TestVisionPipelineNoEffortSendsFlatRequest(t *testing.T) {
 		visionModeDescribe, "", "eye-model", "visiontest", ""); err != nil {
 		t.Fatalf("RunVisionSession: %v", err)
 	}
-	if last.Thinking || last.Effort != "" {
-		t.Errorf("req.Thinking = %v, req.Effort = %q, want neither without a chosen level", last.Thinking, last.Effort)
+	if last.Thinking || last.Effort != provider.EffortNone {
+		t.Errorf("req.Thinking = %v, req.Effort = %q, want no thinking and an explicit none", last.Thinking, last.Effort)
 	}
 	if last.Complexity != "" {
 		t.Errorf("req.Complexity = %q, want no class without a chosen level", last.Complexity)
 	}
-	if last.MaxTokens != visionDescribeMaxTokens {
-		t.Errorf("req.MaxTokens = %d, want %d", last.MaxTokens, visionDescribeMaxTokens)
+	if want := visionDescribeMaxTokens + visionThinkingHeadroom; last.MaxTokens != want {
+		t.Errorf("req.MaxTokens = %d, want %d (mode budget plus thinking headroom)", last.MaxTokens, want)
+	}
+}
+
+// Reasoning that spent the whole ceiling leaves nothing for the answer, and the
+// failure names the budget the call was given: the mode's budget plus the
+// thinking headroom, not the bare answer budget that emptied it.
+func TestVisionPipelineEmptyAnswerReportsHeadroomBudget(t *testing.T) {
+	length := "length"
+	lr, _ := visionRunner(t,
+		[]provider.ModelInfo{{ID: "eye-model", SupportsImages: true, ActiveByDefault: true}},
+		[]provider.StreamEvent{
+			{Type: provider.EventReasoning, Text: strings.Repeat("weighing the evidence ", 50)},
+			{Type: provider.EventFinish, FinishReason: &length},
+		})
+
+	_, err := lr.RunVisionSession(context.Background(), []byte("imagedata"), "image/png",
+		visionModeAnswer, "is this page dark mode?", "eye-model", "visiontest", "")
+	if err == nil {
+		t.Fatal("RunVisionSession succeeded with no answer, want an error")
+	}
+	want := fmt.Sprintf("no answer within %d output tokens", visionAnswerMaxTokens+visionThinkingHeadroom)
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v, want it to name %q", err, want)
 	}
 }

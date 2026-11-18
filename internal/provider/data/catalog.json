@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-16T13:43:22.409676Z",
+  "generatedAt": "2026-11-17T16:07:59.724106Z",
   "models": [
     {
       "id": "claude-fable-5-2",
@@ -2195,11 +2195,6 @@
       "supportsImages": true,
       "contextWindow": 1000000,
       "maxOutputTokens": 0,
-      "efforts": [
-        "low",
-        "medium",
-        "high"
-      ],
       "collection": "open"
     },
     {
@@ -3140,8 +3135,11 @@
       "efforts": [
         "low",
         "medium",
-        "high"
+        "high",
+        "xhigh",
+        "max"
       ],
+      "defaultEffort": "max",
       "collection": "open"
     },
     {

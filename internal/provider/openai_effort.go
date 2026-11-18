@@ -392,9 +392,9 @@ func writeOpenRouterReasoning(spec EffortSpec) effortWriter {
 }
 
 // applyEffort writes the requested level into body when the endpoint takes it
-// for the model. A request that is not the agent loop's (no Thinking) never
-// carries effort, and a level the model does not take is dropped rather than
-// sent: it would fail the request on most hosts.
+// for the model. A request that is not the agent loop's (no Thinking) carries
+// no level but the explicit "none", and a level the model does not take is
+// dropped rather than sent: it would fail the request on most hosts.
 //
 // When the session has chosen no effort (req.Effort == ""), a flash-class
 // model gets a light default instead of the endpoint's: those models reason
@@ -407,6 +407,18 @@ func writeOpenRouterReasoning(spec EffortSpec) effortWriter {
 // untouched.
 func (p *OpenAIProvider) applyEffort(body *oaiRequest, req StreamRequest) {
 	if !req.Thinking {
+		// An explicit "none" is the one level that does not need Thinking. It
+		// says the call carries no reasoning at all, which an omitted field
+		// does not: the endpoint's own default, or the level a gateway pins for
+		// the task class, reasons anyway — inside an output budget sized for the
+		// answer, so the answer never comes. Sent only where the model takes it;
+		// an unknown ladder is left alone rather than guessed at, since a value
+		// a host does not document is a failed request.
+		if req.Effort == EffortNone && body.ReasoningEffort == "" {
+			if spec, write := p.effortPlan(body.Model); write != nil && spec.Allows(EffortNone) {
+				write(body, EffortNone)
+			}
+		}
 		return
 	}
 	spec, write := p.effortPlan(body.Model)

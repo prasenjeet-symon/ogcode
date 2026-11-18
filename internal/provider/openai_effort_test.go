@@ -83,6 +83,10 @@ func TestOpenAICompatibleEffortSpecs(t *testing.T) {
 		// default where it differs from the vendor's.
 		{"OGX falls back to the catalogue", effortProvider(OGXProviderID, "https://ogx.ogcode.in/v1"), "gpt-oss:120b", lowToHighEfforts, EffortMedium, false},
 		{"OGX shows the default Ollama's cloud applies", effortProvider(OGXProviderID, "https://ogx.ogcode.in/v1"), "deepseek-v4-pro", noneLowHighMaxEfforts, EffortLow, false},
+		// beam's own ladder, five levels, run at max when nothing is sent.
+		{"OGX Free takes beam's full ladder", effortProvider(OGXProviderID, "https://ogx.ogcode.in/v1"), "ogx-free", lowToMaxEfforts, EffortMax, false},
+		// M3.1 Flash thinks on a bare switch and names no depth level.
+		{"MiniMax M3.1 Flash takes no effort", effortProvider(OGXProviderID, "https://ogx.ogcode.in/v1"), "ogx-minimax-m3.1-flash", nil, "", false},
 		{"an Ollama model with no ladder anywhere", effortProvider("ollama", "http://localhost:11434/v1"), "llama3.2:3b", nil, "", false},
 	}
 	for _, c := range cases {
@@ -163,6 +167,24 @@ func TestOpenAICompatibleEffortOnTheWire(t *testing.T) {
 		body := wire(p, effortRequest("gpt-oss:20b", EffortHigh, false))
 		if _, ok := body["reasoning_effort"]; ok {
 			t.Errorf("reasoning_effort sent on a utility call: %v", body["reasoning_effort"])
+		}
+	})
+	t.Run("an explicit none rides without thinking", func(t *testing.T) {
+		// Omitting the level is not "off": a gateway pin or the vendor default
+		// reasons anyway, inside a budget sized for the answer. The explicit
+		// level is the only way to say it, so it may ride without Thinking.
+		p := effortProvider("ollama", "http://localhost:11434/v1",
+			ModelInfo{ID: "kimi-k2.6:cloud", Efforts: onOffEfforts, DefaultEffort: EffortOn})
+		if got := wire(p, effortRequest("kimi-k2.6:cloud", EffortNone, false))["reasoning_effort"]; got != EffortNone {
+			t.Errorf("reasoning_effort = %v, want %q", got, EffortNone)
+		}
+	})
+	t.Run("a ladder without none keeps the field off", func(t *testing.T) {
+		// Groq rejects a value the model does not document with a 400, so the
+		// explicit level is dropped rather than guessed at.
+		p := effortProvider("openai", "https://api.groq.com/openai/v1")
+		if got, ok := wire(p, effortRequest("gpt-oss-120b", EffortNone, false))["reasoning_effort"]; ok {
+			t.Errorf("reasoning_effort = %v, want the field absent on a ladder without none", got)
 		}
 	})
 	t.Run("a level the model does not take is dropped", func(t *testing.T) {

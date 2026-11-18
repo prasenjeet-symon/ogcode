@@ -629,10 +629,13 @@ type StreamRequest struct {
 	// failed to judge any command; see riskLLMMaxTokens.)
 	Thinking bool `json:"thinking,omitempty"`
 	// Effort is the reasoning effort to ask for, in ogcode's vocabulary (see
-	// effort.go), or "" for the model's default. It applies only with Thinking:
-	// the agent loop sets both, from the session's choice, after checking the
-	// model takes the level (ResolveEffort). Each provider translates it into
-	// its own field and drops a level the model would reject.
+	// effort.go), or "" for the model's default. With Thinking the agent loop
+	// sets it from the session's choice, after checking the model takes the
+	// level (ResolveEffort). EffortNone is the exception: it may ride without
+	// Thinking, where a caller must state that the request carries no reasoning
+	// at all — leaving the field off does not say that, and an endpoint that
+	// reasons anyway spends a budget sized for the answer. Each provider
+	// translates it into its own field and drops a level the model would reject.
 	Effort string `json:"effort,omitempty"`
 	// StepMechanical marks this request as a mechanical continuation — the
 	// previous step of the turn produced tool calls and no final text, so the
