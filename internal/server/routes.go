@@ -74,6 +74,11 @@ func (s *Server) routes() http.Handler {
 		r.Get("/appearance", s.handleGetAppearance)
 		r.Post("/appearance", s.handleSetAppearance)
 
+		// Which navigation panels this project has folded. Stored in the
+		// project DB, unlike the machine-wide theme above.
+		r.Get("/ui/nav", s.handleGetNavState)
+		r.Post("/ui/nav", s.handleSetNavState)
+
 		r.Get("/search/config", s.handleGetSearchConfig)
 		r.Post("/search/config", s.handleSetSearchConfig)
 		r.Post("/search/config/validate", s.handleValidateSearchKey)

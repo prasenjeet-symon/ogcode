@@ -4,6 +4,7 @@ import { useServer } from '../../context/server';
 import { useSession } from '../../context/session';
 import { projectName } from '../../lib/paths';
 import { createSidebarWidth } from '../../lib/sidebar-width';
+import { loadNavState, navState, setNavCollapsed } from '../../lib/nav-state';
 import { SettingsShell, type ShellReport } from './ui';
 
 // ---------------------------------------------------------------------------
@@ -106,11 +107,13 @@ export default function SettingsLayout(props: RouteSectionProps) {
   // bar shows the page name instead. One threshold with a dead zone rather
   // than a continuous fade, so a slow scroll cannot leave both half-visible.
   const [collapsed, setCollapsed] = createSignal(false);
-  // The nav column keeps its own width and its own fold state, exactly as the
-  // session sidebar does. Width is stored per panel, so the two never fight
-  // over one remembered figure.
-  const [menuCollapsed, setMenuCollapsed] = createSignal(false);
+  // The nav column keeps its own width; the fold is stored per project
+  // (lib/nav-state), so it survives navigation and a restart. Width is kept
+  // per panel, so the two sidebars never fight over one remembered figure.
+  const menuCollapsed = () => navState().settingsNavCollapsed;
+  const setMenuCollapsed = (v: boolean) => setNavCollapsed('settingsNavCollapsed', v);
   const menu = createSidebarWidth({ key: 'ogcode-settings-nav-width' });
+  void loadNavState();
 
   let deskEl: HTMLDivElement | undefined;
   let searchEl: HTMLInputElement | undefined;

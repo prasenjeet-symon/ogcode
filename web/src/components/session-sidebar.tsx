@@ -7,6 +7,7 @@ import type { Session } from '../api/client';
 import { childSessionIds as boardChildSessionIds, isLive, statusMeta } from '../lib/board-tree';
 import { loadPinned, savePinned } from '../lib/pinned-sessions';
 import { createSidebarWidth } from '../lib/sidebar-width';
+import { loadNavState, navState, setNavCollapsed } from '../lib/nav-state';
 import Logo from './logo';
 import { openSessionPalette } from './session-palette';
 import SidebarShell from './sidebar-shell';
@@ -90,12 +91,17 @@ function SessionSidebarInner() {
   const notesOn = () => server.notesEnabled();
   const deviceOn = () => server.devicePanelEnabled();
   const [query, setQuery] = createSignal('');
-  const [collapsed, setCollapsed] = createSignal(false);
+  // The fold is stored per project, server-side, so it lives in lib/nav-state
+  // rather than a signal here: every page mounts its own sidebar, and a remount
+  // must not reset it.
+  const collapsed = () => navState().sidebarCollapsed;
+  const setCollapsed = (v: boolean) => setNavCollapsed('sidebarCollapsed', v);
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [draftTitle, setDraftTitle] = createSignal('');
   const [pinned, setPinned] = createSignal<Set<string>>(loadPinned());
   const [pinnedOpen, setPinnedOpen] = createSignal(true);
   const sidebar = createSidebarWidth();
+  void loadNavState();
 
   const togglePin = (e: MouseEvent, id: string) => {
     e.stopPropagation();
