@@ -30,7 +30,7 @@ func TestAskUserTool_ReportsThePathTaken(t *testing.T) {
 	}
 	// The user picked MySQL; the Postgres screen was never shown, so the reply
 	// carries a blank for it and the dialog skips it.
-	tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+	tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 		return question.Reply{Answers: []question.Answer{
 			{Selected: []string{"MySQL"}}, {}, {Selected: []string{"utf8mb4"}},
 		}}, nil
@@ -78,7 +78,7 @@ func TestAskUserTool_RefusesUnresolvableBranching(t *testing.T) {
 	}
 	for _, tc := range cases {
 		called := false
-		tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+		tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 			called = true
 			return question.Reply{}, nil
 		}}
@@ -116,7 +116,7 @@ func TestAskUserTool_RefusesDuplicateIds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		called := false
-		tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+		tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 			called = true
 			return question.Reply{}, nil
 		}}
@@ -136,20 +136,25 @@ func TestAskUserTool_RefusesDuplicateIds(t *testing.T) {
 func TestAskUserTool_ReturnsTheAnswers(t *testing.T) {
 	var gotQuestions []question.Question
 	var gotSession string
-	tool := AskUserTool{Ask: func(_ context.Context, sessionID string, qs []question.Question) (question.Reply, error) {
+	var gotCallID string
+	tool := AskUserTool{Ask: func(_ context.Context, sessionID, callID string, qs []question.Question) (question.Reply, error) {
 		gotSession = sessionID
+		gotCallID = callID
 		gotQuestions = qs
 		return question.Reply{Answers: []question.Answer{{Selected: []string{"Postgres"}, Text: "and a pooler"}}}, nil
 	}}
 
 	res, err := tool.Execute(context.Background(), askUserArgs(t,
 		question.Question{Header: "Storage", Question: "Which store?", Options: []question.Option{{Label: "Postgres"}, {Label: "SQLite"}}},
-	), Context{SessionID: "ses_42"})
+	), Context{SessionID: "ses_42", CallID: "call_7"})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	if gotSession != "ses_42" {
 		t.Errorf("Ask received session %q, want ses_42", gotSession)
+	}
+	if gotCallID != "call_7" {
+		t.Errorf("Ask received call id %q, want the tool call's own id", gotCallID)
 	}
 	if len(gotQuestions) != 1 || gotQuestions[0].Header != "Storage" {
 		t.Errorf("Ask received %+v, want the batch as given", gotQuestions)
@@ -169,7 +174,7 @@ func TestAskUserTool_ReturnsTheAnswers(t *testing.T) {
 // whose answer went missing, without claiming the blank was permission to
 // invent one.
 func TestAskUserTool_EmptyAnswerIsReportedAsABlank(t *testing.T) {
-	tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+	tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 		return question.Reply{Answers: []question.Answer{{}}}, nil
 	}}
 	res, err := tool.Execute(context.Background(), askUserArgs(t, question.Question{Question: "Which store?"}), Context{})
@@ -204,7 +209,7 @@ func TestAskUserTool_DescriptionNamesTheChannelAndItsLimit(t *testing.T) {
 // A batch reply carries one answer per question, in order. The result must echo
 // each question with its own answer so the model never has to re-pair them.
 func TestAskUserTool_BatchAnswersArePairedInOrder(t *testing.T) {
-	tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+	tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 		return question.Reply{Answers: []question.Answer{
 			{Selected: []string{"Postgres"}},
 			{Text: "blue-green"},
@@ -232,7 +237,7 @@ func TestAskUserTool_BatchAnswersArePairedInOrder(t *testing.T) {
 
 func TestAskUserTool_EmptyBatchIsHelpfulNotFatal(t *testing.T) {
 	called := false
-	tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+	tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 		called = true
 		return question.Reply{}, nil
 	}}
@@ -250,7 +255,7 @@ func TestAskUserTool_EmptyBatchIsHelpfulNotFatal(t *testing.T) {
 
 func TestAskUserTool_TooManyQuestionsRefused(t *testing.T) {
 	called := false
-	tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+	tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 		called = true
 		return question.Reply{}, nil
 	}}
@@ -285,7 +290,7 @@ func TestAskUserTool_UnavailableIsAResultNotAnError(t *testing.T) {
 // A cancelled run unwinds through the error, the way the permission deny path
 // does — it is not a tool result the model should react to and retry.
 func TestAskUserTool_CancellationReturnsError(t *testing.T) {
-	tool := AskUserTool{Ask: func(context.Context, string, []question.Question) (question.Reply, error) {
+	tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
 		return question.Reply{}, context.Canceled
 	}}
 	_, err := tool.Execute(context.Background(), askUserArgs(t, question.Question{Question: "Which store?"}), Context{})
@@ -344,5 +349,50 @@ func TestAskUserTool_SchemaDeclaresTheBatchShape(t *testing.T) {
 	}
 	if req, _ := sw["required"].([]any); len(req) != 1 || req[0] != "question" {
 		t.Errorf("showWhen required = %v, want [question]", sw["required"])
+	}
+}
+
+// The transcript renders an answered batch as a card from the result's
+// metadata rather than by parsing the prose output: the questions as they were
+// put, the answers as they were given, and which screens the branching actually
+// showed. Answers are positional, matching how the reply is ordered.
+func TestAskUserTool_MetadataCarriesTheResolvedBatch(t *testing.T) {
+	questions := []question.Question{
+		{ID: "store", Header: "Storage", Question: "Which store?", Options: []question.Option{{Label: "Postgres"}, {Label: "MySQL"}}},
+		{ID: "pg", Header: "Postgres detail", Question: "Which version?", ShowWhen: &question.Condition{Question: "store", Options: []string{"Postgres"}}},
+		{ID: "mysql", Header: "MySQL detail", Question: "Which charset?", ShowWhen: &question.Condition{Question: "store", Options: []string{"MySQL"}}},
+	}
+	tool := AskUserTool{Ask: func(context.Context, string, string, []question.Question) (question.Reply, error) {
+		return question.Reply{Answers: []question.Answer{
+			{Selected: []string{"MySQL"}}, {}, {Selected: []string{"utf8mb4"}},
+		}}, nil
+	}}
+	res, err := tool.Execute(context.Background(), askUserArgs(t, questions...), Context{CallID: "call_7"})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	gotQs, ok := res.Metadata["askUserQuestions"].([]question.Question)
+	if !ok || len(gotQs) != len(questions) {
+		t.Fatalf("askUserQuestions = %#v, want the batch as given", res.Metadata["askUserQuestions"])
+	}
+	if gotQs[0].Header != "Storage" || gotQs[0].Options[1].Label != "MySQL" {
+		t.Errorf("metadata lost the batch's shape: %+v", gotQs[0])
+	}
+
+	gotAnswers, ok := res.Metadata["askUserAnswers"].([]question.Answer)
+	if !ok || len(gotAnswers) != len(questions) {
+		t.Fatalf("askUserAnswers = %#v, want one per question", res.Metadata["askUserAnswers"])
+	}
+	if len(gotAnswers[0].Selected) != 1 || gotAnswers[0].Selected[0] != "MySQL" || gotAnswers[2].Selected[0] != "utf8mb4" {
+		t.Errorf("answers are not paired with their questions: %+v", gotAnswers)
+	}
+
+	gotVisible, ok := res.Metadata["askUserVisible"].([]bool)
+	if !ok || len(gotVisible) != len(questions) {
+		t.Fatalf("askUserVisible = %#v, want one flag per question", res.Metadata["askUserVisible"])
+	}
+	if !gotVisible[0] || gotVisible[1] || !gotVisible[2] {
+		t.Errorf("visibility = %v, want only the MySQL branch shown", gotVisible)
 	}
 }

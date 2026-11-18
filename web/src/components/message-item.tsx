@@ -9,6 +9,8 @@ import { useSession } from '../context/session';
 import { useServer } from '../context/server';
 import DeliveryTicks, { formatLatency } from './delivery-ticks';
 import IndexEntries from './index-entries';
+import { taskLabel } from '../lib/task-label';
+import { AskUserPrompt, AskUserAnswers, askUserMeta } from './ask-user-card';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -47,6 +49,9 @@ export function summarizeInput(tool: string, input: any): string | null {
   if (input.pattern) return String(input.pattern);
   if (input.query) return String(input.query);
   if (input.url) return String(input.url);
+  // A delegation reads as what it investigates, not as the tool name: the call's
+  // description, else the first line of the prompt it was handed.
+  if (tool === 'task') return taskLabel(input) || null;
   if (tool === 'update_intent' && Array.isArray(input.steps) && input.steps.length > 0) {
     const steps = input.steps.filter((s: any) => s && typeof s.step === 'string');
     if (steps.length > 0) {
@@ -96,6 +101,22 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
   // parses to an object with no `state` property.
   const state = (): ToolState => props.data.state ?? DEFAULT_TOOL_STATE;
   const tool = (): string => props.data.tool || 'unknown';
+  const session = useSession();
+
+  // An ask_user batch is rendered as its own row, not beside it. While the batch
+  // is pending the prompt *is* the row's body — the question belongs in the
+  // transcript where the agent asked it, and the loop stays blocked on it. Once
+  // answered the row returns with the batch it asked, read back as a card, so
+  // the decision stays part of the record instead of shrinking to a tool line.
+  const pendingAsk = () => {
+    if (tool() !== 'ask_user') return undefined;
+    const id = props.data.callId;
+    if (!id) return undefined;
+    return session.pendingQuestions().find((q) => q.callId === id);
+  };
+  // The resolved batch, from the metadata the tool now writes on its result —
+  // the raw output only ever held the answers as prose for the model to read.
+  const askMeta = createMemo(() => (tool() === 'ask_user' ? askUserMeta(state().metadata) : null));
 
   // Agent housekeeping tools (codebase_map, file_map, compact_context,
   // update_intent, deep_search): the maps' dense labeled tree/outline output is
@@ -293,7 +314,11 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
       s.error.toLowerCase().includes('cancel');
   };
 
-  return (
+  // The ordinary row. An answered ask_user adds its card under the row, always
+  // visible: the question and the answer given are the reader's own turn, not
+  // tool output, so they do not wait behind a disclosure. The raw input and
+  // output stay one click down, as on every other tool.
+  const row = () => (
     <div class="my-1.5">
       <Dynamic
         component={isAgentNavTool() ? 'div' : 'button'}
@@ -414,6 +439,14 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
         </Show>
       </Dynamic>
 
+      <Show when={askMeta()}>
+        {(meta) => (
+          <div class="mt-1.5 ml-[1.15rem]">
+            <AskUserAnswers {...meta()} />
+          </div>
+        )}
+      </Show>
+
       <Show when={!isAgentNavTool() && expanded()}>
         {/* .reveal animates the disclosure open from zero height without a
             magic max-height, so long outputs and one-liners open alike. */}
@@ -445,6 +478,16 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
         </div>
       </Show>
     </div>
+  );
+
+  return (
+    <Show when={pendingAsk()} fallback={row()}>
+      {(batch) => (
+        <div class="my-1.5">
+          <AskUserPrompt batch={batch()} variant="inline" />
+        </div>
+      )}
+    </Show>
   );
 }
 

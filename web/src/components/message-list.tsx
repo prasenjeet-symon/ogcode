@@ -4,6 +4,7 @@ import MessageItem, { summarizeInput } from './message-item';
 import { createChatScroll } from '../lib/chat-scroll';
 import { SavedScroll } from '../lib/scroll-memory';
 import JumpToLatest from './jump-to-latest';
+import { JumpToQuestion } from './ask-user-card';
 import LoadingOlder from './loading-older';
 import Logo from './logo';
 import { ActivityHeatmap } from './activity-heatmap';
@@ -881,7 +882,15 @@ export default function MessageList() {
           centres on the conversation and never overlaps a grown input. */}
       <Show when={scroll.isScrolledUp()}>
         <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-          <JumpToLatest count={unreadCount()} onClick={scrollToBottom} />
+          {/* A blocked question outranks unread messages: it names the question
+              and jumps back to the card, which is the last thing the agent
+              wrote and the one thing the turn cannot get past without. */}
+          <Show
+            when={session.pendingQuestions().length > 0}
+            fallback={<JumpToLatest count={unreadCount()} onClick={scrollToBottom} />}
+          >
+            <JumpToQuestion onClick={scrollToBottom} />
+          </Show>
         </div>
       </Show>
     </div>

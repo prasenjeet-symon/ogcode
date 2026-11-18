@@ -430,6 +430,9 @@ export interface PendingQuestionAPI {
   ownerSessionId?: string;
   // The board handle of the teammate that asked, for the dialog's label.
   teammate?: string;
+  // The ask_user tool call that raised this batch, so the transcript can render
+  // the prompt as that call's own row. Absent on a teammate-mirrored copy.
+  callId?: string;
   questions: QuestionAPI[];
 }
 
@@ -1026,6 +1029,25 @@ export function setProviderConcurrency(value: number): Promise<ProviderConcurren
   return fetchAPI('/providers/concurrency', {
     method: 'POST',
     body: JSON.stringify({ value }),
+  });
+}
+
+// Left-hand navigation fold state (per project). Stored in the project DB, so
+// each project remembers whether its sidebar and settings nav are collapsed.
+export interface NavState {
+  sidebarCollapsed: boolean;
+  settingsNavCollapsed: boolean;
+}
+
+export function getNavState(): Promise<NavState> {
+  return fetchAPI('/ui/nav');
+}
+
+// A field left out of the patch keeps its stored value.
+export function setNavState(patch: Partial<NavState>): Promise<NavState> {
+  return fetchAPI('/ui/nav', {
+    method: 'POST',
+    body: JSON.stringify(patch),
   });
 }
 
@@ -1638,7 +1660,10 @@ export function unpublishPreviewPort(port: number): Promise<void> {
 // idle, done, stopped or stale; kind is session or teammate. spawnedBy is the
 // parent's handle, empty for a session that joined on its own. Title and model
 // are joined from the row's session by the server, so a row can be named by what
-// the agent is doing rather than only by its generated handle.
+// the agent is doing rather than only by its generated handle. Waiting is set
+// while the agent is blocked on the human (a permission or ask_user reply).
+// Complexity and workload are the spawner's routing hints, also joined from the
+// session; both are empty for an agent nobody delegated to.
 export interface BoardHandle {
   id: string;
   directory?: string;
@@ -1650,6 +1675,9 @@ export interface BoardHandle {
   status: string;
   title?: string;
   model?: string;
+  complexity?: string;
+  workload?: string;
+  waiting?: boolean;
   createdAt: string;
   updatedAt: string;
 }

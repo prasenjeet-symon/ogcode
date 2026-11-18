@@ -124,7 +124,12 @@ type Request struct {
 	// say whose question the user is answering. It is set on every copy of a
 	// teammate's batch — the teammate's own page's copy included — and empty
 	// only for a batch the session itself asked, with no teammate involved.
-	Teammate  string     `json:"teammate,omitempty"`
+	Teammate string `json:"teammate,omitempty"`
+	// CallID names the ask_user tool call that raised this batch, so the UI can
+	// render the prompt in the transcript as that call's own row instead of in a
+	// floating modal. Empty on a copy the client has no tool part for — a
+	// teammate's batch mirrored to its parent session.
+	CallID    string     `json:"callId,omitempty"`
 	Questions []Question `json:"questions"`
 }
 

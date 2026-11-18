@@ -969,6 +969,7 @@ export const SessionProvider: ParentComponent = (props) => {
               // in, so the restore and live paths stay interchangeable.
               sessionId: q.ownerSessionId || q.sessionId,
               teammate: q.teammate || undefined,
+              callId: q.callId || undefined,
               questions: q.questions,
             }));
           return [...kept, ...added];
@@ -1730,6 +1731,7 @@ export const SessionProvider: ParentComponent = (props) => {
         questionId: p.questionId,
         sessionId: p.ownerSessionId || sid,
         teammate: p.teammate || undefined,
+        callId: p.callId || undefined,
         questions: p.questions || [],
       };
       setQuestionQueue(sid, (prev) =>

@@ -790,6 +790,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// 1×) because the cost scales with the context. Either trigger arms the same
 	// reminder.
 	pressure := newReadPressure(sessionID, modelContextWindow)
+	// A turn that runs long — the repetitive, stuck case — needs a different nudge
+	// from the read-pressure one: not "compact what you have read" but "check
+	// whether you are still getting anywhere". It counts the turn's steps and
+	// rides a tool result every stepReminderInterval steps. Advisory, unlike
+	// every other reminder here: stopping is not always safe, so it asks the
+	// agent to judge rather than telling it to stop.
+	stepCheck := newStepReminder(sessionID, maxSteps)
 	if sess != nil {
 		compactionSummary = sess.CompactionSummary
 	}
@@ -1036,6 +1043,11 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			slog.Warn("agent loop reached its hard step ceiling", "session", sessionID, "hardMax", hardMax)
 		}
 		slog.Info("agent loop step", "session", sessionID, "step", step)
+
+		// Arm the step-count check for this step, so a reminder that falls due
+		// rides one of this block's results rather than waiting on an earlier
+		// block to be re-read.
+		stepCheck.beginStep(step)
 
 		// Check for context cancellation at the start of each loop iteration
 		if ctx.Err() != nil {
@@ -2431,7 +2443,7 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			// model calling something it was never given, and compact_context is
 			// added per step for agents that accumulate read context. Passing the
 			// static agent here would reject every compaction as a disallowed tool.
-			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, turnTools, intentFind, workDir, modelSupportsImages, modelID, providerID, effort, pressure, gate, descent)
+			toolResults, aborted := lr.executeReadyToolCalls(ctx, sessionID, assistantID, readyCalls, effectiveAgent, turnTools, intentFind, workDir, modelSupportsImages, modelID, providerID, effort, pressure, stepCheck, gate, descent)
 			if aborted {
 				exitReason = "aborted"
 				return ctx.Err()
@@ -3388,7 +3400,7 @@ func (lr *LoopRunner) executeTool(ctx context.Context, sessionID session.Session
 // executeReadyToolCalls runs every ready call and returns each one's result
 // keyed by call ID, so the caller can act on what a tool actually did rather
 // than on the fact that it was invoked.
-func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, turnTools *turnToolset, intentFind *intentFinder, workDir string, modelSupportsImages bool, modelID, providerID, effort string, pressure *readPressure, gate *intentGate, descent *descentGate) (results map[string]tool.Result, loopAborted bool) {
+func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID session.SessionID, assistantID session.MessageID, readyCalls []pendingToolCall, agent Agent, turnTools *turnToolset, intentFind *intentFinder, workDir string, modelSupportsImages bool, modelID, providerID, effort string, pressure *readPressure, stepCheck *stepReminder, gate *intentGate, descent *descentGate) (results map[string]tool.Result, loopAborted bool) {
 	if len(readyCalls) > 1 {
 		slog.Info("executing tool calls in parallel", "session", sessionID, "count", len(readyCalls), "tools", toolNames(readyCalls))
 	}
@@ -3513,6 +3525,9 @@ func (lr *LoopRunner) executeReadyToolCalls(ctx context.Context, sessionID sessi
 			continue
 		}
 		pressure.observe(execInfos[i].tc.Name, &execInfos[i].result)
+		// The step-count check rides any successful result, mutating tools
+		// included: a repetitive edit loop is exactly the case it exists for.
+		stepCheck.observe(execInfos[i].tc.Name, &execInfos[i].result)
 		// Nudge a turn that opened with a tool call instead of a plan. Like the
 		// read-pressure reminder above, it has to be part of the stored output
 		// the model reads on its next step.
@@ -3867,7 +3882,9 @@ func (lr *LoopRunner) mirrorQuestion(event string, parent, owner session.Session
 // AskUser puts a batch of questions to the user and blocks until they answer,
 // the loop is cancelled, or the client goes away. It is the ask_user tool's
 // implementation, wired in as tool.AskUserTool{Ask: lr.AskUser} so the tool
-// package keeps no dependency on this one.
+// package keeps no dependency on this one. callID names the tool call that
+// raised the batch; it rides on the request so the transcript can render the
+// prompt as that call's own row.
 //
 // It mirrors requestPermission exactly: register the pending request, announce
 // it on the bus, then wait on a buffered channel the HTTP handler writes to from
@@ -3876,7 +3893,7 @@ func (lr *LoopRunner) mirrorQuestion(event string, parent, owner session.Session
 // teammate's batch is also mirrored to its parent (user-facing) session, so
 // the human answers from the composer they are watching no matter which page
 // the dialog opened on.
-func (lr *LoopRunner) AskUser(ctx context.Context, sessionID string, questions []question.Question) (question.Reply, error) {
+func (lr *LoopRunner) AskUser(ctx context.Context, sessionID, callID string, questions []question.Question) (question.Reply, error) {
 	if lr.Questions == nil {
 		return question.Reply{}, fmt.Errorf("ask_user is not available in this environment")
 	}
@@ -3884,6 +3901,7 @@ func (lr *LoopRunner) AskUser(ctx context.Context, sessionID string, questions [
 	req := question.Request{
 		ID:        question.NewQuestionID(),
 		SessionID: sessionID,
+		CallID:    callID,
 		Questions: questions,
 		Teammate:  teammate,
 	}

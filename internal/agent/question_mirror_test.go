@@ -83,7 +83,7 @@ func TestTeammateQuestionMirrorsToTheParentSession(t *testing.T) {
 	var askErr error
 	go func() {
 		defer close(done)
-		reply, askErr = lr.AskUser(context.Background(), string(sessID), askStorageBatch())
+		reply, askErr = lr.AskUser(context.Background(), string(sessID), "call_mirror", askStorageBatch())
 	}()
 
 	seen := map[string]question.Request{}
@@ -152,7 +152,7 @@ func TestTeammateQuestionCancellationClearsTheParentQueue(t *testing.T) {
 	var askErr error
 	go func() {
 		defer close(done)
-		_, askErr = lr.AskUser(ctx, string(sessID), askStorageBatch())
+		_, askErr = lr.AskUser(ctx, string(sessID), "call_mirror", askStorageBatch())
 	}()
 
 	// Drain the two question.requested events, then cancel.

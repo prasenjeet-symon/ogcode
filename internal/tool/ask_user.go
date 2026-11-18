@@ -11,8 +11,10 @@ import (
 
 // AskUserFunc puts a batch of questions in front of the user and blocks until
 // they answer. Implemented by agent.LoopRunner.AskUser and wired in from
-// server.go to avoid the tool→agent import cycle.
-type AskUserFunc func(ctx context.Context, sessionID string, questions []question.Question) (question.Reply, error)
+// server.go to avoid the tool→agent import cycle. callID names the tool call
+// that raised the batch, so the transcript can render the prompt as that
+// call's own row rather than in a modal outside the conversation.
+type AskUserFunc func(ctx context.Context, sessionID, callID string, questions []question.Question) (question.Reply, error)
 
 // maxAskUserQuestions caps a batch so the dialog stays a short set of screens
 // rather than an interrogation. The guidance in the system prompt asks for 2-5.
@@ -158,14 +160,30 @@ func (t AskUserTool) Execute(ctx context.Context, args json.RawMessage, tctx Con
 		title = h
 	}
 
-	reply, err := t.Ask(ctx, string(tctx.SessionID), input.Questions)
+	reply, err := t.Ask(ctx, string(tctx.SessionID), tctx.CallID, input.Questions)
 	if err != nil {
 		// Mirrors the permission deny path: the wait ended because the run was
 		// cancelled, so the error unwinds the loop rather than being reported
 		// to the model as a tool result it should react to.
 		return Result{}, err
 	}
-	return Result{Title: title, Output: formatAnswers(input.Questions, reply)}, nil
+	return Result{Title: title, Output: formatAnswers(input.Questions, reply), Metadata: askUserMetadata(input.Questions, reply)}, nil
+}
+
+// askUserMetadata hands the resolved batch to the transcript, so an answered
+// question reads in history as a card — the questions as they were put, the
+// answers as they were given, and which screens the branching actually showed
+// — rather than as the tool result text the user would have to parse. Keys are
+// flat and camelCase like the other tools' metadata (analyzeImage*,
+// deepSearch*, syntax*).
+func askUserMetadata(questions []question.Question, reply question.Reply) map[string]any {
+	answers := make([]question.Answer, len(questions))
+	copy(answers, reply.Answers)
+	return map[string]any{
+		"askUserQuestions": questions,
+		"askUserAnswers":   answers,
+		"askUserVisible":   question.Visibility(questions, question.AnswersByID(questions, reply)),
+	}
 }
 
 // validateBranching checks the showWhen graph before the batch goes on screen,

@@ -96,9 +96,10 @@ function ChatContent() {
       </main>
       </Show>
 
-      {/* The agent's question, if it is blocked on one. Rendered above the chat
-          rather than inside it: the batch belongs to the session, not the
-          transcript position, and must stay visible wherever the user scrolled. */}
+      {/* The agent's question, if it is blocked on one: this session's own batch
+          renders inline, as the body of its ask_user tool row, so the question
+          sits where the agent asked it. The dialog is left for a teammate's
+          batch mirrored into this session, which has no row of its own here. */}
       <AskUserDialog />
     </div>
   );
