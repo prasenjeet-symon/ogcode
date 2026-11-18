@@ -91,12 +91,16 @@ export default function AgentsPage() {
 
   refresh();
 
-  // board.* events are the only ones that change this page. A short debounce
-  // folds the burst a spawn produces into one read.
+  // board.* events change a row's status; permission.* and question.* change
+  // its waiting flag. Without the latter the blink would only start or clear on
+  // the next poll — up to 15 s of the board looking wrong about a blocked agent.
+  const refreshesRoster = (type: string) =>
+    type.startsWith('board.') || type.startsWith('permission.') || type.startsWith('question.');
+  // A short debounce folds the burst a spawn produces into one read.
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   createEffect(() => {
     const last = server.lastEvent();
-    if (!last || !last.type.startsWith('board.')) return;
+    if (!last || !refreshesRoster(last.type)) return;
     if (sseTimer) clearTimeout(sseTimer);
     sseTimer = setTimeout(() => {
       sseTimer = null;

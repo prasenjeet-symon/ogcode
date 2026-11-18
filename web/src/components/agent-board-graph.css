@@ -105,9 +105,13 @@
   white-space: nowrap;
 }
 
-.abg-tip-kind {
-  flex-shrink: 0;
-  margin-left: auto;
+.abg-tip-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.abg-trait {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -133,6 +137,43 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A blocked agent says so in words too: the board's radiate catches the eye,
+   this says what it means. */
+.abg-tip-wait {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.abg-tip-wait::before {
+  content: '';
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--warning);
+  animation: abg-wait-blink 1.4s ease-in-out infinite;
+}
+
+@keyframes abg-wait-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .abg-tip-wait::before {
+    animation: none;
+  }
 }
 
 .abg-tip-actions {

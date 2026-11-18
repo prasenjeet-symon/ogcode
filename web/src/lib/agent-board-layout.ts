@@ -71,6 +71,8 @@ export interface BoardCell {
   running: number;
   /** Members that have not finished (running or idle). */
   live: number;
+  /** Members blocked on the human — a pending permission or ask_user reply. */
+  waiting: number;
   /** The deepest member, in edges below the root. */
   depth: number;
   x: number;
@@ -287,6 +289,7 @@ export function layoutBoard(rows: TreeRow[]): BoardLayout {
         count: nodes.length,
         running: nodes.filter((n) => n.h.status === 'running').length,
         live: nodes.filter((n) => isLive(n.h)).length,
+        waiting: nodes.filter((n) => n.h.waiting).length,
         depth: maxDepth,
         x: 0,
         y: 0,

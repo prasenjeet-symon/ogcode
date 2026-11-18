@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/prasenjeet-symon/ogcode/internal/board"
+	"github.com/prasenjeet-symon/ogcode/internal/permission"
+	"github.com/prasenjeet-symon/ogcode/internal/question"
 	"github.com/prasenjeet-symon/ogcode/internal/session"
 )
 
@@ -176,14 +178,17 @@ func TestBoardRoutesUnavailableWithoutABoard(t *testing.T) {
 // rosterRowJSON is the roster wire row as the drawer's client decodes it: the
 // board handle's fields and the joined title/model all flat at the top level.
 type rosterRowJSON struct {
-	Handle    string `json:"handle"`
-	SessionID string `json:"sessionId"`
-	Role      string `json:"role"`
-	Kind      string `json:"kind"`
-	SpawnedBy string `json:"spawnedBy"`
-	Status    string `json:"status"`
-	Title     string `json:"title"`
-	Model     string `json:"model"`
+	Handle     string `json:"handle"`
+	SessionID  string `json:"sessionId"`
+	Role       string `json:"role"`
+	Kind       string `json:"kind"`
+	SpawnedBy  string `json:"spawnedBy"`
+	Status     string `json:"status"`
+	Title      string `json:"title"`
+	Model      string `json:"model"`
+	Complexity string `json:"complexity"`
+	Workload   string `json:"workload"`
+	Waiting    bool   `json:"waiting"`
 }
 
 // TestBoardRosterCarriesTheSessionTitleAndModel pins the join the drawer labels
@@ -244,6 +249,68 @@ func TestBoardRosterCarriesTheSessionTitleAndModel(t *testing.T) {
 	}
 }
 
+// TestBoardRosterCarriesTheDelegationHints pins the join the hover tooltip
+// reads: a delegated agent's row carries the spawner's complexity and workload
+// predictions at the top level, and a session nobody delegated carries neither
+// — the tooltip shows those facts only when they are known.
+func TestBoardRosterCarriesTheDelegationHints(t *testing.T) {
+	srv := boardTestServer(t)
+	srv.store = session.NewStore(srv.db)
+	ctx := context.Background()
+	h := srv.routes()
+
+	if _, err := srv.board.Register(ctx, board.Handle{
+		Handle: "build", SessionID: "ses_build", Role: "build",
+		Kind: board.KindSession, Status: board.StatusRunning,
+	}); err != nil {
+		t.Fatalf("register parent: %v", err)
+	}
+	if _, err := srv.board.Register(ctx, board.Handle{
+		Handle: "worker", SessionID: "ses_worker", Role: "build",
+		Kind: board.KindTeammate, SpawnedBy: "build", Status: board.StatusRunning,
+	}); err != nil {
+		t.Fatalf("register teammate: %v", err)
+	}
+	if err := srv.store.Create(&session.Session{
+		ID: "ses_build", Title: "Build the feature", CreatedAt: session.Now(), UpdatedAt: session.Now(),
+	}); err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	if err := srv.store.Create(&session.Session{
+		ID: "ses_worker", Title: "Fix auth flow",
+		Complexity: "hard", Workload: "read-heavy",
+		CreatedAt: session.Now(), UpdatedAt: session.Now(),
+	}); err != nil {
+		t.Fatalf("create teammate session: %v", err)
+	}
+
+	rec := boardRequest(t, h, http.MethodGet, "/api/board/roster", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/board/roster = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var root struct {
+		Agents []rosterRowJSON `json:"agents"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &root); err != nil {
+		t.Fatalf("decode roster: %v (body: %s)", err, rec.Body.String())
+	}
+	byHandle := map[string]rosterRowJSON{}
+	for _, row := range root.Agents {
+		byHandle[row.Handle] = row
+	}
+	worker, ok := byHandle["worker"]
+	if !ok {
+		t.Fatalf("roster has no worker row: %+v", root.Agents)
+	}
+	if worker.Complexity != "hard" || worker.Workload != "read-heavy" {
+		t.Fatalf("worker hints = complexity %q workload %q, want hard/read-heavy", worker.Complexity, worker.Workload)
+	}
+	build := byHandle["build"]
+	if build.Complexity != "" || build.Workload != "" {
+		t.Fatalf("undelegated session hints = complexity %q workload %q, want both empty", build.Complexity, build.Workload)
+	}
+}
+
 // TestBoardRosterSurvivesAMissingSession pins the join's failure mode: a row
 // whose session row is deleted under it comes back as itself, with empty title
 // and model, and the roster as a whole still answers 200 — one missing session
@@ -284,5 +351,73 @@ func TestBoardRosterSurvivesAMissingSession(t *testing.T) {
 	}
 	if root.Agents[0].Title != "" || root.Agents[0].Model != "" {
 		t.Fatalf("row title/model = %q %q, want empty: its session is gone", root.Agents[0].Title, root.Agents[0].Model)
+	}
+}
+
+// TestBoardRosterFlagsAgentsWaitingOnTheUser pins the flag the board blinks: an
+// agent whose loop is blocked on the human — a permission request or an
+// ask_user batch — must say so on its own roster row, so the board never has to
+// read one queue per agent to find the one that needs an answer.
+func TestBoardRosterFlagsAgentsWaitingOnTheUser(t *testing.T) {
+	srv := boardTestServer(t)
+	srv.permissions = permission.NewManager(permission.NewStore(srv.globalDB))
+	srv.questions = question.NewManager()
+	h := srv.routes()
+	ctx := context.Background()
+
+	for _, handle := range []board.Handle{
+		{Handle: "build", SessionID: "ses_build", Role: "build", Kind: board.KindSession, Status: board.StatusRunning},
+		{Handle: "worker", SessionID: "ses_worker", Role: "build", Kind: board.KindTeammate, SpawnedBy: "build", Status: board.StatusRunning},
+	} {
+		if _, err := srv.board.Register(ctx, handle); err != nil {
+			t.Fatalf("register %s: %v", handle.Handle, err)
+		}
+	}
+
+	waiting := func() map[string]bool {
+		t.Helper()
+		rec := boardRequest(t, h, http.MethodGet, "/api/board/roster", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/board/roster = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+		}
+		var root struct {
+			Agents []rosterRowJSON `json:"agents"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &root); err != nil {
+			t.Fatalf("decode roster: %v (body: %s)", err, rec.Body.String())
+		}
+		out := map[string]bool{}
+		for _, row := range root.Agents {
+			out[row.Handle] = row.Waiting
+		}
+		return out
+	}
+
+	if got := waiting(); got["build"] || got["worker"] {
+		t.Fatalf("roster waiting = %v, want nothing flagged before an agent asks", got)
+	}
+
+	// A teammate's own permission request flags the teammate, not its parent:
+	// the parent's loop is not the one blocked.
+	perm := srv.permissions.Create(permission.Request{ID: "perm-1", SessionID: "ses_worker", Tool: "bash"})
+	if got := waiting(); !got["worker"] || got["build"] {
+		t.Fatalf("roster waiting = %v, want only worker flagged by its own permission", got)
+	}
+	srv.permissions.Remove(perm.Request.ID)
+	if got := waiting(); got["worker"] {
+		t.Fatalf("roster waiting = %v, want worker clear once the permission is answered", got)
+	}
+
+	// An ask_user batch is the other way a loop blocks on the human.
+	batch := srv.questions.Create(question.Request{
+		ID: "qst-1", SessionID: "ses_build",
+		Questions: []question.Question{{Header: "Storage", Question: "Which store?"}},
+	})
+	if got := waiting(); !got["build"] || got["worker"] {
+		t.Fatalf("roster waiting = %v, want only build flagged by its own question", got)
+	}
+	srv.questions.Remove(batch.Request.ID)
+	if got := waiting(); got["build"] {
+		t.Fatalf("roster waiting = %v, want build clear once the question is answered", got)
 	}
 }

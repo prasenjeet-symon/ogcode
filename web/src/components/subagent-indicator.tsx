@@ -1,5 +1,6 @@
 import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js';
 import { useSession } from '../context/session';
+import { taskLabel } from '../lib/task-label';
 import type { ToolPartData } from '../api/client';
 
 // A single active sub-agent delegation. The main agent calls the `task` tool to
@@ -72,7 +73,9 @@ export default function SubagentIndicator() {
         if (status !== 'running' && status !== 'pending') continue;
         if (stale) continue;
         const input = data.state?.input ?? {};
-        const title = (data.state?.title as string) || input?.description || 'Sub-agent';
+        // NOT `state.title`: the loop seeds it with the tool name ("task") when
+        // the call opens, so it never names the delegation the pill is about.
+        const title = taskLabel(input) || 'Sub-agent';
         tasks.push({
           id: data.callId || `${m.info.id}:${tasks.length}`,
           title: String(title),
@@ -97,7 +100,7 @@ export default function SubagentIndicator() {
         <For each={visibleTasks()}>
           {(task) => (
             <div
-              class="group pointer-events-auto flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-full border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)]/95 backdrop-blur-md shadow-lg shadow-black/30 text-micro text-[color:var(--text-primary)] cursor-default select-none max-w-[230px] transition-[transform,border-color] duration-150 hover:-translate-y-px hover:border-[color:var(--border-strong)] animate-fade-in-up"
+              class="group pointer-events-auto flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-full border border-[color:var(--border-default)] bg-[color:var(--bg-overlay)]/95 backdrop-blur-md shadow-lg shadow-black/30 text-micro text-[color:var(--text-primary)] cursor-default select-none max-w-[260px] transition-[transform,border-color] duration-150 hover:-translate-y-px hover:border-[color:var(--border-strong)] animate-fade-in-up"
               title={`${task.title} — sub-agent running`}
             >
               {/* Bot head */}
@@ -113,7 +116,7 @@ export default function SubagentIndicator() {
                 {/* mouth */}
                 <path stroke-linecap="round" d="M9.5 14.5h5" />
               </svg>
-              <span class="truncate min-w-0 max-w-[150px]">{task.title}</span>
+              <span class="truncate min-w-0 max-w-[190px]">{task.title}</span>
               <span class="w-2.5 h-2.5 shrink-0 rounded-full border-[1.5px] border-[color:var(--accent)] border-t-transparent animate-spin" />
               {/* Expanded on hover: workload + elapsed. Collapses to zero width
                   at rest so the pill keeps its compact title-only footprint. */}

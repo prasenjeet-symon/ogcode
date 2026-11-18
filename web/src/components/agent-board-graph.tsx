@@ -15,10 +15,10 @@
 // Painting: one canvas, no per-element DOM. Pulses and flow particles run only
 // while something is alive; a quiet board redraws on interaction alone.
 
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import type { BoardHandle } from '../api/client';
-import type { TreeRow } from '../lib/board-tree';
+import { kindLabel, type TreeRow } from '../lib/board-tree';
 import {
   CELL_CHIP_INSET,
   NODE_R,
@@ -58,6 +58,7 @@ interface Palette {
   elevated: string;
   border: string;
   accent: string;
+  warning: string;
   textSecondary: string;
   textTertiary: string;
   textMuted: string;
@@ -74,6 +75,10 @@ const ACTIVE_MAX_SCALE = 1;
 const FRAME_PAD = 46;
 /** Animation length of a framed move, in milliseconds. */
 const FRAME_MS = 420;
+/** Gap between the hovered node's pointer target and the tooltip, in pixels. */
+const TIP_GAP = 12;
+/** Minimum distance the tooltip keeps from the viewport edges, in pixels. */
+const TIP_MARGIN = 8;
 
 function toRgb(hex: string): [number, number, number] | null {
   const m = hex.trim().match(/^#([0-9a-f]{6}|[0-9a-f]{3})$/i);
@@ -130,6 +135,11 @@ function clampScale(k: number): number {
 export default function AgentBoardGraph(props: AgentBoardGraphProps) {
   let hostEl: HTMLDivElement | undefined;
   let canvasEl: HTMLCanvasElement | undefined;
+  let tipEl: HTMLDivElement | undefined;
+  // Last known pointer position over the board, in client coordinates. Hover is
+  // re-resolved from it when the view moves under a parked pointer.
+  let boardPointer: { x: number; y: number } | null = null;
+  let hoverRaf = 0;
 
   const [hovered, setHovered] = createSignal<string | null>(null);
   const [pointerIn, setPointerIn] = createSignal(false);
@@ -175,6 +185,10 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
   } | null = null;
 
   const anyRunning = () => props.rows.some((r) => r.h.status === 'running');
+  // An agent blocked on the human (permission or ask_user) radiates, and the
+  // radiate needs frames of its own: the board must keep moving even when every
+  // agent is idle, which is exactly the state a pending question leaves behind.
+  const needsUser = () => props.rows.some((r) => r.h.waiting);
 
   // The subtree lit by hover: the hovered node, its ancestors, every
   // descendant. A plain mutable Set read by the canvas each frame — the
@@ -219,7 +233,10 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
       view.k = a.fk + (a.tk - a.fk) * e;
       if (p >= 1) anim = null;
       draw();
-    } else if (anyRunning()) {
+      // The view moved under the pointer: a node may have slid under it, or
+      // out from under it, without the mouse moving at all.
+      refreshHover();
+    } else if (anyRunning() || needsUser()) {
       // A pulse only needs enough frames to read as alive; 30 fps halves the
       // cost of a board with a running agent, and the transition above keeps
       // its full frame rate.
@@ -228,7 +245,7 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
         draw();
       }
     }
-    if (anim || anyRunning()) rafId = requestAnimationFrame(frame);
+    if (anim || anyRunning() || needsUser()) rafId = requestAnimationFrame(frame);
   }
 
   function animateView(to: { x: number; y: number; k: number }) {
@@ -299,9 +316,10 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
     frameRect(target, !first, active ? ACTIVE_MAX_SCALE : MAX_SCALE);
   });
 
-  // Pulse rings and flow particles want frames; a quiet board needs none.
+  // Pulse rings, flow particles and a blocked agent's radiate want frames; a
+  // quiet board needs none.
   createEffect(() => {
-    if (anyRunning()) kick();
+    if (anyRunning() || needsUser()) kick();
   });
 
   // Theme colours, resolved off this element's computed style. The cache is
@@ -317,6 +335,7 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
       elevated: read('--bg-elevated', '#141418'),
       border: read('--border-subtle', '#1e1e23'),
       accent: read('--accent', '#ff5e1f'),
+      warning: read('--warning', '#f5a623'),
       textSecondary: read('--text-secondary', '#a1a1aa'),
       textTertiary: read('--text-tertiary', '#8b8b94'),
       textMuted: read('--text-muted', '#6b6b75'),
@@ -368,6 +387,8 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
     onCleanup(() => {
       if (rafId) cancelAnimationFrame(rafId);
       rafId = 0;
+      if (hoverRaf) cancelAnimationFrame(hoverRaf);
+      hoverRaf = 0;
     });
   });
 
@@ -463,9 +484,21 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
   function drawCell(ctx: CanvasRenderingContext2D, cell: BoardCell, pal: Palette) {
     const inv = 1 / view.k;
     const running = cell.running > 0;
+    const waiting = cell.waiting > 0;
     // Square corners: the cell is a grouping frame, not a card.
     ctx.beginPath();
     ctx.rect(cell.x, cell.y, cell.w, cell.h);
+    if (waiting) {
+      // A family holding a blocked agent pulses in the warning hue, so the
+      // signal survives zooming out to where the dots are too small to read.
+      const blink = 0.5 + 0.5 * Math.sin(performance.now() / 280 + phaseOf(cell.id) * Math.PI * 2);
+      ctx.fillStyle = hexAlpha(pal.warning, 0.04 + 0.04 * blink);
+      ctx.fill();
+      ctx.lineWidth = 1.8 * inv;
+      ctx.strokeStyle = hexAlpha(pal.warning, 0.45 + 0.4 * blink);
+      ctx.stroke();
+      return;
+    }
     ctx.fillStyle = running ? hexAlpha(pal.accent, 0.05) : hexAlpha(pal.elevated, 0.55);
     ctx.fill();
     ctx.lineWidth = (running ? 1.4 : 1) * inv;
@@ -548,6 +581,32 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
 
     if (dimmed) ctx.globalAlpha = 0.22;
 
+    // An agent blocked on the human radiates before the disc is drawn, so the
+    // rings sit behind it. A hover dims the rest of the board; this agent stays
+    // at full strength, because it is the one thing left to act on.
+    if (node.h.waiting) {
+      ctx.globalAlpha = 1;
+      const now = performance.now();
+      const phase = phaseOf(node.id) * Math.PI * 2;
+      const pulse = 0.5 + 0.5 * Math.sin(now / 260 + phase);
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r + (3.5 + pulse * 4.5) * inv, 0, 2 * Math.PI);
+      ctx.fillStyle = hexAlpha(pal.warning, 0.16 + 0.18 * pulse);
+      ctx.fill();
+      // Two rings on a 1.6 s cycle, half a cycle apart, so one is always
+      // leaving the disc: the node reads as radiating, not as a single blink.
+      const t = (now / 1600 + phaseOf(node.id)) % 1;
+      for (const lag of [0, 0.5]) {
+        const p = (t + lag) % 1;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + (2 + p * 16) * inv, 0, 2 * Math.PI);
+        ctx.strokeStyle = hexAlpha(pal.warning, 0.75 * (1 - p));
+        ctx.lineWidth = 1.6 * inv;
+        ctx.stroke();
+      }
+      if (dimmed) ctx.globalAlpha = 0.22;
+    }
+
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
     ctx.fillStyle = hue;
@@ -598,10 +657,17 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
       : view.y + cell.y * view.k + 14;
     if (left > w || left + screenW < 0 || baseline < -16 || baseline > h + 16) return;
     const running = cell.running > 0;
+    const waiting = cell.waiting > 0;
 
     ctx.beginPath();
     ctx.arc(dotX, baseline, 2.4, 0, 2 * Math.PI);
-    ctx.fillStyle = running ? pal.accent : cell.live > 0 ? pal.textTertiary : pal.textMuted;
+    ctx.fillStyle = waiting
+      ? hexAlpha(pal.warning, 0.5 + 0.5 * Math.sin(performance.now() / 280 + phaseOf(cell.id) * Math.PI * 2))
+      : running
+        ? pal.accent
+        : cell.live > 0
+          ? pal.textTertiary
+          : pal.textMuted;
     ctx.fill();
 
     ctx.font = `600 10px ${pal.mono}`;
@@ -615,11 +681,13 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
       while (text.length > 1 && ctx.measureText(`${text}…`).width > maxW) text = text.slice(0, -1);
       text = `${text}…`;
     }
-    ctx.fillStyle = running
-      ? pal.textSecondary
-      : cell.count > 1
-        ? pal.textTertiary
-        : pal.textMuted;
+    ctx.fillStyle = waiting
+      ? pal.warning
+      : running
+        ? pal.textSecondary
+        : cell.count > 1
+          ? pal.textTertiary
+          : pal.textMuted;
     ctx.fillText(text, textX, baseline);
   }
 
@@ -638,6 +706,7 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
     view.y = sy - wy * k;
     view.k = k;
     draw();
+    refreshHover();
   }
 
   function onWheel(e: WheelEvent) {
@@ -653,6 +722,7 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
       view.x -= e.deltaX * unit;
       view.y -= e.deltaY * unit;
       draw();
+      refreshHover();
     }
   }
 
@@ -701,17 +771,33 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
     return null;
   }
 
-  // A pointermove storm would otherwise run the whole node scan on every
-  // event; the cursor only needs to keep up with the eye, not the mouse.
-  let lastHoverScan = 0;
-  function updateHover(e: PointerEvent) {
-    const now = performance.now();
-    if (now - lastHoverScan < 40) return;
-    lastHoverScan = now;
-    const hit = hitTest(e.clientX, e.clientY);
+  function hoverAtHit(clientX: number, clientY: number) {
+    const hit = hitTest(clientX, clientY);
     setCursor(hit ? 'pointer' : 'grab');
     const id = hit?.id ?? null;
     if (id !== hovered()) setHovered(id);
+  }
+
+  // A pointermove storm would otherwise run the whole node scan per event, but
+  // coalescing to one scan per frame (not dropping every move inside a window)
+  // keeps the LAST move: a dropped final move leaves the tooltip on the node the
+  // pointer already left, or missing the one it just reached.
+  function updateHover(e: PointerEvent) {
+    boardPointer = { x: e.clientX, y: e.clientY };
+    setPointerIn(true);
+    if (hoverRaf) return;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0;
+      if (boardPointer) hoverAtHit(boardPointer.x, boardPointer.y);
+    });
+  }
+
+  // refreshHover re-resolves the hover under a parked pointer after the view
+  // moved without the mouse moving: wheel pan, wheel/pinch zoom, button zoom,
+  // framing. Without it a trackpad pan slides nodes under the cursor with no
+  // tooltip, and the hover stays on whichever node the pan displaced.
+  function refreshHover() {
+    if (boardPointer) hoverAtHit(boardPointer.x, boardPointer.y);
   }
 
   function onPointerDown(e: PointerEvent) {
@@ -770,16 +856,34 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
         if (hit?.h.sessionId) props.onOpen(hit.h);
       }
     }
-    setCursor(hitTest(e.clientX, e.clientY) ? 'pointer' : 'grab');
+    boardPointer = { x: e.clientX, y: e.clientY };
+    hoverAtHit(e.clientX, e.clientY);
   }
 
-  function onPointerLeave() {
+  // The tooltip is portaled out of the host, so moving onto it fires the board's
+  // leave events. Treat both as one hover surface: otherwise the tooltip closes
+  // the moment the pointer reaches for its buttons, and — since a mouseenter
+  // never re-fires under a stationary pointer — the hover stays dead until the
+  // pointer leaves the board entirely.
+  function hoverSurfaceHas(node: EventTarget | null): boolean {
+    if (!(node instanceof Node)) return false;
+    if (hostEl?.contains(node)) return true;
+    return node instanceof Element && !!node.closest('.abg-tip');
+  }
+
+  function onHoverLeave(e: MouseEvent) {
+    if (hoverSurfaceHas(e.relatedTarget)) return;
+    boardPointer = null;
+    setPointerIn(false);
+    setHovered(null);
+  }
+
+  function onPointerLeave(e: PointerEvent) {
     pointers.clear();
     drag = null;
     pinch = null;
     setCursor('grab');
-    setPointerIn(false);
-    setHovered(null);
+    onHoverLeave(e);
   }
 
   const openable = (h: BoardHandle) => !!h.sessionId;
@@ -794,16 +898,36 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
     if (!node || !rect) return;
     const sx = rect.left + view.x + node.x * view.k;
     const sy = rect.top + view.y + node.y * view.k;
-    setTipPos({
-      x: Math.max(8, Math.min(window.innerWidth - 244, sx + 12)),
-      y: Math.max(8, Math.min(window.innerHeight - 52, sy - 18)),
-    });
+    // Clear the node's own pointer target. At high zoom that disc is ~26px
+    // across, so a 12px nudge places the tooltip under the cursor hovering it;
+    // the tooltip then swallows the pointer and the hover dies. Flip sides when
+    // the right side has no room.
+    const reach = Math.max(NODE_R + 4, 9 / view.k) * view.k;
+    const box = tipEl?.getBoundingClientRect();
+    const w = box?.width || 228;
+    const h = box?.height || 132;
+    const right = sx + reach + TIP_GAP;
+    const leftEdge = sx - reach - TIP_GAP - w;
+    const x =
+      right + w + TIP_MARGIN <= window.innerWidth
+        ? right
+        : leftEdge >= TIP_MARGIN
+          ? leftEdge
+          : Math.max(TIP_MARGIN, Math.min(window.innerWidth - TIP_MARGIN - w, right));
+    const y = Math.max(TIP_MARGIN, Math.min(window.innerHeight - TIP_MARGIN - h, sy - h / 2));
+    setTipPos({ x, y });
   }
   createEffect(() => {
     if (!hovered() || !pointerIn()) return;
     positionTip();
+    // The first call runs before the tooltip exists, so its measured size is
+    // still the fallback: measure again once it has laid out.
+    const raf = requestAnimationFrame(positionTip);
     const id = setInterval(positionTip, 120);
-    onCleanup(() => clearInterval(id));
+    onCleanup(() => {
+      cancelAnimationFrame(raf);
+      clearInterval(id);
+    });
   });
 
   function frameActive() {
@@ -831,10 +955,7 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
         ref={hostEl}
         class="abg-host"
         onMouseEnter={() => setPointerIn(true)}
-        onMouseLeave={() => {
-          setPointerIn(false);
-          setHovered(null);
-        }}
+        onMouseLeave={onHoverLeave}
       >
         <canvas ref={canvasEl} class="abg-canvas" style={{ cursor: cursor() }} aria-hidden="true" />
         {/* Viewport controls: frame the work on screen, and zoom. */}
@@ -866,22 +987,32 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
         <Show when={tipShown()}>
           {(t) => (
             <div
+              ref={tipEl}
               class="abg-tip"
+              onMouseLeave={onHoverLeave}
               style={{
                 left: `${tipPos().x}px`,
                 top: `${tipPos().y}px`,
               }}
             >
               <div class="abg-tip-head">
-                <span class="w-2 h-2 rounded-full shrink-0" style={{ background: statusHue(t().h.status) }} />
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  style={{ background: t().h.waiting ? palette().warning : statusHue(t().h.status) }}
+                />
                 <span class="abg-tip-handle">{t().id}</span>
-                <span class="abg-tip-kind">{t().h.kind ?? 'agent'}</span>
               </div>
               <Show when={t().h.title}>
                 <div class="abg-tip-title">{t().h.title}</div>
               </Show>
+              <Show when={t().h.waiting}>
+                <div class="abg-tip-wait">Waiting on your reply</div>
+              </Show>
               <div class="abg-tip-meta">
                 {[t().h.model, fmtElapsed(t().h.createdAt, props.now)].filter(Boolean).join(' · ')}
+              </div>
+              <div class="abg-tip-traits">
+                <For each={traits(t().h)}>{(trait) => <span class="abg-trait">{trait}</span>}</For>
               </div>
               <div class="abg-tip-actions">
                 <Show when={openable(t().h)}>
@@ -911,6 +1042,13 @@ export default function AgentBoardGraph(props: AgentBoardGraphProps) {
       </Portal>
     </>
   );
+}
+
+// traits is the tooltip's chip line: what the row is, then the routing hints its
+// spawner gave it. A session nobody delegated to carries neither hint, so it
+// shows only its kind.
+function traits(h: BoardHandle): string[] {
+  return [kindLabel(h.kind), h.workload, h.complexity].filter((v): v is string => Boolean(v));
 }
 
 // relationMaps builds the parent/child adjacency for one rows array. Pure:
