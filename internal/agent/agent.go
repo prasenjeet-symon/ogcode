@@ -27,7 +27,7 @@ type Agent struct {
 // Only it holds this list directly: buildAgentTools adds `schedule`, which is
 // deliverable only to a build session running in the project directory, and the
 // other agents carry their own narrower read-only lists.
-var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "query_sheet", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "analyze_image", "task", "skill", "mcp_*"}
+var codingAgentTools = []string{"bash", "read", "file_map", "check_syntax", "write", "edit", "glob", "grep", "memory_recall", "project_memory_recall", "read_pdf_page", "pdf_index", "read_docx_page", "docx_index", "query_sheet", "codebase_map", "deep_search", "latex_to_pdf", "view_image", "analyze_image", "analyze_video", "task", "skill", "mcp_*"}
 
 // buildAgentTools is the BuildAgent's toolset: codingAgentTools plus `schedule`.
 // A reminder reaches its session two ways — the per-session catch-up hook at the

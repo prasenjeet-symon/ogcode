@@ -433,6 +433,7 @@ var contentReturningTools = map[string]bool{
 	"query_sheet":           true,
 	"view_image":            true,
 	"analyze_image":         true,
+	"analyze_video":         true,
 	"skill":                 true,
 	"task":                  true,
 }

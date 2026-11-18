@@ -110,6 +110,9 @@ var documentTools = []lazyTool{
 var lazyTools = append(append([]lazyTool{}, documentTools...), lazyTool{
 	ID:          "schedule",
 	Description: "Arm a one-shot reminder for this conversation: a note that comes back after a delay or at a set clock time. Use it when a step says to remind, set a timer, check back later, follow up after a pause, or defer something to a later moment; it never starts a turn on its own.",
+}, lazyTool{
+	ID:          "analyze_video",
+	Description: "Read a screen recording or screencast — an .mp4, .mov, .m4v, .webm, .mkv or .avi file, a screen capture, demo, tutorial, walkthrough or slide-deck recording — and return a timestamped timeline of what happens on screen, the text it shows, or an answer about the footage. Use it when a step needs what a recording shows, or when the video itself is the thing being inspected, summarized or reviewed; writing code that handles a video format is not a match. It can also focus on one stretch of the recording — a dialog, menu or error that flashes by — by sampling that window more densely than the rest.",
 })
 
 // documentToolIDs lists the document tools' ids in catalogue order, for tests

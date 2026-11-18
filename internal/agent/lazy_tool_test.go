@@ -27,7 +27,7 @@ import (
 // when the matcher names it, and an agent without the matcher keeps the whole
 // allowlist exactly as it always did.
 func TestTurnToolsetWithholdsLazyTools(t *testing.T) {
-	allow := append([]string{"grep", "update_intent", "schedule"}, documentToolIDs()...)
+	allow := append([]string{"grep", "update_intent", "schedule", "analyze_video"}, documentToolIDs()...)
 
 	matcher := newTurnToolset(allow, true)
 	if got := strings.Join(matcher.wireIDs(), ","); got != "grep,update_intent" {
@@ -36,13 +36,14 @@ func TestTurnToolsetWithholdsLazyTools(t *testing.T) {
 	v0 := matcher.version
 	matcher.offer("pdf_index")
 	matcher.offer("schedule")
+	matcher.offer("analyze_video")
 	matcher.offer("pdf_index") // duplicate: no-op
 	matcher.offer("read")      // outside every offered family: refused
-	if got := strings.Join(matcher.wireIDs(), ","); got != "grep,update_intent,pdf_index,schedule" {
+	if got := strings.Join(matcher.wireIDs(), ","); got != "grep,update_intent,analyze_video,pdf_index,schedule" {
 		t.Errorf("offered lazy ids must land after the base, got %q", got)
 	}
-	if matcher.version != v0+2 {
-		t.Errorf("two distinct offers must bump the version twice, got %d", matcher.version)
+	if matcher.version != v0+3 {
+		t.Errorf("three distinct offers must bump the version three times, got %d", matcher.version)
 	}
 
 	// Only the agent that runs the matcher narrows the wire.
@@ -167,6 +168,7 @@ func TestLazyToolDescriptionsNameTheirArtifacts(t *testing.T) {
 		"latex_to_pdf":   {".tex", "LaTeX", "PDF"},
 		"query_sheet":    {".csv", ".tsv", ".xlsx", ".xlsm", "Excel", "SQL"},
 		"schedule":       {"reminder"},
+		"analyze_video":  {".mp4", "video", "screencast"},
 	}
 	if len(want) != len(lazyTools) {
 		t.Fatalf("the pin covers %d tools, lazyTools has %d — add the new tool's description terms", len(want), len(lazyTools))
@@ -191,6 +193,29 @@ func candidateNames(cs []intentCandidate) string {
 		names = append(names, c.Name+":"+c.Kind)
 	}
 	return strings.Join(names, ",")
+}
+
+// TestProjectIndexPrompt_KeepsTheVideoToolWithItsLazyOwner pins the other side of
+// the same seam: analyze_video is lazy, and only the build agent runs the
+// matcher, so the note and subagent prompts must not name a tool they never get
+// — nor hold it in their allowlists, which is the prompt-to-Tools half of
+// tool_reachability_test.go.
+func TestProjectIndexPrompt_KeepsTheVideoToolWithItsLazyOwner(t *testing.T) {
+	if build := projectIndexPrompt("build", true, true); !strings.Contains(build, "analyze_video") {
+		t.Error("the build prompt does not name analyze_video, so the recording rule is never stated")
+	}
+	for _, role := range []string{"note", "subagent"} {
+		if p := projectIndexPrompt(role, true, true); strings.Contains(p, "analyze_video") {
+			t.Errorf("projectIndexPrompt(%q) names analyze_video, but that agent holds no video tool and never runs the matcher", role)
+		}
+	}
+	for _, a := range []Agent{NoteAgent, SubagentAgent} {
+		for _, id := range a.Tools {
+			if id == "analyze_video" {
+				t.Errorf("%s lists analyze_video; only the build agent runs the matcher that offers it", a.Name)
+			}
+		}
+	}
 }
 
 // TestProjectIndexPrompt_TellsTheBuildAgentToolsArriveOnDemand pins the prompt in

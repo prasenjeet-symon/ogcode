@@ -419,7 +419,7 @@ func readOne(path, display string, req readRequest, tctx Context) (readOutcome, 
 	if codemap.LooksBinary(data) {
 		out.body = fmt.Sprintf(
 			"%s is a binary file — it has no line structure to read as text. "+
-				"For an image use view_image (or analyze_image to extract text or answers with a vision model); for a PDF use pdf_index/read_pdf_page; for a DOCX use docx_index/read_docx_page.",
+				"For an image use view_image (or analyze_image to extract text or answers with a vision model); for a screen recording use analyze_video; for a PDF use pdf_index/read_pdf_page; for a DOCX use docx_index/read_docx_page.",
 			display,
 		)
 		return out, nil

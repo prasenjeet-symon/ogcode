@@ -40,6 +40,11 @@ const (
 	// KindImage is the text an image-analysis call extracted from an image, keyed
 	// by a hash of the image bytes themselves, so a re-rendered copy hits too.
 	KindImage Kind = "image"
+	// KindVideo is the timeline an analysis of a screen recording produced. It is
+	// keyed by the video's identity rather than its bytes: hashing a multi-
+	// gigabyte recording to answer a cache question costs more than the lookup
+	// saves, so the key carries path, size and modification time instead.
+	KindVideo Kind = "video"
 )
 
 // Default TTLs per kind. Search rankings move fastest and are the cheapest to
@@ -50,6 +55,7 @@ const (
 	DefaultPageTTL   = 24 * time.Hour
 	DefaultAnswerTTL = 6 * time.Hour
 	DefaultImageTTL  = 7 * 24 * time.Hour
+	DefaultVideoTTL  = 7 * 24 * time.Hour
 )
 
 // Default capacities. Both levels are bounded — an unbounded cache in a
@@ -166,6 +172,8 @@ func defaultTTL(kind Kind) time.Duration {
 		return DefaultAnswerTTL
 	case KindImage:
 		return DefaultImageTTL
+	case KindVideo:
+		return DefaultVideoTTL
 	default:
 		return DefaultSearchTTL
 	}

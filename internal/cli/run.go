@@ -427,6 +427,13 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		ResolveModel: lr.ResolveVisionModel,
 		Cache:        webCache,
 	})
+	// analyze_video is the same one-shot shape, one level up: local ffmpeg
+	// extraction plus a chunked vision call, no bridge to gate on.
+	toolRegistry.Register(tool.AnalyzeVideoTool{
+		Run:          lr.RunVideoSession,
+		ResolveModel: lr.ResolveVisionModel,
+		Cache:        webCache,
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

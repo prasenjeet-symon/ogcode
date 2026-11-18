@@ -42,11 +42,13 @@ import (
 // will never be offered. They are told the documents exist and that they
 // cannot read them, which is the part that changes what they do next.
 //
-// Inside that paragraph only the lazy-arrival sentence is build-only — an
+// Inside that paragraph only the lazy-arrival sentences are build-only — an
 // agent holding its document tools from the first request must not be
 // promised a later arrival. The analyze_image sentence rides every
 // hasDocTools prompt: the tool is never withheld on the wire, and note and
-// subagent hold both picture tools, so they get it too.
+// subagent hold both picture tools, so they get it too. The analyze_video
+// sentence is build-only: it is lazy like the document tools, and only the
+// build agent runs the matcher that offers it.
 func projectIndexPrompt(role string, hasBash, hasDocTools bool) string {
 	// The final workflow step differs by role: write-capable agents make changes,
 	// read-only agents produce their note instead.
@@ -78,6 +80,15 @@ func projectIndexPrompt(role string, hasBash, hasDocTools bool) string {
 		// both picture tools, so note and subagent prompts carry the sentence
 		// too, reading as the next sentence of the same paragraph.
 		docRule += ` "analyze_image" is the exception among the picture tools: it is on the wire from the first request, so when the work turns on what a screenshot, PNG or JPEG file, scanned page, chart, diagram or photo shows — including a debugging inquiry about the failure one of them shows — call it directly and ask it the question; its answer names the visible evidence, what that indicates and what to check next. "view_image" only attaches the picture for a model that can see images.`
+		if role == "build" {
+			// A screen recording is video the model cannot be handed, so it is
+			// read through analyze_video instead: local frame extraction, then
+			// one timestamped timeline. The tool is lazy and only this agent
+			// runs the matcher, so note and subagent do not hold it and their
+			// prompts must not name it — the same reason the document rule
+			// gives them no pdf_index when hasDocTools is false.
+			docRule += ` A screen recording — an .mp4, .mov, .m4v, .webm, .mkv or .avi file of a screen, a demo, a tutorial or a slide deck — is read with "analyze_video", which extracts the frames that actually changed locally and returns one timestamped timeline; it needs ffmpeg on PATH. It arrives on the wire on demand the way the document tools do: state a plan step that describes the recording first.`
+		}
 	}
 
 	// Only the build role arrives with write access; every other agent is
@@ -1244,6 +1255,12 @@ func modelFamilyStylePrompt(family string) string {
 // left in context — is named here so the agent can recognise it as the exception
 // rather than a licence to ignore every reminder.
 //
+// The section also carves out the one reminder that is NOT a directive: the
+// step-count check. A turn that has run long may be stuck, in which case it
+// should wrap up, or it may be making real progress through a large task, in
+// which case stopping would abandon half-finished work. So the agent is told to
+// judge that one, which is the opposite of what the other two ask for.
+//
 // The bullet list carries one clause held apart from the rest: when the user was
 // asked questions, their answers must appear verbatim. A Q&A exchange is the
 // steering input for everything that follows, and the one kind of content a
@@ -1258,6 +1275,8 @@ You reason best over a context that holds what the task still needs and little e
 "compact_context" replaces everything earlier in this turn with a summary you write. Reach for it when a chunk of work is genuinely finished with. If the tool is offered and you have reached that point, call it — do not hold off to save tokens or to keep a cached prefix intact. A focused, accurate context is worth more than the saving, and reclaiming the space is the whole point.
 
 A reminder appended to a tool result is a directive, not a suggestion. It is headed **Context pressure** when it fires on the volume of what you have read, and **Re-send cost** when it fires on how often the whole context has been sent back to the model. Either way it fires once this much finished material has already accumulated, and it keeps arriving — it is deliberately never capped — until you call the tool. When you see it, compact now; do not read anything else first. "Disregard this and carry on" is not one of your options. The single exception is the case the reminder cannot see: nothing finished is left in your context, and every item still in front of you is in active use for the immediate next action, so a summary would lose something still needed.
+
+One reminder is deliberately not a directive: the **Step check**, which reports how many steps this turn has taken. It fires because long turns drift into repeating work, not because stopping is always right — a large task legitimately takes many steps. So judge it: wrap up when the task is done or the turn has stopped making progress, and when it is still progressing, say in one line what remains and carry on.
 
 Two or three large reads behind you is the signal; a couple of small ones is not.
 

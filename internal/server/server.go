@@ -774,6 +774,17 @@ func (s *Server) serve(ctx context.Context) error {
 	})
 	slog.Info("analyze_image tool registered")
 
+	// Register analyze_video after loopRunner is built (needs RunVideoSession).
+	// Same one-shot shape as analyze_image — local ffmpeg extraction plus a
+	// chunked vision call — so there is no bridge to gate on and the cache is
+	// optional.
+	toolRegistry.Register(tool.AnalyzeVideoTool{
+		Run:          s.loopRunner.RunVideoSession,
+		ResolveModel: s.loopRunner.ResolveVisionModel,
+		Cache:        s.webCache,
+	})
+	slog.Info("analyze_video tool registered")
+
 	// Register the task sub-agent tool (needs RunTaskSession). Available
 	// regardless of the search bridge — the sub-agent is a read-only codebase
 	// investigator that only optionally uses deep_search.
