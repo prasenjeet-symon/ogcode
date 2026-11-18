@@ -1,3 +1,103 @@
+# Release Notes — v0.59.4
+
+## Major: A screen recording is read as a timestamped timeline
+
+Last release gave a still picture an eye. A recording was still a dead end: an
+`.mp4` of the failing flow, a demo, a tutorial or a slide deck is a binary file,
+so `read` refused it and no other tool in the set could look inside. The new
+`analyze_video` tool closes that gap with the same shape — one fixed vision call
+of its own, text back — stretched over time. It samples the recording with
+ffmpeg at `fps` (one frame per second by default, `max_frames` 40), then keeps
+only the frames whose screen actually changed: a frame whose changed area falls
+under one percent of the previous kept frame is dropped, a difference-hash guard
+catches the fades and cursor ghosts that a ratio alone would let through, and a
+blur floor discards the transitions. What survives goes to the image-analysis
+model in chunks of ten frames, each described as a timeline of its own, and one
+merge call reduces the chunk answers into a single account that carries
+`mm:ss` timestamps — "at 00:12 the dialog appears, at 00:19 it is dismissed"
+rather than a paragraph of impressions.
+
+The three modes frame the call the way the image tool's do: `describe` gives a
+thorough factual account of what the screen did, `transcribe` returns the text a
+human could read off it in order, and `answer` (the default) answers a pointed
+`question` out of what the frames contain — a debugging inquiry answered as
+evidence, reading and next step. `segment` (`"04:10-04:40"`) restricts the whole
+job to one window and takes a denser pass inside it, so a five-second glitch at
+the end of a long recording is not one frame among hundreds. `effort` and
+`fresh` behave as they do for `analyze_image`.
+
+The bounds are the ones video work needs: a ten-minute ceiling on one call, a
+2 GiB file cap, `ffmpeg` and `ffprobe` required with a failure that names them,
+and frames scaled down to 480 pixels wide before any vision is spent on them.
+Results are cached by path, size and mtime for seven days under a video kind of
+their own, so re-asking about an unchanged file costs nothing, and the footer
+says how many frames were sampled and whether the answer was cached. The tool is
+offered exactly where `analyze_image` is — registered for the CLI and the
+server, lazy under the build role, absent from note and sub-agent prompts — and
+the binary refusal in `read` now points at both.
+
+## Minor: The agent asks inside the transcript
+
+A question batch now belongs to the tool call that asked it. The call carries a
+`callId`, `ask_user` returns its questions, the answers and which of them were
+visible as metadata, and the web renders the batch inline, as the body of that
+agent tool row — so the question sits where it was asked instead of in a panel
+above the chat, and the transcript keeps its order when a session asks three
+times. Conditional screens work the same way: a later screen appears only for
+the answer that selects it, evaluated live as each answer lands, and the batch
+is answered where it stands. The dialog survives for one case — a teammate's
+batch mirrored into a session that has no row of its own — and renders the same
+component in its dialog variant. While a batch is pending, the composer's
+jump-to-latest affordance becomes jump-to-question, so scrolling up to reread
+something does not lose the thing you have to answer.
+
+## Minor: The board blinks whoever is blocked on you
+
+A roster row now carries the delegation hints it was always handed — complexity
+and workload — and a `waiting` flag set when a permission request or a question
+is pending for that session. A waiting node pulses at 280 ms, so an agent stuck
+on you is visible from across the board without opening a session; a node that
+is merely running keeps the steady treatment it had. The agents page also
+refreshes on `permission.*` and `question.*` events, not only on session
+traffic, so the blink appears when the request does rather than at the next poll.
+The board's tooltip now follows the pointer on the next animation frame and
+stays inside the canvas instead of on every repaint.
+
+## Minor: Each project remembers which panels you folded
+
+Folding the sidebar and the settings nav was remembered per browser tab and
+forgotten across reloads. Both are now a project setting: a singleton
+`project_ui_prefs` row (migration 080) holds `sidebar_collapsed` and
+`settings_nav_collapsed`, served by `GET` and `POST /api/ui/nav`. A field left
+out of the payload keeps its stored value, so each panel writes only itself and
+two tabs cannot clobber one another's unrelated state. The web keeps one shared
+signal, loads it once per project, and sets it optimistically behind a version
+counter, so a slow reply cannot undo a faster click.
+
+## Minor: A long turn is asked to check itself
+
+A turn that runs past a hundred steps now gets a short advisory line — headed
+`Step check:` — riding its first successful tool result, and again every
+`OGCODE_STEP_REMINDER_INTERVAL` steps after that (100 by default, clamped
+between 10 and 10000). It asks the agent to judge whether it is still making
+progress or has drifted into repeating work, and the prompt says plainly that
+it is a prompt to reconsider, not a directive to stop. A reminder raised late in
+one step rides the next one instead of being lost.
+
+## Patch: A vision call keeps room for its answer, and sub-agent rows say what they are
+
+A `describe` or `transcribe` request that named no effort level left the
+reasoning switch to the provider default, and every vision mode's budget was
+sized as if no thinking would be spent at all — so a thinking model could
+reason through the whole allowance and return nothing. Every vision budget now
+carries 4096 tokens of headroom, an unnamed level is sent as an explicit
+`none`, and the provider lets that none ride without a Thinking block when the
+model's ladder allows it. The catalogue follows: `ogx-free` gains the full
+low-to-max ladder with `max` as its default, and MiniMax-M3.1-Flash drops its
+named levels back to a bare thinking switch. Sub-agent rows no longer read
+"task": the label comes from the first line of the prompt, capped at eighty
+characters.
+
 # Release Notes — v0.59.3
 
 ## Major: An image is read by a model that can see, even when the chat model cannot
