@@ -470,7 +470,7 @@ export default function SessionPalette() {
                     type="button"
                     role="option"
                     data-row={i()}
-                    aria-selected={active() === i()}
+                    aria-selected={active() === i() ? "true" : "false"}
                     onMouseEnter={() => setActive(i())}
                     onClick={() => runRow(row)}
                     class="w-full flex items-center gap-2.5 px-3 mx-1 h-9 rounded-lg text-left transition-all"
@@ -497,7 +497,7 @@ export default function SessionPalette() {
                   type="button"
                   role="option"
                   data-row={i()}
-                  aria-selected={active() === i()}
+                  aria-selected={active() === i() ? "true" : "false"}
                   onMouseEnter={() => setActive(i())}
                   onClick={() => runRow(row)}
                   class="w-full flex flex-col gap-0.5 px-3 py-1.5 mx-1 rounded-lg text-left transition-all"

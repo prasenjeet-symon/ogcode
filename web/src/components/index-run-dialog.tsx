@@ -199,7 +199,7 @@ export default function IndexRunDialog(props: {
       labelledBy="idx-run-title"
       describedBy="idx-run-desc"
       onClose={props.onClose}
-      class="sm:max-w-[560px]"
+      widthClass="sm:max-w-[560px]"
       initialFocus={() => list?.querySelector<HTMLElement>('[aria-checked="true"]') ?? filterInput ?? null}
       onKeyDown={onKeyDown}
       returnFocus={props.returnFocus}

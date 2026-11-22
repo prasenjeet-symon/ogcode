@@ -1,5 +1,5 @@
-// plotly.js-dist-min ships no type declarations. We only call Plotly.newPlot,
-// so declare the narrow surface we actually use.
+// plotly.js-dist-min ships no type declarations. We only call newPlot, react,
+// purge and Plots.resize, so declare the narrow surface we actually use.
 declare module 'plotly.js-dist-min' {
   export interface PlotlyConfig {
     responsive?: boolean;
@@ -16,6 +16,11 @@ declare module 'plotly.js-dist-min' {
     ): Promise<unknown>;
   }
 
-  const Plotly: { newPlot: NewPlot };
+  const Plotly: {
+    newPlot: NewPlot;
+    react: NewPlot;
+    purge: (el: HTMLElement) => void;
+    Plots: { resize: (el: HTMLElement) => void };
+  };
   export default Plotly;
 }

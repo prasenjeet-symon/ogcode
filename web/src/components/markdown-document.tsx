@@ -62,6 +62,8 @@ function escapeHtml(s: string): string {
 
 function decodeEntities(s: string): string {
   return s
+    .replace(/&#(\d+);/g, (_m, n: string) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, n: string) => String.fromCodePoint(parseInt(n, 16)))
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 }
@@ -110,9 +112,10 @@ md.use({
       },
     },
     {
-      // Stricter than chat's rule, because documents talk about money: the
-      // opening $ must hug its first character, the closing $ its last, and no
-      // digit may follow — so "costs $5 and $10" stays prose.
+      // Same rule as chat (markdown-content.tsx), and for the same reason:
+      // documents quote prices too. The opening $ must hug its first
+      // character, the closing $ its last, and no digit may follow — so
+      // "costs $5 and $10" stays prose.
       name: 'inlineMath',
       level: 'inline',
       start(src: string) { return src.indexOf('$'); },
@@ -159,7 +162,14 @@ md.use({
   },
 });
 
-mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'antiscript' });
+function mermaidTheme(): 'default' | 'dark' {
+  const t = document.documentElement.dataset.theme;
+  if (t === 'light') return 'default';
+  if (t === 'dark') return 'dark';
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'default' : 'dark';
+}
+
+mermaid.initialize({ startOnLoad: false, theme: mermaidTheme(), securityLevel: 'antiscript' });
 
 // ---------------------------------------------------------------------------
 // Front matter
@@ -440,7 +450,16 @@ export default function MarkdownDocument(props: MarkdownDocumentProps) {
 
       const diagrams = article.querySelectorAll<HTMLElement>('.mermaid');
       if (diagrams.length) {
-        requestAnimationFrame(() => { mermaid.run({ nodes: diagrams }).catch(() => {}); });
+        mermaid.initialize({ startOnLoad: false, theme: mermaidTheme(), securityLevel: 'antiscript' });
+        requestAnimationFrame(() => {
+          mermaid.run({ nodes: diagrams }).catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            diagrams.forEach((node) => {
+              if (node.querySelector('svg')) return;
+              node.textContent = 'Invalid Mermaid diagram: ' + message;
+            });
+          });
+        });
       }
       props.onRendered?.(article, outline);
       // Straight away when the pane is already laid out; a frame later when

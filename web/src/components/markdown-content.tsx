@@ -7,9 +7,31 @@ import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import Plotly from 'plotly.js-dist-min';
+// Plotly is ~1MB minified — lazy-load it so the chat bundle stays lean until
+// a message actually contains a chart. The resolved module is cached here so
+// teardown helpers (purge of last run's plots) can reach it without importing.
+type PlotlyModule = typeof import('plotly.js-dist-min');
+let plotlyModule: PlotlyModule['default'] | null = null;
+function loadPlotly(): Promise<PlotlyModule> {
+  if (plotlyModule) return Promise.resolve({ default: plotlyModule } as unknown as PlotlyModule);
+  return import('plotly.js-dist-min').then((m) => {
+    plotlyModule = m.default;
+    return m;
+  });
+}
 import { renderRoughDiagram, type RoughSpec } from './rough-renderer';
 import DiagramZoomDialog, { DIAGRAM_ZOOM_ICON, type DiagramZoomState } from './diagram-zoom';
+
+// Mermaid ships light and dark themes; the chat follows the page theme
+// (documentElement.dataset.theme, falling back to prefers-color-scheme),
+// re-initialized per render in the effect below so a mid-session theme
+// flip is picked up without a reload.
+function mermaidTheme(): 'dark' | 'default' {
+  const t = document.documentElement?.dataset?.theme;
+  if (t === 'light') return 'default';
+  if (t === 'dark') return 'dark';
+  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'default' : 'dark';
+}
 
 mermaid.initialize({
   startOnLoad: false,
@@ -76,15 +98,37 @@ marked.setOptions({
   gfm: true,
 });
 
-// Encode HTML content for use in a data attribute, preserving all characters
-// including <script>, event handlers, etc. We use base64 to avoid any
-// encoding issues with DOMPurify or HTML attribute escaping.
+// Base64 over UTF-8 bytes (chunked so large blocks don't blow the argument
+// list, and surrogate-safe — the old btoa(unescape(...)) path threw on lone
+// surrogates and aborted every later diagram render in the same pass).
 function encodeHtmlForSrcdoc(html: string): string {
-  return btoa(unescape(encodeURIComponent(html)));
+  const bytes = new TextEncoder().encode(html);
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+  }
+  return btoa(bin);
 }
 
 function decodeHtmlFromSrcdoc(encoded: string): string {
-  return decodeURIComponent(escape(atob(encoded)));
+  const bin = atob(encoded);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+// Chunked base64-to-bytes for large downloads (a PDF page bundle decoded in
+// one atob + charCodeAt pass blocks the main thread the same way).
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bin.length; i += CHUNK) {
+    const end = Math.min(i + CHUNK, bin.length);
+    for (let j = i; j < end; j++) out[j] = bin.charCodeAt(j);
+  }
+  return out;
 }
 
 // A ```latex block is compiled by POSTing its source to the server, which runs
@@ -129,6 +173,13 @@ function compileLatex(source: string): Promise<LatexResult> {
 
     const data = (await res.json()) as LatexResult;
     latexResults.set(source, data);
+    // Bound the cache: one entry per distinct source would otherwise grow
+    // the heap monotonically over a long session with many documents.
+    while (latexResults.size > 30) {
+      const oldest = latexResults.keys().next();
+      if (oldest.done) break;
+      latexResults.delete(oldest.value);
+    }
     return data;
   })();
   latexInflight.set(source, p);
@@ -182,6 +233,22 @@ export default function MarkdownContent(props: { text: string; class?: string })
     frame.appendChild(btn);
   };
 
+  // highlight.js escapes quotes as &quot; and &#x27; (see escapeHTML in
+  // highlight.js/lib/core.js), so decode every remaining entity after
+  // stripping its <span> wrappers — not just &amp;/&lt;/&gt;/&quot;/&#39;.
+  // A leftover like &#x27; inside a <script> breaks the script, and the
+  // iframe then renders blank while still reporting its static height.
+  const decodeHljsEntities = (s: string) =>
+    s
+      .replace(/<[^>]+>/g, '')
+      .replace(/&#(\d+);/g, (_m, n: string) => String.fromCodePoint(parseInt(n, 10)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_m, n: string) => String.fromCodePoint(parseInt(n, 16)))
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+
   const html = createMemo(() => {
     const raw = marked.parse(props.text, { async: false }) as string;
 
@@ -196,13 +263,7 @@ export default function MarkdownContent(props: { text: string; class?: string })
         // highlight.js wraps tokens in <span> tags before HTML-escaping, so
         // we must strip those span wrappers first. Otherwise <<span>html</span>>
         // reaches the iframe and the browser misparsed it as garbled markup.
-        const rawHtml = codeContent
-          .replace(/<[^>]+>/g, '')
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'");
+        const rawHtml = decodeHljsEntities(codeContent);
         const encoded = encodeHtmlForSrcdoc(rawHtml);
         htmlBlocks.push(encoded);
         const idx = htmlBlocks.length - 1;
@@ -228,16 +289,23 @@ export default function MarkdownContent(props: { text: string; class?: string })
         '<div class="rough-diagram" style="min-height:200px">$1</div>'
       )
       .replace(
+        /<pre><code class="hljs language-math">([\s\S]*?)<\/code><\/pre>/g,
+        (_match: string, codeContent: string) => {
+          // Same entity/tag decode as the latex branch below; the fence
+          // carries display TeX, which the document viewer also renders.
+          const rawTex = decodeHljsEntities(codeContent);
+          try {
+            return `<div class="math-block">${katex.renderToString(rawTex, { displayMode: true, throwOnError: false, output: 'html' })}</div>`;
+          } catch {
+            return _match;
+          }
+        }
+      )
+      .replace(
         /<pre><code class="hljs language-latex">([\s\S]*?)<\/code><\/pre>/g,
         (_match: string, codeContent: string) => {
           // Decode HTML entities from highlight.js
-          const rawLatex = codeContent
-            .replace(/<[^>]+>/g, '')
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'");
+          const rawLatex = decodeHljsEntities(codeContent);
           const encoded = encodeHtmlForSrcdoc(rawLatex);
           htmlBlocks.push(encoded);
           const idx = htmlBlocks.length - 1;
@@ -263,6 +331,8 @@ export default function MarkdownContent(props: { text: string; class?: string })
     // the definition would otherwise be gone by the time the zoom opens.
     const mermaidNodes = containerRef.querySelectorAll<HTMLElement>('.mermaid');
     if (mermaidNodes.length > 0) {
+      // Re-init per render so a theme flip is picked up without a reload.
+      mermaid.initialize({ startOnLoad: false, theme: mermaidTheme(), securityLevel: 'antiscript' });
       requestAnimationFrame(() => {
         const sources = new Map<Element, string>();
         mermaidNodes.forEach((node) => sources.set(node, node.textContent || ''));
@@ -278,22 +348,89 @@ export default function MarkdownContent(props: { text: string; class?: string })
               });
             });
           })
-          .catch(() => {});
+          .catch(() => {
+            mermaidNodes.forEach((node) => {
+              if (!node.querySelector('svg')) node.textContent = 'Invalid Mermaid diagram';
+            });
+          });
       });
     }
 
-    // Render Plotly charts
+    // Render Plotly charts. A JSON.parse failure is *not* an error here:
+    // while streaming, the fence body is truncated JSON and the next chunk
+    // re-runs this effect, so only a parsed-but-misshapen spec (or a render
+    // rejection) shows "Invalid Plotly spec". spec.config is deliberately
+    // ignored — responsive/displayModeBar stay ours.
     const plotlyNodes = containerRef.querySelectorAll<HTMLElement>('.plotly-chart');
+    const plotIsLight = document.documentElement?.dataset?.theme === 'light' ||
+      (!document.documentElement?.dataset?.theme && window.matchMedia?.('(prefers-color-scheme: light)').matches);
     plotlyNodes.forEach(el => {
+      let spec: unknown;
       try {
-        const spec = JSON.parse(el.textContent || '{}');
-        el.textContent = '';
-        Plotly.newPlot(el, spec.data ?? [], spec.layout ?? {}, { responsive: true, displayModeBar: false, ...spec.config });
-        attachZoom(el, 'Plotly chart', (host) => {
-          void Plotly.newPlot(host, spec.data ?? [], spec.layout ?? {}, { responsive: true, displayModeBar: false, ...spec.config });
-        });
+        spec = JSON.parse(el.textContent || '{}');
       } catch {
+        return;
+      }
+      if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) {
         el.textContent = 'Invalid Plotly spec';
+        return;
+      }
+      const s = spec as { data?: unknown; layout?: Record<string, unknown> };
+      if (!Array.isArray(s.data)) {
+        el.textContent = 'Invalid Plotly spec';
+        return;
+      }
+      // The chat chrome is dark: default to a transparent canvas plus a
+      // readable font unless the spec sets its own.
+      const layout = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: plotIsLight ? '#1a1a1e' : '#ededef' },
+        ...(s.layout ?? {}),
+      } as Record<string, unknown>;
+      const data = s.data as unknown[];
+      el.textContent = '';
+      void loadPlotly()
+        .then((m) => m.default.react(el, data, layout, { responsive: true, displayModeBar: false }))
+        .then(() => {
+          attachZoom(el, 'Plotly chart', (host) => {
+            // The zoom host starts out an empty div with no height, so
+            // size the plot off the dialog body (which already has its
+            // flex height); resize hooks keep it full-bleed on rotation.
+            host.style.width = '100%';
+            host.style.minHeight = '420px';
+            host.style.height = 'min(60vh, 560px)';
+            void loadPlotly()
+              .then((m) => m.default.react(host, data, layout, { responsive: true, displayModeBar: false }))
+              .then(() => {
+                if (!window.ResizeObserver) {
+                  try { plotlyModule?.Plots.resize(host); } catch { /* not plotted yet */ }
+                  return;
+                }
+                const zro = new ResizeObserver(() => {
+                  try { plotlyModule?.Plots.resize(host); } catch { /* torn down */ }
+                });
+                zro.observe(host);
+                onCleanup(() => zro.disconnect());
+              });
+          });
+        })
+        .catch(() => {
+          el.textContent = 'Invalid Plotly spec';
+        });
+      // The effect re-runs per chunk and innerHTML discards old plot DOM,
+      // so purge each plot on re-run/unmount (react() registers
+      // window-resize listeners that purge() removes).
+      onCleanup(() => {
+        try { plotlyModule?.purge(el); } catch { /* already discarded */ }
+      });
+      // responsive:true only tracks window resizes; follow the container too.
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => {
+          try { plotlyModule?.Plots.resize(el); } catch { /* not plotted yet */ }
+        });
+        ro.observe(el);
+        onCleanup(() => ro.disconnect());
       }
     });
 
@@ -385,12 +522,19 @@ export default function MarkdownContent(props: { text: string; class?: string })
       // Wrap the content in a transparent template that blends seamlessly
       // into the chat. No background or card styling — the HTML content
       // should appear as part of the conversation, not as a separate widget.
-      const darkWrap = `<!DOCTYPE html><html style="color-scheme:dark;"><head><meta charset="utf-8"><style>
-body { margin: 0; padding: 0; background: transparent; color: #ededef; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color-scheme: dark; }
-a { color: #ffb38a; }
+      const htmlIsLight = document.documentElement?.dataset?.theme === 'light' ||
+        (!document.documentElement?.dataset?.theme && window.matchMedia?.('(prefers-color-scheme: light)').matches);
+      const htmlScheme = htmlIsLight ? 'light' : 'dark';
+      const htmlFg = htmlIsLight ? '#1a1a1e' : '#ededef';
+      const htmlLink = htmlIsLight ? '#0b57d0' : '#ffb38a';
+      const htmlBorder = htmlIsLight ? '#d5d5da' : '#2a2a30';
+      const htmlThBg = htmlIsLight ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.05)';
+      const frameDoc = `<!DOCTYPE html><html style="color-scheme:${htmlScheme};"><head><meta charset="utf-8"><style>
+body { margin: 0; padding: 0; background: transparent; color: ${htmlFg}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color-scheme: ${htmlScheme}; }
+a { color: ${htmlLink}; }
 table { border-collapse: collapse; margin: 0.75em 0; }
-th, td { border: 1px solid #2a2a30; padding: 6px 12px; text-align: left; }
-th { background: rgba(255, 255, 255, 0.05); }
+th, td { border: 1px solid ${htmlBorder}; padding: 6px 12px; text-align: left; }
+th { background: ${htmlThBg}; }
 img { max-width: 100%; height: auto; }
 </style></head><body>${rawHtml}<script>
 (function () {
@@ -408,6 +552,11 @@ img { max-width: 100%; height: auto; }
 
       const onFrameMessage = (e: MessageEvent) => {
         if (e.source !== iframe.contentWindow) return;
+        // The frame is sandboxed without allow-same-origin, so it posts
+        // from an opaque origin. Nested frames inside the model's HTML
+        // share the source check via contentWindow, so require the opaque
+        // origin too before trusting a height message.
+        if (e.origin !== 'null' && e.origin !== '') return;
         const d = e.data as { type?: string; height?: number } | null;
         if (d?.type !== 'ogcode-html-height' || typeof d.height !== 'number' || d.height <= 0) return;
         // A runaway frame must not push the transcript thousands of pixels tall.
@@ -416,7 +565,7 @@ img { max-width: 100%; height: auto; }
       window.addEventListener('message', onFrameMessage);
       detachFrameListeners.push(() => window.removeEventListener('message', onFrameMessage));
 
-      iframe.srcdoc = darkWrap;
+      iframe.srcdoc = frameDoc;
       el.textContent = '';
       el.appendChild(iframe);
     });
@@ -442,47 +591,74 @@ img { max-width: 100%; height: auto; }
       const container = document.createElement('div');
       container.className = 'latex-render-container';
 
-      // Header bar
+      // Header bar — built with DOM APIs and textContent so the
+      // regex-extracted docClass/docTitle (raw model output) can never
+      // inject markup. Only static icon SVGs use innerHTML, with no
+      // interpolated data.
       const header = document.createElement('div');
       header.className = 'latex-render-header';
-      header.innerHTML = `
-        <div class="latex-render-info">
+      const info = document.createElement('div');
+      info.className = 'latex-render-info';
+      info.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
             <line x1="16" y1="13" x2="8" y2="13"/>
             <line x1="16" y1="17" x2="8" y2="17"/>
             <polyline points="10 9 9 9 8 9"/>
-          </svg>
-          <span class="latex-render-type">LaTeX (${docClass})</span>
-          ${docTitle ? `<span class="latex-render-title">— ${docTitle}</span>` : ''}
-        </div>
-        <div class="latex-render-actions">
-          <button class="latex-zoom-btn" title="Zoom document">
+          </svg>`;
+      const typeSpan = document.createElement('span');
+      typeSpan.className = 'latex-render-type';
+      typeSpan.textContent = `LaTeX (${docClass})`;
+      info.appendChild(typeSpan);
+      if (docTitle) {
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'latex-render-title';
+        titleSpan.textContent = `\u2014 ${docTitle}`;
+        info.appendChild(titleSpan);
+      }
+      header.appendChild(info);
+      const actions = document.createElement('div');
+      actions.className = 'latex-render-actions';
+      const zoomBtnEl = document.createElement('button');
+      zoomBtnEl.type = 'button';
+      zoomBtnEl.className = 'latex-zoom-btn';
+      zoomBtnEl.title = 'Zoom document';
+      zoomBtnEl.setAttribute('aria-label', 'Zoom document');
+      zoomBtnEl.innerHTML = `
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="7"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
               <line x1="11" y1="7.5" x2="11" y2="14.5"/>
               <line x1="7.5" y1="11" x2="14.5" y2="11"/>
             </svg>
-            Zoom
-          </button>
-          <button class="latex-src-toggle" title="Show/hide source code">
+            Zoom`;
+      actions.appendChild(zoomBtnEl);
+      const srcToggleEl = document.createElement('button');
+      srcToggleEl.type = 'button';
+      srcToggleEl.className = 'latex-src-toggle';
+      srcToggleEl.title = 'Show/hide source code';
+      srcToggleEl.setAttribute('aria-label', 'Show/hide LaTeX source');
+      srcToggleEl.innerHTML = `
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="16 18 22 12 16 6"/>
               <polyline points="8 6 2 12 8 18"/>
-            </svg>
-          </button>
-          <button class="latex-download-btn" title="Download PDF">
+            </svg>`;
+      actions.appendChild(srcToggleEl);
+      const dlBtnEl = document.createElement('button');
+      dlBtnEl.type = 'button';
+      dlBtnEl.className = 'latex-download-btn';
+      dlBtnEl.title = 'Download PDF';
+      dlBtnEl.setAttribute('aria-label', 'Download PDF');
+      dlBtnEl.innerHTML = `
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            PDF
-          </button>
-        </div>
-      `;
+            PDF`;
+      actions.appendChild(dlBtnEl);
+      header.appendChild(actions);
 
       // Page images container (shown after compilation)
       const pagesDiv = document.createElement('div');
@@ -571,6 +747,10 @@ img { max-width: 100%; height: auto; }
       };
 
       const compileAndRender = async () => {
+        // Disabled while the auto-compile is in flight so an early click
+        // cannot fire a second full compile via POST /api/latex.
+        const dlBtn = container.querySelector<HTMLButtonElement>('.latex-download-btn');
+        dlBtn?.setAttribute('disabled', 'true');
         loadingDiv.style.display = 'flex';
         statusDiv.style.display = 'none';
         statusDiv.className = 'latex-render-status';
@@ -585,6 +765,8 @@ img { max-width: 100%; height: auto; }
 
           // Show source code so the user can see what was attempted
           sourceDiv.style.display = 'block';
+        } finally {
+          dlBtn?.removeAttribute('disabled');
         }
       };
 
@@ -613,27 +795,37 @@ img { max-width: 100%; height: auto; }
         });
       }
 
-      // Auto-compile on render
-      compileAndRender();
+      // Auto-compile on render, gated and debounced: while streaming, this
+      // effect re-runs per chunk and each partial fence would otherwise burn
+      // a server pdflatex run. Only compile once the source looks complete,
+      // and coalesce rapid chunks into one compile.
+      const downloadBtn = container.querySelector<HTMLButtonElement>('.latex-download-btn');
+      if (/\\end\{document\}/.test(rawLatex)) {
+        // Disabled from setup (not just in-flight) so a click during the
+        // debounce wait cannot fire a fallback compile alongside the timer.
+        downloadBtn?.setAttribute('disabled', 'true');
+        const timer = window.setTimeout(() => { void compileAndRender(); }, 400);
+        onCleanup(() => window.clearTimeout(timer));
+      } else {
+        loadingDiv.style.display = 'none';
+        statusDiv.className = 'latex-render-status';
+        statusDiv.style.display = 'block';
+        statusDiv.textContent = 'Composing LaTeX\u2026';
+      }
 
       // Download button handler
-      const downloadBtn = container.querySelector('.latex-download-btn');
       if (downloadBtn) {
         downloadBtn.addEventListener('click', async () => {
           // If we already have the PDF data, download directly
           const pdfBase64 = (container as any)._pdfBase64;
           if (pdfBase64) {
-            const byteCharacters = atob(pdfBase64);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const byteArray = base64ToBytes(pdfBase64);
+            const blob = new Blob([byteArray.buffer as ArrayBuffer], { type: 'application/pdf' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${(container as any)._docTitle || 'output'}.pdf`;
+            const cachedTitle = String((container as any)._docTitle || 'output').replace(/[^\w\-]+/g, '_').slice(0, 80) || 'output';
+            a.download = `${cachedTitle}.pdf`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -674,7 +866,8 @@ img { max-width: 100%; height: auto; }
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'output.pdf';
+            const fallbackName = String(docTitle || (container as any)._docTitle || 'output').replace(/[^\w\-]+/g, '_').slice(0, 80) || 'output';
+            a.download = `${fallbackName}.pdf`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

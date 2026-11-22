@@ -225,7 +225,7 @@ export default function FileViewer(props: {
               type="button"
               role="tab"
               class="seg-btn"
-              aria-selected={view() === 'preview'}
+              aria-selected={view() === 'preview' ? "true" : "false"}
               onClick={() => setViewRemembered('preview')}
               title="Rendered document (⇧⌘V)"
             >
@@ -239,7 +239,7 @@ export default function FileViewer(props: {
               type="button"
               role="tab"
               class="seg-btn"
-              aria-selected={view() === 'source'}
+              aria-selected={view() === 'source' ? "true" : "false"}
               onClick={() => setViewRemembered('source')}
               title="Markdown source (⇧⌘V)"
             >

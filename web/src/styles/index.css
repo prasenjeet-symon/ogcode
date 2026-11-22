@@ -1031,14 +1031,21 @@ textarea.auto-resize {
 }
 .diagram-zoom-host {
   width: 100%;
+  min-height: 240px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
 }
 .diagram-zoom-host .mermaid,
-.diagram-zoom-host svg {
+.diagram-zoom-host svg:not(.main-svg) {
   max-width: 100%;
   height: auto;
+}
+/* Plotly renders its own sized canvas — keep it full-bleed, not squashed. */
+.diagram-zoom-host .plotly,
+.diagram-zoom-host .js-plotly-plot {
+  width: 100% !important;
 }
 .diagram-zoom-host .latex-page-img {
   width: 100%;

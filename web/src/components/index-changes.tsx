@@ -224,13 +224,13 @@ export function ChangesPanel(props: { git: GitChanges; onBack: () => void; onPic
           Files
         </button>
         <div class="seg" role="tablist" aria-label="Git view">
-          <button type="button" role="tab" class="seg-btn" aria-selected={git.mode() === 'wt'} onClick={() => git.setMode('wt')}>
+          <button type="button" role="tab" class="seg-btn" aria-selected={git.mode() === 'wt' ? "true" : "false"} onClick={() => git.setMode('wt')}>
             Changes
             <Show when={git.files().length > 0}>
               <span class="seg-count">{git.files().length}</span>
             </Show>
           </button>
-          <button type="button" role="tab" class="seg-btn" aria-selected={git.mode() === 'log'} onClick={() => git.setMode('log')}>
+          <button type="button" role="tab" class="seg-btn" aria-selected={git.mode() === 'log' ? "true" : "false"} onClick={() => git.setMode('log')}>
             Commits
           </button>
         </div>

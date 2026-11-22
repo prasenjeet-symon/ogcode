@@ -241,7 +241,7 @@ export default function ModelMetaDialog(props: {
       labelledBy={`${uid}-title`}
       describedBy={`${uid}-desc`}
       onClose={props.onClose}
-      class="sm:max-w-[620px]"
+      widthClass="sm:max-w-[620px]"
       initialFocus={() => firstField ?? null}
       onKeyDown={onKey}
     >

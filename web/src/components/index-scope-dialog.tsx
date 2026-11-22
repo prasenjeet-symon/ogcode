@@ -198,7 +198,7 @@ export default function IndexScopeDialog(props: {
       labelledBy="idx-scope-title"
       describedBy="idx-scope-desc"
       onClose={props.onClose}
-      class="sm:max-w-[800px]"
+      widthClass="sm:max-w-[800px]"
       returnFocus={props.returnFocus}
     >
       <DialogHeader
