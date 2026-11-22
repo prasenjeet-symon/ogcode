@@ -31,6 +31,18 @@ without a `find` is an insert before that line. The web transcript renders the
 same two shapes — a positioned hunk's `find` is its before text — so an edit
 diff no longer shows an empty body under a change that plainly landed.
 
+## Patch: `grep` refuses an over-wide search instead of truncating it
+
+`grep` used to cap its output at 100 matches and hand back a truncated
+success, which presented a partial search as a complete one. It now rejects
+the call with an error past 100 matches that names the limit and how to
+narrow the search (a tighter pattern, a `path`/`include` scope, or
+`codebase_map` to find the relevant files first). Binary files are skipped
+silently, and a file whose scan stops partway through — any line longer than
+the 64KB buffer — refuses the whole search instead of returning the matches
+found before the break, so an answer never hides the fact that the rest was
+never looked at.
+
 ## Patch: A stringified array is not a type error
 
 Some providers send an array argument as a JSON string — `"files":
