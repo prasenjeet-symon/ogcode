@@ -17,6 +17,7 @@ node_modules/
 web/dist/
 web/build/
 web/.solid/
+*.tsbuildinfo
 
 # Blog and docs build artifacts — the Pages workflow builds blog/ and
 # docs-site/ into docs/blog and docs/docs before deploying, so the generated

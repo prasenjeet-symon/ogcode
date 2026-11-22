@@ -489,3 +489,52 @@ func TestExtractVideoFramesSegmentPastEnd(t *testing.T) {
 		t.Errorf("err = %v, want the past-the-end message", err)
 	}
 }
+
+// TestExtractVideoFramesManifestCarriesSamplingKnobs pins the cache contract
+// readVideoManifest relies on: the manifest records the sampling knobs the
+// extraction ran with, so a later call with different knobs decodes again
+// instead of reusing frames cut for another sampling.
+func TestExtractVideoFramesManifestCarriesSamplingKnobs(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe not installed")
+	}
+	out := t.TempDir()
+	videoPath := filepath.Join(out, "knobs.mp4")
+	gen := exec.Command("ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=10",
+		"-pix_fmt", "yuv420p", videoPath)
+	if genOut, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("generate test video: %v: %s", err, genOut)
+	}
+	manifest, err := ExtractVideoFrames(context.Background(), VideoExtractOptions{
+		Path:      videoPath,
+		OutDir:    out,
+		SampleFPS: 2,
+		MaxFrames: 9,
+	})
+	if err != nil {
+		t.Fatalf("ExtractVideoFrames: %v", err)
+	}
+	if manifest.SampleFPS != 2 {
+		t.Errorf("manifest.SampleFPS = %g, want 2", manifest.SampleFPS)
+	}
+	if manifest.MaxFrames != 9 {
+		t.Errorf("manifest.MaxFrames = %d, want 9", manifest.MaxFrames)
+	}
+	// The knobs survive the disk round trip the reuse path reads back.
+	data, err := os.ReadFile(manifest.ManifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var roundTrip VideoManifest
+	if err := json.Unmarshal(data, &roundTrip); err != nil {
+		t.Fatalf("parse manifest back: %v", err)
+	}
+	if roundTrip.SampleFPS != 2 || roundTrip.MaxFrames != 9 {
+		t.Errorf("manifest on disk has sampleFPS %g maxFrames %d, want 2 and 9",
+			roundTrip.SampleFPS, roundTrip.MaxFrames)
+	}
+}

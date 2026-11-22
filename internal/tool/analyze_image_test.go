@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/gif"
+	"image/jpeg"
 	"image/png"
 	"net/http"
 	"os"
@@ -568,5 +570,204 @@ func TestAnalyzeImageToolCacheKeyIncludesEffort(t *testing.T) {
 
 	if got := run.count(); got != 2 {
 		t.Fatalf("Run called %d times, want 2", got)
+	}
+}
+
+// analyzeImageExifAPP1 builds a minimal JPEG APP1 segment carrying the EXIF
+// orientation tag (little-endian), so tests pin the parser without a camera.
+func analyzeImageExifAPP1(orient int) []byte {
+	return []byte{0xff, 0xe1, 0x00, 0x22, 'E', 'x', 'i', 'f', 0x00, 0x00,
+		'I', 'I', 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
+		0x01, 0x00,
+		0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,
+		byte(orient), 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00}
+}
+
+// analyzeImageJPEGWithOrientation encodes a w×h JPEG and splices an EXIF
+// orientation tag after SOI, the shape a portrait phone photo arrives in.
+func analyzeImageJPEGWithOrientation(t *testing.T, w, h, orient int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x * 60), G: uint8(y * 60), B: 0x80, A: 0xff})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
+	}
+	raw := buf.Bytes()
+	if len(raw) < 2 || raw[0] != 0xff || raw[1] != 0xd8 {
+		t.Fatalf("encoder did not emit an SOI header")
+	}
+	out := append([]byte{raw[0], raw[1]}, analyzeImageExifAPP1(orient)...)
+	return append(out, raw[2:]...)
+}
+
+// M12: image.Decode ignores EXIF orientation, so a portrait phone photo
+// stored as landscape pixels with orientation 6 must be rotated upright (and
+// re-encoded) even though its byte size is passthrough-small — the old
+// passthrough would have handed the model the photo sideways.
+func TestAnalyzeImageToolUprightsExifOrientation(t *testing.T) {
+	run := &analyzeImageCounter{}
+	tool := AnalyzeImageTool{Run: run.run}
+	// Stored 4x2 landscape, orientation 6 (rotate 90 CW) → upright 2x4.
+	data := analyzeImageJPEGWithOrientation(t, 4, 2, 6)
+	if got := exifOrientation(data); got != 6 {
+		t.Fatalf("exifOrientation = %d, want 6", got)
+	}
+	name, dir := analyzeImageWriteFile(t, "phone.jpg", data)
+	in := analyzeImageInput{path: name, mode: "describe", sessionDir: dir}
+	if _, err := tool.Execute(context.Background(), in.args(t), in.toolContext()); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if bytes.Equal(run.lastImage, data) {
+		t.Fatal("EXIF-rotated pixels went through byte-for-byte; want an uprighted re-encode")
+	}
+	if run.lastMediaType != "image/jpeg" {
+		t.Fatalf("media type = %q, want image/jpeg", run.lastMediaType)
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(run.lastImage))
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if cfg.Width != 2 || cfg.Height != 4 {
+		t.Fatalf("upright payload = %dx%d, want 2x4", cfg.Width, cfg.Height)
+	}
+}
+
+// The orientation parser and rotator geometry: 3/6/8 rotate 180/90/270
+// degrees clockwise (6 and 8 swap dimensions), 1 passes through, and marked
+// pixels land where the rotation says they should.
+func TestAnalyzeImageExifOrientationValues(t *testing.T) {
+	if got := exifOrientation([]byte("not a jpeg")); got != 1 {
+		t.Fatalf("exifOrientation(non-JPEG) = %d, want 1", got)
+	}
+	if got := exifOrientation(analyzeImageJPEGWithOrientation(t, 4, 2, 1)); got != 1 {
+		t.Fatalf("exifOrientation(orientation 1) = %d, want 1", got)
+	}
+	marked := func(w, h, mx, my int) image.Image {
+		img := image.NewNRGBA(image.Rect(0, 0, w, h))
+		img.SetNRGBA(mx, my, color.NRGBA{R: 0xff, A: 0xff})
+		return img
+	}
+	at := func(img image.Image, x, y int) color.NRGBA {
+		return color.NRGBAModel.Convert(img.At(img.Bounds().Min.X+x, img.Bounds().Min.Y+y)).(color.NRGBA)
+	}
+	for _, tt := range []struct {
+		orient       int
+		markX, markY int // marked pixel in the stored 4x2 frame
+		wantW, wantH int // upright dimensions
+	}{
+		{3, 3, 1, 4, 2}, // 180: stored (3,1) → upright (0,0)
+		{6, 0, 1, 2, 4}, // 90 CW: stored (0,1) → upright (0,0)
+		{8, 3, 0, 2, 4}, // 270 CW: stored (3,0) → upright (0,0)
+	} {
+		got := applyExifOrientation(marked(4, 2, tt.markX, tt.markY), tt.orient)
+		b := got.Bounds()
+		if b.Dx() != tt.wantW || b.Dy() != tt.wantH {
+			t.Errorf("orientation %d: bounds = %dx%d, want %dx%d", tt.orient, b.Dx(), b.Dy(), tt.wantW, tt.wantH)
+			continue
+		}
+		if c := at(got, 0, 0); c.R != 0xff {
+			t.Errorf("orientation %d: upright (0,0) = %+v, want the marked red pixel", tt.orient, c)
+		}
+	}
+	if got := applyExifOrientation(marked(4, 2, 0, 0), 1); got.Bounds().Dx() != 4 || got.Bounds().Dy() != 2 {
+		t.Errorf("orientation 1: bounds = %v, want 4x2", got.Bounds())
+	}
+}
+
+// M13: JPEG has no alpha channel, so a transparent PNG encoded directly
+// turns every transparent pixel black. The encoder must composite onto
+// opaque white first — a formerly-transparent corner decodes near-white.
+func TestAnalyzeImageToolFlattensTransparencyToWhite(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 16, 16)) // all zeros: transparent black
+	img.SetNRGBA(0, 0, color.NRGBA{R: 0xff, A: 0xff})
+	data, mediaType, err := encodeImageForModel(img)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if mediaType != "image/jpeg" {
+		t.Fatalf("media type = %q, want image/jpeg", mediaType)
+	}
+	dec, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	r, g, b, _ := dec.At(15, 15).RGBA()
+	if r < 0xfa00 || g < 0xfa00 || b < 0xfa00 {
+		t.Fatalf("transparent pixel flattened to #%02x%02x%02x, want near-white", r>>8, g>>8, b>>8)
+	}
+}
+
+// M14: the passthrough used to check only the byte count, so a small-filesize
+// but huge-dimension image sailed past the ~1568px ceiling. A 2000px-wide
+// PNG that compresses tiny must still be decoded and downscaled.
+func TestAnalyzeImageToolDownscalesLargePassthroughSize(t *testing.T) {
+	run := &analyzeImageCounter{}
+	tool := AnalyzeImageTool{Run: run.run}
+	img := image.NewRGBA(image.Rect(0, 0, 2000, 200))
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 2000; x++ {
+			img.Set(x, y, color.RGBA{R: 0x20, G: 0x40, B: 0x80, A: 0xff})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	data := buf.Bytes()
+	if len(data) > analyzeImagePassthroughBytes {
+		t.Fatalf("fixture is %d bytes, want it under the passthrough size so the pixel cap is what trips", len(data))
+	}
+	if analyzeImageWithinPixelCap(data) {
+		t.Fatal("fixture fits the pixel cap; want it over so the passthrough hole is exercised")
+	}
+	name, dir := analyzeImageWriteFile(t, "wide.png", data)
+	in := analyzeImageInput{path: name, mode: "describe", sessionDir: dir}
+	if _, err := tool.Execute(context.Background(), in.args(t), in.toolContext()); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if run.lastMediaType != "image/jpeg" {
+		t.Fatalf("media type = %q, want image/jpeg after the over-cap re-encode", run.lastMediaType)
+	}
+	if bytes.Equal(run.lastImage, data) {
+		t.Fatal("over-cap PNG passed through byte-for-byte; want a downscaled re-encode")
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(run.lastImage))
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	long := cfg.Width
+	if cfg.Height > long {
+		long = cfg.Height
+	}
+	if long > viewMaxLongEdgePx {
+		t.Fatalf("payload long edge = %d, want at most %d", long, viewMaxLongEdgePx)
+	}
+}
+
+// LOW: image.Decode sees only the first frame of an animated GIF while the
+// frontend passes GIFs through, so the answer must say so instead of
+// analyzing one frame silently.
+func TestAnalyzeImageToolNotesFirstFrameOfGIF(t *testing.T) {
+	run := &analyzeImageCounter{}
+	tool := AnalyzeImageTool{Run: run.run}
+	img := image.NewPaletted(image.Rect(0, 0, 8, 8), color.Palette{color.Black, color.White})
+	var buf bytes.Buffer
+	if err := gif.Encode(&buf, img, nil); err != nil {
+		t.Fatalf("encode gif: %v", err)
+	}
+	name, dir := analyzeImageWriteFile(t, "anim.gif", buf.Bytes())
+	in := analyzeImageInput{path: name, mode: "describe", sessionDir: dir}
+	res, err := tool.Execute(context.Background(), in.args(t), in.toolContext())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(res.Output, "only the first frame") {
+		t.Fatalf("output %q has no first-frame note", res.Output)
 	}
 }

@@ -8,11 +8,13 @@ type SessionID = id.SessionID
 type MessageID = id.MessageID
 type PartID = id.PartID
 type PermissionID = id.PermissionID
+type TurnSummaryID = id.TurnSummaryID
 
 func NewSessionID() SessionID       { return id.NewSessionID() }
 func NewMessageID() MessageID       { return id.NewMessageID() }
 func NewPartID() PartID             { return id.NewPartID() }
 func NewPermissionID() PermissionID { return id.NewPermissionID() }
+func NewTurnSummaryID() TurnSummaryID { return id.NewTurnSummaryID() }
 
 type ModelPreference struct {
 	ID          string `json:"id"`

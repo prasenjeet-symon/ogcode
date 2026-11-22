@@ -26,7 +26,7 @@ export default function IndexConsentDialog() {
           labelledBy="idx-consent-title"
           describedBy="idx-consent-desc"
           onClose={close}
-          class="sm:max-w-[580px]"
+          widthClass="sm:max-w-[580px]"
         >
           <div class="flex justify-end px-4 pt-4">
             <button

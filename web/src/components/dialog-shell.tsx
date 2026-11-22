@@ -32,7 +32,9 @@ export default function DialogShell(props: {
   describedBy?: string;
   /** Omit to make the dialog non-dismissible. */
   onClose?: () => void;
-  /** Width classes for the panel, e.g. `sm:max-w-[520px]`. */
+  /** Max panel width on sm+ screens; replaces the 680px default (never stacked with it). */
+  widthClass?: string;
+  /** Extra classes for the panel. */
   class?: string;
   /** Element to focus on open; defaults to the panel itself. */
   initialFocus?: () => HTMLElement | null | undefined;
@@ -96,7 +98,7 @@ export default function DialogShell(props: {
         aria-describedby={props.describedBy}
         tabindex="-1"
         onKeyDown={(e) => props.onKeyDown?.(e)}
-        class={`dlg-panel sm:max-w-[680px] ${props.class ?? ''}`}
+        class={`dlg-panel ${props.widthClass ?? 'sm:max-w-[680px]'} ${props.class ?? ''}`}
       >
         {props.children}
       </div>
@@ -212,7 +214,7 @@ export function DialogTab(props: {
   children: JSX.Element;
 }) {
   return (
-    <button type="button" role="tab" aria-selected={props.selected} class="dlg-tab" onClick={props.onClick}>
+    <button type="button" role="tab" aria-selected={props.selected ? "true" : "false"} class="dlg-tab" onClick={props.onClick}>
       {props.children}
       <Show when={props.count !== undefined && props.count !== '' && props.count !== 0}>
         <span class="dlg-tab-count">{props.count}</span>

@@ -553,6 +553,13 @@ func applyPositioned(content string, h resolvedHunk, path string) (string, int, 
 	}
 	if h.oldStr == "" {
 		ins := h.newStr
+		// Inserting at the end of a file that does not end with a newline
+		// would glue the new text onto the last line ("abcnew\n"); when
+		// the insert lands at EOF, separate it from the unterminated
+		// last line instead.
+		if eol := eolFor(content); content != "" && !strings.HasSuffix(content, "\n") && offset == len(content) && !strings.HasPrefix(ins, "\n") && !strings.HasPrefix(ins, eol) {
+			ins = eol + ins
+		}
 		if !strings.HasSuffix(ins, "\n") {
 			ins += eolFor(content)
 		}

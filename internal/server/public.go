@@ -30,8 +30,15 @@ func (s *Server) servePublic(r chiRouter) {
 	// http.FileServer routes on the URL path, so strip the /public prefix before
 	// it hits http.Dir — otherwise it looks for <dir>/public/<public-path>.
 	fileServer := http.StripPrefix("/public", http.FileServer(http.Dir(s.publicDir())))
-	r.Get("/public", fileServer.ServeHTTP)
-	r.Get("/public/*", fileServer.ServeHTTP)
-	r.Head("/public", fileServer.ServeHTTP)
-	r.Head("/public/*", fileServer.ServeHTTP)
+	// Mirror the doc-asset viewer headers (handleReadDocAsset): pin the
+	// sniffed type and sandbox any HTML/SVG opened directly from /public.
+	secured := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+		fileServer.ServeHTTP(w, r)
+	})
+	r.Get("/public", secured.ServeHTTP)
+	r.Get("/public/*", secured.ServeHTTP)
+	r.Head("/public", secured.ServeHTTP)
+	r.Head("/public/*", secured.ServeHTTP)
 }

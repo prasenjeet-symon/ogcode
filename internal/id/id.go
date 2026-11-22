@@ -46,6 +46,7 @@ type MessageID string
 type PartID string
 type PermissionID string
 type QuestionID string
+type TurnSummaryID string
 
 func NewSessionID() SessionID {
 	return SessionID("ses_" + newULID())
@@ -65,6 +66,10 @@ func NewPermissionID() PermissionID {
 
 func NewQuestionID() QuestionID {
 	return QuestionID("qst_" + newULID())
+}
+
+func NewTurnSummaryID() TurnSummaryID {
+	return TurnSummaryID("tsm_" + newULID())
 }
 
 func NewNoteID() string {

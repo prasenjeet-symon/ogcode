@@ -327,7 +327,7 @@ export function TreeRow(props: TreeRowProps) {
       ref={(el) => props.attach?.(el)}
       role="treeitem"
       aria-level={props.depth + 1}
-      aria-selected={props.selected}
+      aria-selected={props.selected ? "true" : "false"}
       aria-expanded={isDir() ? props.expanded : undefined}
       onClick={() => {
         props.onSelect(props.node);

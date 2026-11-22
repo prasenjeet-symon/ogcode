@@ -125,11 +125,11 @@ func TestVideoPipelineChunksTwentyFiveFrames(t *testing.T) {
 	if sys := p.requests[3].System; len(sys) != 1 || sys[0] != videoReduceSystem {
 		t.Errorf("reduce System = %v, want the merge prompt", sys)
 	}
-	if got := p.requests[3].MaxTokens; got != videoReduceMaxTokens {
-		t.Errorf("reduce MaxTokens = %d, want %d", got, videoReduceMaxTokens)
+	if want := videoReduceMaxTokens + visionThinkingHeadroom; p.requests[3].MaxTokens != want {
+		t.Errorf("reduce MaxTokens = %d, want %d (budget plus thinking headroom)", p.requests[3].MaxTokens, want)
 	}
-	if got := p.requests[0].MaxTokens; got != videoChunkMaxTokens {
-		t.Errorf("chunk MaxTokens = %d, want %d", got, videoChunkMaxTokens)
+	if want := videoChunkMaxTokens + visionThinkingHeadroom; p.requests[0].MaxTokens != want {
+		t.Errorf("chunk MaxTokens = %d, want %d (budget plus thinking headroom)", p.requests[0].MaxTokens, want)
 	}
 
 	// Image order follows the frames' label order, chunk by chunk.

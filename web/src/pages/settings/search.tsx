@@ -443,7 +443,7 @@ export default function SearchSettings() {
                     <button
                       type="button"
                       role="tab"
-                      aria-selected={on()}
+                      aria-selected={on() ? "true" : "false"}
                       onClick={() => changeProvider(tab.id)}
                       class={`relative flex items-center gap-1.5 h-8 px-2.5 rounded-md text-ui whitespace-nowrap shrink-0
                               transition-colors duration-150

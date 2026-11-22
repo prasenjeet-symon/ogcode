@@ -543,9 +543,9 @@ func markdownCapabilitiesPrompt(hasLatexTool, savedToFile bool) string {
 The chat interface natively renders the following — use them when they add genuine clarity:
 
 - **Mermaid diagrams** (triple-backtick mermaid blocks) — flows, architectures, sequences, entity relationships.
-- **LaTeX math** — inline $...$ and display $$...$$ — for formulas and equations.
+- **LaTeX math** — inline $...$ and display $$...$$ — for formulas and equations; $...$ must hug its content ($x^2$ not $ x^2 $), $$...$$ is single-line display only (not mid-sentence), and $ inside code spans stays literal.
 ` + latexDocs + latexTool + `
-- **Plotly charts** (triple-backtick plotly blocks) — a JSON object with a "data" array and optional "layout" (Plotly.js spec): bar, line, scatter, pie, heatmap, etc.
+- **Plotly charts** (triple-backtick plotly blocks) — a JSON object with a "data" array and optional "layout" (Plotly.js spec): bar, line, scatter, pie, heatmap, etc.; an optional "config" object is honored, merged over the defaults ({responsive: true, displayModeBar: false}).
 - **Rough diagrams** (triple-backtick rough blocks) — hand-drawn-style 2D diagrams: JSON with an "elements" array (types: rectangle, circle, ellipse, line, arrow, path, polygon, text) plus optional RoughJS style options.
 - **HTML/CSS/JS** (triple-backtick html blocks) — full interactive content in a sandboxed iframe (JS has no access to the parent page). Use for rich visualizations, dashboards, widgets, styled tables. The iframe is transparent and borderless — **do NOT add a background color, gradient, or card-like container**; use subtle borders or spacing so it blends into the chat.`
 }

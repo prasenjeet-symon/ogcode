@@ -117,4 +117,22 @@ func TestServe_PublicDir(t *testing.T) {
 			t.Fatalf("HEAD body = %d bytes, want 0", len(body))
 		}
 	})
+
+	// Served assets must pin their type and sandbox active content, mirroring
+	// the doc-asset viewer headers — an HTML/SVG dropped into public/ must
+	// not run script when opened directly.
+	t.Run("sets nosniff and sandbox CSP headers", func(t *testing.T) {
+		resp, err := http.Get(base + "/public/greet.txt")
+		if err != nil {
+			t.Fatalf("GET /public/greet.txt: %v", err)
+		}
+		defer resp.Body.Close()
+		if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+		}
+		wantCSP := "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+		if got := resp.Header.Get("Content-Security-Policy"); got != wantCSP {
+			t.Fatalf("Content-Security-Policy = %q, want %q", got, wantCSP)
+		}
+	})
 }

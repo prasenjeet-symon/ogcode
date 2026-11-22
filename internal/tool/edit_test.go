@@ -1218,6 +1218,26 @@ func TestEditTool_PositionedInsertBeforeLine(t *testing.T) {
 	}
 }
 
+// TestEditTool_PositionedInsertAtEOFNoTrailingNewline pins the gap at the end
+// of a file that does not end with a newline: inserting at len(lines)+1 must
+// not glue the inserted text onto the unterminated last line ("abcnew\n").
+func TestEditTool_PositionedInsertAtEOFNoTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "abc")
+
+	if _, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"at":      2,
+		"replace": "new",
+	}); err != nil {
+		t.Fatalf("an insert at the end of file should apply: %v", err)
+	}
+	if got := fileText(t, path); got != "abc\nnew\n" {
+		t.Errorf("insert at EOF of a newline-less file should start on its own line, got %q", got)
+	}
+}
+
 // TestEditTool_PositionedMultiHunkAppliesBottomUp pins why the order exists: all
 // the line numbers come from one read, so a change near the top of the file must
 // not shift the numbers the hunk below it names.

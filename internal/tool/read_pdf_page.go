@@ -106,8 +106,12 @@ func (ReadPdfPageTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 
 	// If the page yields little text, it is likely a graph/diagram/scanned image.
 	// For vision-capable models, render the page and return it as an image.
+	var renderErr error
+	var data []byte
+	var mediaType string
 	if len(strings.Fields(text)) < imageFallbackWordThreshold && tctx.ModelSupportsImages {
-		if data, mediaType, rerr := renderPDFPageImage(path, params.Page); rerr == nil {
+		data, mediaType, renderErr = renderPDFPageImage(path, params.Page)
+		if renderErr == nil {
 			note := fmt.Sprintf("Page %d has little extractable text (likely a graph, diagram, or scanned image); a rendered image of the page is attached.", params.Page)
 			if text != "" {
 				note += "\n\nExtracted text:\n" + text
@@ -121,7 +125,19 @@ func (ReadPdfPageTool) Execute(_ context.Context, args json.RawMessage, tctx Con
 				},
 			}, nil
 		}
-		// Render failed — fall through to returning whatever text we have.
+	}
+	// Render failed: say so on the text fallback. The page looked
+	// scanned (little extractable text) and the image render failed too,
+	// so without the hint the caller would trust an incomplete extraction.
+	if renderErr != nil {
+		if text == "" {
+			text = "(no extractable text on this page)"
+		}
+		text += fmt.Sprintf("\n\n_Page appears scanned; image render failed: %s. Text extraction may be incomplete._", renderErr)
+		return Result{
+			Title:  title,
+			Output: text,
+		}, nil
 	}
 
 	if text == "" {

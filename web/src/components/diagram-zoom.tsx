@@ -1,4 +1,4 @@
-import { onMount } from 'solid-js';
+import { createSignal, onMount, Show } from 'solid-js';
 import DialogShell, { DialogFooter, DialogHeader } from './dialog-shell';
 
 /**
@@ -8,10 +8,11 @@ import DialogShell, { DialogFooter, DialogHeader } from './dialog-shell';
  * the width of a large dialog, so the detail the author encoded is legible.
  *
  * The caller hands over a `render` callback rather than markup, because every
- * diagram kind draws itself differently — mermaid from its source, plotly from
- * a spec, rough from a spec, latex from compiled page images. The callback runs
- * once the body is in the DOM, and only when the dialog opens, so nothing is
- * drawn twice.
+ * diagram kind draws itself differently — mermaid/plotly/rough re-render here
+ * from their spec at dialog width, while latex shows its already-compiled
+ * page images (copies of the 150-DPI img srcs, CSS-upscaled). The callback
+ * runs once the body is in the DOM, and only when the dialog opens, so
+ * nothing is drawn twice.
  */
 
 export interface DiagramZoomState {
@@ -35,17 +36,27 @@ export default function DiagramZoomDialog(props: {
   onClose: () => void;
 }) {
   let body: HTMLDivElement | undefined;
+  const [pending, setPending] = createSignal(true);
+  const [error, setError] = createSignal<string | null>(null);
 
   onMount(() => {
     if (!body) return;
-    Promise.resolve(props.state.render(body)).catch(() => {});
+    setPending(true);
+    setError(null);
+    Promise.resolve()
+      .then(() => props.state.render(body as HTMLElement))
+      .then(() => setPending(false))
+      .catch((err) => {
+        setPending(false);
+        setError(String(err));
+      });
   });
 
   return (
     <DialogShell
       labelledBy="diagram-zoom-title"
       onClose={props.onClose}
-      class="sm:max-w-[1100px]"
+      widthClass="sm:max-w-[min(1100px,calc(100vw-3rem))]"
     >
       <DialogHeader
         id="diagram-zoom-title"
@@ -62,6 +73,12 @@ export default function DiagramZoomDialog(props: {
         }
       />
       <div class="diagram-zoom-body">
+        <Show when={pending()}>
+          <div class="diagram-zoom-pending">Rendering diagram…</div>
+        </Show>
+        <Show when={error()}>
+          {(msg) => <div class="diagram-zoom-error">{msg()}</div>}
+        </Show>
         <div ref={body} class="diagram-zoom-host" />
       </div>
       <DialogFooter hint="Scroll to inspect the whole diagram.">

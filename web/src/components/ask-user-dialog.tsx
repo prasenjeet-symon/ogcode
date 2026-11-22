@@ -52,7 +52,7 @@ export default function AskUserDialog() {
   return (
     <Show when={batch()}>
       {(b) => (
-        <DialogShell labelledBy="ask-user-title" class="sm:max-w-[620px]">
+        <DialogShell labelledBy="ask-user-title" widthClass="sm:max-w-[620px]">
           <DialogHeader
             id="ask-user-title"
             title="The agent has a question"
