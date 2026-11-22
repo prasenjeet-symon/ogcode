@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,6 +69,13 @@ func latexPDFPath(sessionDir, filename string) (string, bool) {
 	if !strings.HasSuffix(strings.ToLower(filename), ".pdf") {
 		filename += ".pdf"
 	}
+	// Only a plain file name: a nested path would need its parent directory
+	// created (only the session dir itself is made below), so refuse it here
+	// with the same false as the traversal guard.
+	if cleaned := filepath.Clean(filename); strings.Contains(cleaned, "/") ||
+		strings.Contains(cleaned, string(filepath.Separator)) {
+		return "", false
+	}
 	return resolveSubdirPrefix(sessionDir, filename)
 }
 
@@ -127,7 +135,10 @@ func (LatexToPdfTool) Execute(ctx context.Context, args json.RawMessage, tctx Co
 	var compileOutput string
 	for pass := 1; pass <= 2; pass++ {
 		compileCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		// -no-shell-escape keeps \write18 off: compilation must never run
+		// shell commands from the document source.
 		cmd := exec.CommandContext(compileCtx, "pdflatex",
+			"-no-shell-escape",
 			"-interaction=nonstopmode",
 			"-halt-on-error",
 			"-output-directory="+tmpDir,
@@ -144,7 +155,7 @@ func (LatexToPdfTool) Execute(ctx context.Context, args json.RawMessage, tctx Co
 		if err != nil {
 			fullOutput := stdout.String() + stderr.String()
 			// Check if it was a timeout
-			if compileCtx.Err() == context.DeadlineExceeded {
+			if errors.Is(compileCtx.Err(), context.DeadlineExceeded) {
 				return Result{
 					Title:  "LaTeX to PDF — compilation timed out",
 					Output: "pdflatex compilation timed out after 60 seconds. Your document may be too complex or contain an infinite loop.",
