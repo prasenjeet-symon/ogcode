@@ -84,6 +84,34 @@ func TestTruncateForDigest(t *testing.T) {
 	}
 }
 
+// A turn with many tool calls must not grow the digest without limit: the
+// per-input cap alone would still let ten calls add up to tens of kilobytes.
+// The whole digest is head+tail truncated at digestCap, and the turn's start
+// (the user request) survives the cut.
+func TestBuildTurnDigestCapsTotal(t *testing.T) {
+	big := `{"data":"` + strings.Repeat("x", digestInputCap+500) + `"}`
+	messages := []*session.MessageWithParts{
+		{Info: session.MessageInfo{Role: session.RoleUser}, Parts: []session.Part{digestTextPart("Do the thing")}},
+	}
+	for i := 0; i < 10; i++ {
+		messages = append(messages, &session.MessageWithParts{
+			Info:  session.MessageInfo{Role: session.RoleAssistant},
+			Parts: []session.Part{digestToolPart("write", big, "out")},
+		})
+	}
+	messages = append(messages, &session.MessageWithParts{
+		Info:  session.MessageInfo{Role: session.RoleAssistant},
+		Parts: []session.Part{digestTextPart("done")},
+	})
+	digest := buildTurnDigest(messages, 0, "Do the thing")
+	if len([]rune(digest)) > digestCap+10 {
+		t.Errorf("digest = %d runes, want <= %d+marker (total cap)", len([]rune(digest)), digestCap)
+	}
+	if !strings.Contains(digest, "Do the thing") {
+		t.Error("digest lost the user request to the total cap")
+	}
+}
+
 func TestTurnMemorableSession(t *testing.T) {
 	memorable := []string{"", "build"}
 	for _, s := range memorable {

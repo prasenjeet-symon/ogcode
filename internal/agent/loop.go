@@ -74,6 +74,66 @@ type BoardReport struct {
 // tracker lives one per process, keyed by the long-lived shared runner.
 var boardReports sync.Map // *LoopRunner → *boardReportQueue
 
+// turnSummaryWaitTimeout bounds how long a next turn waits for the previous
+// turn's background summary. The background job itself times out at 20s, so a
+// few seconds of slack guards against a stuck goroutine without hanging the
+// turn forever.
+const turnSummaryWaitTimeout = 25 * time.Second
+
+// turnSummaryInFlight tracks the background turn-summary goroutines one per
+// session, so the next turn can wait for the previous turn's summary before
+// it reads RecentTurnSummaries. It lives beside the runner for the same
+// reason boardReports does: LoopRunner is copied by value for teammates and
+// tasks, and a value-field channel map would fork across copies.
+var turnSummaryInFlight sync.Map // session.SessionID → chan struct{}
+
+// registerTurnSummary records the done channel for sessionID's background
+// summary and returns a cleanup that closes it and drops the entry. It is a
+// no-op cleanup (already-closed channel) when sessionID is empty, so callers
+// can defer it unconditionally. A second registration for the same session
+// replaces the first: turns for one session run sequentially, so only one
+// summary should be in flight at a time.
+func registerTurnSummary(sessionID session.SessionID) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+	done := make(chan struct{})
+	turnSummaryInFlight.Store(sessionID, done)
+	return func() {
+		// Only delete if this entry is still the registered one — a later
+		// turn may have registered a newer summary before this one finished.
+		if cur, ok := turnSummaryInFlight.Load(sessionID); ok && cur == done {
+			turnSummaryInFlight.Delete(sessionID)
+		}
+		close(done)
+	}
+}
+
+// waitTurnSummary blocks until sessionID's in-flight background summary
+// finishes, the wait budget expires, or ctx is cancelled — whichever comes
+// first. It returns immediately when no summary is in flight (the common
+// case: the user waited, or the process restarted), so it adds no delay then.
+// A wait that expires or is cancelled just proceeds without the newest
+// summary, exactly as a turn that started before the summary landed would.
+func waitTurnSummary(ctx context.Context, sessionID session.SessionID) {
+	v, ok := turnSummaryInFlight.Load(sessionID)
+	if !ok {
+		return
+	}
+	done := v.(chan struct{})
+	// The background summary already bounds itself to 20s (see
+	// writeTurnSummary); the wait mirrors that plus slack so a stuck
+	// goroutine can never hang the turn indefinitely.
+	timer := time.NewTimer(turnSummaryWaitTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		slog.Warn("waitTurnSummary: timed out waiting for previous turn summary", "session", sessionID)
+	case <-ctx.Done():
+	}
+}
+
 // boardReportQueue holds the reports one runner's turns still owe their board.
 type boardReportQueue struct {
 	mu      sync.Mutex
@@ -726,6 +786,12 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// The per-turn markdown route is the only memory now, governed solely by its
 	// env gate (OGCODE_TURN_MEMORY, default on). When off, there is no memory.
 	turnMemoryActive := lr.TurnMemory && lr.MemFiles != nil
+	// Turn-summary continuity is narrower than markdown memory: utility/
+	// ephemeral sessions (recalls, subagents, notes, indexing, search) are
+	// not units of work worth a synthesis call or a summary row, so they
+	// neither store nor inject summaries. No subagent exception — that
+	// exception only serves the search-only indexing path in writeTurnMemory.
+	turnSummaryActive := turnMemoryActive && turnMemorableSession(sess.SessionType)
 
 	// Resolve the provider/model and the two fixed per-run model attributes.
 	p, modelID, modelSupportsImages, modelContextWindow := lr.resolveRunModel(ctx, sess, sessionID)
@@ -991,6 +1057,27 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		msgs, _ := lr.Store.GetMessages(sessionID, "", 1000)
 		prevTurnResponse = extractLastAssistantText(msgs)
 	}
+	// Recent turn summaries, loaded once per turn (turn-constant, so the
+	// prompt cache prefix survives the whole turn). The step loop below
+	// appends this string verbatim; querying per step would just re-read
+	// the same rows and could change mid-turn.
+	var recentTurnSummaries string
+	if turnSummaryActive && recentTurnSummariesWindow() > 0 {
+		// If the previous turn's summary is still being written in the
+		// background, wait for it (bounded) so this turn can inject it. No
+		// entry means it already finished or the process restarted — either
+		// way, no wait. Gated on turnSummaryActive and window>0, same as the load below.
+		if _, inFlight := turnSummaryInFlight.Load(sessionID); inFlight {
+			lr.setSessionStatus(sessionID, session.StatusRunning)
+		}
+		waitTurnSummary(ctx, sessionID)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if recents, err := lr.Store.RecentTurnSummaries(sessionID, recentTurnSummariesWindow()); err == nil {
+			recentTurnSummaries = formatRecentTurnSummaries(recents)
+		}
+	}
 
 	// In-memory working set of the conversation. The DB stays the durable log
 	// (all streaming/tool writes go there), but re-reading and re-unmarshaling the
@@ -1169,6 +1256,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 				exitReason = finish
 				// Turn-end registry sweep for the intent gate (intent_gate.go).
 				sweepIntentReminderSeen()
+				if turnSummaryActive {
+					lr.writeTurnSummary(ctx, sessionID, p, modelID)
+				}
 				if turnMemoryActive {
 					lr.writeTurnMemory(ctx, sessionID, p, modelID)
 				}
@@ -1309,6 +1399,13 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 		// cover the gap in between.
 		if browserSteer != "" {
 			systemPrompts = appendSystemEntry(systemPrompts, agent, browserSteer)
+		}
+		// Recent turn continuity: the last few turn-local summaries, loaded
+		// once per turn before the step loop (see recentTurnSummaries). They
+		// come from the persistent turn_summary table, so they survive a
+		// restart. Placed before baseSystemPrompts capture.
+		if recentTurnSummaries != "" {
+			systemPrompts = appendSystemEntry(systemPrompts, agent, recentTurnSummaries)
 		}
 		// Everything above is fixed for the turn. A mid-step rebuild starts from
 		// this base and re-derives only the one entry that can change (the
@@ -2554,6 +2651,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 			slog.Info("agent loop complete", "session", sessionID, "steps", step, "reason", finishReason)
 			exitReason = finishReason
 			sweepIntentReminderSeen()
+			if turnSummaryActive {
+				lr.writeTurnSummary(ctx, sessionID, p, modelID)
+			}
 			if turnMemoryActive {
 				lr.writeTurnMemory(ctx, sessionID, p, modelID)
 			}
@@ -2582,6 +2682,9 @@ func (lr *LoopRunner) RunLoop(ctx context.Context, sessionID session.SessionID, 
 	// reason keeps an extended-then-stopped turn from being read as a clean finish.
 	exitReason = "step_limit"
 	sweepIntentReminderSeen()
+	if turnSummaryActive {
+		lr.writeTurnSummary(ctx, sessionID, p, modelID)
+	}
 	if turnMemoryActive {
 		lr.writeTurnMemory(ctx, sessionID, p, modelID)
 	}
@@ -2813,6 +2916,153 @@ func (lr *LoopRunner) cancelPartialToolCalls(sessionID session.SessionID, assist
 	}
 	lr.Bus.Publish("message.updated", resultMsg)
 	return resultID
+}
+
+// writeTurnSummary synthesizes a turn-local summary (the user request, the
+// tool calls, the final response) and persists it via InsertTurnSummary so
+// the next turn can inject the recent tail (see recentTurnSummariesWindow).
+// The message load and digest build
+// run synchronously (cheap); the LLM synthesis and insert run detached in
+// the background with a 20s timeout, so the turn closes without waiting on
+// the model. If the LLM fails, times out, or returns empty, it falls back
+// to a head+tail truncation of the digest so a summary is always stored. It
+// never fails the turn.
+func (lr *LoopRunner) writeTurnSummary(ctx context.Context, sessionID session.SessionID, chatProvider provider.Provider, chatModel string) {
+	if lr.Store == nil {
+		return
+	}
+	chatProvider, chatModel = lr.resolveBackgroundProvider(chatProvider, chatModel)
+	// Load messages and find the turn's user text.
+	messages, err := lr.Store.GetMessages(sessionID, "", 1000)
+	if err != nil {
+		slog.Warn("writeTurnSummary: failed to load messages", "err", err)
+		return
+	}
+	userText := ""
+	userMsgIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Info.Role != session.RoleUser || len(messages[i].Parts) == 0 {
+			continue
+		}
+		found := ""
+		for _, p := range messages[i].Parts {
+			if p.Type == session.PartText {
+				var data session.TextPartData
+				if json.Unmarshal(p.Data, &data) == nil && data.Text != "" {
+					found = data.Text
+				}
+			}
+		}
+		if found != "" {
+			userText = found
+			userMsgIdx = i
+			break
+		}
+	}
+	if userText == "" {
+		slog.Info("writeTurnSummary: no user text found, skipping", "session", sessionID)
+		return
+	}
+	digest := buildTurnDigest(messages, userMsgIdx, userText)
+	done := registerTurnSummary(sessionID)
+	go func() {
+		defer done()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("writeTurnSummary: panic in background summary", "session", sessionID, "err", r, "stack", string(debug.Stack()))
+			}
+		}()
+		// Detached context so the summary still completes if the turn's
+		// context is cancelled the moment it ends.
+		bgCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		summary := ""
+		if chatProvider != nil {
+			text, usage, err := newSynthClient(chatProvider, chatModel).Chat(bgCtx, turnSummarySystemPrompt, digest)
+			if err == nil && strings.TrimSpace(text) != "" {
+				summary = strings.TrimSpace(text)
+				lr.recordUtilityUsage(sessionID, providerIDOf(chatProvider), chatModel, usage)
+			} else {
+				if err != nil {
+					slog.Warn("writeTurnSummary: synthesis failed, using head+tail fallback", "session", sessionID, "err", err)
+				} else {
+					slog.Warn("writeTurnSummary: empty synthesis, using head+tail fallback", "session", sessionID)
+				}
+			}
+		}
+		if summary == "" {
+			summary = truncateHeadTail(digest, 1500, 1500)
+		}
+		if _, err := lr.Store.InsertTurnSummary(sessionID, summary, userText); err != nil {
+			slog.Warn("writeTurnSummary: failed to store summary", "session", sessionID, "err", err)
+			return
+		}
+		slog.Info("writeTurnSummary: turn summary stored", "session", sessionID)
+	}()
+}
+
+// turnSummaryWindowEnv names how many recent turn summaries the next turn
+// injects, overriding session.RecentTurnSummariesWindow.
+const turnSummaryWindowEnv = "OGCODE_TURN_SUMMARY_WINDOW"
+
+const (
+	// turnSummaryWindowMin/Max clamp a configured window so a mistyped
+	// magnitude cannot disable continuity by accident (0 disables injection,
+	// which is itself a usable override) or bloat every turn's system prompt
+	// with the whole history. The default comes from session so there is one
+	// canonical count for the store and the loop.
+	turnSummaryWindowMin = 0
+	turnSummaryWindowMax = 100
+)
+
+// recentTurnSummariesWindow returns how many past turn summaries the next turn
+// injects: OGCODE_TURN_SUMMARY_WINDOW when it names a usable value, else the
+// built-in default carried by session.RecentTurnSummariesWindow (currently 2).
+// Read per turn, so a long-lived server picks up an override the same way any
+// other env-configured setting applies, and so tests can drive it with
+// t.Setenv. This is the sole reader of the env var; the store-level constant
+// remains the default for callers that pass an explicit limit.
+func recentTurnSummariesWindow() int {
+	return envInt(turnSummaryWindowEnv, session.RecentTurnSummariesWindow,
+		turnSummaryWindowMin, turnSummaryWindowMax)
+}
+
+// turnSummarySystemPrompt instructs the synthesis LLM to produce a short,
+// turn-local summary for continuity injection (not the full memory-file
+// format). It must be brief — a few sentences — so a couple of them fit in the
+// next turn's system prompt without bloat.
+const turnSummarySystemPrompt = `You are summarizing one completed turn between a developer and a coding agent for continuity in the NEXT turn. The digest shows the developer's request, the agent's tool calls (inputs only), and the final response.
+
+Write a TURN-LOCAL summary of ONLY this turn — 3-5 sentences max, plain prose, no markdown headings. Capture: what the user asked, what the agent did/changed, any decision or preference stated, and what (if anything) is left open or needs the user's next input. Do not summarize earlier turns. Be specific (file paths, names, values) but concise.
+
+Output ONLY the summary text, no preamble.`
+
+// truncateHeadTail returns the first headN runes plus, when the string is
+// longer than headN+tailN, an ellipsis and the last tailN runes. It is the
+// B-fallback when LLM synthesis fails: enough of the turn (its start and its
+// final response) to remain useful for continuity.
+func truncateHeadTail(s string, headN, tailN int) string {
+	runes := []rune(s)
+	if len(runes) <= headN+tailN {
+		return s
+	}
+	return string(runes[:headN]) + "\n…\n" + string(runes[len(runes)-tailN:])
+}
+
+// formatRecentTurnSummaries renders the recent-summaries block injected into
+// the next turn's system prompt, oldest-first so it reads as a timeline.
+// Returns "" when there is nothing to inject.
+func formatRecentTurnSummaries(summaries []*session.TurnSummary) string {
+	if len(summaries) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Recent turn continuity (last ")
+	fmt.Fprintf(&b, "%d turns, oldest first):\n", len(summaries))
+	for _, ts := range summaries {
+		fmt.Fprintf(&b, "- Turn %d: %s\n", ts.TurnIndex, strings.TrimSpace(ts.Summary))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // writeTurnMemory is the per-turn markdown memory writer. It synthesizes a structured
@@ -3132,7 +3382,11 @@ func buildTurnDigest(messages []*session.MessageWithParts, userMsgIdx int, userT
 	}
 	b.WriteString(strings.TrimSpace(final))
 	b.WriteString("\n")
-	return b.String()
+	digest := b.String()
+	if len(digest) > digestCap {
+		return truncateHeadTail(digest, digestCap/2, digestCap/2)
+	}
+	return digest
 }
 
 // digestInputCap bounds a single tool call's input in the digest. Inputs carry
@@ -3140,6 +3394,12 @@ func buildTurnDigest(messages []*session.MessageWithParts, userMsgIdx int, userT
 // in a write call) would blow the summary's token budget for no gain, so it is
 // clipped — the summary only needs to know what was done, not replay it.
 const digestInputCap = 2000
+
+// digestCap bounds the whole digest. Each tool input is already capped, but
+// a turn with many calls could still grow without limit; the total is
+// head+tail truncated so the summary model sees the turn's start (the user
+// request) and its final response.
+const digestCap = 12000
 
 func truncateForDigest(s string) string {
 	if len(s) <= digestInputCap {
