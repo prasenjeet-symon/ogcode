@@ -108,6 +108,7 @@ type VideoManifest struct {
 	Height           int     `json:"height"`
 	FPS              float64 `json:"fps"`
 	SampleFPS        float64 `json:"sampleFPS"`
+	MaxFrames        int     `json:"maxFrames"`
 	Sampled          int     `json:"sampled"`
 	Kept             int     `json:"kept"`
 	Dropped          int     `json:"dropped"`
@@ -341,6 +342,7 @@ func ExtractVideoFrames(ctx context.Context, opts VideoExtractOptions) (*VideoMa
 		Height:           pb.Height,
 		FPS:              pb.FPS,
 		SampleFPS:        opts.SampleFPS,
+		MaxFrames:        opts.MaxFrames,
 		Sampled:          sampled,
 		Kept:             len(frames),
 		Dropped:          sampled - selected,

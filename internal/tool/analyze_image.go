@@ -124,6 +124,23 @@ func analyzeImageMetadata(path, mode string, cached bool) map[string]any {
 	}
 }
 
+// analyzeImageWithinPixelCap reports whether raw image bytes already fit
+// the vision-model pixel ceiling without downscaling. M14: the passthrough
+// path used to check only the byte count, so a small-filesize but
+// huge-dimension image sailed past the ~1568px cap the re-encode path
+// enforces.
+func analyzeImageWithinPixelCap(data []byte) bool {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+	long := cfg.Width
+	if cfg.Height > long {
+		long = cfg.Height
+	}
+	return long <= viewMaxLongEdgePx
+}
+
 // analyzeImageCachedFooter renders the single trailing line a cached result
 // carries, so an answer served from cache is never mistaken for a fresh one,
 // matching the deep-search tool's convention.
@@ -234,16 +251,28 @@ func (t AnalyzeImageTool) Execute(ctx context.Context, args json.RawMessage, tct
 	}
 
 	// Payload on the wire. A JPEG or PNG small enough for a vision model
-	// unchanged is passed through byte-for-byte — re-encoding costs OCR
-	// fidelity. Anything else is decoded and re-encoded the same way
-	// view_image prepares its attachments, which downscales past the
-	// vision-model pixel limit and normalises the format.
+	// passes through byte-for-byte — re-encoding costs OCR fidelity — but
+	// only when it also fits the pixel cap AND carries no EXIF rotation to
+	// apply: image.Decode ignores orientation, so a rotated phone photo must
+	// be decoded, uprighted (M12) and re-encoded even when its byte size is
+	// small, and a small-bytes but huge-pixels panorama must be decoded and
+	// downscaled to the ~1568px vision-model ceiling (M14) the same way
+	// view_image prepares its attachments.
 	detected := http.DetectContentType(data)
 	mediaType, payload := detected, data
-	if detected != "image/jpeg" && detected != "image/png" || len(data) > analyzeImagePassthroughBytes {
-		img, _, err := image.Decode(bytes.NewReader(data))
+	animated := false
+	passthrough := (detected == "image/jpeg" || detected == "image/png") &&
+		len(data) <= analyzeImagePassthroughBytes &&
+		exifOrientation(data) == 1 &&
+		analyzeImageWithinPixelCap(data)
+	if !passthrough {
+		img, format, err := image.Decode(bytes.NewReader(data))
 		if err != nil {
 			return Result{}, fmt.Errorf("unsupported or unreadable image %s (detected %s; analyze_image handles PNG, JPEG, GIF, BMP and WebP)", path, detected)
+		}
+		img = applyExifOrientation(img, exifOrientation(data))
+		if format == "gif" {
+			animated = true
 		}
 		payload, mediaType, err = encodeImageForModel(img)
 		if err != nil {
@@ -261,6 +290,12 @@ func (t AnalyzeImageTool) Execute(ctx context.Context, args json.RawMessage, tct
 		return Result{Output: fmt.Sprintf("Image analysis error: %s", err)}, nil
 	}
 	text = strings.TrimSpace(text)
+	// LOW: image.Decode (and encodeImageForModel) sees only the first
+	// frame of an animated GIF, while the frontend passes GIFs through.
+	// Say so on the answer instead of analyzing one frame silently.
+	if animated && text != "" {
+		text += "\n\n_Note: only the first frame of the animated image was analyzed._"
+	}
 
 	// An error is never cached, and neither is an empty answer. A cache
 	// failure is logged and swallowed: the tool's job is the text, not the

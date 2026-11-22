@@ -298,7 +298,7 @@ func (t AnalyzeVideoTool) Execute(ctx context.Context, args json.RawMessage, tct
 	// different rate, cap or focus window must decode again rather than inherit
 	// a manifest that describes a different sampling.
 	workDir := filepath.Join(os.TempDir(), "ogcode-video", identity[:16], videoExtractTag(fps, maxFrames, focusFrames, segmentKey))
-	manifest, reused := readVideoManifest(workDir, path)
+	manifest, reused := readVideoManifest(workDir, path, fps, maxFrames, focusFrames, segStart, segEnd)
 	if !reused {
 		extract := t.Extract
 		if extract == nil {
@@ -316,11 +316,11 @@ func (t AnalyzeVideoTool) Execute(ctx context.Context, args json.RawMessage, tct
 			FocusFrames:  focusFrames,
 		})
 		if err != nil {
-			return Result{Output: fmt.Sprintf("Video extraction error: %s", err)}, nil
+			return Result{}, fmt.Errorf("extract video frames: %w", err)
 		}
 	}
 	if manifest == nil || len(manifest.Frames) == 0 {
-		return Result{Output: fmt.Sprintf("No frames could be extracted from %s — it may be shorter than one sample or have no video stream.", base)}, nil
+		return Result{}, fmt.Errorf("no frames could be extracted from %s — it may be shorter than one sample or have no video stream", base)
 	}
 
 	frames := make([]VideoFrame, 0, len(manifest.Frames))
@@ -337,7 +337,7 @@ func (t AnalyzeVideoTool) Execute(ctx context.Context, args json.RawMessage, tct
 		})
 	}
 	if len(frames) == 0 {
-		return Result{Output: fmt.Sprintf("The keyframes extracted from %s are no longer on disk — run again with fresh=true.", base)}, nil
+		return Result{}, fmt.Errorf("the keyframes extracted from %s are no longer on disk — run again with fresh=true", base)
 	}
 
 	transcript := make([]string, 0, len(manifest.Transcript))
@@ -360,7 +360,7 @@ func (t AnalyzeVideoTool) Execute(ctx context.Context, args json.RawMessage, tct
 		Effort:     effort,
 	})
 	if err != nil {
-		return Result{Output: fmt.Sprintf("Video analysis error: %s", err)}, nil
+		return Result{}, fmt.Errorf("analyze video: %w", err)
 	}
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -467,9 +467,13 @@ func videoExtractTag(fps float64, maxFrames, focusFrames int, segment string) st
 	return fmt.Sprintf("%x", sum[:6])
 }
 
-// readVideoManifest reloads a previous extraction for the same unchanged file,
-// so a second call reuses the frames instead of decoding the video again.
-func readVideoManifest(dir, source string) (*VideoManifest, bool) {
+// readVideoManifest reloads a previous extraction for the same unchanged file
+// and the same sampling knobs, so a second call reuses the frames instead of
+// decoding the video again. The scratch directory tag already separates most
+// parameter combinations, but the manifest check is the backstop: a stale or
+// hand-planted manifest whose sampling differs from this call must decode
+// again rather than mislabel the timeline.
+func readVideoManifest(dir, source string, wantSampleFPS float64, wantMaxFrames, wantFocusFrames int, wantSegStart, wantSegEnd float64) (*VideoManifest, bool) {
 	data, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {
 		return nil, false
@@ -479,6 +483,9 @@ func readVideoManifest(dir, source string) (*VideoManifest, bool) {
 		return nil, false
 	}
 	if m.Source != source || len(m.Frames) == 0 {
+		return nil, false
+	}
+	if m.SampleFPS != wantSampleFPS || m.MaxFrames != wantMaxFrames || m.FocusFrames != wantFocusFrames || m.SegmentStartSec != wantSegStart || m.SegmentEndSec != wantSegEnd {
 		return nil, false
 	}
 	for _, f := range m.Frames {

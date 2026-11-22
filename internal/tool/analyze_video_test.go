@@ -74,6 +74,10 @@ func videoTestExtractor(t *testing.T, calls *int) func(context.Context, VideoExt
 			Source:           opts.Path,
 			DurationSec:      126,
 			SampleFPS:        opts.SampleFPS,
+			MaxFrames:        opts.MaxFrames,
+			FocusFrames:      opts.FocusFrames,
+		SegmentStartSec:  opts.SegmentStart,
+		SegmentEndSec:    opts.SegmentEnd,
 			Sampled:          126,
 			Kept:             len(frames),
 			Dropped:          120,
@@ -443,6 +447,95 @@ func TestAnalyzeVideoToolRejectsInvalidSegment(t *testing.T) {
 	}
 	if runs != 0 || extracts != 0 {
 		t.Fatalf("a rejected segment still did work: ran %d, extracted %d", runs, extracts)
+	}
+}
+
+// A manifest whose sampling knobs differ from this call is stale: the
+// backstop in readVideoManifest rejects it, so the frames decode again
+// instead of mislabelling the timeline.
+func TestAnalyzeVideoToolStaleManifestReextracts(t *testing.T) {
+	name, dir := videoTestFile(t)
+	run := &videoRunCounter{}
+	extracts := 0
+	tool := AnalyzeVideoTool{Run: run.run, Extract: videoTestExtractor(t, &extracts)}
+	in := Context{SessionDir: dir}
+	if _, err := tool.Execute(context.Background(), videoTestArgs(t, name, "describe", "", false), in); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if extracts != 1 {
+		t.Fatalf("extractor ran %d times, want 1", extracts)
+	}
+	// A repeat call with the same knobs reuses the manifest on disk.
+	if _, err := tool.Execute(context.Background(), videoTestArgs(t, name, "describe", "", false), in); err != nil {
+		t.Fatalf("repeat call: %v", err)
+	}
+	if extracts != 1 {
+		t.Fatalf("repeat call re-extracted: extractor ran %d times, want 1", extracts)
+	}
+	// A different frame cap lands in a different scratch directory today, but
+	// even a manifest planted under this call's directory with the wrong cap
+	// must decode again rather than mislabel the timeline.
+	args, err := json.Marshal(struct {
+		Path      string `json:"path"`
+		Mode      string `json:"mode"`
+		MaxFrames int    `json:"max_frames"`
+	}{Path: name, Mode: "describe", MaxFrames: analyzeVideoDefaultFrames + 7})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	if _, err := tool.Execute(context.Background(), args, in); err != nil {
+		t.Fatalf("changed-cap call: %v", err)
+	}
+	if extracts != 2 {
+		t.Fatalf("changed cap reused the stale extraction: extractor ran %d times, want 2", extracts)
+	}
+}
+
+// Extraction, frame-read and pipeline failures are real errors, so the
+// agent's retry logic sees them — not success text the loop would file away.
+// An empty pipeline answer is the exception: the work succeeded with nothing
+// to say, so it stays readable text.
+func TestAnalyzeVideoToolFailuresAreErrors(t *testing.T) {
+	name, dir := videoTestFile(t)
+	in := Context{SessionDir: dir}
+
+	failing := AnalyzeVideoTool{
+		Run:     (&videoRunCounter{}).run,
+		Extract: func(context.Context, VideoExtractOptions) (*VideoManifest, error) { return nil, fmt.Errorf("boom") },
+	}
+	if _, err := failing.Execute(context.Background(), videoTestArgs(t, name, "describe", "", false), in); err == nil {
+		t.Error("extraction failure was success text, want a real error")
+	}
+
+	empty := AnalyzeVideoTool{
+		Run:     (&videoRunCounter{}).run,
+		Extract: func(context.Context, VideoExtractOptions) (*VideoManifest, error) { return &VideoManifest{Source: "x"}, nil },
+	}
+	if _, err := empty.Execute(context.Background(), videoTestArgs(t, name, "describe", "", false), in); err == nil {
+		t.Error("empty extraction was success text, want a real error")
+	}
+
+	pipelineErr := AnalyzeVideoTool{
+		Run:     func(context.Context, VideoAnalysisRequest) (string, error) { return "", fmt.Errorf("model down") },
+		Extract: videoTestExtractor(t, new(int)),
+	}
+	if _, err := pipelineErr.Execute(context.Background(), videoTestArgs(t, name, "describe", "", false), in); err == nil {
+		t.Error("pipeline failure was success text, want a real error")
+	}
+
+	pipelineEmpty := AnalyzeVideoTool{
+		Run:     func(context.Context, VideoAnalysisRequest) (string, error) { return "  ", nil },
+		Extract: videoTestExtractor(t, new(int)),
+	}
+	// An empty pipeline answer stays success text: the frames were extracted
+	// and the model ran — there is nothing to retry, so the agent sees the
+	// "returned nothing" line rather than an error.
+	res, err := pipelineEmpty.Execute(context.Background(), videoTestArgs(t, name, "describe", "", false), in)
+	if err != nil {
+		t.Fatalf("empty pipeline output: %v, want success text", err)
+	}
+	if !strings.Contains(res.Output, "returned nothing") {
+		t.Errorf("empty pipeline output = %q, want the returned-nothing text", res.Output)
 	}
 }
 

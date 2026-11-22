@@ -292,13 +292,11 @@ func videoReduceUserText(req tool.VideoAnalysisRequest, mode, question string, n
 // The resolved effort is also the call's declared difficulty, exactly as the
 // single-image helper declares it.
 func oneShotVisionLLMMulti(ctx context.Context, p provider.Provider, model, system, user string, images []provider.MessageImage, maxTokens int, effort string) (string, *provider.TokenUsage, error) {
-	budget := maxTokens
-	// Thinking is asked for only when a level was named, exactly as the
-	// single-image helper does.
+	// The headroom rides every call, exactly as the single-image helper
+	// does: no level named does not mean no reasoning, and reasoning
+	// spends this same ceiling. See visionThinkingHeadroom.
+	budget := maxTokens + visionThinkingHeadroom
 	thinking := effort != ""
-	if thinking {
-		budget += visionThinkingHeadroom
-	}
 	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return "", nil, err
