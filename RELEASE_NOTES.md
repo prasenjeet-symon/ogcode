@@ -1,3 +1,46 @@
+# Release Notes — v0.60.0
+
+## Minor: A finished turn is summarized for the next one
+
+A turn used to end and leave nothing behind but its messages, so the next
+turn re-read the thread cold — or missed what the last one actually decided.
+Each completed turn now gets a digest, synthesized in the background after
+the turn ends and stored in a new `turn_summary` table (migration 082), and
+the next turn waits briefly for the in-flight summary before injecting the
+recent window as context, so the agent remembers what it just did. The
+window defaults to two summaries and is tuned with
+`OGCODE_TURN_SUMMARY_WINDOW`. Utility sessions — recalls, subagents, notes,
+indexing, search — neither store nor inject summaries; they are not units of
+work worth a synthesis call. A summary that fails to generate degrades to a
+head-and-tail truncation of the digest, and never fails the turn.
+
+## Patch: Images and video respect orientation, size caps and manifests
+
+A phone photo shot in portrait arrived sideways: `image.Decode` ignores the
+EXIF orientation tag, while the web frontend applies it, so the backend now
+rotates the pixels upright before handing them to the model — except when
+the image is already upright and within the pixel cap, in which case the
+bytes pass through untouched. Animated images carry a note that only the
+first frame is analyzed. Video extraction reloads a previous run from its
+manifest when the file and the sampling knobs are unchanged, and a stale or
+hand-planted manifest whose sampling differs forces a fresh decode instead
+of silently reusing the wrong frames. Failures that used to vanish now
+surface as real errors: a PDF page whose render fails says the text may be
+incomplete instead of pretending the page was empty.
+
+## Patch: Rendering paths cache, harden and clean up their output
+
+The LaTeX routes gained an LRU cache with ETag, request size limits and
+`no-shell-escape`, and PDF page renders are cached the same way, so a
+re-opened page no longer recompiles from scratch. Public assets serve with
+`nosniff` and a sandboxed content policy. The `edit` tool's positioned
+insert at end-of-file no longer glues onto an unterminated last line. On
+the web side, Plotly loads lazily so the chat bundle stays lean until a
+chart actually appears, mermaid follows the page theme and names invalid
+diagrams instead of leaving them blank, the rough renderer clamps sizes and
+skips degenerate shapes, and dialogs take explicit widths with proper
+aria-selected strings.
+
 # Release Notes — v0.59.5
 
 ## Minor: A custom model can name its own reasoning ladder
