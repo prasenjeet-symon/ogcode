@@ -952,6 +952,9 @@ export interface CustomModelMeta {
   cacheReadPricePerM?: number;
   cacheWritePricePerM?: number;
   supportsImages?: boolean;
+  efforts?: string[];
+  defaultEffort?: string;
+  effortField?: string;
 }
 
 export interface ModelPreference extends CustomModelMeta {

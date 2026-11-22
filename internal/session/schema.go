@@ -36,9 +36,19 @@ type ModelPreference struct {
 	CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
 	// SupportsImages can only ever force image support ON: a bool has no way to
 	// say "yes" from "unconfigured", and catalogue facts outrank a false.
-	SupportsImages bool  `json:"supportsImages"`
-	CreatedAt      int64 `json:"createdAt"`
-	UpdatedAt      int64 `json:"updatedAt"`
+	SupportsImages bool `json:"supportsImages"`
+	// Efforts is the user-set reasoning ladder in ogcode vocabulary, lowest
+	// first, comma-joined when persisted. Empty means unconfigured and falls
+	// back to catalogue/host facts.
+	Efforts []string `json:"efforts,omitempty"`
+	// DefaultEffort is the level shown as selected before the user chooses.
+	DefaultEffort string `json:"defaultEffort,omitempty"`
+	// EffortField names which request field carries the level:
+	// "reasoning_effort" (default), "thinking", "enable_thinking" or
+	// "reasoning" (OpenRouter object). Empty means reasoning_effort.
+	EffortField string `json:"effortField,omitempty"`
+	CreatedAt   int64  `json:"createdAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
 }
 
 // ModelCapability is a probed/known capability record for a model, persisted so

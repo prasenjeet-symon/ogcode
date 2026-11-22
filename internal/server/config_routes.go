@@ -57,13 +57,16 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	// It rides the response so the settings editor can prefill, and clear,
 	// exactly their own numbers.
 	type ModelOverrideEntry struct {
-		ContextWindow       int     `json:"contextWindow,omitempty"`
-		MaxOutputTokens     int     `json:"maxOutputTokens,omitempty"`
-		InputPricePerM      float64 `json:"inputPricePerM,omitempty"`
-		OutputPricePerM     float64 `json:"outputPricePerM,omitempty"`
-		CacheReadPricePerM  float64 `json:"cacheReadPricePerM,omitempty"`
-		CacheWritePricePerM float64 `json:"cacheWritePricePerM,omitempty"`
-		SupportsImages      bool    `json:"supportsImages,omitempty"`
+		ContextWindow       int      `json:"contextWindow,omitempty"`
+		MaxOutputTokens     int      `json:"maxOutputTokens,omitempty"`
+		InputPricePerM      float64  `json:"inputPricePerM,omitempty"`
+		OutputPricePerM     float64  `json:"outputPricePerM,omitempty"`
+		CacheReadPricePerM  float64  `json:"cacheReadPricePerM,omitempty"`
+		CacheWritePricePerM float64  `json:"cacheWritePricePerM,omitempty"`
+		SupportsImages      bool     `json:"supportsImages,omitempty"`
+		Efforts             []string `json:"efforts,omitempty"`
+		DefaultEffort       string   `json:"defaultEffort,omitempty"`
+		EffortField         string   `json:"effortField,omitempty"`
 	}
 	type ModelEntry struct {
 		ID                  string  `json:"id"`
@@ -113,7 +116,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ok || (info.ContextWindow <= 0 && info.MaxOutputTokens <= 0 &&
 			info.InputPricePerM <= 0 && info.OutputPricePerM <= 0 &&
-			info.CacheReadPricePerM <= 0 && info.CacheWritePricePerM <= 0 && !info.SupportsImages) {
+			info.CacheReadPricePerM <= 0 && info.CacheWritePricePerM <= 0 && !info.SupportsImages && len(info.Efforts) == 0) {
 			return nil
 		}
 		return &ModelOverrideEntry{
@@ -124,6 +127,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			CacheReadPricePerM:  info.CacheReadPricePerM,
 			CacheWritePricePerM: info.CacheWritePricePerM,
 			SupportsImages:      info.SupportsImages,
+			Efforts:             info.Efforts,
+			DefaultEffort:       info.DefaultEffort,
+			EffortField:         info.EffortField,
 		}
 	}
 	windowOf := func(modelID string) (int, int) {

@@ -41,7 +41,13 @@ per page. Include ALL pages — do not skip any.
 Parameters:
 - doc_path: absolute path to the document being indexed (the pdf_index/
   docx_index 'path' spelling is also accepted)
-- pages: array of {page_num, labels} objects covering every page`, MaxLabelsPerPage)
+- pages: array of {page_num, labels} objects covering every page
+
+pages and labels are native arrays, not JSON strings containing arrays.
+Send for example:
+- \"pages\": [{\"page_num\": 1, \"labels\": [\"topic\"], \"page_num\": 2, \"labels\": []}];
+- \"labels\": [\"auth\", \"indexing\"] per page.
+Never send \"pages\": \"[{...}]\" or \"labels\": \"[\\\"topic\\\"]\" — pass the array itself.`, MaxLabelsPerPage)
 }
 
 func (SubmitDocIndexTool) Parameters() json.RawMessage {
@@ -89,6 +95,9 @@ func (t SubmitDocIndexTool) Execute(_ context.Context, args json.RawMessage, _ C
 		} `json:"pages"`
 	}
 	if err := DecodeArgs(args, &params); err != nil {
+		if bad := stringifiedArrayFields(args); len(bad) > 0 {
+			return Result{}, fmt.Errorf("parse submit_doc_index args: %w — array params must be native arrays, not JSON strings holding arrays. Send \"pages\": [{\"page_num\": 1, \"labels\": [\"topic\"]}] and \"labels\": [\"topic\"], not \"pages\": \"[{...}]\" or \"labels\": \"[\\\"topic\\\"]\"", err)
+		}
 		return Result{}, fmt.Errorf("parse submit_doc_index args: %w", err)
 	}
 	// Parameter-name drift across the indexed-document tools: this tool's

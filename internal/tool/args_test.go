@@ -156,6 +156,132 @@ func TestReadTool_AcceptsIntegralFloatArgs(t *testing.T) {
 	}
 }
 
+// Same tolerance, second shape: models that ignore "type": "array" and emit
+// the array as a JSON string ("files": "[{...}]") fail Go's decoder with
+// "cannot unmarshal string into Go struct field". DecodeArgs unwraps a
+// stringified array/object in place on the generic value walk, so every tool
+// with an array param — read, submit_doc_index, edit, ask_user,
+// update_intent, teammate — recovers without a per-tool special case. The
+// unwrap only runs when the plain decode has already failed, so a string
+// field whose content merely looks like JSON keeps its bytes.
+
+type stringifiedFilesFixture struct {
+	Files []struct {
+		Path   string `json:"path"`
+		Ranges []struct {
+			StartLine int `json:"start_line"`
+		} `json:"ranges"`
+	} `json:"files"`
+}
+
+func TestDecodeArgs_UnwrapsStringifiedArray(t *testing.T) {
+	var in stringifiedFilesFixture
+	args := `{"files": "[{\"path\": \"a.go\", \"ranges\": [{\"start_line\": 3}]}]"}`
+	if err := DecodeArgs(json.RawMessage(args), &in); err != nil {
+		t.Fatalf("DecodeArgs: %v", err)
+	}
+	if len(in.Files) != 1 || in.Files[0].Path != "a.go" {
+		t.Fatalf("got %+v, want one file a.go", in.Files)
+	}
+	if len(in.Files[0].Ranges) != 1 || in.Files[0].Ranges[0].StartLine != 3 {
+		t.Errorf("nested ranges wrong: %+v", in.Files[0].Ranges)
+	}
+}
+
+func TestDecodeArgs_UnwrapsNestedStringifiedArray(t *testing.T) {
+	var in struct {
+		Pages []struct {
+			PageNum int      `json:"page_num"`
+			Labels  []string `json:"labels"`
+		} `json:"pages"`
+	}
+	args := `{"pages": [{"page_num": 1, "labels": "[\"auth\", \"indexing\"]"}]}`
+	if err := DecodeArgs(json.RawMessage(args), &in); err != nil {
+		t.Fatalf("DecodeArgs: %v", err)
+	}
+	if len(in.Pages) != 1 || len(in.Pages[0].Labels) != 2 ||
+		in.Pages[0].Labels[0] != "auth" || in.Pages[0].Labels[1] != "indexing" {
+		t.Errorf("got %+v, want labels [auth indexing]", in.Pages)
+	}
+}
+
+func TestDecodeArgs_UnwrapsStringifiedObject(t *testing.T) {
+	var in struct {
+		Context struct {
+			Mode string `json:"mode"`
+		} `json:"ctx"`
+	}
+	args := `{"ctx": "{\"mode\": \"fast\"}"}`
+	if err := DecodeArgs(json.RawMessage(args), &in); err != nil {
+		t.Fatalf("DecodeArgs: %v", err)
+	}
+	if in.Context.Mode != "fast" {
+		t.Errorf("got %q, want fast", in.Context.Mode)
+	}
+}
+
+func TestDecodeArgs_PlainStringFieldUntouched(t *testing.T) {
+	// The plain decode succeeds here, so the unwrap never runs: a string
+	// field whose content looks like JSON is content, like the number text
+	// above, and must not be rewritten to the array it resembles.
+	var in decodeArgsFixture
+	if err := DecodeArgs(json.RawMessage(`{"path": "[1,2,3]", "offset": 1}`), &in); err != nil {
+		t.Fatalf("DecodeArgs: %v", err)
+	}
+	if in.Path != "[1,2,3]" {
+		t.Errorf("string content rewritten: got %q", in.Path)
+	}
+}
+
+func TestDecodeArgs_RejectsStringifiedGarbage(t *testing.T) {
+	// Unwrapping is structural, not forgiving: a string that is not a clean
+	// JSON array/object — or carries trailing garbage after one — is still an
+	// error, and so is a number passed as a string.
+	for _, args := range []string{
+		`{"files": "[not json]"}`,
+		`{"files": "[{\"path\": \"a.go\"}] trailing"}`,
+		`{"files": "a.go"}`,
+		`{"files": 3}`,
+	} {
+		var in stringifiedFilesFixture
+		if err := DecodeArgs(json.RawMessage(args), &in); err == nil {
+			t.Errorf("DecodeArgs(%s) was accepted, want an error", args)
+		}
+	}
+}
+
+// End-to-end regression for the reported failure: a read call whose args
+// stringified the files array ("files": "[{...}]") failed with an unmarshal
+// error and the model retried the same call. Now the call runs.
+func TestReadTool_AcceptsStringifiedArrayArgs(t *testing.T) {
+	path := numbered(t, 20)
+	// Build the stringified form the way a model emits it: the files value is
+	// the array's JSON text as a string, so the inner payload is marshaled
+	// once as its own JSON and again as the string the tool receives.
+	inner, err := json.Marshal([]map[string]any{
+		{"path": path, "ranges": []map[string]any{{"start_line": 2, "end_line": 4}}},
+	})
+	if err != nil {
+		t.Fatalf("marshal inner files: %v", err)
+	}
+	args, err := json.Marshal(map[string]any{"files": string(inner)})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	res, err := ReadTool{}.Execute(context.Background(), args, Context{SessionDir: filepath.Dir(path)})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, want := range []string{"line2", "line3", "line4"} {
+		if !strings.Contains(res.Output, lineNumberSep+want) {
+			t.Errorf("window missing %s:\n%s", want, res.Output)
+		}
+	}
+	if strings.Contains(res.Output, lineNumberSep+"line5") {
+		t.Errorf("window wrong:\n%s", res.Output)
+	}
+}
+
 func quoteJSON(t *testing.T, s string) string {
 	t.Helper()
 	b, err := json.Marshal(s)

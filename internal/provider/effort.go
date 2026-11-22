@@ -86,7 +86,18 @@ func EffortSpecFor(p Provider, model string) EffortSpec {
 		return EffortSpec{}
 	}
 	if es, ok := p.(EffortSpecifier); ok {
-		return es.EffortSpec(model)
+		if spec := es.EffortSpec(model); len(spec.Levels) > 0 {
+			return spec
+		}
+	}
+	// A provider that carries no effort for this model (or cannot say so)
+	// still reports the ladder the user configured: the user explicitly
+	// asserted the model takes these levels, and ResolveProviderFor only
+	// guarantees routing, not effort support — a stub, a new provider type
+	// or a host the effort-aware providers do not recognise would
+	// otherwise hide a configured picker.
+	if o, ok := userEffortFor(p.ID(), model); ok {
+		return userEffortSpec(o)
 	}
 	return EffortSpec{}
 }

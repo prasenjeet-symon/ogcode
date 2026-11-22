@@ -507,6 +507,34 @@ func TestParallelToolCallsPrompt_NamesTheMultiFileRead(t *testing.T) {
 // the order the model wrote them, so the pairing is advice about wasted work,
 // never stated as forbidden, and the clean-failure message is still what the
 // model re-issues from.
+// Array parameters are a native form in every tool call: a model that
+// stringifies an array turns it into text the runtime must guess about, and
+// weak models do it habitually. The prompt teaches the distinction with a
+// concrete wrong-vs-right example on the code-facing side — and the web
+// variant stays free of it, since its tools take no code-shaped arrays and
+// the reachability tests hold it to that.
+func TestParallelToolCallsPrompt_TeachesNativeArrays(t *testing.T) {
+	for _, canWrite := range []bool{true, false} {
+		p := parallelToolCallsPrompt(canWrite, true)
+		for _, want := range []string{"Array parameters are native arrays"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("code-facing prompt (canWriteFiles=%v) missing %q", canWrite, want)
+			}
+		}
+		if !strings.Contains(p, `"files": [{"path"`) {
+			t.Errorf("code-facing prompt (canWriteFiles=%v) lost the right-form example", canWrite)
+		}
+		if !strings.Contains(p, `"files": "[{`) {
+			t.Errorf("code-facing prompt (canWriteFiles=%v) lost the wrong-form example", canWrite)
+		}
+	}
+	web := parallelToolCallsPrompt(false, false)
+	for _, unwanted := range []string{"Array parameters", `"files":`, "native array"} {
+		if strings.Contains(web, unwanted) {
+			t.Errorf("web prompt names %q, which its tools cannot use", unwanted)
+		}
+	}
+}
 func TestParallelToolCallsPrompt_SameFileEditGuidance(t *testing.T) {
 	prompt := parallelToolCallsPrompt(true, true)
 
@@ -1566,5 +1594,22 @@ func TestMemoryPointersAreRoleAwareWhenTheFileIsMissing(t *testing.T) {
 	writable := memoryMDPrompt(true, "/tmp/proj", nil)
 	if !strings.Contains(writable, "Create one at the project root") {
 		t.Error("writable agent is not told where to create MEMORY.md")
+	}
+}
+
+// The change description has to be asked for in the prompt as well as the
+// schema: it is the only "why" a stale read shows the next agent, and an agent
+// left to its own judgement writes a paragraph where three lines would do.
+func TestParallelToolCallsPrompt_AsksForAShortChangeDescription(t *testing.T) {
+	writer := parallelToolCallsPrompt(true, true)
+	for _, want := range []string{`"description"`, "three or four lines at most", "stale read"} {
+		if !strings.Contains(writer, want) {
+			t.Errorf("writer prompt missing %q", want)
+		}
+	}
+	// Read-only agents have no write or edit, so they must not be told to send
+	// a field no tool they hold accepts.
+	if strings.Contains(parallelToolCallsPrompt(false, true), "three or four lines at most") {
+		t.Error("read-only prompt asks for a change description it cannot send")
 	}
 }

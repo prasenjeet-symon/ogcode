@@ -1,4 +1,5 @@
 import { onMount, onCleanup, Show, type JSX } from 'solid-js';
+import { Portal } from 'solid-js/web';
 
 /**
  * The frame every modal in ogcode shares: the dimmed backdrop, the panel, and
@@ -82,6 +83,7 @@ export default function DialogShell(props: {
   });
 
   return (
+    <Portal>
     <div
       class="fixed inset-0 z-50 bg-black/55 backdrop-blur-[3px] flex items-end sm:items-center justify-center sm:p-6 modal-backdrop"
       onMouseDown={(e) => { if (e.target === e.currentTarget) props.onClose?.(); }}
@@ -99,6 +101,7 @@ export default function DialogShell(props: {
         {props.children}
       </div>
     </div>
+    </Portal>
   );
 }
 

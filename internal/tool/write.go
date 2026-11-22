@@ -23,7 +23,7 @@ func (WriteTool) Parameters() json.RawMessage {
 		"properties": {
 			"path": {"type": "string", "description": "File path to write to"},
 			"content": {"type": "string", "description": "Content to write. Absent is refused (it would truncate the file); an explicit \"\" writes an empty file."},
-			"description": {"type": "string", "description": "A few lines: what this change does and why. Another agent working in this project will see this text if it has to re-read the file after your edit."}
+			"description": {"type": "string", "description": "Required. Three or four short lines at most: what this change does and why — a stale read shows it to the next agent. Never restate the diff; longer text is cut to four lines when recorded."}
 		},
 		"required": ["path", "content", "description"]
 	}`)
@@ -44,15 +44,18 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 
 	// The description is the only record of WHY a write happened, and it is
 	// what a refused agent is shown: without it the catch-up is a diff with no
-	// intent. The schema's "required" is advice to the model (DecodeArgs is a
-	// plain unmarshal), so it is enforced here, as a result rather than an
-	// error for the same reason the stale refusal is one.
-	description := strings.TrimSpace(input.Description)
-	if description == "" {
-		return Result{
-			Title:  "Description required",
-			Output: "Every write carries a description: a few lines on what this change does and why. Another agent working in this project sees that text if it has to re-read the file after your write. Resend the call with \"description\" beside \"path\" and \"content\".",
-		}, nil
+	// intent. The schema asks for it on every call, and that is where it
+	// normally comes from — but a missing one must never cost the caller its
+	// payload. Refusing here threw away a complete write and made the model
+	// generate the whole file body a second time (142 of this project's own
+	// writes, 6.4 KB of content on average). So the write lands, and the row
+	// records a generated note that says the description was missing. A
+	// description that overshoots the few lines a refusal can show is cut to
+	// descriptionMaxLines rather than refused, for the same reason.
+	description := clampDescription(input.Description)
+	noDescription := description == ""
+	if noDescription {
+		description = generatedNote("write", input.Path, 0)
 	}
 
 	// Same trap as edit: schema "required" is advice, and a missing path would
@@ -187,9 +190,13 @@ func (WriteTool) Execute(ctx context.Context, args json.RawMessage, tctx Context
 	if created {
 		verb = "Created"
 	}
+	out := fmt.Sprintf("%s %d bytes to %s", verb, len(content), path)
+	if noDescription {
+		out += noDescriptionNote("write")
+	}
 	return applySyntaxNote(Result{
 		Title:    filepath.Base(path),
-		Output:   fmt.Sprintf("%s %d bytes to %s", verb, len(content), path),
+		Output:   out,
 		Metadata: metadata,
 	}, note, check), nil
 }

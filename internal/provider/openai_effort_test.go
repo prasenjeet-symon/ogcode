@@ -316,3 +316,73 @@ func TestOllamaEffortsFromShow(t *testing.T) {
 		}
 	}
 }
+
+// TestUserEffortsOnAnUnknownHost pins the custom-model effort ladder: a
+// user-asserted ladder on a host ogcode does not recognise gets a picker
+// and a wire field, while one level (no choice) and unknown tokens do not.
+func TestUserEffortsOnAnUnknownHost(t *testing.T) {
+	const model = "muse-ember-1.0"
+	const host = "http://localhost:1234/v1"
+	t.Cleanup(func() { setUserEffort(model, CustomModelInfo{}) })
+
+	wire := func(field string, req StreamRequest) map[string]any {
+		body, _ := captureWireRequest(t, effortProvider("openai", host), req)
+		return body
+	}
+
+	t.Run("a user ladder gets a picker and reasoning_effort", func(t *testing.T) {
+		setUserEffort(model, CustomModelInfo{Efforts: []string{EffortNone, EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium})
+		p := effortProvider("openai", host)
+		spec := p.EffortSpec(model)
+		if !slices.Equal(spec.Levels, []string{EffortNone, EffortLow, EffortMedium, EffortHigh}) {
+			t.Errorf("Levels = %v, want the user's ladder", spec.Levels)
+		}
+		if spec.Default != EffortMedium {
+			t.Errorf("Default = %q, want medium", spec.Default)
+		}
+		if got := wire("", effortRequest(model, EffortHigh, true))["reasoning_effort"]; got != EffortHigh {
+			t.Errorf("reasoning_effort = %v, want high", got)
+		}
+	})
+	t.Run("the user's field names the wire", func(t *testing.T) {
+		setUserEffort(model, CustomModelInfo{Efforts: []string{EffortNone, EffortOn}, EffortField: "thinking"})
+		body := wire("", effortRequest(model, EffortNone, true))
+		th, _ := body["thinking"].(map[string]any)
+		if th["type"] != "disabled" {
+			t.Errorf("thinking = %v, want type disabled", body["thinking"])
+		}
+		if _, ok := body["reasoning_effort"]; ok {
+			t.Errorf("reasoning_effort beside thinking: %v", body["reasoning_effort"])
+		}
+		setUserEffort(model, CustomModelInfo{Efforts: []string{EffortNone, EffortOn}, EffortField: "enable_thinking"})
+		if got := wire("", effortRequest(model, EffortOn, true))["enable_thinking"]; got != true {
+			t.Errorf("enable_thinking = %v, want true", got)
+		}
+	})
+	t.Run("a single level is no choice", func(t *testing.T) {
+		setUserEffort(model, CustomModelInfo{Efforts: []string{EffortHigh}})
+		if spec := effortProvider("openai", host).EffortSpec(model); len(spec.Levels) != 0 {
+			t.Errorf("Levels = %v, want none for a single level", spec.Levels)
+		}
+	})
+	t.Run("tokens outside ogcode's vocabulary never reach the wire", func(t *testing.T) {
+		setUserEffort(model, CustomModelInfo{Efforts: []string{EffortNone, "turbo", EffortHigh, EffortHigh}})
+		spec := effortProvider("openai", host).EffortSpec(model)
+		if !slices.Equal(spec.Levels, []string{EffortNone, EffortHigh}) {
+			t.Errorf("Levels = %v, want [none high]", spec.Levels)
+		}
+	})
+	t.Run("a default outside the ladder is dropped", func(t *testing.T) {
+		setUserEffort(model, CustomModelInfo{Efforts: []string{EffortNone, EffortHigh}, DefaultEffort: EffortMax})
+		if spec := effortProvider("openai", host).EffortSpec(model); spec.Default != "" {
+			t.Errorf("Default = %q, want empty", spec.Default)
+		}
+	})
+	t.Run("clearing removes the ladder", func(t *testing.T) {
+		setUserEffort(model, CustomModelInfo{Efforts: []string{EffortNone, EffortHigh}})
+		setUserEffort(model, CustomModelInfo{})
+		if spec := effortProvider("openai", host).EffortSpec(model); len(spec.Levels) != 0 {
+			t.Errorf("Levels = %v, want none after clearing", spec.Levels)
+		}
+	})
+}

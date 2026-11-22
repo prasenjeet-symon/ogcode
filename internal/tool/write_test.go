@@ -168,3 +168,40 @@ func TestWriteTool_PreservesExecutableBit(t *testing.T) {
 		t.Errorf("mode after write = %v, want 0755 — the script is no longer executable", got)
 	}
 }
+
+// A caller sees the schema before it sees the file, so the requirement and its
+// bound have to be in the field's own description — the prompt and the schema
+// are the only places the rule reaches the model.
+func TestWriteAndEditSchemasAskForAShortDescription(t *testing.T) {
+	for name, params := range map[string]json.RawMessage{
+		"write": WriteTool{}.Parameters(),
+		"edit":  EditTool{}.Parameters(),
+	} {
+		var schema struct {
+			Properties struct {
+				Description struct {
+					Description string `json:"description"`
+				} `json:"description"`
+			} `json:"properties"`
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(params, &schema); err != nil {
+			t.Fatalf("%s: Parameters is not valid JSON: %v", name, err)
+		}
+		required := false
+		for _, field := range schema.Required {
+			if field == "description" {
+				required = true
+			}
+		}
+		if !required {
+			t.Errorf("%s: description is not in required", name)
+		}
+		text := schema.Properties.Description.Description
+		for _, want := range []string{"Required", "Three or four", "four lines"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s: description field text missing %q: %q", name, want, text)
+			}
+		}
+	}
+}

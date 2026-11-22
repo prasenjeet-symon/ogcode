@@ -26,6 +26,9 @@ export type MetaForm = {
   cacheReadPrice: string;
   cacheWritePrice: string;
   images: boolean;
+  efforts: string;
+  defaultEffort: string;
+  effortField: string;
 };
 
 export const EMPTY_META: MetaForm = {
@@ -36,6 +39,9 @@ export const EMPTY_META: MetaForm = {
   cacheReadPrice: '',
   cacheWritePrice: '',
   images: false,
+  efforts: '',
+  defaultEffort: '',
+  effortField: '',
 };
 
 /** Only what the user actually typed: a blank field is absent from the body,
@@ -56,7 +62,39 @@ export function metaFrom(form: MetaForm): CustomModelMeta {
   const cacheWrite = optNumber(form.cacheWritePrice);
   if (cacheWrite !== undefined) m.cacheWritePricePerM = cacheWrite;
   if (form.images) m.supportsImages = true;
+  const levels = parseLevels(form.efforts);
+  if (levels.length) {
+    m.efforts = levels;
+    const d = form.defaultEffort.trim().toLowerCase();
+    if (LEVELS.includes(d) && levels.includes(d)) m.defaultEffort = d;
+    const f = EFFORT_FIELDS.find((x) => x.value === form.effortField)?.value;
+    if (f) m.effortField = f;
+  }
   return m;
+}
+
+/** The ogcode effort vocabulary (internal/provider Levels). A token outside
+ *  it is not a level and would fail the request on a real host. */
+const LEVELS = ['none', 'on', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+/** The request fields a level can be sent in. The empty value is the OpenAI
+ *  spelling, reasoning_effort, which most OpenAI-compatible hosts copy. */
+export const EFFORT_FIELDS = [
+  { value: 'reasoning_effort', label: 'reasoning_effort (OpenAI spelling)' },
+  { value: 'thinking', label: 'thinking (a switch the host reads)' },
+  { value: 'enable_thinking', label: 'enable_thinking (a switch the host reads)' },
+  { value: 'reasoning', label: 'reasoning (OpenRouter object)' },
+];
+
+// Split a comma-separated ladder, keeping only ogcode's vocabulary, in the
+// order given, without duplicates.
+function parseLevels(raw: string): string[] {
+  const out: string[] = [];
+  for (const part of raw.split(',')) {
+    const t = part.trim().toLowerCase();
+    if (LEVELS.includes(t) && !out.includes(t)) out.push(t);
+  }
+  return out;
 }
 
 // An optional numeric field: blank or unparseable reads as "not set"
@@ -155,6 +193,9 @@ export default function ModelMetaDialog(props: {
     cacheReadPrice: own().cacheReadPricePerM ? String(own().cacheReadPricePerM) : '',
     cacheWritePrice: own().cacheWritePricePerM ? String(own().cacheWritePricePerM) : '',
     images: !!own().supportsImages,
+    efforts: own().efforts?.join(', ') ?? '',
+    defaultEffort: own().defaultEffort ?? '',
+    effortField: own().effortField ?? 'reasoning_effort',
   });
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal(false);
@@ -210,7 +251,7 @@ export default function ModelMetaDialog(props: {
         title={`Edit ${props.model.name}`}
         description={
           <>
-            <span class="font-mono text-[color:var(--text-secondary)] break-all">{props.model.id}</span>
+            <span class="font-mono text-[color:var(--text-secondary)] [overflow-wrap:break-word]">{props.model.id}</span>
             {' — these figures sit over whatever the catalogue and the provider say.'}
           </>
         }
@@ -263,6 +304,50 @@ export default function ModelMetaDialog(props: {
             <span class="text-micro text-[color:var(--text-muted)]">(already on)</span>
           </Show>
         </label>
+
+        <div class="mt-5 space-y-3">
+          <p class="text-meta font-medium text-[color:var(--text-secondary)]">Reasoning effort</p>
+          <label class="block">
+            <span class="block text-micro text-[color:var(--text-muted)] mb-1">Levels</span>
+            <input
+              type="text"
+              value={form().efforts}
+              onInput={(e) => patch({ efforts: e.currentTarget.value })}
+              placeholder="none, low, medium, high"
+              aria-label="Reasoning effort levels, comma separated"
+              class={`${fieldClass} w-full font-mono`}
+            />
+            <span class="mt-1 block text-micro text-[color:var(--text-muted)] leading-snug">
+              Comma-separated, lowest first — one of none, on, minimal, low, medium, high, xhigh, max. Blank keeps the catalogue's ladder.
+            </span>
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+            <label class="block">
+              <span class="block text-micro text-[color:var(--text-muted)] mb-1">Default level</span>
+              <input
+                type="text"
+                value={form().defaultEffort}
+                onInput={(e) => patch({ defaultEffort: e.currentTarget.value })}
+                placeholder="medium"
+                aria-label="Default reasoning effort level"
+                class={`${fieldClass} w-full font-mono`}
+              />
+            </label>
+            <label class="block">
+              <span class="block text-micro text-[color:var(--text-muted)] mb-1">Send in field</span>
+              <select
+                value={form().effortField}
+                onChange={(e) => patch({ effortField: e.currentTarget.value })}
+                aria-label="Request field the level is sent in"
+                class={`${fieldClass} w-full`}
+              >
+                <For each={EFFORT_FIELDS}>
+                  {(f) => <option value={f.value}>{f.label}</option>}
+                </For>
+              </select>
+            </label>
+          </div>
+        </div>
       </DialogBody>
 
       {/* ---- Footer ---- */}

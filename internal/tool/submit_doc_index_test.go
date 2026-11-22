@@ -154,3 +154,29 @@ func TestSubmitDocIndex_StoresEveryLabel(t *testing.T) {
 			len(entries[0].Labels), len(labels))
 	}
 }
+
+// End-to-end regression: the index tool's pages arrive as a stringified
+// array ("pages": "[{...}]"). The decode unwraps it, so the pages are stored
+// instead of erroring out of the submission.
+func TestSubmitDocIndex_AcceptsStringifiedPages(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "ogcode.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	store := docindex.NewStore(database)
+	tool := NewSubmitDocIndexTool(store)
+
+	args := json.RawMessage(`{"doc_path": "/proj/a.go", "pages": "[{\"page_num\": 1, \"labels\": [\"auth\", \"indexing\"]}]"}`)
+	if _, err := tool.Execute(context.Background(), args, Context{}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	entries, err := store.GetByDoc("/proj/a.go")
+	if err != nil {
+		t.Fatalf("get by doc: %v", err)
+	}
+	if len(entries) != 1 || len(entries[0].Labels) != 2 ||
+		entries[0].Labels[0] != "auth" || entries[0].Labels[1] != "indexing" {
+		t.Errorf("got %+v, want one entry with labels [auth indexing]", entries)
+	}
+}

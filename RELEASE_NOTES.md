@@ -1,3 +1,57 @@
+# Release Notes — v0.59.5
+
+## Minor: A custom model can name its own reasoning ladder
+
+Custom (OpenAI-compatible) models described their reasoning with the facts their
+host or the catalogue knew — when the host knew nothing, the effort switch was
+simply absent, and a model whose ladder was nobody's record could not be made
+honest. `model_preference` now carries `efforts`, `default_effort` and
+`effort_field` (migration 081), and the settings page exposes them on every
+model row: a comma-separated ladder, the default level, and the request field
+that carries it (`reasoning_effort` by default). When those columns hold a ladder,
+it overrides the host's and the catalogue's — the user's word about their own
+model wins over anyone else's guess at it — and when they are empty, nothing
+changes: the old fallbacks apply exactly as before. The OpenAI effort resolver
+was also taught to tell its hosts apart (OpenAI, Azure OpenAI, DeepSeek, Groq and
+friends), so a custom endpoint that speaks one of those protocols inherits the
+ladder that protocol actually uses.
+
+## Minor: An edit can point at a line
+
+The `edit` tool takes a positioned hunk form — `at`, `find`, `replace` — that
+names the line an edit lands on, and anchors to that line when it looks for the
+match. A hunk that carries `at` is resolved against that line first, so an
+unambiguous neighbourhood resolves even when the same text appears elsewhere;
+a huge single quoted block is no longer what's needed to make a change, and a
+wrong guess costs one hunk, not the whole call. The anchored form
+(`old_string`/`new_string`) still works everywhere it did, and a call that
+mixes the two is refused rather than guessed at. Edits apply bottom-up, so the
+later hunks in a batch cannot be shifted by the earlier ones, and an `at`
+without a `find` is an insert before that line. The web transcript renders the
+same two shapes — a positioned hunk's `find` is its before text — so an edit
+diff no longer shows an empty body under a change that plainly landed.
+
+## Patch: A stringified array is not a type error
+
+Some providers send an array argument as a JSON string — `"files":
+"[{...}]"` — and the tool call used to fail on the type mismatch before
+anything else ran. Array arguments now get one second chance: when the plain
+decode rejects the value, the string is unwrapped and the array decoded from
+inside it. The prompt says outright that arrays ride as native arrays, and the
+edit batch is recovered the same way, so a provider that stringifies its payload
+still gets its work done instead of an apology.
+
+## Patch: A missing description no longer costs the whole payload
+
+Every mutation asks for a description — it is the only record of why a change
+happened, and the reason a stale refusal shows its author. The write body or
+the edit hunks were one refusal away from having to be resent just to add one
+sentence, so a call that sends none now goes through with a generated note
+that says what landed and plainly says the intent is missing. A description
+that overshoots is clamped to four lines and 400 bytes instead of rejected —
+cutting the note costs the caller nothing, unlike a refusal. The prompt still
+asks for it.
+
 # Release Notes — v0.59.4
 
 ## Major: A screen recording is read as a timestamped timeline

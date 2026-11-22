@@ -81,6 +81,13 @@ export default function FileDiff(props: {
         }
       >
         <div class="overflow-x-auto font-mono text-meta leading-[1.5] py-1">
+          {/* No rows means the call carried no before/after text at all — say
+              so, rather than leaving a box that reads as a failed render. */}
+          <Show when={shown().length === 0}>
+            <div class="px-3 py-1 text-micro" style={{ color: 'var(--text-muted)' }}>
+              No line changes to show.
+            </div>
+          </Show>
           <For each={shown()}>{(row) => <DiffRow row={row} />}</For>
           <Show when={truncated() > 0}>
             <div class="px-3 py-1 text-micro" style={{ color: 'var(--text-muted)' }}>

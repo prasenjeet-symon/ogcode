@@ -2,6 +2,7 @@ package session
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/prasenjeet-symon/ogcode/internal/db"
 )
@@ -18,6 +19,7 @@ func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 		`SELECT id, enabled, provider_id, display_name, is_custom, collection,
 		        context_window, max_output_tokens, input_price_per_m, output_price_per_m,
 		        cache_read_price_per_m, cache_write_price_per_m, supports_images,
+		        efforts, default_effort, effort_field,
 		        time_created, time_updated
 		 FROM model_preference ORDER BY time_created ASC`,
 	)
@@ -33,12 +35,14 @@ func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 		var isCustom int
 		var supportsImages int
 		var collection sql.NullString
+		var efforts sql.NullString
 		// Scan order must match the SELECT above exactly: a column listed there
 		// but missed here is a silent runtime error, not a compile error.
 		if err := rows.Scan(
 			&p.ID, &enabled, &p.ProviderID, &p.DisplayName, &isCustom, &collection,
 			&p.ContextWindow, &p.MaxOutputTokens, &p.InputPricePerM, &p.OutputPricePerM,
 			&p.CacheReadPricePerM, &p.CacheWritePricePerM, &supportsImages,
+			&efforts, &p.DefaultEffort, &p.EffortField,
 			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -47,6 +51,10 @@ func GetModelPreferences(database *db.DB) ([]*ModelPreference, error) {
 		p.IsCustom = isCustom == 1
 		p.SupportsImages = supportsImages == 1
 		p.Collection = collection.String
+		p.Efforts = nil
+		if efforts.String != "" {
+			p.Efforts = strings.Split(efforts.String, ",")
+		}
 		prefs = append(prefs, &p)
 	}
 	return prefs, nil
@@ -75,8 +83,9 @@ func SetModelPreference(database *db.DB, p *ModelPreference) error {
 		`INSERT INTO model_preference (id, enabled, provider_id, display_name, is_custom, collection,
 				context_window, max_output_tokens, input_price_per_m, output_price_per_m,
 				cache_read_price_per_m, cache_write_price_per_m, supports_images,
+				efforts, default_effort, effort_field,
 				time_created, time_updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id, provider_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			display_name = excluded.display_name,
@@ -89,10 +98,14 @@ func SetModelPreference(database *db.DB, p *ModelPreference) error {
 			cache_read_price_per_m = excluded.cache_read_price_per_m,
 			cache_write_price_per_m = excluded.cache_write_price_per_m,
 			supports_images = excluded.supports_images,
+			efforts = excluded.efforts,
+			default_effort = excluded.default_effort,
+			effort_field = excluded.effort_field,
 			time_updated = excluded.time_updated`,
 		p.ID, enabled, p.ProviderID, p.DisplayName, isCustom, p.Collection,
 		p.ContextWindow, p.MaxOutputTokens, p.InputPricePerM, p.OutputPricePerM,
 		p.CacheReadPricePerM, p.CacheWritePricePerM, supportsImages,
+		strings.Join(p.Efforts, ","), p.DefaultEffort, p.EffortField,
 		p.CreatedAt, p.UpdatedAt,
 	)
 	return err

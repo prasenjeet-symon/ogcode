@@ -38,7 +38,7 @@ func asEditsForm(params map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range params {
 		switch k {
-		case "old_string", "new_string", "replace_all", "expected_count":
+		case "old_string", "new_string", "replace_all", "expected_count", "at", "find", "replace":
 			hunk[k] = v
 		default:
 			out[k] = v
@@ -748,12 +748,12 @@ func TestEditTool_OnlyTakesTheEditsArray(t *testing.T) {
 	})
 }
 
-// TestEditTool_StringifiedEditsArrayIsExplained covers the shape weak models
+// TestEditTool_StringifiedEditsArrayIsRecovered covers the shape weak models
 // emit for an array param: the hunk list arrives as a JSON string holding the
-// array rather than the array itself. The decoder's own message
-// ("cannot unmarshal string into Go struct field .edits") names neither the fix
-// nor the field as written, so the caller has to be told what to send instead.
-func TestEditTool_StringifiedEditsArrayIsExplained(t *testing.T) {
+// array rather than the array itself. The payload was correct apart from its
+// quoting, and refusing it burned a round trip on every occurrence — a quarter
+// of this repo's failed edits were exactly this — so it is decoded and applied.
+func TestEditTool_StringifiedEditsArrayIsRecovered(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
 	original := "hello world\n"
@@ -764,9 +764,28 @@ func TestEditTool_StringifiedEditsArrayIsExplained(t *testing.T) {
 	inner := `[{"old_string":"world","new_string":"there"}]`
 	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change","edits":` + strconv.Quote(inner) + `}`)
 
-	_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
+	if _, err := (EditTool{}).Execute(context.Background(), raw, Context{SessionDir: dir}); err != nil {
+		t.Fatalf("a readable stringified edits array should be decoded and applied: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "hello there\n" {
+		t.Errorf("edit did not apply, got %q", got)
+	}
+}
+
+// TestEditTool_UnreadableStringifiedEditsIsExplained is the other half: when the
+// escapes cannot be parsed back there is no array to recover, and guessing at
+// the intent would be worse than making the caller resend it.
+func TestEditTool_UnreadableStringifiedEditsIsExplained(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "hello world\n"
+	mustWriteFile(t, path, original)
+
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change","edits":"not json"}`)
+
+	_, err := (EditTool{}).Execute(context.Background(), raw, Context{SessionDir: dir})
 	if err == nil {
-		t.Fatal("a stringified edits array must be refused")
+		t.Fatal("a stringified edits array that does not parse must be refused")
 	}
 	for _, want := range []string{"string containing a JSON array", `"edits"`, "old_string", "one entry per change"} {
 		if !strings.Contains(err.Error(), want) {
@@ -1099,5 +1118,422 @@ func TestEditTool_TopLevelPerHunkFieldsRejected(t *testing.T) {
 				t.Errorf("file must be untouched, got %q", got)
 			}
 		})
+	}
+}
+
+func fileText(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
+}
+
+// TestEditTool_PositionedNeedsNoUniqueMatch is the point of the at-based form:
+// the line number names the occurrence, so find may be a line that appears
+// several times. The anchored form has to buy the same specificity by echoing
+// neighbouring lines, which is what made long anchors fail.
+func TestEditTool_PositionedNeedsNoUniqueMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	original := "func a() error {\n\treturn nil\n}\n\nfunc b() error {\n\treturn nil\n}\n\nfunc c() error {\n\treturn nil\n}\n"
+	mustWriteFile(t, path, original)
+
+	res, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"at":      6,
+		"find":    "\treturn nil",
+		"replace": "\treturn fmt.Errorf(\"b\")",
+	})
+	if err != nil {
+		t.Fatalf("the second return nil should be the one edited: %v", err)
+	}
+	want := "func a() error {\n\treturn nil\n}\n\nfunc b() error {\n\treturn fmt.Errorf(\"b\")\n}\n\nfunc c() error {\n\treturn nil\n}\n"
+	if got := fileText(t, path); got != want {
+		t.Errorf("only the line at 6 should change, got:\n%s", got)
+	}
+	if strings.Contains(res.Output, "landed away") {
+		t.Errorf("the line given was the one edited, so no move should be reported: %s", res.Output)
+	}
+}
+
+// TestEditTool_PositionedDriftedRegionLandsNearest pins the trade the form
+// makes: a stale line number is a hint, not an identity. The find text still
+// decides where the change lands, so a shifted file costs a note rather than a
+// failed call — and never a silent edit in the wrong place.
+func TestEditTool_PositionedDriftedRegionLandsNearest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "alpha\nbeta\ngamma\ndelta\n")
+
+	res, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"at":      4,
+		"find":    "beta",
+		"replace": "BETA",
+	})
+	if err != nil {
+		t.Fatalf("find should have been located by content: %v", err)
+	}
+	if got := fileText(t, path); got != "alpha\nBETA\ngamma\ndelta\n" {
+		t.Errorf("the nearest occurrence of find should be the one edited, got %q", got)
+	}
+	for _, want := range []string{"landed away from the line given", "2 lines off"} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("output should report the move with %q, got: %s", want, res.Output)
+		}
+	}
+}
+
+// TestEditTool_PositionedInsertBeforeLine covers the form with no find: the
+// replace text goes in as a new line before at.
+func TestEditTool_PositionedInsertBeforeLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "a\nb\nc\n")
+
+	if _, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"at":      2,
+		"replace": "INSERTED",
+	}); err != nil {
+		t.Fatalf("an insert without find should apply: %v", err)
+	}
+	if got := fileText(t, path); got != "a\nINSERTED\nb\nc\n" {
+		t.Errorf("replace should land as a line before line 2, got %q", got)
+	}
+
+	// at one past the last line is the end of the file, matching how the read
+	// tool numbers a file that ends in a newline.
+	if _, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"at":      5,
+		"replace": "LAST",
+	}); err != nil {
+		t.Fatalf("an insert at the end of the file should apply: %v", err)
+	}
+	if got := fileText(t, path); got != "a\nINSERTED\nb\nc\nLAST\n" {
+		t.Errorf("replace should land at the end of the file, got %q", got)
+	}
+}
+
+// TestEditTool_PositionedMultiHunkAppliesBottomUp pins why the order exists: all
+// the line numbers come from one read, so a change near the top of the file must
+// not shift the numbers the hunk below it names.
+func TestEditTool_PositionedMultiHunkAppliesBottomUp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "one\ntwo\nthree\nfour\n")
+
+	res, err := editWith(t, dir, map[string]any{
+		"path": path,
+		"edits": []map[string]any{
+			{"at": 2, "find": "two", "replace": "two\nTWO-EXTRA"},
+			{"at": 4, "find": "four", "replace": "FOUR"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("both positioned hunks should apply: %v", err)
+	}
+	if got := fileText(t, path); got != "one\ntwo\nTWO-EXTRA\nthree\nFOUR\n" {
+		t.Errorf("the growing hunk at 2 must not move the one at 4, got:\n%s", got)
+	}
+	if strings.Contains(res.Output, "landed away") {
+		t.Errorf("both hunks named the right lines, so no move should be reported: %s", res.Output)
+	}
+}
+
+// TestEditTool_MixedShapesRejected: the two forms disagree about what a line
+// number or a later hunk means, so a call carrying both is refused rather than
+// guessed at.
+func TestEditTool_MixedShapesRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "one\ntwo\n"
+	mustWriteFile(t, path, original)
+
+	_, err := editWith(t, dir, map[string]any{
+		"path": path,
+		"edits": []map[string]any{
+			{"at": 1, "find": "one", "replace": "1"},
+			{"old_string": "two", "new_string": "2"},
+		},
+	})
+	if err == nil {
+		t.Fatal("mixing positioned and anchored entries in one call must be refused")
+	}
+	if !strings.Contains(err.Error(), "mixes positioned entries") {
+		t.Errorf("error should name the mixed shapes, got: %v", err)
+	}
+	if got := fileText(t, path); got != original {
+		t.Errorf("file must be untouched, got %q", got)
+	}
+}
+
+// TestEditTool_PositionedValidation pins the entries the form cannot honour.
+func TestEditTool_PositionedValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "one\ntwo\nthree\n"
+
+	for name, tc := range map[string]struct {
+		hunk map[string]any
+		want string
+	}{
+		"past the end":         {map[string]any{"at": 6, "replace": "x"}, "past the end"},
+		"no replace":           {map[string]any{"at": 1, "find": "one"}, "replace is missing"},
+		"identical":            {map[string]any{"at": 1, "find": "one", "replace": "one"}, "identical"},
+		"empty find":           {map[string]any{"at": 1, "find": "", "replace": "x"}, "find is empty"},
+		"nothing to insert":    {map[string]any{"at": 1, "replace": ""}, "neither replaces nor inserts"},
+		"both shapes in one":   {map[string]any{"at": 1, "find": "one", "replace": "1", "old_string": "two", "new_string": "2"}, "send one"},
+		"count in an at entry": {map[string]any{"at": 1, "find": "one", "replace": "1", "expected_count": 1}, "anchored form"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mustWriteFile(t, path, original)
+			hunk := map[string]any{"path": path}
+			for k, v := range tc.hunk {
+				hunk[k] = v
+			}
+			_, err := editWith(t, dir, hunk)
+			if err == nil {
+				t.Fatalf("%s must be refused", name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should say %q, got: %v", tc.want, err)
+			}
+			if got := fileText(t, path); got != original {
+				t.Errorf("file must be untouched, got %q", got)
+			}
+		})
+	}
+}
+
+// TestEditTool_FindReplaceWithoutAtIsAnchored covers the call that used to be
+// refused outright: an entry carrying find/replace but no at. Its payload is
+// the anchored form spelled with the positioned field names — the shape a
+// caller reaches for before anything told it at is required — so the find text
+// is what locates the change either way, and the entry is applied as anchored.
+func TestEditTool_FindReplaceWithoutAtIsAnchored(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "alpha\nbeta\ngamma\n")
+
+	res, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"find":    "beta",
+		"replace": "BETA",
+	})
+	if err != nil {
+		t.Fatalf("find/replace with no at should be read as anchored, not refused: %v", err)
+	}
+	if got := fileText(t, path); got != "alpha\nBETA\ngamma\n" {
+		t.Errorf("the find text should have been replaced, got %q", got)
+	}
+	if !strings.Contains(res.Output, "without at") {
+		t.Errorf("the result should say the entry was read as anchored, got: %s", res.Output)
+	}
+}
+
+// TestEditTool_FindReplaceWithoutAtStillNeedsUniqueMatch is the other half:
+// reading the entry as anchored keeps the anchored form's contract, so a find
+// text that repeats fails the way an ambiguous old_string does rather than
+// guessing which occurrence was meant.
+func TestEditTool_FindReplaceWithoutAtStillNeedsUniqueMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "same\nother\nsame\n"
+	mustWriteFile(t, path, original)
+
+	_, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"find":    "same",
+		"replace": "x",
+	})
+	if err == nil {
+		t.Fatal("a find text that repeats has to be refused when there is no at to pick one")
+	}
+	if !strings.Contains(err.Error(), "unique match") {
+		t.Errorf("error should send the caller to a unique anchor or at, got: %v", err)
+	}
+	if got := fileText(t, path); got != original {
+		t.Errorf("file must be untouched, got %q", got)
+	}
+}
+
+// TestEditTool_ReplaceWithoutAtIsRefused: replace alone is an insert, and with
+// no at there is nothing to insert before. The refusal names the missing field
+// rather than the old "got 0" message, which described an entry the caller
+// never wrote.
+func TestEditTool_ReplaceWithoutAtIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "alpha\nbeta\n"
+	mustWriteFile(t, path, original)
+
+	_, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"replace": "INSERTED",
+	})
+	if err == nil {
+		t.Fatal("an insert with no line number must be refused")
+	}
+	if !strings.Contains(err.Error(), "at is missing") {
+		t.Errorf("error should name the missing at, got: %v", err)
+	}
+	if got := fileText(t, path); got != original {
+		t.Errorf("file must be untouched, got %q", got)
+	}
+}
+
+// TestEditTool_NegativeAtIsRefused: a negative line number is a bad at, not a
+// missing one. Falling back to the anchored form would silently drop the
+// position the caller asked for.
+func TestEditTool_NegativeAtIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "alpha\nbeta\n")
+
+	_, err := editWith(t, dir, map[string]any{
+		"path":    path,
+		"at":      -1,
+		"find":    "beta",
+		"replace": "BETA",
+	})
+	if err == nil {
+		t.Fatal("a negative at must be refused")
+	}
+	if !strings.Contains(err.Error(), "at must be the 1-based line number") {
+		t.Errorf("error should point at the line number, got: %v", err)
+	}
+}
+
+// TestEditTool_MixedAnchorSpellingsAllowed: once find/replace without at counts
+// as anchored, a call mixing it with old_string/new_string is one shape used
+// two ways, not two forms — so the sequential anchored order applies to both
+// instead of the mixed-shape refusal.
+func TestEditTool_MixedAnchorSpellingsAllowed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "one\ntwo\nthree\n")
+
+	if _, err := editWith(t, dir, map[string]any{
+		"path": path,
+		"edits": []map[string]any{
+			{"find": "one", "replace": "1"},
+			{"old_string": "two", "new_string": "2"},
+		},
+	}); err != nil {
+		t.Fatalf("both entries are anchored, so the call should apply: %v", err)
+	}
+	if got := fileText(t, path); got != "1\n2\nthree\n" {
+		t.Errorf("both changes should have landed, got %q", got)
+	}
+}
+
+// TestEditTool_AlreadyAppliedHint names the resend: the anchor is gone because
+// the change already landed, which the caller reads as a wrong anchor and
+// retries — 18% of this repo's failed edits were exactly that.
+func TestEditTool_AlreadyAppliedHint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	mustWriteFile(t, path, "hello there\n")
+
+	_, err := editWith(t, dir, map[string]any{
+		"path":       path,
+		"old_string": "world",
+		"new_string": "there",
+	})
+	if err == nil {
+		t.Fatal("a missing anchor is still a failure")
+	}
+	for _, want := range []string{"already appears once", "line 1", "looks applied already"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestEditTool_StringifiedPositionedInsertRejected: a decoded string can have
+// mangled its escapes, and an insert has no anchor to check the text against,
+// so that one shape is refused rather than written.
+func TestEditTool_StringifiedPositionedInsertRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "one\n"
+	mustWriteFile(t, path, original)
+
+	inner := `[{"at":1,"replace":"x"}]`
+	raw := json.RawMessage(`{"path":` + strconv.Quote(path) + `,"description":"test change","edits":` + strconv.Quote(inner) + `}`)
+	_, err := EditTool{}.Execute(context.Background(), raw, Context{SessionDir: dir})
+	if err == nil {
+		t.Fatal("a decoded insert has nothing to verify its text against and must be refused")
+	}
+	if !strings.Contains(err.Error(), "an insert has no anchor") {
+		t.Errorf("error should explain the insert case, got: %v", err)
+	}
+	if got := fileText(t, path); got != original {
+		t.Errorf("file must be untouched, got %q", got)
+	}
+}
+
+// The schema is the only place a caller learns the positioned form before it
+// has read anything, so both shapes have to be described there: the anchor
+// fields, the position fields, and which one the tool prefers. A schema that
+// quietly stopped mentioning them would leave the cheap form unreachable in
+// practice even though Execute keeps accepting it.
+func TestEditTool_SchemaAdvertisesPositionedForm(t *testing.T) {
+	var schema struct {
+		Properties struct {
+			Edits struct {
+				Description string `json:"description"`
+				Items       struct {
+					Properties map[string]struct {
+						Type        string `json:"type"`
+						Description string `json:"description"`
+						Minimum     int    `json:"minimum"`
+					} `json:"properties"`
+					Required []string `json:"required"`
+				} `json:"items"`
+			} `json:"edits"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(EditTool{}.Parameters(), &schema); err != nil {
+		t.Fatalf("Parameters is not valid JSON: %v", err)
+	}
+	props := schema.Properties.Edits.Items.Properties
+	for _, field := range []string{"at", "find", "replace", "old_string", "new_string"} {
+		if _, ok := props[field]; !ok {
+			t.Errorf("schema does not describe %q", field)
+		}
+	}
+	for field, wantType := range map[string]string{"at": "integer", "replace": "string", "find": "string"} {
+		if got := props[field].Type; got != wantType {
+			t.Errorf("%s is %q, want %q", field, got, wantType)
+		}
+		if !strings.Contains(strings.ToLower(props[field].Description), "positioned") {
+			t.Errorf("%s's description does not say which form it belongs to", field)
+		}
+	}
+	if got := props["at"].Minimum; got != 1 {
+		t.Errorf("at's schema minimum = %d, want 1 — a line number below 1 is not a position", got)
+	}
+	if !strings.Contains(schema.Properties.Edits.Description, "POSITIONED") {
+		t.Error("the edits description does not name the positioned form")
+	}
+	// Nothing in the entry is required: a positioned entry has no old_string, an
+	// anchored one has no at, and the resolver refuses whichever is missing for
+	// the shape it is reading.
+	if len(schema.Properties.Edits.Items.Required) != 0 {
+		t.Errorf("entry-level required = %v, want none", schema.Properties.Edits.Items.Required)
+	}
+	for _, want := range []string{"path", "edits", "description"} {
+		if !strings.Contains(strings.Join(schema.Required, ","), want) {
+			t.Errorf("top-level required is missing %q", want)
+		}
+	}
+	if desc := (EditTool{}).Description(); !strings.Contains(desc, "positioned") {
+		t.Error("Description does not mention the positioned form")
 	}
 }

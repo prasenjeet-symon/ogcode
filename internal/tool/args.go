@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"strconv"
+	"strings"
 )
 
 // DecodeArgs unmarshals a tool call's raw argument JSON into v, coercing
@@ -25,7 +26,143 @@ import (
 // beyond int64 — is left untouched for the decoder to reject exactly as
 // before, so a genuinely wrong argument still fails loudly.
 func DecodeArgs(args json.RawMessage, v any) error {
-	return json.Unmarshal(coerceIntegralFloats(args), v)
+	data := coerceIntegralFloats(args)
+	if err := json.Unmarshal(data, v); err == nil {
+		return nil
+	} else {
+		// Stringified-array fallback: some models emit an array param as a
+		// JSON string holding the array ("files": "[{\"path\":...}]") rather
+		// than the array itself. The plain decode above then fails with a
+		// type error that names neither the field nor the fix, and the model
+		// retries verbatim. Rewriting the stringified value into the native
+		// array/object it holds — and only then, only when the plain decode
+		// already failed — recovers the call without touching a string field
+		// whose value legitimately looks like JSON (write content, edit
+		// anchors), because those decode cleanly on the first pass.
+		unwrapped := unwrapStringifiedJSON(args)
+		if unwrapped == nil || bytes.Equal(unwrapped, args) {
+			return err
+		}
+		if retryErr := json.Unmarshal(coerceIntegralFloats(unwrapped), v); retryErr == nil {
+			return nil
+		}
+		return err
+	}
+}
+
+// unwrapStringifiedJSON rewrites a call whose array/object param arrived as a
+// JSON string holding the value into the native value it holds, at every
+// level. Returns nil when nothing rewritten — so caller keeps original error.
+func unwrapStringifiedJSON(args json.RawMessage) []byte {
+	var root any
+	if json.Unmarshal(args, &root) != nil {
+		return nil
+	}
+	if !unwrapValue(root) {
+		return nil
+	}
+	out, err := json.Marshal(root)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// unwrapValue recursively replaces string values that parse as a JSON
+// array/object with the parsed value. Returns whether anything changed.
+func unwrapValue(v any) bool {
+	switch node := v.(type) {
+	case map[string]any:
+		changed := false
+		for key, val := range node {
+			if s, ok := val.(string); ok {
+				if parsed := decodeStringified(s); parsed != nil {
+					node[key] = parsed
+					changed = true
+					continue
+				}
+			}
+			if unwrapValue(val) {
+				changed = true
+			}
+		}
+		return changed
+	case []any:
+		changed := false
+		for i, elem := range node {
+			if s, ok := elem.(string); ok {
+				if parsed := decodeStringified(s); parsed != nil {
+					node[i] = parsed
+					changed = true
+					continue
+				}
+			}
+			if unwrapValue(elem) {
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
+}
+
+// decodeStringified parses s as a JSON array or object, returning nil unless
+// it parses cleanly as one of those two composite shapes. Plain strings,
+// numbers, and unparseable text are left alone so the decoder's own error
+// — and the caller's original intent — survives.
+func decodeStringified(s string) any {
+	trimmed := strings.TrimSpace(s)
+	if len(trimmed) == 0 || (trimmed[0] != '[' && trimmed[0] != '{') {
+		return nil
+	}
+	var parsed any
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	if err := dec.Decode(&parsed); err != nil {
+		return nil
+	}
+	if dec.More() {
+		return nil
+	}
+	// Reject trailing garbage after valid JSON.
+	if dec.InputOffset() < int64(len(trimmed)) {
+		// dec.More only checks within same nesting; ensure all consumed beyond whitespace.
+		if strings.TrimSpace(trimmed[dec.InputOffset():]) != "" {
+			return nil
+		}
+	}
+	// Must be array or object, not scalar (first byte already ensures).
+	switch parsed.(type) {
+	case []any, map[string]any:
+		return parsed
+	default:
+		return nil
+	}
+}
+
+// stringifiedArrayFields names top-level fields whose value arrived as a
+// string that parses as a JSON array/object, for schema-shaped error messages
+// that restate via example payload rather than error alone.
+func stringifiedArrayFields(args json.RawMessage) []string {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(args, &fields) != nil {
+		return nil
+	}
+	var names []string
+	for key, raw := range fields {
+		trimmed := strings.TrimSpace(string(raw))
+		if len(trimmed) == 0 || trimmed[0] != '"' {
+			continue
+		}
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			continue
+		}
+		if decodeStringified(s) != nil {
+			names = append(names, key)
+		}
+	}
+	return names
 }
 
 // coerceIntegralFloats returns data with integral float-notation number

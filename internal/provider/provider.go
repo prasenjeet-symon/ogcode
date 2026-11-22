@@ -821,6 +821,17 @@ type CustomModelInfo struct {
 	CacheReadPricePerM  float64
 	CacheWritePricePerM float64
 	SupportsImages      bool
+	// Efforts is the user-set reasoning ladder in ogcode vocabulary, lowest
+	// first. When non-empty it wins over every host/catalogue ladder for the
+	// model, so a custom endpoint whose host ogcode does not know still gets a
+	// picker — the user is asserting what the endpoint takes.
+	Efforts []string
+	// DefaultEffort is the level shown before the user chooses.
+	DefaultEffort string
+	// EffortField names which request field carries the level:
+	// "reasoning_effort" (or empty), "thinking", "enable_thinking" or
+	// "reasoning" (OpenRouter object).
+	EffortField string
 }
 
 type Registry struct {
@@ -1058,6 +1069,7 @@ func (r *Registry) RegisterCustomModelInfo(modelID string, info CustomModelInfo)
 	r.customMu.Lock()
 	r.customModels[modelID] = info
 	r.customMu.Unlock()
+	setUserEffort(modelID, info)
 }
 
 // CustomModel returns what the user configured for a custom model, and false
@@ -1073,6 +1085,7 @@ func (r *Registry) UnregisterCustomModel(modelID string) {
 	r.customMu.Lock()
 	delete(r.customModels, modelID)
 	r.customMu.Unlock()
+	setUserEffort(modelID, CustomModelInfo{})
 }
 
 // overrideKey keys an override by the model id AND the provider its preference
@@ -1098,11 +1111,13 @@ func (r *Registry) SetModelOverride(modelID string, info CustomModelInfo) {
 	key := overrideKey(modelID, info.ProviderID)
 	if info.ContextWindow <= 0 && info.MaxOutputTokens <= 0 &&
 		info.InputPricePerM <= 0 && info.OutputPricePerM <= 0 &&
-		info.CacheReadPricePerM <= 0 && info.CacheWritePricePerM <= 0 && !info.SupportsImages {
+		info.CacheReadPricePerM <= 0 && info.CacheWritePricePerM <= 0 && !info.SupportsImages && len(info.Efforts) == 0 {
 		delete(r.overrides, key)
+		setUserEffort(key, CustomModelInfo{})
 		return
 	}
 	r.overrides[key] = info
+	setUserEffort(key, info)
 }
 
 // ModelOverride returns what the user configured about a listed model on a

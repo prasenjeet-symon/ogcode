@@ -128,6 +128,9 @@ func thinkingConfigFor(model string) *anthropicThinking {
 // Anthropic-compatible host serving another vendor's model gets no effort,
 // since its levels — if it has any — are not Claude's.
 func (p *AnthropicProvider) EffortSpec(model string) EffortSpec {
+	if o, ok := userEffortFor(p.ID(), model); ok {
+		return userEffortSpec(o)
+	}
 	m, ok := anthropicCatalogModel(model)
 	if !ok {
 		return EffortSpec{}

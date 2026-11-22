@@ -3,6 +3,7 @@ package provider
 import (
 	"slices"
 	"strings"
+	"sync"
 )
 
 // Reasoning effort over the OpenAI-compatible protocol (see effort.go for the
@@ -96,6 +97,98 @@ func (p *OpenAIProvider) effortHost() effortHost {
 // through the Responses API, and every agent step carries tools.
 const openAIToolsNote = "OpenAI lets this model reason while it uses tools only through its Responses API. ogcode talks to OpenAI over Chat Completions, so agent turns run with reasoning off."
 
+// User effort overrides. The registry records what the user asserted about a
+// model (CustomModelInfo.Efforts) but providers do not hold the registry — they
+// are replaced wholesale by ReplaceProviders, taking any per-instance hook with
+// them. A package-level mirror survives that: Registry writes it whenever a
+// custom model or override changes, and the providers read it when they build
+// their effort plan. It is keyed exactly like overrideKey, with the model-only
+// key for custom models.
+
+type userEffortOverride struct {
+	levels []string
+	def    string
+	field  string
+}
+
+var userEffortsMu sync.RWMutex
+var userEfforts = map[string]userEffortOverride{}
+
+// setUserEffort mirrors one registry record into the package-level map, or
+// removes it when the record carries no efforts. Custom models are keyed by
+// model id alone; overrides by (model, provider).
+func setUserEffort(key string, info CustomModelInfo) {
+	userEffortsMu.Lock()
+	defer userEffortsMu.Unlock()
+	if len(info.Efforts) == 0 {
+		delete(userEfforts, key)
+		return
+	}
+	levels := slices.Clone(info.Efforts)
+	userEfforts[key] = userEffortOverride{levels: levels, def: info.DefaultEffort, field: info.EffortField}
+}
+
+// userEffortFor returns the user-asserted ladder for model on this provider:
+// a custom-model entry (model id alone) wins, else the (model, provider)
+// override. Ok is false when the user configured nothing, in which case the
+// host/catalogue ladder answers.
+func userEffortFor(providerID, model string) (userEffortOverride, bool) {
+	userEffortsMu.RLock()
+	defer userEffortsMu.RUnlock()
+	if o, ok := userEfforts[model]; ok {
+		return o, true
+	}
+	o, ok := userEfforts[overrideKey(model, providerID)]
+	return o, ok
+}
+
+// sanitizeUserLevels keeps only ogcode's effort vocabulary, in the order the
+// user gave, with no duplicates. A raw token the user typed that is not a
+// level would fail the request on a real host, so it never reaches the wire.
+func sanitizeUserLevels(levels []string) []string {
+	var out []string
+	for _, l := range levels {
+		if !IsEffort(l) {
+			continue
+		}
+		if slices.Contains(out, l) {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// userEffortSpec turns a user-asserted ladder into the spec both the picker
+// and the wire read. The default is honoured only when it is one of the levels.
+func userEffortSpec(o userEffortOverride) EffortSpec {
+	levels := sanitizeUserLevels(o.levels)
+	if len(levels) == 0 {
+		return EffortSpec{}
+	}
+	def := o.def
+	if !slices.Contains(levels, def) {
+		def = ""
+	}
+	return EffortSpec{Levels: levels, Default: def}
+}
+
+// userEffortWriter picks the request field the user's EffortField names. The
+// empty value is the OpenAI spelling, reasoning_effort, which is what most
+// OpenAI-compatible hosts copy.
+func userEffortWriter(o userEffortOverride, spec EffortSpec) effortWriter {
+	switch o.field {
+	case "thinking":
+		return writeThinkingSwitch("enabled")
+	case "enable_thinking":
+		return writeEnableThinking
+	case "reasoning":
+		return writeOpenRouterReasoning(spec)
+	default:
+		return writeReasoningEffort
+	}
+}
+
 // EffortSpec reports the effort levels a model takes through this endpoint.
 func (p *OpenAIProvider) EffortSpec(model string) EffortSpec {
 	spec, _ := p.effortPlan(model)
@@ -108,6 +201,20 @@ type effortWriter func(body *oaiRequest, level string)
 // effortPlan is the single source for both what the picker offers and how a
 // chosen level is sent, so the two cannot disagree.
 func (p *OpenAIProvider) effortPlan(model string) (EffortSpec, effortWriter) {
+	// A user-asserted ladder wins over every host rule, including the unknown-
+	// host default: the user is telling ogcode what this endpoint takes, and
+	// their EffortField names the field to send it in. This is the only way a
+	// custom endpoint ogcode does not recognise ever gets a picker.
+	if o, ok := userEffortFor(p.id, model); ok {
+		spec := userEffortSpec(o)
+		if len(spec.Levels) >= 2 {
+			return spec, userEffortWriter(o, spec)
+		}
+		// A single level is the host saying there is no choice — the model
+		// never thinks, or always thinks at one depth. That overrules the
+		// host ladder the same way Ollama's one-value listing does.
+		return EffortSpec{}, nil
+	}
 	host := p.effortHost()
 	switch host {
 	case hostOpenAI:

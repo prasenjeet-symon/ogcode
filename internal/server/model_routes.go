@@ -22,13 +22,16 @@ func (s *Server) handleSetModelPreference(w http.ResponseWriter, r *http.Request
 		// and image support that stand in for, and win over, whatever a catalogue
 		// or a provider's listing says. Zero means "not configured", so those
 		// facts still answer.
-		ContextWindow       int     `json:"contextWindow"`
-		MaxOutputTokens     int     `json:"maxOutputTokens"`
-		InputPricePerM      float64 `json:"inputPricePerM"`
-		OutputPricePerM     float64 `json:"outputPricePerM"`
-		CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
-		CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
-		SupportsImages      bool    `json:"supportsImages"`
+		ContextWindow       int      `json:"contextWindow"`
+		MaxOutputTokens     int      `json:"maxOutputTokens"`
+		InputPricePerM      float64  `json:"inputPricePerM"`
+		OutputPricePerM     float64  `json:"outputPricePerM"`
+		CacheReadPricePerM  float64  `json:"cacheReadPricePerM"`
+		CacheWritePricePerM float64  `json:"cacheWritePricePerM"`
+		SupportsImages      bool     `json:"supportsImages"`
+		Efforts             []string `json:"efforts"`
+		DefaultEffort       string   `json:"defaultEffort"`
+		EffortField         string   `json:"effortField"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -66,6 +69,9 @@ func (s *Server) handleSetModelPreference(w http.ResponseWriter, r *http.Request
 		CacheReadPricePerM:  input.CacheReadPricePerM,
 		CacheWritePricePerM: input.CacheWritePricePerM,
 		SupportsImages:      input.SupportsImages,
+		Efforts:             input.Efforts,
+		DefaultEffort:       input.DefaultEffort,
+		EffortField:         input.EffortField,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
@@ -107,6 +113,9 @@ func (s *Server) registerModelConfig(p *session.ModelPreference) {
 		CacheReadPricePerM:  p.CacheReadPricePerM,
 		CacheWritePricePerM: p.CacheWritePricePerM,
 		SupportsImages:      p.SupportsImages,
+		Efforts:             p.Efforts,
+		DefaultEffort:       p.DefaultEffort,
+		EffortField:         p.EffortField,
 	}
 	if p.IsCustom {
 		s.registry.RegisterCustomModelInfo(p.ID, info)

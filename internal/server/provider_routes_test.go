@@ -352,7 +352,7 @@ func TestCustomModelMetadataRoundTrips(t *testing.T) {
 		"openai": stubProvider{id: "openai"},
 	})
 
-	body := strings.NewReader(`{"id":"acme-vision-1","providerId":"openai","displayName":"Acme Vision","enabled":true,"isCustom":true,"collection":"Mine","contextWindow":200000,"maxOutputTokens":32000,"inputPricePerM":3.5,"outputPricePerM":14,"cacheReadPricePerM":0.18,"cacheWritePricePerM":2,"supportsImages":true}`)
+	body := strings.NewReader(`{"id":"acme-vision-1","providerId":"openai","displayName":"Acme Vision","enabled":true,"isCustom":true,"collection":"Mine","contextWindow":200000,"maxOutputTokens":32000,"inputPricePerM":3.5,"outputPricePerM":14,"cacheReadPricePerM":0.18,"cacheWritePricePerM":2,"supportsImages":true,"efforts":["none","low","high"],"defaultEffort":"high","effortField":"thinking"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/models/preference", body))
 	if rec.Code != http.StatusOK {
@@ -365,17 +365,19 @@ func TestCustomModelMetadataRoundTrips(t *testing.T) {
 		t.Fatalf("GET /api/models = %d, want 200", rec.Code)
 	}
 	var models []struct {
-		ID                  string  `json:"id"`
-		ProviderID          string  `json:"providerId"`
-		IsCustom            bool    `json:"isCustom"`
-		ContextWindow       int     `json:"contextWindow"`
-		CompactAtTokens     int     `json:"compactAtTokens"`
-		MaxOutputTokens     int     `json:"maxOutputTokens"`
-		InputPricePerM      float64 `json:"inputPricePerM"`
-		OutputPricePerM     float64 `json:"outputPricePerM"`
-		CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
-		CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
-		SupportsImages      bool    `json:"supportsImages"`
+		ID                  string   `json:"id"`
+		ProviderID          string   `json:"providerId"`
+		IsCustom            bool     `json:"isCustom"`
+		ContextWindow       int      `json:"contextWindow"`
+		CompactAtTokens     int      `json:"compactAtTokens"`
+		MaxOutputTokens     int      `json:"maxOutputTokens"`
+		InputPricePerM      float64  `json:"inputPricePerM"`
+		OutputPricePerM     float64  `json:"outputPricePerM"`
+		CacheReadPricePerM  float64  `json:"cacheReadPricePerM"`
+		CacheWritePricePerM float64  `json:"cacheWritePricePerM"`
+		SupportsImages      bool     `json:"supportsImages"`
+		Efforts             []string `json:"efforts"`
+		DefaultEffort       string   `json:"defaultEffort"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
 		t.Fatalf("decode models: %v (body: %s)", err, rec.Body.String())
@@ -407,6 +409,12 @@ func TestCustomModelMetadataRoundTrips(t *testing.T) {
 		}
 		if !m.SupportsImages {
 			t.Error("supportsImages = false, want true")
+		}
+		if len(m.Efforts) != 3 || m.Efforts[0] != "none" || m.Efforts[1] != "low" || m.Efforts[2] != "high" {
+			t.Errorf("efforts = %v, want the user's [none low high]", m.Efforts)
+		}
+		if m.DefaultEffort != "high" {
+			t.Errorf("defaultEffort = %q, want high", m.DefaultEffort)
 		}
 	}
 	if !found {
@@ -441,13 +449,16 @@ func TestListedModelMetadataOverrideRoundTrips(t *testing.T) {
 		}
 	}
 	type override struct {
-		ContextWindow       int     `json:"contextWindow"`
-		MaxOutputTokens     int     `json:"maxOutputTokens"`
-		InputPricePerM      float64 `json:"inputPricePerM"`
-		OutputPricePerM     float64 `json:"outputPricePerM"`
-		CacheReadPricePerM  float64 `json:"cacheReadPricePerM"`
-		CacheWritePricePerM float64 `json:"cacheWritePricePerM"`
-		SupportsImages      bool    `json:"supportsImages"`
+		ContextWindow       int      `json:"contextWindow"`
+		MaxOutputTokens     int      `json:"maxOutputTokens"`
+		InputPricePerM      float64  `json:"inputPricePerM"`
+		OutputPricePerM     float64  `json:"outputPricePerM"`
+		CacheReadPricePerM  float64  `json:"cacheReadPricePerM"`
+		CacheWritePricePerM float64  `json:"cacheWritePricePerM"`
+		SupportsImages      bool     `json:"supportsImages"`
+		Efforts             []string `json:"efforts"`
+		DefaultEffort       string   `json:"defaultEffort"`
+		EffortField         string   `json:"effortField"`
 	}
 	type entry struct {
 		ID              string    `json:"id"`
@@ -460,6 +471,8 @@ func TestListedModelMetadataOverrideRoundTrips(t *testing.T) {
 		InputPricePerM  float64   `json:"inputPricePerM"`
 		OutputPricePerM float64   `json:"outputPricePerM"`
 		SupportsImages  bool      `json:"supportsImages"`
+		Efforts         []string  `json:"efforts"`
+		DefaultEffort   string    `json:"defaultEffort"`
 		Override        *override `json:"override"`
 	}
 	list := func() entry {
@@ -481,7 +494,7 @@ func TestListedModelMetadataOverrideRoundTrips(t *testing.T) {
 
 	// The same save the settings editor makes: the row's identity, its enabled
 	// state, and the figures the user typed.
-	post(`{"id":"acme/listed-1","providerId":"openrouter","displayName":"Acme Listed","enabled":true,"contextWindow":200000,"maxOutputTokens":32000,"inputPricePerM":3.5,"outputPricePerM":14,"cacheReadPricePerM":0.18,"cacheWritePricePerM":2,"supportsImages":true}`)
+	post(`{"id":"acme/listed-1","providerId":"openrouter","displayName":"Acme Listed","enabled":true,"contextWindow":200000,"maxOutputTokens":32000,"inputPricePerM":3.5,"outputPricePerM":14,"cacheReadPricePerM":0.18,"cacheWritePricePerM":2,"supportsImages":true,"efforts":["none","low","high"],"defaultEffort":"high","effortField":"reasoning"}`)
 
 	got := list()
 	if got.IsCustom {
@@ -505,6 +518,12 @@ func TestListedModelMetadataOverrideRoundTrips(t *testing.T) {
 	if got.Override == nil || got.Override.ContextWindow != 200000 || got.Override.InputPricePerM != 3.5 ||
 		got.Override.CacheReadPricePerM != 0.18 || got.Override.CacheWritePricePerM != 2 || !got.Override.SupportsImages {
 		t.Errorf("override = %+v, want the user's own record, cache prices included", got.Override)
+	}
+	if len(got.Efforts) != 3 || got.Efforts[2] != "high" || got.DefaultEffort != "high" {
+		t.Errorf("efforts = %v default %q, want the user's ladder on the listed model", got.Efforts, got.DefaultEffort)
+	}
+	if got.Override == nil || len(got.Override.Efforts) != 3 || got.Override.DefaultEffort != "high" || got.Override.EffortField != "reasoning" {
+		t.Errorf("override = %+v, want the user's effort record", got.Override)
 	}
 
 	// A toggle resends the override (the row replaces every metadata column), so

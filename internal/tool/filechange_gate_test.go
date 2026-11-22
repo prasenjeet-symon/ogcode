@@ -198,10 +198,14 @@ func TestOwnEarlierChangeIsNotStale(t *testing.T) {
 	}
 }
 
-// TestWriteAndEditRequireADescription pins the argument the catch-up depends
-// on: a change with no description leaves the next agent a diff and no intent,
-// so the call is refused as a result (not an error) and nothing is written.
-func TestWriteAndEditRequireADescription(t *testing.T) {
+// TestWriteAndEditWithoutADescriptionStillApply pins that a dropped
+// description costs the caller nothing but the note. The refusal this used to
+// return threw away a complete payload — a whole file body on a write, every
+// hunk on an edit — and made the model generate it a second time, which in this
+// project's own log was 406 calls and about 1.5 MB of payload. The change
+// lands, and the row a stale refusal shows the next agent carries a generated
+// note that says no description was sent.
+func TestWriteAndEditWithoutADescriptionStillApply(t *testing.T) {
 	g := newChangeGate(t)
 	path := filepath.Join(g.dir, "x.txt")
 
@@ -209,39 +213,58 @@ func TestWriteAndEditRequireADescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write without a description returned an error: %v", err)
 	}
-	if res.Title != "Description required" {
-		t.Fatalf("write title = %q, want %q", res.Title, "Description required")
+	if res.Title != filepath.Base(path) {
+		t.Fatalf("write title = %q, want %q", res.Title, filepath.Base(path))
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("write without a description touched the disk: stat err = %v", err)
+	if got := g.content(path); got != "hi\n" {
+		t.Fatalf("file = %q, want %q — a missing description must not stop the write", got, "hi\n")
+	}
+	if !strings.Contains(res.Output, "no description was sent") {
+		t.Errorf("write result does not ask for a description:\n%s", res.Output)
+	}
+	if note := lastNote(t, g, path); !strings.Contains(note, "no description sent") {
+		t.Errorf("history note = %q, want the generated note", note)
 	}
 
-	mustWriteFile(t, path, "hi\n")
 	hunk := map[string]any{"edits": []map[string]any{{"old_string": "hi", "new_string": "bye"}}}
 	hunk["path"] = path
 	res, err = g.call("session-a", EditTool{}.Execute, hunk)
 	if err != nil {
 		t.Fatalf("edit without a description returned an error: %v", err)
 	}
-	if res.Title != "Description required" {
-		t.Fatalf("edit title = %q, want %q", res.Title, "Description required")
+	if got := g.content(path); got != "bye\n" {
+		t.Fatalf("file = %q, want %q — a missing description must not stop the edit", got, "bye\n")
 	}
-	if got := g.content(path); got != "hi\n" {
-		t.Fatalf("edit without a description changed the file to %q", got)
+	if !strings.Contains(res.Output, "no description was sent") {
+		t.Errorf("edit result does not ask for a description:\n%s", res.Output)
+	}
+	if note := lastNote(t, g, path); !strings.Contains(note, "no description sent") {
+		t.Errorf("edit history note = %q, want the generated note", note)
 	}
 
-	// Whitespace is not a description either.
-	blank := map[string]any{"path": path, "content": "bye\n", "description": "   "}
+	// Whitespace is not a description either, and it is recorded the same way.
+	blank := map[string]any{"path": path, "content": "again\n", "description": "   "}
 	res, err = g.call("session-a", WriteTool{}.Execute, blank)
 	if err != nil {
 		t.Fatalf("write with a blank description returned an error: %v", err)
 	}
-	if res.Title != "Description required" {
-		t.Fatalf("blank description title = %q, want %q", res.Title, "Description required")
+	if got := g.content(path); got != "again\n" {
+		t.Fatalf("file = %q, want %q — a blank description must not stop the write", got, "again\n")
 	}
-	if got := g.content(path); got != "hi\n" {
-		t.Fatalf("write with a blank description changed the file to %q", got)
+	if !strings.Contains(res.Output, "no description was sent") {
+		t.Errorf("blank-description result does not ask for a description:\n%s", res.Output)
 	}
+}
+
+// lastNote returns the newest recorded history note for path, read through the
+// gate the way a second session would: changes this session did not make.
+func lastNote(t *testing.T, g *changeGate, path string) string {
+	t.Helper()
+	changes, _ := g.log.Stale(context.Background(), FileKey(g.dir, path), "reader", 0)
+	if len(changes) == 0 {
+		t.Fatalf("no change recorded for %s", path)
+	}
+	return changes[len(changes)-1].Note
 }
 
 // TestMapOnlyReadDoesNotCertifyContent pins the order of the map branch and
@@ -391,5 +414,47 @@ func TestReadTool_FilesMapEntryDoesNotStamp(t *testing.T) {
 	}
 	if seen := g.log.Seen(FileKey(g.dir, small), "session-a"); seen != 0 {
 		t.Errorf("content section left the small file's bookmark at %d, want 0", seen)
+	}
+}
+
+// TestWriteAndEditClampLongDescriptions pins the length bound: what a stale
+// refusal shows in place of the diff has to stay a few lines, so an over-long
+// description is cut and marked rather than stored whole or refused.
+func TestWriteAndEditClampLongDescriptions(t *testing.T) {
+	g := newChangeGate(t)
+	path := filepath.Join(g.dir, "x.txt")
+
+	long := "first line\nsecond line\nthird line\nfourth line\nfifth line\nsixth line"
+	if _, err := g.call("session-a", WriteTool{}.Execute, map[string]any{
+		"path": path, "content": "hi\n", "description": long,
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	note := lastNote(t, g, path)
+	if lines := strings.Count(note, "\n") + 1; lines > descriptionMaxLines {
+		t.Errorf("recorded note is %d lines, want at most %d:\n%s", lines, descriptionMaxLines, note)
+	}
+	if !strings.Contains(note, "…") {
+		t.Errorf("a cut note should mark the cut: %q", note)
+	}
+	if !strings.HasPrefix(note, "first line\nsecond line") {
+		t.Errorf("clamp dropped the start of the description: %q", note)
+	}
+
+	// Four lines can still be a paragraph, so a single very long line is cut by
+	// bytes as well.
+	huge := strings.Repeat("word ", 200)
+	if _, err := g.call("session-a", EditTool{}.Execute, map[string]any{
+		"path": path, "description": huge,
+		"edits": []map[string]any{{"old_string": "hi", "new_string": "bye"}},
+	}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	note = lastNote(t, g, path)
+	if len(note) > descriptionMaxBytes+len(" …") {
+		t.Errorf("recorded note is %d bytes, want at most %d", len(note), descriptionMaxBytes)
+	}
+	if !strings.Contains(note, "…") {
+		t.Errorf("a byte-cut note should mark the cut: %q", note)
 	}
 }

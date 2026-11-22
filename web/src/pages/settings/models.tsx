@@ -28,7 +28,7 @@ import {
   matches,
   useShell,
 } from './ui';
-import ModelMetaDialog, { EMPTY_META, metaFrom, type MetaForm } from './model-meta';
+import ModelMetaDialog, { EFFORT_FIELDS, EMPTY_META, metaFrom, type MetaForm } from './model-meta';
 import {
   PROVIDER_DEFS,
   COMPATIBLE_PRESETS,
@@ -1765,6 +1765,38 @@ function MetaFields(props: {
         title="What 1M tokens written to the prompt cache cost, in dollars. Blank means not set."
         class={`${field} w-[8.5rem] tabular-nums no-spin`}
       />
+      <input
+        type="text"
+        value={props.form.efforts}
+        onInput={(e) => props.onChange({ efforts: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="efforts: none, low, medium, high"
+        aria-label="Reasoning effort levels, comma separated"
+        title="Reasoning effort levels the model takes, comma-separated, lowest first (none, on, minimal, low, medium, high, xhigh, max). One level offers no choice. Blank means not set."
+        class={`${field} w-[13.5rem] font-mono`}
+      />
+      <input
+        type="text"
+        value={props.form.defaultEffort}
+        onInput={(e) => props.onChange({ defaultEffort: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        placeholder="default effort"
+        aria-label="Default reasoning effort level"
+        title="The effort level the model runs at when none is chosen. Must be one of the levels above. Blank means not set."
+        class={`${field} w-[8.5rem] font-mono`}
+      />
+      <select
+        value={props.form.effortField}
+        onChange={(e) => props.onChange({ effortField: e.currentTarget.value })}
+        onKeyDown={props.onKeyDown}
+        aria-label="Request field the effort level is sent in"
+        title="The request field the level is sent in. reasoning_effort is what most OpenAI-compatible hosts copy."
+        class={`${field} w-[11rem]`}
+      >
+        <For each={EFFORT_FIELDS}>
+          {(f) => <option value={f.value}>{f.label}</option>}
+        </For>
+      </select>
       <label class="inline-flex items-center gap-1.5 h-8 text-meta text-[color:var(--text-secondary)] cursor-pointer">
         <input
           type="checkbox"

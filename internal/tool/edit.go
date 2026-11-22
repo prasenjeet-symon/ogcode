@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -16,38 +17,43 @@ type EditTool struct{}
 
 func (EditTool) ID() string { return "edit" }
 func (EditTool) Description() string {
-	return "Make one or more search-and-replace edits to a file. Every change goes in the \"edits\" array — a single change is an array of one. The edits apply in order and ALL-OR-NOTHING: if any anchor is missing or ambiguous, nothing is written. Each old_string must match exactly one place unless replace_all is set, so include enough surrounding context to identify the occurrence you mean. The result reports any syntax error the edits introduced, so a broken edit surfaces immediately rather than at the next build."
+	return "Make one or more edits to a file. Every change goes in the \"edits\" array — a single change is an array of one — and an entry is EITHER positioned (\"at\" plus \"find\"/\"replace\") OR anchored (\"old_string\"/\"new_string\"). Prefer positioned: \"at\" is the line number a read showed you, so \"find\" covers only the lines that change rather than the whole region it sits in, and no unique-match hunt is needed. The call applies all-or-nothing, and the result reports any syntax error the edits introduced, so a broken edit surfaces immediately rather than at the next build."
 }
 
 func (EditTool) Parameters() json.RawMessage {
-	// There is exactly one way to express an edit here, and that is deliberate.
-	// This tool used to accept a top-level old_string/new_string as well as the
-	// array, and callers routinely filled both — the flat pair out of habit, the
-	// array because the tool asked for it — producing a call that could not be
-	// read either way and had to be refused. Documenting the exclusivity did not
-	// stop it; removing the second form does.
+	// One call, one array of entries, and only one of the two entry shapes per
+	// call. This tool used to accept a top-level old_string/new_string as well as
+	// the array, and callers routinely filled both — the flat pair out of habit,
+	// the array because the tool asked for it — producing a call that could not
+	// be read either way and had to be refused. Documenting the exclusivity did
+	// not stop it; removing the second form does. The same failure appears one
+	// level down when a call mixes positioned and anchored entries, which is why
+	// collectHunks refuses it rather than guessing.
 	//
-	// The uniqueness rule is stated here too, because it is the one part of this
-	// contract a caller cannot infer from the file: a block that looks unique in
-	// the region being read may repeat elsewhere.
+	// Both forms are described here in full, because a caller sees this schema
+	// before it sees the file: the uniqueness rule of the anchored form is the
+	// one part of that contract it cannot infer, since a block that looks unique
+	// in the region being read may repeat elsewhere.
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "File path to edit"},
-			"description": {"type": "string", "description": "A few lines: what this change does and why. Another agent working in this project will see this text if it has to re-read the file after your edit."},
+			"description": {"type": "string", "description": "Required. Three or four short lines at most: what this change does and why — a stale read shows it to the next agent. Never restate the diff; longer text is cut to four lines when recorded."},
 			"edits": {
 				"type": "array",
 				"minItems": 1,
-				"description": "Every change to this file, in order. ONE change is an array of one entry — there is no other way to pass an edit. They apply all-or-nothing: each is checked first, and if any fails the file is left untouched, so a refactor can never half-apply. Later entries match against the result of earlier ones.",
+				"description": "Every change to this file. ONE change is an array of one entry. Two entry shapes, and one call uses only one of them: POSITIONED {at, find, replace} is the cheap default — at is a line number a read showed you, so find needs only the lines that change; ANCHORED {old_string, new_string} needs a unique match and makes you echo the whole region. They apply all-or-nothing: each is checked first, and if any fails the file is left untouched, so a refactor can never half-apply.",
 				"items": {
 					"type": "object",
 					"properties": {
-						"old_string": {"type": "string", "description": "Exact text to find, including indentation. Copy it from what a read of this file shows — leading spaces and tabs exactly as printed, no line-number prefix, no truncation marker — and never retype it from memory: an anchor rebuilt from recollection almost never carries the file's bytes. Must match EXACTLY ONE place in the file unless replace_all is true. When a block repeats — the same step in several CI jobs, the same line in several functions — extend it with neighbouring lines until only the intended occurrence matches. Write newlines as plain \\n even in a CRLF file: when every line of the file ends in CRLF, the tool matches and writes the file's own endings."},
-						"new_string": {"type": "string", "description": "Text to replace it with. Always send it, even when replacing with nothing: \"\" means delete old_string, and omitting the field is rejected rather than read as a deletion."},
-						"replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match. Use when the text genuinely should change everywhere, such as removing one repeated step from every job in a workflow. The result reports how many were replaced."},
-						"expected_count": {"type": "integer", "description": "Optional assertion: fail unless old_string matches exactly this many times. Must be a non-negative integer — 0 (the default) checks nothing. Worth setting alongside replace_all, where a miscounted anchor would otherwise rewrite more of the file than intended."}
-					},
-					"required": ["old_string", "new_string"]
+						"at": {"type": "integer", "minimum": 1, "description": "Positioned form: the 1-based line number to edit, taken from the read this change is based on. Entries are applied bottom-up, so at always means the line you read, never one shifted by another entry. If find has drifted from it, the nearest occurrence wins and the result says how far."},
+						"find": {"type": "string", "description": "Positioned form: exact text to replace, copied from the read — only the part that changes, not the whole region, and it need not be unique: at says which occurrence. Omit it to insert replace before line at. Write newlines as plain \\n even in a CRLF file."},
+						"replace": {"type": "string", "description": "Positioned form: text to put where find was (\"\" deletes it), or the text to insert before line at when find is omitted. Always send it."},
+						"old_string": {"type": "string", "description": "Anchored form: exact text to find, including indentation. Copy it from what a read of this file shows — no line-number prefix, no truncation marker — and never retype it from memory. Must match EXACTLY ONE place unless replace_all is true; when it repeats, extend it with neighbouring lines instead. Prefer the positioned form: it needs neither the unique match nor the whole block."},
+						"new_string": {"type": "string", "description": "Anchored form: text to replace it with. Always send it, even when replacing with nothing: \"\" means delete old_string, and omitting the field is rejected rather than read as a deletion."},
+						"replace_all": {"type": "boolean", "description": "Anchored form only: replace every occurrence instead of requiring a unique match. The result reports how many were replaced."},
+						"expected_count": {"type": "integer", "description": "Anchored form only: fail unless old_string matches exactly this many times. Must be a non-negative integer — 0 (the default) checks nothing."}
+					}
 				}
 			}
 		},
@@ -69,6 +75,18 @@ type editHunk struct {
 	NewString     *string `json:"new_string"`
 	ReplaceAll    bool    `json:"replace_all"`
 	ExpectedCount int     `json:"expected_count"`
+
+	// The positioned form: at, an optional find, and a replace. It exists
+	// because the anchored form charges the caller for its location: the whole
+	// region it edits comes back as old_string, and uniqueness has to be bought
+	// with even more neighbouring lines. Both costs vanish once the line number
+	// from the read is supplied — at names the occurrence, so find only has to
+	// carry the text that actually changes. That is also what the calls in this
+	// repo's own log were failing on: retyped long anchors (42% of failures) and
+	// anchors that could not be made unique (5%).
+	At      int     `json:"at"`
+	Find    *string `json:"find"`
+	Replace *string `json:"replace"`
 }
 
 // resolvedHunk is a hunk that has passed validation, with its replacement text
@@ -77,6 +95,15 @@ type resolvedHunk struct {
 	oldStr, newStr string
 	replaceAll     bool
 	expectedCount  int
+	// positioned selects the at-based apply path. A positioned hunk's oldStr
+	// is its find text and may be empty, which means "insert before at".
+	positioned bool
+	at         int
+	// anchoredFallback marks an entry that arrived as find/replace with no at
+	// and was therefore applied as anchored. The result says so: the caller
+	// learns that its find text had to be unique, and that at is what makes
+	// the same entry cheap.
+	anchoredFallback bool
 }
 
 func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context) (Result, error) {
@@ -97,6 +124,12 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 		LegacyReplaceAll *bool   `json:"replace_all"`
 		LegacyExpected   *int    `json:"expected_count"`
 	}
+	// A stringified array usually reads back cleanly, and refusing every one of
+	// them cost a full round trip: it was the second largest cause of failed
+	// edits in this project's own call log (27% of them), and the caller's
+	// payload was correct apart from its quoting. Recover it here; the refusal
+	// below stays for the payloads whose escaping cannot be parsed.
+	args, recovered := unwrapStringifiedEdits(args)
 	if stringifiedEdits(args) {
 		// A stringified array is a shape some models emit for an array param:
 		// the hunk list arrives as a JSON string HOLDING the array rather than
@@ -120,16 +153,15 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 
 	// The description is the only record of WHY an edit happened, and it is
 	// what a refused agent is shown: without it the catch-up is a diff with no
-	// intent. The schema's "required" is advice to the model (DecodeArgs is a
-	// plain unmarshal), so it is enforced here, as a result rather than an
-	// error for the same reason the stale refusal is one.
-	description := strings.TrimSpace(input.Description)
-	if description == "" {
-		return Result{
-			Title:  "Description required",
-			Output: "Every edit carries a description: a few lines on what this change does and why. Another agent working in this project sees that text if it has to re-read the file after your edit. Resend the call with \"description\" beside \"path\" and \"edits\".",
-		}, nil
-	}
+	// intent. The schema asks for it on every call, and that is where it
+	// normally comes from — but a missing one must never cost the caller its
+	// payload. Refusing here meant generating every hunk again (264 of this
+	// project's own edits), so the edit lands and the row records a generated
+	// note that says the description was missing. A description that
+	// overshoots the few lines a refusal can show is cut to
+	// descriptionMaxLines (clampDescription) rather than refused.
+	description := clampDescription(input.Description)
+	noDescription := description == ""
 
 	// The schema's "required" is advice (DecodeArgs is a plain unmarshal), so a
 	// model that drops the path still reaches here: the join below resolves an
@@ -144,6 +176,18 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	hunks, err := collectHunks(input.Edits, sawLegacy)
 	if err != nil {
 		return Result{}, err
+	}
+	if noDescription {
+		description = generatedNote("edit", input.Path, len(hunks))
+	}
+	if recovered {
+		// An insert has no anchor, so nothing would catch text the decoding
+		// mangled on the way in. Refuse that one shape rather than write it.
+		for i, h := range hunks {
+			if h.positioned && h.oldStr == "" {
+				return Result{}, fmt.Errorf("edits[%d]: this call's edits arrived as a JSON string, and an insert has no anchor to check the decoded text against — resend them as real array entries", i)
+			}
+		}
 	}
 
 	path := input.Path
@@ -183,12 +227,35 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// rather than in a state no one asked for and no one is looking at.
 	content := string(data)
 	replaced := 0
-	for i, h := range hunks {
-		next, n, err := applyHunk(content, h, path)
+	relocated, drift := 0, 0
+	anchoredNoAt := 0
+	order := make([]int, len(hunks))
+	for i := range order {
+		order[i] = i
+	}
+	if hunks[0].positioned {
+		// Every positioned hunk carries a line number from the same read, so
+		// applying them bottom-up keeps each of those numbers valid: a change
+		// at line 400 cannot move line 42. Anchored hunks keep their given
+		// order, where each matches the result of the one before it.
+		sort.SliceStable(order, func(a, b int) bool { return hunks[order[a]].at > hunks[order[b]].at })
+	}
+	for _, i := range order {
+		next, n, moved, err := applyHunk(content, hunks[i], path)
 		if err != nil {
+			if recovered {
+				err = fmt.Errorf("%w (these edits arrived as a JSON string and were decoded from it, which can mangle escapes — if the text above looks wrong, resend them as real array entries)", err)
+			}
 			return Result{}, labelHunkError(err, i, len(hunks))
 		}
 		content, replaced = next, replaced+n
+		if moved != 0 {
+			relocated++
+			drift = max(drift, absInt(moved))
+		}
+		if hunks[i].anchoredFallback {
+			anchoredNoAt++
+		}
 	}
 
 	if content == string(data) {
@@ -230,9 +297,31 @@ func (EditTool) Execute(ctx context.Context, args json.RawMessage, tctx Context)
 	// caused it is still the last thing that happened.
 	note, check := syntaxNote(path, input.Path, data, newContent)
 
+	out := summarize(path, len(hunks), replaced)
+	if relocated > 0 {
+		// Say so rather than pretend the line numbers were right: a caller that
+		// sees the move can trust the rest, and one that did not mean it gets
+		// the chance to look before building on the result.
+		out += fmt.Sprintf(" — %d of %d landed away from the line given (up to %d lines off: that region had shifted), so check the result",
+			relocated, len(hunks), drift)
+	}
+	if noDescription {
+		out += noDescriptionNote("edit")
+	}
+	if anchoredNoAt > 0 {
+		// The entry worked, but only because its find text happened to be
+		// unique. Say so, or the caller keeps paying that cost and never
+		// learns that at is what makes the same entry cheap.
+		noun := "entries"
+		if anchoredNoAt == 1 {
+			noun = "entry"
+		}
+		out += fmt.Sprintf(" — %d of %d %s carried find/replace without at and had to match exactly one place; send at, taken from your read, for the positioned form",
+			anchoredNoAt, len(hunks), noun)
+	}
 	return applySyntaxNote(Result{
 		Title:  filepath.Base(path),
-		Output: summarize(path, len(hunks), replaced),
+		Output: out,
 	}, note, check), nil
 }
 
@@ -251,6 +340,48 @@ func stringifiedEdits(args json.RawMessage) bool {
 	return strings.HasPrefix(trimmed, `"`)
 }
 
+// unwrapStringifiedEdits rewrites a call whose "edits" is a JSON string holding
+// the array into the array it was meant to be, and reports whether it did.
+//
+// It rewrites rather than decodes so the result still passes through DecodeArgs,
+// which is what coerces a line number sent as 42.0. Anything it cannot read back
+// — including a payload whose escapes collapsed into raw control characters —
+// is returned untouched, so the refusal in Execute still fires with its
+// explanation instead of guessing at the intent.
+func unwrapStringifiedEdits(args json.RawMessage) (json.RawMessage, bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(args, &fields) != nil {
+		return args, false
+	}
+	raw, ok := fields["edits"]
+	if !ok || !strings.HasPrefix(strings.TrimSpace(string(raw)), `"`) {
+		return args, false
+	}
+	var inner string
+	if json.Unmarshal(raw, &inner) != nil {
+		return args, false
+	}
+	var entries []json.RawMessage
+	if json.Unmarshal([]byte(inner), &entries) != nil || len(entries) == 0 {
+		return args, false
+	}
+	for _, e := range entries {
+		if !json.Valid(e) {
+			return args, false
+		}
+	}
+	array, err := json.Marshal(entries)
+	if err != nil {
+		return args, false
+	}
+	fields["edits"] = array
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return args, false
+	}
+	return out, true
+}
+
 // collectHunks reduces the two request shapes to one list. The single-edit form
 // stays the common case and is simply a one-hunk list; mixing the two forms in
 // one call is rejected rather than guessed at, because either reading of that
@@ -267,7 +398,25 @@ func collectHunks(edits []editHunk, sawLegacyFields bool) ([]resolvedHunk, error
 				"the entry they apply to")
 	}
 	if len(edits) == 0 {
-		return nil, fmt.Errorf("edits must contain at least one entry, each with old_string and new_string")
+		return nil, fmt.Errorf("edits must contain at least one entry, each with old_string and new_string, or with at and replace")
+	}
+	positioned := 0
+	for _, h := range edits {
+		if h.At != 0 {
+			positioned++
+		}
+	}
+	if positioned > 0 && positioned < len(edits) {
+		// The two shapes disagree about what "later" means: an anchored hunk
+		// matches the result of the one before it, while a positioned one
+		// names lines from a read taken before any of them ran. A mixed call
+		// would have to guess which of those the caller meant. Only at
+		// counts as positioned: find/replace without it is anchored in
+		// substance — located by content, not by line — so it belongs on
+		// the anchored side of this check.
+		return nil, fmt.Errorf("this call mixes positioned entries (at/find/replace) with anchored ones " +
+			"(old_string/new_string) — send one shape for the whole file: either at with find/replace, or " +
+			"old_string with new_string")
 	}
 	out := make([]resolvedHunk, 0, len(edits))
 	for i, h := range edits {
@@ -282,6 +431,9 @@ func collectHunks(edits []editHunk, sawLegacyFields bool) ([]resolvedHunk, error
 
 // resolveHunk validates one hunk and settles its replacement text.
 func resolveHunk(h editHunk) (resolvedHunk, error) {
+	if h.At != 0 || h.Find != nil || h.Replace != nil {
+		return resolvePositioned(h)
+	}
 	if h.OldString == "" {
 		return resolvedHunk{}, fmt.Errorf("old_string must not be empty")
 	}
@@ -302,9 +454,171 @@ func resolveHunk(h editHunk) (resolvedHunk, error) {
 	}, nil
 }
 
+// resolvePositioned validates an entry of the at-based form.
+func resolvePositioned(h editHunk) (resolvedHunk, error) {
+	if h.OldString != "" || h.NewString != nil {
+		return resolvedHunk{}, fmt.Errorf("this entry carries at/find/replace as well as old_string/new_string — " +
+			"they are two ways of locating the same change, so send one: at with find/replace, or old_string with new_string")
+	}
+	if h.At < 1 {
+		// No line number: this is the anchored form spelled with the
+		// positioned field names, the shape a caller reaches for before
+		// anything told it at is required. Its payload is a correct anchor,
+		// so read it that way rather than charging it a round trip.
+		return resolveWithoutAt(h)
+	}
+	if h.Replace == nil {
+		return resolvedHunk{}, fmt.Errorf("replace is missing — send it explicitly, using \"\" if deleting the find text is what you meant")
+	}
+	if h.ReplaceAll || h.ExpectedCount != 0 {
+		return resolvedHunk{}, fmt.Errorf("replace_all and expected_count belong to the anchored form: a positioned entry already names the one region at edits, so there is no count to assert")
+	}
+	find := ""
+	if h.Find != nil {
+		find = *h.Find
+		if find == "" {
+			return resolvedHunk{}, fmt.Errorf("find is empty — omit the field to insert replace before line at, or send the text to replace")
+		}
+		if find == *h.Replace {
+			return resolvedHunk{}, fmt.Errorf("replace is identical to find, so this edit would change nothing — send the text you actually want in its place")
+		}
+	}
+	if find == "" && *h.Replace == "" {
+		return resolvedHunk{}, fmt.Errorf("this entry neither replaces nor inserts anything — omit find only when replace has text")
+	}
+	return resolvedHunk{oldStr: find, newStr: *h.Replace, positioned: true, at: h.At}, nil
+}
+
+// resolveWithoutAt reads an entry that carries find/replace but no at. It is
+// the anchored form under the positioned field names — find is the anchor and
+// has to match exactly one place — and a caller that never learned at was
+// required should not lose the call over it. replace alone has no anchor at
+// all, so there at is genuinely missing and the refusal says so.
+func resolveWithoutAt(h editHunk) (resolvedHunk, error) {
+	if h.At < 0 {
+		// A negative line number is a bad at, not a missing one: falling back
+		// would silently drop the position the caller asked for.
+		return resolvedHunk{}, fmt.Errorf("at must be the 1-based line number to edit, taken from the read this change is based on — got %d", h.At)
+	}
+	if h.Replace == nil {
+		return resolvedHunk{}, fmt.Errorf("replace is missing — send it explicitly, using \"\" if deleting the find text is what you meant")
+	}
+	if h.Find == nil || *h.Find == "" {
+		return resolvedHunk{}, fmt.Errorf("at is missing — replace with no find inserts before a line, so it needs the 1-based line number a read showed you; send at, or send find with the text to replace")
+	}
+	if *h.Find == *h.Replace {
+		return resolvedHunk{}, fmt.Errorf("replace is identical to find, so this edit would change nothing — send the text you actually want in its place")
+	}
+	if h.ExpectedCount < 0 {
+		return resolvedHunk{}, fmt.Errorf("expected_count %d is negative — it must be a non-negative integer asserting how many times find matches; omit it (or pass 0) for no assertion", h.ExpectedCount)
+	}
+	return resolvedHunk{
+		oldStr:           *h.Find,
+		newStr:           *h.Replace,
+		replaceAll:       h.ReplaceAll,
+		expectedCount:    h.ExpectedCount,
+		anchoredFallback: true,
+	}, nil
+}
+
 // applyHunk resolves one hunk against the current content, returning the new
-// content and how many occurrences it replaced.
-func applyHunk(content string, h resolvedHunk, path string) (string, int, error) {
+// content, how many occurrences it replaced, and how many lines away from the
+// line the caller named it landed (0 when it landed exactly there).
+func applyHunk(content string, h resolvedHunk, path string) (string, int, int, error) {
+	if h.positioned {
+		return applyPositioned(content, h, path)
+	}
+	next, n, err := applyAnchored(content, h, path)
+	return next, n, 0, err
+}
+
+// applyPositioned resolves one at-based hunk.
+//
+// The line number is a hint, never an identity: the find text is what decides
+// where the edit lands, and at only says which of several occurrences the
+// caller meant — with the nearest one winning when the file has shifted under
+// it. That is the whole trade against the anchored form: a stale line number
+// costs nothing, where a stale anchor costs a failed call, and a short anchor
+// costs nothing where a short old_string costs an ambiguity error.
+func applyPositioned(content string, h resolvedHunk, path string) (string, int, int, error) {
+	h = normalizeHunkEOL(content, h)
+	starts := lineStarts(content)
+	if h.at > len(starts)+1 {
+		return "", 0, 0, fmt.Errorf("at %d is past the end of %s, which has %d lines — take the number from the read this change is based on",
+			h.at, path, len(starts))
+	}
+	offset := len(content)
+	if h.at <= len(starts) {
+		offset = starts[h.at-1]
+	}
+	if h.oldStr == "" {
+		ins := h.newStr
+		if !strings.HasSuffix(ins, "\n") {
+			ins += eolFor(content)
+		}
+		return content[:offset] + ins + content[offset:], 1, 0, nil
+	}
+	best, bestDist := -1, 0
+	for from := 0; ; {
+		i := strings.Index(content[from:], h.oldStr)
+		if i < 0 {
+			break
+		}
+		pos := from + i
+		dist := absInt(pos - offset)
+		if best < 0 || dist < bestDist {
+			best, bestDist = pos, dist
+			if dist == 0 {
+				break
+			}
+		}
+		from = pos + 1
+	}
+	if best < 0 {
+		return "", 0, 0, fmt.Errorf("find text not found in %s%s", path, notFoundHint(content, h.oldStr))
+	}
+	moved := 0
+	switch {
+	case best > offset:
+		moved = strings.Count(content[offset:best], "\n")
+	case best < offset:
+		moved = -strings.Count(content[best:offset], "\n")
+	}
+	return content[:best] + h.newStr + content[best+len(h.oldStr):], 1, moved, nil
+}
+
+// lineStarts returns the byte offset of each 1-based line's start, numbered as
+// the read tool numbers them: a file ending in a newline has no extra empty
+// line after it, so len(starts) is its line count and starts[len(starts)] —
+// the end of the file — is a legal place to insert at.
+func lineStarts(content string) []int {
+	starts := []int{0}
+	for i := 0; i < len(content); i++ {
+		if content[i] == '\n' && i+1 < len(content) {
+			starts = append(starts, i+1)
+		}
+	}
+	return starts
+}
+
+// eolFor names the newline to terminate an inserted line with, so an insert
+// into a CRLF file does not leave one LF line behind.
+func eolFor(content string) string {
+	if uniformlyCRLF(content) {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// applyAnchored resolves one old_string/new_string hunk.
+func applyAnchored(content string, h resolvedHunk, path string) (string, int, error) {
 	if h.oldStr == h.newStr {
 		// Replacing text with itself finds its anchor, writes identical bytes and
 		// looks exactly like a successful edit — the tool used to report "replaced
@@ -324,6 +638,9 @@ func applyHunk(content string, h resolvedHunk, path string) (string, int, error)
 	count := strings.Count(content, h.oldStr)
 	switch {
 	case count == 0:
+		if hint := alreadyAppliedHint(content, h.newStr); hint != "" {
+			return "", 0, fmt.Errorf("old_string not found in %s%s", path, hint)
+		}
 		return "", 0, fmt.Errorf("old_string not found in %s%s", path, notFoundHint(content, h.oldStr))
 	case h.expectedCount > 0 && count != h.expectedCount:
 		// Checked before the uniqueness rule: when both would fire, the broken
@@ -460,6 +777,43 @@ func precedingContext(lines []string, lineNo int) string {
 		return s
 	}
 	return ""
+}
+
+// alreadyAppliedHint recognises the retry of an edit that has already landed:
+// the anchor is gone precisely because it was replaced by new_string. The
+// caller cannot tell that apart from a wrong anchor by itself, so it re-reads
+// and rewrites a change that is already in the file — 18% of this repo's failed
+// edits were resends of an edit that had already been applied once. Only an
+// unambiguous single occurrence is reported; anything else is left to the
+// not-found hint.
+func alreadyAppliedHint(content, newStr string) string {
+	if len(strings.TrimSpace(newStr)) < 2 || strings.Count(content, newStr) != 1 {
+		return ""
+	}
+	at := strings.Index(content, newStr)
+	if embeddedInWord(content, at, len(newStr)) {
+		// A short new_string such as "x" turns up inside unrelated identifiers
+		// ("Exec") far more often than it is evidence of anything, and the
+		// hint would replace the diagnostics that actually help.
+		return ""
+	}
+	lineNo := strings.Count(content[:at], "\n") + 1
+	return fmt.Sprintf(" — but new_string already appears once, at line %d: this change looks applied already."+
+		" Read that region before resending, rather than sending the same edit again", lineNo)
+}
+
+// embeddedInWord reports whether the match at content[at:at+n] is part of a
+// longer identifier rather than a token of its own.
+func embeddedInWord(content string, at, n int) bool {
+	if at > 0 && n > 0 && isWordByte(content[at-1]) && isWordByte(content[at]) {
+		return true
+	}
+	end := at + n
+	return end > at && end < len(content) && isWordByte(content[end-1]) && isWordByte(content[end])
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // notFoundHint explains a miss that is really a whitespace mismatch, and — when

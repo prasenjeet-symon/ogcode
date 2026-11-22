@@ -10,6 +10,7 @@ import { useServer } from '../context/server';
 import DeliveryTicks, { formatLatency } from './delivery-ticks';
 import IndexEntries from './index-entries';
 import { taskLabel } from '../lib/task-label';
+import { editDiffTexts } from '../lib/edit-diff';
 import { AskUserPrompt, AskUserAnswers, askUserMeta } from './ask-user-card';
 
 function formatTime(ts: number): string {
@@ -203,22 +204,16 @@ function ToolPartDisplay(props: { data: ToolPartData }) {
     const meta = state().metadata || {};
     if (tool() === 'edit') {
       // The edit tool carries its changes in an "edits" array — one entry per
-      // hunk, each with its own old_string/new_string. Several hunks are shown
-      // as one before/after by joining them in order, which is what the call
-      // did to the file.
+      // hunk, in either the positioned (at/find/replace) or the anchored
+      // (old_string/new_string) shape. editDiffTexts reads both and joins them
+      // in order, which is what the call did to the file.
       //
-      // The flat fallback is for history: messages written before the tool took
-      // an array still hold old_string/new_string at the top level, and reading
-      // only the array would blank out the diff on every past session. That is
-      // exactly what happened when the array landed and this stayed behind —
-      // every edit rendered +0 −0 while the file changed correctly underneath.
-      const hunks = Array.isArray(input.edits) ? input.edits : null;
-      if (hunks) {
-        const join = (key: 'old_string' | 'new_string') =>
-          hunks.map((h: any) => String(h?.[key] ?? '')).join('\n');
-        return { oldText: join('old_string'), newText: join('new_string'), mode: 'edit', omitted: false };
-      }
-      return { oldText: String(input.old_string ?? ''), newText: String(input.new_string ?? ''), mode: 'edit', omitted: false };
+      // Reading only the anchored keys is what made every positioned edit
+      // render +0 −0 with an empty body while the file changed correctly
+      // underneath; the flat fallback covers history written before the tool
+      // took an array at all.
+      const { oldText, newText } = editDiffTexts(input);
+      return { oldText, newText, mode: 'edit', omitted: false };
     }
     const created = !!meta.created;
     return {
