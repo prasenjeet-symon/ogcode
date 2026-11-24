@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="440" viewBox="0 0 960 440" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Same sessions, a third of the tokens</title>
+<desc id="dsc">Two vertical bars on a linear scale: total tokens across 43 real sessions. The turn summaries total 12,980 tokens; the previous turn's final message verbatim totals 39,932, about 3.1 times as many. The difference of 26,952 tokens stays out of the request.</desc>
+<rect width="960" height="440" fill="#151414"/>
+<text x="40.0" y="34.0" fill="#fffbf5" font-size="14" font-weight="600">Same sessions, a third of the tokens</text>
+<text x="40.0" y="56.0" fill="#9a9390" font-size="12">totals across 43 continuity blocks &#183; linear scale &#183; tokens only</text>
+<rect x="596" y="24" width="11" height="11" rx="2" fill="#ff5e1f"/>
+<text x="614.0" y="34.0" fill="#9a9390" font-size="11.5">turn summaries</text>
+<rect x="760" y="24" width="11" height="11" rx="2" fill="#7d8fb3"/>
+<text x="778.0" y="34.0" fill="#9a9390" font-size="11.5">last message</text>
+<rect x="397" y="80" width="176" height="26" rx="13" fill="#151414" stroke="#ff5e1f" stroke-width="1.5"/>
+<text x="500.0" y="98.0" fill="#ff5e1f" font-size="13" text-anchor="middle" font-weight="700">&#215;3.1 fewer tokens</text>
+<line x1="150.0" y1="330.0" x2="800.0" y2="330.0" stroke="#2a2726" stroke-width="1"/>
+<text x="140.0" y="334.0" fill="#9a9390" font-size="11.5" text-anchor="end">0</text>
+<line x1="150.0" y1="280.0" x2="800.0" y2="280.0" stroke="#2a2726" stroke-width="1"/>
+<text x="140.0" y="284.0" fill="#9a9390" font-size="11.5" text-anchor="end">10k</text>
+<line x1="150.0" y1="230.0" x2="800.0" y2="230.0" stroke="#2a2726" stroke-width="1"/>
+<text x="140.0" y="234.0" fill="#9a9390" font-size="11.5" text-anchor="end">20k</text>
+<line x1="150.0" y1="180.0" x2="800.0" y2="180.0" stroke="#2a2726" stroke-width="1"/>
+<text x="140.0" y="184.0" fill="#9a9390" font-size="11.5" text-anchor="end">30k</text>
+<line x1="150.0" y1="130.0" x2="800.0" y2="130.0" stroke="#2a2726" stroke-width="1"/>
+<text x="140.0" y="134.0" fill="#9a9390" font-size="11.5" text-anchor="end">40k</text>
+<line x1="150.0" y1="330.0" x2="800.0" y2="330.0" stroke="#6b6462" stroke-width="1"/>
+<rect x="265.0" y="265.1" width="170" height="64.9" rx="6" fill="#ff5e1f"/>
+<text x="350.0" y="253.1" fill="#fffbf5" font-size="12" text-anchor="middle" font-weight="600">12,980 tokens</text>
+<rect x="515.0" y="130.3" width="170" height="199.7" rx="6" fill="#7d8fb3"/>
+<text x="600.0" y="118.3" fill="#fffbf5" font-size="12" text-anchor="middle" font-weight="600">39,932 tokens</text>
+<text x="350.0" y="356.0" fill="#fffbf5" font-size="12.5" font-weight="600">turn summaries</text>
+<text x="600.0" y="356.0" fill="#fffbf5" font-size="12.5" font-weight="600">last message</text>
+<line x1="265.0" y1="265.1" x2="685.0" y2="265.1" stroke="#9a9390" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="255.0" y="269.1" fill="#9a9390" font-size="11" text-anchor="end">summary total</text>
+<line x1="705.0" y1="130.3" x2="705.0" y2="265.1" stroke="#ff5e1f" stroke-width="2"/>
+<line x1="699.0" y1="130.3" x2="711.0" y2="130.3" stroke="#ff5e1f" stroke-width="2"/>
+<line x1="699.0" y1="265.1" x2="711.0" y2="265.1" stroke="#ff5e1f" stroke-width="2"/>
+<text x="717.0" y="195.7" fill="#fffbf5" font-size="12" font-weight="600">26,952 tokens saved</text>
+<text x="717.0" y="213.7" fill="#9a9390" font-size="11.5">&#8776;68% less</text>
+<text x="24.0" y="384.0" fill="#9a9390" font-size="11">Same blocks, same estimator, added up &#183; no dollars, no projections &#183; just tokens.</text>
+<text x="24.0" y="404.0" fill="#9a9390" font-size="11">Totals: 12,980 vs 39,932 tokens &#183; the last message sends &#215;3.1 &#183; 26,952 tokens stay out of the request.</text>
+</svg>
