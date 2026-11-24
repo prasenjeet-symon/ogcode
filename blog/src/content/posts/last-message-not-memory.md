@@ -1,16 +1,17 @@
 ---
-title: "3x Fewer Tokens Every Turn: Why the Last Message Lost"
-description: "Every turn needs a little of the turn before it. We shipped two ways to supply that, replayed both against 43 real sessions, and the written summary came back at about a third of the tokens, with a bounded tail and more of the task inside it."
+title: "AI Agent Session Memory: Why the Last Message Lost at 3x the Tokens"
+description: "Across 43 real AI coding-agent sessions, turn summaries cost a median 290 tokens vs 648 for the last message, with a bounded tail. Why summaries win."
 pubDate: 2026-11-24
-tags: ["agents", "session-memory", "context-engine", "evaluation"]
+updatedDate: 2026-11-24
+tags: ["agents", "session-memory", "context-engine", "context-window", "evaluation"]
 hero: "/blog/media/last-message-not-memory-hero.jpg"
 heroAlt: "A dark isometric desk. On the left sits a short, tidy stack of orange cards. On the right, a tall messy pile of grey cards spills off the edge."
 ogImage: "https://ogcode.in/blog/media/last-message-not-memory-hero.jpg"
 ---
 
-A coding agent works one turn at a time. You send a message, it reads, edits, runs the tests, and answers. Then the turn ends, and the next one begins from your next message.
+An AI coding agent works one turn at a time. You send a message, it reads, edits, runs the tests, and answers. Then the turn ends, and the next one begins from your next message.
 
-Something has to connect them. The request for a turn cannot carry the whole conversation, which is the design we wrote about in [the context window post](/blog/context-budget-64k/), so it carries a small, deliberate selection instead: what the agent needs to know about the turn before it. Call it the continuity block. It sits on every request for the life of the session, which makes it the one line item that repeats. Choose it badly and you pay for the choice on every turn.
+Something has to connect them. That is session memory. The request for a turn cannot carry the whole conversation, which is the design we wrote about in [the context window post](/blog/context-budget-64k/), so it carries a small, deliberate selection instead: what the agent needs to know about the turn before it. Call it the continuity block. It sits on every LLM request for the life of the session, which makes token cost per turn the line item that repeats. Choose it badly and you pay extra tokens on every turn.
 
 Our first version was the obvious one. Take the last message the agent sent, and put it in front of the next request, verbatim. It costs nothing to produce, it is exactly what the agent said, and it is the thing a person would scroll up to reread.
 
@@ -18,17 +19,17 @@ Then we replaced it with a short summary written when each turn ends. This post 
 
 **In short:** the summary block is cheaper in 33 of 43 sessions. Its median is 290 tokens against 648 for the last message, its worst case is 625 against 3,264, and across all 43 sessions it comes to about a third of the tokens. The last message wins only when it has almost nothing to say.
 
-## Why a turn needs a memory at all
+## Why every AI agent turn needs session memory
 
-In Ogcode, a session is not a buffer that gets replayed. The transcript is written to disk, the request is assembled fresh each turn, and the conversation is never pasted back into it. A turn that started completely cold would be an agent that has forgotten what it was doing: it would ask which file you meant, reopen something it already read, or cheerfully re-propose the approach it abandoned twenty minutes ago.
+In Ogcode, [a session is not a buffer that gets replayed](/blog/long-session-beats-fresh/). The transcript is written to disk, the request is assembled fresh each turn, and the conversation is never pasted back into it. A turn that started completely cold would be an agent that has forgotten what it was doing: it would ask which file you meant, reopen something it already read, or cheerfully re-propose the approach it abandoned twenty minutes ago.
 
-The continuity block is what stops turn forty from re-litigating turn thirty-nine. It is not the transcript, it is not the notes file that the agent maintains for the task, and it is not a search result. It is the short piece of the recent past that goes in front of every request, chosen once per turn, paid for once per turn.
+The continuity block is what stops turn forty from re-litigating turn thirty-nine. It is not the transcript, it is not the [notes file that the agent maintains for the task](/blog/memory-is-table-stakes/), and it is not a [search result](/blog/long-session-beats-fresh/). It is the short piece of the recent past that goes in front of every request, chosen once per turn, paid for once per turn.
 
 That is also why its size matters more than it looks. A block that costs an extra three hundred tokens costs them again on every turn that follows, for as long as the session lives.
 
-## The two candidates
+## Two ways to carry session continuity: last message vs turn summary
 
-### The previous message, verbatim
+### Option 1: resend the previous message verbatim
 
 Copy what the agent said last. It has the virtues of a copy: perfect fidelity, no synthesis step, nothing to get wrong. It is also the block we shipped first.
 
@@ -36,7 +37,7 @@ The problem is what a final message is for. It was written for you, after the wo
 
 And its size is nobody's decision. A final message is one line when the answer is "done" and several thousand tokens when the agent has to hand you a diff, a stack trace, or the contents of a new migration. Whatever it was, the next turn sends it again, and the turn after that too.
 
-### The summary
+### Option 2: a written turn summary for the next turn
 
 When a turn ends, we write three to five sentences about it: what was asked, what was done, what broke, what is still open. The next turn reads the last couple of these.
 
@@ -44,7 +45,7 @@ Two things follow from writing it rather than copying it. The first is that the 
 
 > A final message is written for the person waiting. A summary is written for the turn that comes next.
 
-## How we measured it
+## How we measured token cost across 43 real sessions
 
 Both candidates already exist in the log. Every turn that ends writes a summary, and every turn leaves a final message. So the comparison needs no fixtures and no live runs: for each session that has both, rebuild the two blocks exactly as production would send them, and count the tokens in each.
 
@@ -78,7 +79,7 @@ In tokens, the two medians are 290 against 648 per turn. Neither block breaks an
   <figcaption>Added up across all 43 sessions: 12,980 tokens against 39,932. The 26,952-token gap is what stays out of the request.</figcaption>
 </figure>
 
-## The median is not the interesting number
+## Beyond the median: why bounded token cost matters
 
 Read the two distributions as different kinds of object.
 
@@ -90,7 +91,7 @@ That shape is what you want from a recurring token cost. A distribution with a t
 
 > One block is a size that was chosen. The other is a size that happened.
 
-## Where the last message wins, and why that is fine
+## Where resending the last message still wins
 
 It won in 10 of the 43 sessions, and in all ten the previous message was short. "Done." "Fixed, tests green." A one-line confirmation of something you already knew.
 
@@ -98,7 +99,7 @@ In those cases a summary is genuinely longer than the thing it summarizes, becau
 
 It is also the cheapest kind of loss. It is bounded by a few hundred tokens, it only happens on turns that did almost nothing, and it buys the bounded worst case on every other turn. The failure that would worry us is the opposite one: paying multiples of the tokens precisely on the turns that did the most work.
 
-## What the summary knows that the message does not
+## What a turn summary knows that the last message misses
 
 The final message is the last event of a turn, not the turn. Before it, the agent read files, tried something, watched a test fail, changed direction. The final message usually reports the settled outcome and leaves out the settling: which approach was rejected and why, which test is expected to fail until the migration lands, which file looked relevant and was not.
 
@@ -106,7 +107,7 @@ The summary is written across the whole turn, at the moment it ends, with all of
 
 > The last message tells you how the turn ended. The summary tells you what the turn was.
 
-## So we deleted the other path
+## Why we removed the last-message path from Ogcode
 
 The working tree now has one continuity mechanism instead of two. The verbatim path is gone, its tests with it, and the summary block is what a turn gets.
 
@@ -122,7 +123,7 @@ The cost we accept is the one the summary always had. A summary has to be writte
 
 **One project's history.** Forty-three sessions of this project's own work, replayed statically against the log. A different agent with different turn shapes could land somewhere else, which is why the replay is a script over the log rather than a table in a post. It runs again against whatever the next hundred sessions look like.
 
-## The last message is not the memory
+## Session memory FAQ: the last message is the receipt, the turn summary is the memory
 
 It is the receipt: itemized for the person who was waiting, issued when the turn closed, and silent about how the work got done. The memory is the shorter thing written afterward, for whoever comes next, with a length somebody chose.
 
